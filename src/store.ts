@@ -1194,13 +1194,15 @@ export class Store {
   }
   /** 仅由已认证 Wire 拒绝路径调用；原子提交确定未写出，未知或既有终态绝不倒退。 */
   commitDispatchRefusal(binding: AttemptBinding, code: DispatchRefusalCode): boolean {
-    if (code !== 'terminal_execution_disabled') {
+    if (code !== 'terminal_execution_disabled' && code !== 'policy_revision_stale') {
       throw new GatewayError('invalid_dispatch_refusal')
     }
     return this.transaction(
       /** 先落实原固定 deadline，再核对当前完整锚点；审计提交前不发布拒绝。 */ (now) => {
         this.stopWhere('call_id=? AND deadline<=?', [binding.call_id, String(now)], 'deadline_exceeded', now)
         const row = this.responseAnchorRow(binding)
+        // 执行器可能在 accepted 后、原生写入前才复核策略并报告真实未写出；
+        // 重放帧的防御在 Connector 的 running/seen 守卫，不在此按 code 区分状态。
         if (!['dispatching', 'connector_accepted'].includes(row.state)) {
           return false
         }

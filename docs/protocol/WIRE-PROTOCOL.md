@@ -199,18 +199,19 @@ Connector 不依赖 Gateway 额外交付的 TTL 或上下文。受保护配置�
 规则：
 
 - 相同 call / attempt 的精确重复请求是幂等的，不刷新期限。请求摘要或绑定有任何变化，都按冲突拒绝。
+- 准入层拒绝只在 attempt 未进入执行时生成：已执行中（running）或已观察（seen）的 attempt 重发时，Connector 静默丢弃重复帧，不另发拒绝证明；账本状态由原执行路径收敛。
 - 请求到达时核对认证连接、完整 attempt、provider 与契约、双方 policy revision 和 deadline。主体来自 Connector 受保护的完整 Target 路由，不采信消息自报。
 - claim 与 attempt book 跨 epoch 共享。断连只释放该 epoch 的请求正文，不提前清除墓碑、不续期、不重放。deadline 到达后回收防重记录；原完整意图仍被期限检查拒绝。回收与持久时钟推进在同一事务完成，时钟回退不允许再次 claim。
 - 执行许可仍由 Wire、双方策略和 provider 自己的原生校验器建立。
 
 ## dispatch_refused
 
-`dispatch_refused` 只在双方协商 `dispatch_refusal` 后由 Connector 发送，须经当前认证连接和独立登记的完整 attempt 校验。
+`dispatch_refused` 只在双方协商 `dispatch_refusal` 后由 Connector 发送，须经当前认证连接和独立登记的完整 attempt 校验。准入层（revision 漂移）拒绝发生在执行锚点登记之前，Connector 编码拒绝帧只绑定当前认证连接与 attempt 结构，锚点、策略与 revision 的全量复核由 Gateway 接收端在其自身账本完成；执行器拒绝仍经原 adapter 完整校验。
 
-- `code` 目前只允许 `terminal_execution_disabled`，不承载原生响应、异常正文或任意字符串。
-- 它只接受真实的本机 adapter 明确报告 `not_dispatched` 的终端最终门禁拒绝。`accepted` 之后仍可确证未写出。普通异常、原生 error、超时和 `outcome_unknown` 都不能生成此证明。
+- `code` 目前允许 `terminal_execution_disabled` 与 `policy_revision_stale`，不承载原生响应、异常正文或任意字符串。
+- 它只接受真实的本机 adapter 明确报告 `not_dispatched` 的终端最终门禁拒绝，或准入层在写出任何原生字节前即确定的策略 revision 漂移（网关盖章的 `caller/local_policy_revision` 与 Connector 受保护快照不一致）。`accepted` 之后仍可确证未写出。普通异常、原生 error、超时和 `outcome_unknown` 都不能生成此证明。
 - Gateway 先在账本事务中核对原 tuple、当前 provider 与 epoch、固定 deadline，提交拒绝和必要审计，之后才清理该 call 的在途与读取上下文。
-- 只有尚未到期的 `dispatching` / `connector_accepted` 可变为 `not_dispatched`。已 unknown、已响应或已拒绝的状态保持不变，不续期，不重派。合法的拒绝不关闭连接，不取消其它在途调用。
+- 只有尚未到期的 `dispatching` / `connector_accepted` 可变为 `not_dispatched`（执行器可能在 accepted 后、原生写入前才复核策略并报告真实未写出）。重放帧的防御在 Connector 的 running/seen 守卫：已进入执行的 attempt 重发不生成拒绝证明。已 unknown、已响应或已拒绝的状态保持不变，不续期，不重派。合法的拒绝不关闭连接，不取消其它在途调用。
 - 未协商、认证或锚点错误、存储提交失败都保守拒绝，不发布虚假终态。
 - Store 须提供 `commitDispatchRefusal(binding, code)`，否则 Gateway 不广告该能力。若配置要求此能力，则以 `dispatch_refusal_backend_unavailable` 拒绝启动。该事务只在真正提交 `not_dispatched` 时返回 true。对 unknown、responded 或已拒绝的状态返回 false，此时 Gateway 不释放上下文，response 之后到达的拒绝不会驱逐仍有效的结果读取许可。
 

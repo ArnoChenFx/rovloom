@@ -88,7 +88,7 @@ export type RequestPayload = {
   native_request: JsonObject
   validation: ValidationMode
 }
-export type DispatchRefusalCode = 'terminal_execution_disabled'
+export type DispatchRefusalCode = 'terminal_execution_disabled' | 'policy_revision_stale'
 export type TerminalExecutionState = Readonly<{ binding: ProviderBinding; enabled: boolean }>
 export type Payloads = {
   provider_fenced: { binding: ProviderBinding }

@@ -8,13 +8,13 @@ export interface DispatchRefusalLedger {
   commitDispatchRefusal(binding: AttemptBinding, code: DispatchRefusalCode): boolean
 }
 
-/** 固定白名单只覆盖终端最终门禁；未知、可能已写出或其它 provider 的异常仍走保守失败路径。 */
+/** 固定白名单只覆盖确定未写出的终局门禁；未知、可能已写出或其它 provider 的异常仍走保守失败路径。 */
 export function dispatchRefusal(error: unknown, kind: ProviderKind): DispatchRefusalCode | undefined {
   if (
     ((kind === 'herdr' && error instanceof HerdrLocalError) ||
       (kind === 'luvus' && error instanceof LuvusAdapterError)) &&
     error.outcome === 'not_dispatched' &&
-    error.code === 'terminal_execution_disabled'
+    (error.code === 'terminal_execution_disabled' || error.code === 'policy_revision_stale')
   ) {
     return error.code
   }
