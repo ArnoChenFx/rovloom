@@ -32,7 +32,7 @@ COPY --from=build --chmod=0644 /app/package.json /app/bun.lock /app/LICENSE ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --chmod=0755 scripts/container/healthcheck.mjs /usr/local/bin/rovloom-healthcheck.mjs
-ENV HOME=/home/rovloom ROVLOOM_HEALTH_PORT=9444
+ENV HOME=/home/rovloom ROVLOOM_HEALTH_PORT=9444 ROVLOOM_CONTAINER=1
 USER 10001:10001
 STOPSIGNAL SIGTERM
 # 健康检查脚本用 Bun 的 fetch 请求本机 MCP 端点，不依赖 curl。

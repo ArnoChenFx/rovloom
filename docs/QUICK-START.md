@@ -64,10 +64,10 @@ mkdir rovloom && cd rovloom
 curl --fail --location --output docker-compose.yaml \
   https://raw.githubusercontent.com/ArnoChenFx/rovloom/main/docker-compose.yaml
 docker compose pull
-docker compose run --rm gateway config init gateway --container
+docker compose up -d
 ```
 
-Ports 9443, 9444 and 9445 must be free (the Compose file publishes them from a bridge network), and `config init gateway --container` prepares the container listeners on first setup. See
+Ports 9443, 9444 and 9445 must be free (the Compose file publishes them from a bridge network); the image sets `ROVLOOM_CONTAINER=1`, so first startup generates the container listeners (all three on `0.0.0.0`) automatically. See
 [Docker deployment](DOCKER.md) for volumes, backup and upgrades.
 
 ## 2. Prepare the Connector machine
@@ -165,19 +165,21 @@ Dashboard can display them later; include that directory when backing up credent
 
 ### LAN access
 
-Normal CLI initialization allows only loopback access on all three listeners. Skip this section for a same-machine setup.
-Docker initialization with `config init gateway --container` enables `management.lan` by default;
+The listener hostname is the only switch: `0.0.0.0` accepts any Host over plain HTTP on that listener,
+`127.0.0.1` accepts only loopback addressing; there is no separate `lan` field. The Docker image sets
+`ROVLOOM_CONTAINER=1`, so its first-startup configuration binds all three listeners to `0.0.0.0` by default;
 access through the host IP still depends on the Compose port mappings. See [Docker deployment](DOCKER.md)
-for older configuration migration and port mapping examples.
-On first setup, run `rovloom config init gateway` on the Gateway machine, then edit
-`~/.config/rovloom/gateway.json`. Preserve the other fields and update the listener groups you need;
+for port mapping examples.
+The npm binary defaults to `0.0.0.0` on the MCP and device listeners and `127.0.0.1` on the management page;
+to open the management page on the LAN, edit `~/.config/rovloom/gateway.json` after first setup.
+Preserve the other fields and update the listener groups you need;
 edit existing configuration directly:
 
 ```json
 {
   "devices": {"hostname": "0.0.0.0", "port": 9443},
-  "mcp": {"hostname": "0.0.0.0", "port": 9444, "lan": true},
-  "management": {"enabled": true, "hostname": "0.0.0.0", "port": 9445, "lan": true}
+  "mcp": {"hostname": "0.0.0.0", "port": 9444},
+  "management": {"enabled": true, "hostname": "0.0.0.0", "port": 9445}
 }
 ```
 

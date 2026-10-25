@@ -187,7 +187,7 @@ function managedCaller(config: GatewayConfig, administrator?: GatewayIdentitySou
       new URL(`http://${hostname}:${config.mcp_port}/mcp`).href,
       administrator,
       config.mcp_public_url,
-      config.mcp_lan === true && isWildcardHostname(config.mcp_hostname)
+      isWildcardHostname(config.mcp_hostname)
     ),
     setupRequired: false
   }
@@ -332,7 +332,7 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
           ? {
               port: managementHost.port,
               hostname: config.management_hostname,
-              lan: config.management_lan === true && config.management_hostname === '0.0.0.0',
+              lan: config.management_hostname === '0.0.0.0',
               listening: managementHost.listening?.bind(managementHost),
               pairingPolicy: managementHost.pairingPolicy?.bind(managementHost),
               providerEnable: managementHost.providerEnable?.bind(managementHost),

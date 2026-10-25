@@ -6,7 +6,7 @@
 
 - 默认地址是 `http://127.0.0.1:9445/`。端口和开关由 Gateway 配置的 `management.port` 与 `management.enabled` 控制，见 [配置参考](CONFIGURATION-zh.md)。
 - 默认监听地址为 `127.0.0.1`，请求的 Host 必须是 `127.0.0.1:<port>`。从其他机器访问时，使用 SSH 端口转发，并让本地端口与 `management.port` 相同。
-- 显式设置 `management.hostname: "0.0.0.0"` 加 `management.lan: true` 后，管理页接受局域网 Host 的明文 HTTP 访问（见 [配置参考](CONFIGURATION-zh.md#每个用户参数)）；Gateway 会输出 `wildcard_listener` 告警。Cookie 仍为 `HttpOnly`/`SameSite=Strict`，跨站请求仍被拒绝，但没有传输加密：请勿在不可信网络中开放此选项，必要时用 TLS 反向代理收口。未配置 `lan` 时局域网访问仍然返回 403，行为与原来完全一致。
+- 把 `management.hostname` 设为 `"0.0.0.0"` 后，管理页即接受局域网 Host 的明文 HTTP 访问（见 [配置参考](CONFIGURATION-zh.md#每个用户参数)）。Cookie 仍为 `HttpOnly`/`SameSite=Strict`，跨站请求仍被拒绝，但没有传输加密：请勿在不可信网络中开放此选项，必要时用 TLS 反向代理收口。保持 `127.0.0.1` 时只接受回环寻址，局域网访问返回 403，行为与原来完全一致。
 - 管理页使用 HTTP Basic 登录。用户名是管理员 ID，默认 `admin`。
 - 首次配对经 Gateway 终端完成时，会自动创建管理员 `admin` 并只显示一次密码。也可以在任何配对之前运行 `rovloom admin create` 手动创建，然后从管理页完成首台设备的在线配对（见下文「在线配对」与 [配置参考](CONFIGURATION-zh.md#管理页管理员)）。之后用 `rovloom admin create|list|revoke` 管理，创建与修改都不需要重启。
 - Gateway 只保存密码的 SHA-256 摘要。创建、重新签发和撤销都不需要重启。管理员被撤销或密码被替换后，对应浏览器会话在下一次请求时失效。

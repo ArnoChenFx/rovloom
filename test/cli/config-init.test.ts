@@ -68,16 +68,22 @@ for (const provider of ['luvus', 'herdr', 'mixed']) {
   })
 }
 
-test('container initialization selects container listeners explicitly while normal startup defaults remain local', async () => {
+test('container initialization selects container management listeners while normal startup defaults stay wildcard MCP and loopback management', async () => {
   const f = fixture()
   try {
     assert.equal((await f.run('config', 'init', 'gateway')).code, 0)
     const local = readConfig(f.path('gateway'))
     assert(local.role === 'gateway')
-    assert.equal(local.mcp_hostname, '127.0.0.1')
-    assert.equal(local.management_lan, undefined)
-    assert.equal(local.mcp_lan, undefined)
+    // 新默认：MCP 通配绑定并明文 LAN 放行，设备通道通配；管理页保持回环。
+    assert.equal(local.mcp_hostname, '0.0.0.0')
+    assert.equal(local.device_hostname, '0.0.0.0')
+    assert.equal(local.management_hostname, '127.0.0.1')
+    const localDocument = JSON.parse(readFileSync(f.path('gateway'), 'utf8'))
+    assert.equal(localDocument.mcp.hostname, '0.0.0.0')
+    assert.equal(localDocument.mcp.lan, undefined)
+    assert.equal(localDocument.management.hostname, '127.0.0.1')
     const before = readFileSync(f.path('gateway'))
+    // --container 与新默认的差异只剩管理页监听：已有文件不覆盖，仍报 config_exists。
     assert.equal((await f.run('config', 'init', 'gateway', '--container')).stderr, 'config_exists\n')
     assert.deepEqual(readFileSync(f.path('gateway')), before)
     const explicit = join(f.home, 'container.json')
@@ -91,17 +97,19 @@ test('container initialization selects container listeners explicitly while norm
       [container.mcp_hostname, container.device_hostname, container.management_hostname],
       ['0.0.0.0', '0.0.0.0', '0.0.0.0']
     )
-    assert.equal(container.management_lan, true)
-    assert.equal(container.mcp_lan, undefined)
     const document = JSON.parse(readFileSync(explicit, 'utf8'))
-    assert.equal(document.management.lan, true)
+    assert.equal(document.management.hostname, '0.0.0.0')
+    assert.equal(document.mcp.lan, undefined)
+    assert.equal(document.management.lan, undefined)
     assert.equal(container.state_dir, local.state_dir)
     assert.equal(existsSync(container.state_dir), false)
     assert.equal((await f.run('config', 'init', 'gateway', '--container', '--config', explicit)).code, 0)
     assert.deepEqual(JSON.parse(readFileSync(explicit, 'utf8')), document)
-    // 已有容器配置缺少管理页 LAN 时明确提示冲突，保留用户文件等待显式编辑。
-    delete document.management.lan
-    writeFileSync(explicit, JSON.stringify(document))
+    // 已有回环管理页配置与 --container 冲突时明确提示，保留用户文件等待显式编辑。
+    writeFileSync(
+      explicit,
+      JSON.stringify({ ...document, management: { ...document.management, hostname: '127.0.0.1' } })
+    )
     const previous = readFileSync(explicit)
     assert.equal(
       (await f.run('config', 'init', 'gateway', '--container', '--config', explicit)).stderr,
@@ -109,6 +117,49 @@ test('container initialization selects container listeners explicitly while norm
     )
     assert.deepEqual(readFileSync(explicit), previous)
   } finally {
+    f.close()
+  }
+})
+
+test('ROVLOOM_CONTAINER=1 makes first-run gateway defaults use container listeners; connector and unset paths stay local', async () => {
+  const f = fixture()
+  const previous = process.env.ROVLOOM_CONTAINER
+  process.env.ROVLOOM_CONTAINER = '1'
+  try {
+    // 环境变量与 --container 等价：镜像默认入口（rovloom gateway）首次生成即容器监听值。
+    // 角色启动路径（gateway 子命令）才会创建首配，这里直接用 gateway 启动前的初始化入口生成。
+    assert.equal((await f.run('config', 'init', 'gateway')).code, 0)
+    const gateway = readConfig(f.path('gateway'))
+    assert(gateway.role === 'gateway')
+    assert.deepEqual(
+      [gateway.mcp_hostname, gateway.device_hostname, gateway.management_hostname],
+      ['0.0.0.0', '0.0.0.0', '0.0.0.0']
+    )
+    const document = JSON.parse(readFileSync(f.path('gateway'), 'utf8'))
+    assert.equal(document.management.hostname, '0.0.0.0')
+    // 已存在文件不重新生成：环境变量只影响首次生成，不改写既有配置。
+    const before = readFileSync(f.path('gateway'))
+    delete process.env.ROVLOOM_CONTAINER
+    assert.equal((await f.run('config', 'init', 'gateway')).code, 0)
+    assert.deepEqual(readFileSync(f.path('gateway')), before)
+    // 未设变量时首次生成仍是回环监听；connector 角色不受容器变量影响。
+    assert.equal((await f.run('config', 'init', 'connector')).code, 0)
+    const connector = readConfig(f.path('connector'))
+    assert.equal(connector.role, 'connector')
+    const plain = join(f.home, 'plain-gateway.json')
+    assert.equal((await f.run('config', 'init', 'gateway', '--config', plain)).code, 0)
+    const local = readConfig(plain)
+    assert(local.role === 'gateway')
+    // 未设变量时新默认：MCP/设备通道通配，管理页回环。
+    assert.equal(local.mcp_hostname, '0.0.0.0')
+    assert.equal(local.device_hostname, '0.0.0.0')
+    assert.equal(local.management_hostname, '127.0.0.1')
+  } finally {
+    if (previous === undefined) {
+      delete process.env.ROVLOOM_CONTAINER
+    } else {
+      process.env.ROVLOOM_CONTAINER = previous
+    }
     f.close()
   }
 })

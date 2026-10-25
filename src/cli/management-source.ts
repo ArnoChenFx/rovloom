@@ -194,7 +194,7 @@ export function openProtectedManagementSource(
   const port = source.port
   const now = options.now ?? Date.now
   const origin = `http://127.0.0.1:${port}`
-  const lan = config.management_lan === true
+  const lan = config.management_hostname === '0.0.0.0'
   let observed = 0
   let closed = false
   let authority: ManagementSessionAuthority | undefined

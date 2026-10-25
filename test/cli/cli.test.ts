@@ -96,7 +96,7 @@ test(
     ]) {
       assert.throws(/* 分组字段、端口与旧TLS选择不能越过正式配置边界。 */ () => parseConfig(invalid))
     }
-    const disabled = { ...gateway, management: { enabled: false, port: 9555 } }
+    const disabled = { ...gateway, management: { enabled: false, hostname: '127.0.0.1', port: 9555 } }
     assert.deepEqual(configDocument(parseConfig(disabled)), disabled)
     // 通配绑定是显式可选的隔离环境配置，解析与序列化往返保持原值；管理面只多接受 0.0.0.0。
     const wildcard = {

@@ -64,6 +64,9 @@ def check_gateway(name):
     parsed = json.loads(config)
     assert parsed['data']['directory'] == '/home/rovloom/.local/share/rovloom/gateway'
     assert 'authentication_ref' not in parsed and 'tls' not in config
+    # 镜像入口未跑任何子命令：首次自动生成的配置就应是容器监听默认值（lan 字段已废除，通配绑定即放行）。
+    assert all(parsed[part]['hostname'] == '0.0.0.0' for part in ['mcp', 'devices', 'management'])
+    assert 'lan' not in parsed['mcp'] and 'lan' not in parsed['management']
     # 无TTY运行不能创建首次初始化计划、身份或provider授权；只检查自有临时卷的程序管理目录。
     managed = '/home/rovloom/.local/share/rovloom/gateway/managed'
     assert command('exec', name, 'find', managed, '-mindepth', '1', '-maxdepth', '1', '-printf', 'x') == ''
@@ -149,7 +152,7 @@ def compose_smoke(image, compose_path):
                            '--file', str(override), *arguments, timeout=timeout)
 
         try:
-            compose('run', '--rm', 'gateway', 'config', 'init', 'gateway', '--container', timeout=45)
+            # 镜像默认入口直接启动；容器默认监听值由首次自动生成落地，不再需要手动 config init --container。
             compose('up', '--detach', timeout=45)
             container = compose('ps', '--all', '--quiet', 'gateway')
             assert re.fullmatch(r'[0-9a-f]{64}', container)
@@ -159,7 +162,7 @@ def compose_smoke(image, compose_path):
             check_gateway(container)
             parsed = json.loads(command('exec', container, 'cat', '/home/rovloom/.config/rovloom/gateway.json'))
             assert all(parsed[part]['hostname'] == '0.0.0.0' for part in ['mcp', 'devices', 'management'])
-            assert parsed['management']['lan'] is True
+            assert 'lan' not in parsed['mcp'] and 'lan' not in parsed['management']
             # bridge验收的落点在宿主机侧：发布端口必须经端口映射真实可达。
             assert host_status('http://127.0.0.1:9444/mcp') == 401
             assert host_status('http://127.0.0.1:9445/') == 200

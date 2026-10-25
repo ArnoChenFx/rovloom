@@ -18,6 +18,13 @@ export function privateDirectory(path: string): void {
 
 export type RoleInitialization = Readonly<{ provider?: 'luvus' | 'herdr' | 'mixed'; container?: true }>
 
+// 容器镜像通过环境变量声明自身：首次生成的 Gateway 配置直接采用容器监听默认值，
+// 让镜像默认入口（rovloom gateway）无需额外子命令即可从宿主机端口映射访问。
+// 与 --container 标志取并集；npm 安装的二进制不受影响。
+function containerEnvironment(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
+  return env.ROVLOOM_CONTAINER === '1'
+}
+
 // 角色和状态目录分离；显式config只覆盖用户文件位置，默认数据仍属于当前用户的home。
 function defaults(
   role: RoleConfig['role'],
@@ -38,13 +45,12 @@ function defaults(
   if (config.role === 'connector' && initialization.provider) {
     return { ...config, native: { ...config.native, provider: initialization.provider } }
   }
-  if (config.role === 'gateway' && initialization.container) {
+  if (config.role === 'gateway' && (initialization.container || containerEnvironment())) {
     return {
       ...config,
       mcp_hostname: '0.0.0.0',
       device_hostname: '0.0.0.0',
-      management_hostname: '0.0.0.0',
-      management_lan: true
+      management_hostname: '0.0.0.0'
     }
   }
   return config
