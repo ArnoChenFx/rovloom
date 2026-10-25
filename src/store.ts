@@ -379,7 +379,7 @@ export class Store {
     }
   }
   // 在单一 writer 事务内固定时钟和预算，成功提交才发布回收通知，存储失败锁存降级。
-  private transaction<T>(fn: (now: number) => T, admission = true): T {
+  private transaction<T>(fn: (now: number) => T, admission: boolean | 'optional' = true): T {
     if (this.transactionTime !== undefined) {
       throw new GatewayError('transaction_in_progress')
     }
@@ -418,6 +418,10 @@ export class Store {
       } catch {
         /* 不在错误中暴露 SQL/内容。 */
       }
+      // 可选诊断遵守普通准入预算；容量不足只撤去本条诊断，真实写入/提交故障仍锁存降级。
+      if (admission === 'optional' && error instanceof GatewayError && error.code === 'storage_exhausted') {
+        throw error
+      }
       if (
         error instanceof GatewayError &&
         !['storage_exhausted', 'audit_quota', 'metadata_quota', 'security_quota'].includes(error.code)
@@ -439,8 +443,13 @@ export class Store {
     }
   }
   // 结合逻辑子额、物理文件与备份检查预算，为准入保留在途完成空间。
-  private budget(admission: boolean): void {
-    assertBudget(this.db, this.path, this.limits, this.options.backupDirectory, admission)
+  private budget(admission: boolean | 'optional'): void {
+    // 可选诊断额外留出一份普通业务余量；既不能动收尾预留，也不能将正常准入额度全部占满。
+    const limits =
+      admission === 'optional'
+        ? { ...this.limits, storage_total_bytes: this.limits.storage_total_bytes - this.limits.storage_reserve_bytes }
+        : this.limits
+    assertBudget(this.db, this.path, limits, this.options.backupDirectory, admission !== false)
   }
   // 按固定白名单构造脱敏审计记录，并与对应业务变化在同一事务写入。
   private audit(
@@ -995,7 +1004,7 @@ export class Store {
             /* 独立小事务只写预检拒绝事件，不带参数、目标或原始 schema 细节。 */ (now) => {
               this.audit('native_preflight_rejected', principal, now, undefined, { code: error.code })
             },
-            false
+            'optional'
           )
         } catch {
           /* 审计失败不改变原拒绝语义。 */
