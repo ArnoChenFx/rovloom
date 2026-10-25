@@ -106,7 +106,10 @@ test('container initialization selects container management listeners while norm
     assert.equal((await f.run('config', 'init', 'gateway', '--container', '--config', explicit)).code, 0)
     assert.deepEqual(JSON.parse(readFileSync(explicit, 'utf8')), document)
     // 已有回环管理页配置与 --container 冲突时明确提示，保留用户文件等待显式编辑。
-    writeFileSync(explicit, JSON.stringify({ ...document, management: { ...document.management, hostname: '127.0.0.1' } }))
+    writeFileSync(
+      explicit,
+      JSON.stringify({ ...document, management: { ...document.management, hostname: '127.0.0.1' } })
+    )
     const previous = readFileSync(explicit)
     assert.equal(
       (await f.run('config', 'init', 'gateway', '--container', '--config', explicit)).stderr,
