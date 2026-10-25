@@ -370,9 +370,9 @@ function count(value: unknown): asserts value is number {
 }
 
 /** 调用聚合与窗口声明一致：total 等于状态计数之和，窗口边界单调。 */
-function callAggregate(value: CallAggregate, total: number): void {
+function callAggregate(value: CallAggregate, pageItems: number): void {
   record(value, ['total', 'by_state', 'by_provider', 'by_principal', 'by_method'])
-  if (value.total !== total) {
+  if (!Number.isSafeInteger(value.total) || value.total < 0 || value.total > 2000 || value.total < pageItems) {
     invalid()
   }
   bounded(value.by_state, 6)
@@ -383,15 +383,16 @@ function callAggregate(value: CallAggregate, total: number): void {
     count(row.count)
     states += row.count
   }
-  if (value.by_state.length && states !== value.total) {
+  if (states !== value.total) {
     invalid()
   }
   for (const [rows, limit, inspect] of [
     [
       value.by_provider,
       8,
-      (row: { provider_id: string; kind: string; count: number }) => {
-        record(row, ['provider_id', 'kind', 'count'])
+      (row: { machine_id: string; provider_id: string; kind: string; count: number }) => {
+        record(row, ['machine_id', 'provider_id', 'kind', 'count'])
+        text(row.machine_id)
         text(row.provider_id)
         choice(row.kind, ['luvus', 'herdr'])
         count(row.count)

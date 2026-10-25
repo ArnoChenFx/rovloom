@@ -91,7 +91,7 @@ export function createManagementPageRead(transport: ManagementReadTransport): Pa
         try {
           page.calls = await execute('calls_list', {
             limit: 50,
-            ...(route.callsCursor === null ? {} : { cursor: route.callsCursor })
+            ...(route.callsCursor ? { cursor: route.callsCursor } : {})
           })
         } catch (error) {
           page.callsProblem = partialProblem(error)

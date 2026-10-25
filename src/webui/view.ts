@@ -598,7 +598,7 @@ function callsPage(page: PageView, freshness: Freshness, route: PageRoute, filte
       'calls.byTargetNote',
       aggregate.by_provider.map(
         /* 目标使用 provider 实例标识与类型。 */ (row) => ({
-          label: `${row.kind === 'luvus' ? 'Luvus' : 'Herdr'} · ${row.provider_id}`,
+          label: `${row.machine_id} · ${row.kind === 'luvus' ? 'Luvus' : 'Herdr'} · ${row.provider_id}`,
           count: row.count
         })
       ),

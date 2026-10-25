@@ -227,7 +227,7 @@ summary { cursor: pointer; }
 .call-principal { display: block; font-size: 12px; overflow-wrap: anywhere; }
 .call-source p, .call-time p { font-size: 11px; }
 .call-state { display: grid; gap: 4px; justify-items: start; }
-.call-state .badge { font-size: 11px; white-space: normal; }
+.call-state .badge { font-size: 12px; white-space: normal; }
 .call-time strong { font-size: 12px; font-weight: 550; }
 .mono { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; }
 /* 分组设备详情与明确确认的管理操作。 */

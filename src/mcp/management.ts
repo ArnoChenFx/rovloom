@@ -136,7 +136,7 @@ export type CallSummary = {
   provider_kind: 'luvus' | 'herdr'
   method: string
   state: CallState
-  /** 派发后的连接代次存在与否；原始 epoch 引用不离开账本。 */
+  /** 派发尝试是否已登记；不证明原生已接收或执行，原始 epoch 引用不离开账本。 */
   dispatched: boolean
   /** 目标只保留 profile 与调用方声明的 session 名，不含原生句柄或凭据。 */
   target: { profile: 'session' | 'host'; session: string | null }
@@ -144,14 +144,14 @@ export type CallSummary = {
   outcome: 'result' | 'error' | null
   created_at: number
   deadline: number
-  /** 内容是否仍可读；到期或丢弃后只保留状态，不复活原文。 */
+  /** 账本内容保留状态；不授予管理员正文读取权限，到期或丢弃后不复活原文。 */
   content_status: 'available' | 'expired' | 'discarded' | 'unavailable'
 }
 /** 单次采样内的分布统计，覆盖当前授权设备范围，不受分页影响。 */
 export type CallAggregate = {
   total: number
   by_state: readonly { state: CallState; count: number }[]
-  by_provider: readonly { provider_id: string; kind: 'luvus' | 'herdr'; count: number }[]
+  by_provider: readonly { machine_id: string; provider_id: string; kind: 'luvus' | 'herdr'; count: number }[]
   by_principal: readonly { principal: string; count: number }[]
   by_method: readonly { method: string; count: number }[]
 }

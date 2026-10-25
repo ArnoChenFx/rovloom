@@ -795,8 +795,7 @@ export class StoreGatewayService implements GatewayService {
     const rows = this.options.store.callsWindow(machines, since, CALL_WINDOW_LIMIT + 1)
     const truncated = rows.length > CALL_WINDOW_LIMIT
     const windowRows = truncated ? rows.slice(0, CALL_WINDOW_LIMIT) : rows
-    const filtered = args.states ? windowRows.filter((row) => args.states!.includes(row.state)) : windowRows
-    const items: CallSummary[] = filtered.map(
+    const projected: CallSummary[] = windowRows.map(
       /* 逐行投影账本元数据；降级时未定结论保持 outcome_unknown，不宣称已执行。 */ (row) => {
         const state =
           mode === 'storage_degraded' && ['dispatching', 'connector_accepted'].includes(row.state)
@@ -826,6 +825,7 @@ export class StoreGatewayService implements GatewayService {
         }
       }
     )
+    const items = args.states ? projected.filter((row) => args.states!.includes(row.state)) : projected
     const scope = {
       principal: principal.id,
       admin,
@@ -840,10 +840,10 @@ export class StoreGatewayService implements GatewayService {
       aggregate: this.callAggregate(items),
       window: {
         since,
-        first_at: filtered.length ? filtered[filtered.length - 1]!.created : null,
-        last_at: filtered.length ? filtered[0]!.created : null,
+        first_at: items.length ? items[items.length - 1]!.created_at : null,
+        last_at: items.length ? items[0]!.created_at : null,
         // 采样数与统计同一范围（含状态筛选），避免页面出现两个互相矛盾的总数。
-        sampled: filtered.length,
+        sampled: items.length,
         truncated
       }
     }
@@ -859,6 +859,18 @@ export class StoreGatewayService implements GatewayService {
       'not_dispatched',
       'outcome_unknown'
     ]
+    // provider_id 只在所属机器内唯一；历史记录也可能包含同一实例的不同 kind。
+    const providerCounts = new Map<string, CallAggregate['by_provider'][number]>()
+    for (const item of items) {
+      const key = canonical([item.machine_id, item.provider_id, item.provider_kind])
+      const previous = providerCounts.get(key)
+      providerCounts.set(key, {
+        machine_id: item.machine_id,
+        provider_id: item.provider_id,
+        kind: item.provider_kind,
+        count: (previous?.count ?? 0) + 1
+      })
+    }
     return {
       total: items.length,
       by_state: tally(
@@ -866,17 +878,9 @@ export class StoreGatewayService implements GatewayService {
         states
       ).map(({ key, count }) => ({ state: key, count })),
       by_provider: ranked(
-        tally(
-          items.map(/* provider 分布按实例 ID 计数，不含配置引用。 */ (item) => item.provider_id),
-          [...new Set(items.map((item) => item.provider_id))]
-        ),
+        [...providerCounts].map(([key, value]) => ({ key, count: value.count })),
         8
-      ).map(({ key, count }) => {
-        const kind = items.find(
-          /* 同一 provider 在同一设备上 kind 稳定。 */ (item) => item.provider_id === key
-        )!.provider_kind
-        return { provider_id: key, kind, count }
-      }),
+      ).map(({ key }) => providerCounts.get(key)!),
       by_principal: ranked(
         tally(
           items.map(/* 来源分布按 principal 计数，是审计可见的调用方标识。 */ (item) => item.principal),

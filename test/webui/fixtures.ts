@@ -239,6 +239,7 @@ function fixtureCalls(args: ManagementArguments['calls_list']): ManagementReply[
       total: items.length,
       by_state: counted('state').map(([state, count]) => ({ state: state as (typeof items)[number]['state'], count })),
       by_provider: counted('provider_id').map(([provider_id, count]) => ({
+        machine_id: items.find((item) => item.provider_id === provider_id)!.machine_id,
         provider_id,
         kind: items.find((item) => item.provider_id === provider_id)!.provider_kind,
         count
