@@ -5,7 +5,16 @@ import { copyControl } from './clipboard.js'
 import { ResourceError, type ResourceTransport, type ResourceOperation } from './resource-client.js'
 
 type Token = { principal: string; token: string | null; expires_at: number; scope: string }
-type Pairing = { pairing_id: string; machine_id: string; name: string; status: string; expires: number }
+type PairingCode = {
+  code_id: string
+  machine_id: string
+  name: string
+  created_at: number
+  status: 'unused' | 'used' | 'revoked' | 'failed'
+  used_at: number | null
+  code?: string
+}
+type CreatedPairingCode = { code: string; name: string; device_port: number }
 function node<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = ''): HTMLElementTagNameMap[K] {
   const element = document.createElement(tag)
   element.textContent = text
@@ -25,10 +34,13 @@ export function createResourcePanel(options: {
   let active = false
   let pending = false
   let controller = new AbortController()
-  let data: { resource?: string; next_cursor?: number | null; items: (Token | Pairing)[] } | undefined
-  let cursor = 0
+  let data:
+    | { resource?: string; next_cursor?: number | null; device_port?: number; items: (Token | PairingCode)[] }
+    | undefined
   let tokenName = ''
   let tokenDays = '365'
+  let codeName = ''
+  let created: CreatedPairingCode | undefined
   let version = 0
   let route: PageRoute
   let language = ''
@@ -60,8 +72,8 @@ export function createResourcePanel(options: {
     feedback.textContent = i18n.t('resources.loading')
     try {
       const value = (await request(
-        key === 'connect' ? 'tokens_list' : 'pairings_list',
-        key === 'connect' ? {} : { cursor }
+        key === 'connect' ? 'tokens_list' : 'pairing_codes_list',
+        key === 'connect' ? {} : {}
       )) as typeof data
       if (generation !== version || !active) {
         return
@@ -91,7 +103,13 @@ export function createResourcePanel(options: {
     feedback.textContent = i18n.t('resources.saving')
     render()
     try {
-      await request(operation, args)
+      const reply =
+        operation === 'pairing_codes_create'
+          ? ((await request(operation, args)) as CreatedPairingCode)
+          : ((await request(operation, args)) as null)
+      if (operation === 'pairing_codes_create' && reply && typeof reply.code === 'string') {
+        created = reply
+      }
       if (generation !== version || !active) {
         return
       }
@@ -99,6 +117,9 @@ export function createResourcePanel(options: {
       if (operation === 'tokens_create') {
         tokenName = ''
         tokenDays = '365'
+      }
+      if (operation === 'pairing_codes_create') {
+        codeName = ''
       }
       if (operation === 'devices_delete') {
         options.committed(route.machineId ?? undefined)
@@ -144,7 +165,7 @@ export function createResourcePanel(options: {
     } else {
       const heading = node('div', '', 'section-heading')
       heading.append(
-        node('h2', t(key === 'connect' ? 'resources.tokens' : 'resources.pairings')),
+        node('h2', t(key === 'connect' ? 'resources.tokens' : 'resources.pairingCodes')),
         button(t('action.refresh'), () => {
           void refresh()
         })
@@ -248,51 +269,77 @@ export function createResourcePanel(options: {
           body.append(card)
         }
       } else {
+        const host = typeof location === 'undefined' ? '127.0.0.1' : location.hostname
+        const form = node('form', '', 'token-create-form')
+        const nameLabel = node('label', t('resources.name'))
+        const name = node('input')
+        name.name = 'code-name'
+        name.pattern = '[A-Za-z0-9._-]{0,63}'
+        name.maxLength = 63
+        name.placeholder = 'workstation'
+        name.disabled = pending
+        name.value = codeName
+        name.addEventListener('input', () => {
+          codeName = name.value
+        })
+        nameLabel.append(name)
+        const submit = node('button', t('resources.createCode'), 'primary-button')
+        submit.type = 'submit'
+        submit.disabled = pending
+        form.append(nameLabel, submit)
+        form.addEventListener('submit', (event) => {
+          event.preventDefault()
+          void mutate('pairing_codes_create', name.value.trim() ? { name: name.value.trim() } : {})
+        })
+        body.append(node('p', t('resources.codesNote'), 'muted'), form)
+        if (created) {
+          const command = 'rovloom connector --join ws://' + host + ':' + created.device_port + '#' + created.code
+          const card = node('article', '', 'pairing-record code-created')
+          const details = node('div')
+          details.append(node('h3', created.name), node('p', t('resources.codeCreatedNote'), 'muted'))
+          const block = node('div', '', 'command-snippet')
+          block.append(node('code', command), copyControl(command, t('copy.action')))
+          card.append(details, block)
+          body.append(card)
+          created = undefined
+        }
+        const port = data?.device_port ?? 9443
         for (const item of data?.items ?? []) {
-          const pairing = item as Pairing
+          const entry = item as PairingCode
           const card = node('article', '', 'pairing-record')
           const details = node('div')
-          const label = ['pending', 'paired', 'cancelled', 'expired'].includes(pairing.status)
-            ? t(('resources.' + pairing.status) as 'resources.pending')
-            : pairing.status
+          const label = t(('resources.code_' + entry.status) as 'resources.code_unused')
           details.append(
-            node('h3', pairing.name),
-            node('code', pairing.pairing_id),
-            node('p', label + ' · ' + i18n.timestamp(pairing.expires), 'muted')
-          )
-          card.append(
-            details,
-            button(
-              t('resources.delete'),
-              () => remove('pairings_delete', { pairing_id: pairing.pairing_id }, t('resources.confirmPairing')),
-              true
+            node('h3', entry.name),
+            node('code', entry.machine_id),
+            node(
+              'p',
+              label +
+                ' · ' +
+                i18n.timestamp(entry.created_at) +
+                (entry.used_at ? ' · ' + i18n.timestamp(entry.used_at) : ''),
+              'muted'
             )
           )
+          card.append(details)
+          if (entry.status === 'unused' && entry.code) {
+            const command = 'rovloom connector --join ws://' + host + ':' + port + '#' + entry.code
+            const block = node('div', '', 'command-snippet')
+            block.append(node('code', command), copyControl(command, t('copy.action')))
+            card.append(block)
+            card.append(
+              button(
+                t('resources.revokeCode'),
+                () => remove('pairing_codes_revoke', { code_id: entry.code_id }, t('resources.confirmRevokeCode')),
+                true
+              )
+            )
+          }
           body.append(card)
         }
       }
-      if (key === 'pairing' && (cursor > 0 || typeof data?.next_cursor === 'number')) {
-        const pages = node('div', '', 'token-controls')
-        if (cursor > 0) {
-          pages.append(
-            button(t('resources.previous'), () => {
-              cursor = Math.max(0, cursor - 50)
-              void refresh()
-            })
-          )
-        }
-        if (typeof data?.next_cursor === 'number') {
-          pages.append(
-            button(t('resources.next'), () => {
-              cursor = data!.next_cursor!
-              void refresh()
-            })
-          )
-        }
-        body.append(pages)
-      }
-      if (data?.items.length === 0) {
-        body.append(node('p', t(key === 'connect' ? 'resources.emptyTokens' : 'resources.emptyPairings'), 'empty'))
+      if (data?.items.length === 0 && key === 'connect') {
+        body.append(node('p', t('resources.emptyTokens'), 'empty'))
       }
     }
     region.replaceChildren(body, feedback)
@@ -301,9 +348,10 @@ export function createResourcePanel(options: {
     active = false
     key = ''
     data = undefined
-    cursor = 0
     tokenName = ''
     tokenDays = '365'
+    codeName = ''
+    created = undefined
     version++
     controller.abort()
     pending = false
@@ -338,8 +386,8 @@ export function createResourcePanel(options: {
       region.hidden = false
       if (changed) {
         key = nextKey
-        cursor = 0
         data = undefined
+        created = undefined
         version++
         controller.abort()
         controller = new AbortController()

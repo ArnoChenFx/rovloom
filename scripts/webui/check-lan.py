@@ -46,7 +46,6 @@ def main():
         page.goto(origin + '/fixtures/#machine=' + device)
         assert page.evaluate('!isSecureContext && typeof crypto.randomUUID === "undefined"')
         page.locator('[data-device-action="device_rename"]:enabled').wait_for()
-        expect(page.locator('[name="pairing-policy"]')).to_have_value('rovloom_setup_v1')
         page.locator('[data-device-action="device_rename"]').click()
         page.locator('input[name="device-name"]').fill('owned_lan_renamed')
         page.locator('.operation-form button').click()
@@ -55,16 +54,15 @@ def main():
         page.locator('dialog[data-phase="committed"]').wait_for()
         page.locator('.operation-controls button').last.click()
         page.locator('.nav-link[href="#view=pairing"]').click()
-        expect(page.locator('.pairing-section')).to_be_visible()
-        page.locator('.pairing-advanced > summary').click()
-        page.locator('[name="pairing-name"]').fill('owned_lan_pairing')
-        page.locator('[name="pairing-policy"]').fill('fixture_policy')
-        page.locator('.pairing-form button[type="submit"]').click()
-        page.locator('.pairing-review .pairing-confirm').click()
-        expect(page.locator('.pairing-entry')).to_be_visible()
+        expect(page.locator('[name="code-name"]')).to_be_visible()
+        page.locator('[name="code-name"]').fill('owned-lan-pairing')
+        page.get_by_role('button', name='Generate code', exact=True).click()
+        entry = page.locator('.pairing-record:not(.code-created)').filter(has_text='owned-lan-pairing')
+        expect(entry).to_be_visible()
+        assert entry.locator('.command-snippet code').inner_text().startswith('rovloom connector --join ws://192.0.2.10:9443#')
         calls = context.request.get(base + '/__fixture').json()['calls']
         assert calls.count('devices_rename') == 1
-        assert calls.count('pairings_create') == 1
+        assert calls.count('pairing_codes_create') == 1
         assert not errors, errors
         (output / 'lan.json').write_text(json.dumps({'passed': True, 'secure_context': False, 'randomUUID': False,
             'device_rename_committed': True, 'pairing_create_committed': True, 'page_errors': errors}, indent=2) + '\n')

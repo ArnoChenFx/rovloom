@@ -2,6 +2,7 @@
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { PairingCodes } from '../../src/cli/pairing-codes.js'
 import { createManagementResources } from '../../src/cli/management-resources.js'
 import { configTemplate, type GatewayConfig } from '../../src/cli/config.js'
 import { writeAdminFiles } from '../../src/cli/admin-command.js'
@@ -191,7 +192,8 @@ export function createActionsHostFixture(origin: string) {
       config,
       store: f.store,
       authorize: () => mode !== '401' && mode !== '403',
-      disconnect: () => {}
+      disconnect: () => {},
+      codes: new PairingCodes(f.store, directory)
     })
   })
   return {
@@ -232,12 +234,10 @@ export function createActionsHostFixture(origin: string) {
         )
       }
       const response = await handler.fetch(request)
-      if (response.status === 200 && operation === 'pairings_create') {
-        const receipt = (await response.clone().json()) as { machine_id: string }
-        f.grant(
-          { action: 'devices_read', machine_id: receipt.machine_id },
-          { action: 'devices_revoke', machine_id: receipt.machine_id }
-        )
+      if (response.status === 200 && (operation === 'pairings_create' || operation === 'pairing_codes_create')) {
+        const receipt = (await response.clone().json()) as { machine_id?: string; code?: string }
+        const machine = receipt.machine_id ?? receipt.code!.split('.')[0]!
+        f.grant({ action: 'devices_read', machine_id: machine }, { action: 'devices_revoke', machine_id: machine })
       }
       if (response.status === 200 && operation === 'confirmations_create') {
         confirmationExpiresAt = ((await response.clone().json()) as { expires_at: number }).expires_at

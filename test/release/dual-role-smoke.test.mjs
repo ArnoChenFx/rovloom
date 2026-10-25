@@ -5,7 +5,11 @@ import { join } from 'node:path'
 import { setTimeout as pause } from 'node:timers/promises'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { createDualRoleManagementRead, startDualRoleSmokeProcess } from '../../scripts/release/dual-role-smoke.mjs'
+import {
+  createDualRoleManagementRead,
+  startDualRoleSmokeProcess,
+  assertConnectorDiagnostics
+} from '../../scripts/release/dual-role-smoke.mjs'
 
 /** 只构造不读取环境或运行用户命令的受控shell child，所有输出和状态均为本轮合成值。 */
 function fixture(body, limits) {
@@ -157,3 +161,12 @@ test(
     }
   }
 )
+
+test('Connector release smoke accepts transport diagnostics and rejects unknown or secret output', () => {
+  assertConnectorDiagnostics('')
+  assertConnectorDiagnostics(
+    'connector_transport connecting provider_ready=false\nconnector_transport ready provider_ready=true\n'
+  )
+  assert.throws(() => assertConnectorDiagnostics('runtime_failed\n'))
+  assert.throws(() => assertConnectorDiagnostics('Bearer (private): synthetic-secret\n'))
+})

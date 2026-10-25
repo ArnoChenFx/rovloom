@@ -1,4 +1,4 @@
-// 从空状态走正式 production 装配、Basic/Cookie/CSRF 与在线激活；只使用本例临时设备及合成安装清单。
+// 从空状态走正式 production 装配、Basic/Cookie/CSRF 与单码直连配对：面板生成一机一码，POST /pairing 一次完成配对。
 import assert from 'node:assert/strict'
 import { before, test } from 'node:test'
 import { once } from 'node:events'
@@ -6,20 +6,16 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { digest } from '../../src/contracts.js'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
-import { DEFAULT_PAIRING_POLICY_REF } from '../../src/pairing-policy.js'
 import { hash } from '../../src/wire/index.js'
-import { createManagementWriteClient } from '../../src/webui/write-client.js'
-import { createPairingManagementFlow } from '../../src/webui/pairing-flow.js'
+import { SIMPLE_SETUP_ACTOR, SIMPLE_SETUP_LINEAGE, setupReference, setupTarget } from '../../src/cli/setup-policy.js'
 import type { GatewayConfig } from '../../src/cli/config.js'
 import { initializeRoleConfig } from '../../src/cli/config-init.js'
 import { writeAdminFiles } from '../../src/cli/admin-command.js'
 import { createProductionCliRuntime } from '../../src/cli/production.js'
-import { writeSetupFile } from '../../src/cli/setup-files.js'
+import { createProductSources } from '../../src/cli/product-sources.js'
 import { readRuntimeJson, runtimeReference } from '../../src/cli/runtime-files.js'
 import { parseRegistry, REGISTRY_MAX_BYTES } from '../../src/cli/token-registry.js'
-import { setupReference, setupTarget } from '../../src/cli/setup-policy.js'
 import { buildManagementAssets } from './management-assets-fixture.js'
 
 before(buildManagementAssets)
@@ -38,7 +34,7 @@ async function availablePort(): Promise<number> {
 
 for (const lan of [false, true]) {
   test(
-    `production web-first pairing completes via ${lan ? 'LAN' : 'loopback'} management HTTP`,
+    `production single-code pairing completes via ${lan ? 'LAN' : 'loopback'} management HTTP`,
     { timeout: 30_000 },
     async () => {
       const root = mkdtempSync(join(tmpdir(), 'rovloom-web-first-http-'))
@@ -64,9 +60,9 @@ for (const lan of [false, true]) {
       const origin = 'http://' + host
       const network = 'http://127.0.0.1:' + management
       let active: Awaited<ReturnType<NonNullable<ReturnType<typeof createProductionCliRuntime>['gateway']>>> | undefined
-      let client: ReturnType<typeof createManagementWriteClient> | undefined
+      const runtime = createProductionCliRuntime(createProductSources())
       try {
-        active = await createProductionCliRuntime().gateway!(config)
+        active = await runtime.gateway!(config)
         const shell = await fetch(network + '/', { headers: { host } })
         assert.equal(shell.status, 200)
         assert(!(await shell.text()).includes('rovloom-management-bootstrap'))
@@ -107,161 +103,135 @@ for (const lan of [false, true]) {
         await resource('tokens_create', { principal: 'dashboard-client', days: 365 })
         const createdToken = (await resource('tokens_list')).items[0].token
         assert.match(createdToken, /^[A-Za-z0-9_-]{43}$/)
-        client = createManagementWriteClient({
-          csrf: async () => csrf,
-          fetcher: (path, init) => {
-            const headers = new Headers(init.headers)
-            headers.set('host', host)
-            headers.set('origin', origin)
-            headers.set('cookie', cookie)
-            return fetch(network + path, { ...init, headers })
-          }
-        })
-        const unknown = createPairingManagementFlow({ transport: client })
-        assert.deepEqual(
-          await unknown.prepare({ action: 'pairing_create', name: 'refused', policy_ref: 'unapproved', labels: [] }),
-          {
-            phase: 'failed',
-            problem: 'outcome_unconfirmed'
-          }
-        )
-        unknown.dispose()
-        const create = createPairingManagementFlow({ transport: client })
-        assert.equal(
-          (
-            await create.prepare({
-              action: 'pairing_create',
-              name: 'web_first',
-              policy_ref: DEFAULT_PAIRING_POLICY_REF,
-              labels: []
-            })
-          ).phase,
-          'awaiting_confirmation'
-        )
-        const created = await create.confirm()
-        assert.equal(created.phase, 'committed')
-        assert(created.phase === 'committed')
-        const { machine_id, pairing_id } = created.receipt as typeof created.receipt & {
-          machine_id: string
-          pairing_id: string
-        }
-        create.dispose()
-        /** 模拟设备端的认领协议，不替代管理页确认或 Store 认证。 */
+
+        const raw = readFileSync(new URL('../fixtures/herdr/0.9.5/schema.json', import.meta.url), 'utf8')
+        /** 模拟设备端的单码直连配对：一次 POST 换取设备凭据与 MCP Bearer。 */
         const devicePost = async (path: string, body: unknown) => {
           const response = await fetch('http://127.0.0.1:' + devices + path, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify(body)
           })
-          assert.equal(response.status, 200, path)
-          return response.json()
+          return { status: response.status, value: (await response.json().catch(() => undefined)) as any }
         }
-        const secret = 'synthetic-owned-claim-secret-123456'
-        const claim = await devicePost('/pairing/claim', { pairing_id, secret_hash: digest(secret) })
-        const progress = await client.execute('pairings_get', { machine_id, pairing_id }, new AbortController().signal)
-        assert.equal(progress.claim!.user_code, claim.user_code)
-        const approve = createPairingManagementFlow({ transport: client })
-        assert.equal(
-          (
-            await approve.prepare({
-              action: 'pairing_claim_approve',
-              machine_id,
-              pairing_id,
-              claim_id: claim.claim_id,
-              user_code: progress.claim!.user_code
-            })
-          ).phase,
-          'awaiting_confirmation'
-        )
-        assert.equal((await approve.confirm()).phase, 'committed')
-        approve.dispose()
-        const delivered = await devicePost('/pairing/claim/status', { claim_id: claim.claim_id, secret })
-        assert.equal(delivered.status, 'approved')
-        await devicePost('/pairing/claim/ack', { claim_id: claim.claim_id, secret })
-        const authentication = {
-          machine_id,
-          credential: delivered.credential,
-          recovery_generation: delivered.recovery_generation
-        }
-        const raw = readFileSync(new URL('../fixtures/herdr/0.9.5/schema.json', import.meta.url), 'utf8')
-        const reference = setupReference(claim.claim_id, 'herdr')
-        const installation = {
-          installations: [
-            {
-              reference,
-              value: {
-                kind: 'herdr',
-                schema_bundle: raw,
-                config: {
-                  version: 1,
-                  target: setupTarget(machine_id, 'herdr'),
-                  binding_revision: 1,
-                  config_ref: reference,
-                  peer_policy_revision: 'setup_local_' + claim.claim_id,
-                  expected_source: {
-                    ...fixedHerdrSource(),
-                    binary_version: 'synthetic-future',
-                    server_version: 'synthetic-future',
-                    binary_sha256: 'f'.repeat(64),
-                    schema_sha256: hash(raw)
+        const installationFor = (machine_id: string, attempt: string) => {
+          const reference = setupReference(attempt, 'herdr')
+          return {
+            installations: [
+              {
+                reference,
+                value: {
+                  kind: 'herdr',
+                  schema_bundle: raw,
+                  config: {
+                    version: 1,
+                    target: setupTarget(machine_id, 'herdr'),
+                    binding_revision: 1,
+                    config_ref: reference,
+                    peer_policy_revision: 'setup_local_' + SIMPLE_SETUP_LINEAGE,
+                    expected_source: {
+                      ...fixedHerdrSource(),
+                      binary_version: 'synthetic-future',
+                      server_version: 'synthetic-future',
+                      binary_sha256: 'f'.repeat(64),
+                      schema_sha256: hash(raw)
+                    }
                   }
                 }
               }
-            }
-          ]
+            ]
+          }
         }
-        const activated = await devicePost('/pairing/claim/activation/native', {
-          attempt_id: claim.claim_id,
-          authentication,
-          installation
+        // 面板生成一机一码：完整码值 machine.code_id.secret 与设备端口一起返回。
+        const first = await resource('pairing_codes_create', { name: 'workstation' })
+        assert.match(first.code, /^[A-Za-z0-9_-]+\.[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/)
+        assert.equal(first.device_port, devices)
+        const [machine_id, attempt] = first.code.split('.')
+        const listed = await resource('pairing_codes_list')
+        assert.equal(listed.items.length, 1)
+        assert.equal(listed.items[0].code, first.code)
+        assert.equal(listed.items[0].status, 'unused')
+        // 单端点配对：凭据、恢复代次与首台设备的 MCP Bearer 同一响应交付。
+        const paired = await devicePost('/pairing', {
+          code: first.code,
+          installation: installationFor(machine_id, attempt)
         })
-        assert.equal(activated.state, 'configured')
+        assert.equal(paired.status, 200)
+        assert.equal(paired.value.state, 'paired')
+        assert.equal(paired.value.machine_id, machine_id)
+        assert.match(paired.value.credential, /^[A-Za-z0-9_-]{32,256}$/)
+        assert.match(paired.value.mcp.token, /^[A-Za-z0-9_-]{43}$/)
         await active.reconfigure
+        // 模拟 runCli 真正关闭旧 listener/Store 并以同一进程运行时重开，而非只等待重载通知。
+        await active.close()
+        active = await runtime.gateway!(config)
+        const refreshedPage = await fetch(network + '/', {
+          headers: { host, authorization: 'Basic ' + Buffer.from('admin:' + issued.secret).toString('base64') }
+        })
+        assert.equal(refreshedPage.status, 200)
+        actionHeaders.cookie = refreshedPage.headers.get('set-cookie')!.split(';')[0]!
+        actionHeaders['x-rovloom-csrf'] = /name="rovloom-management-bootstrap" content="([\w-]{43})"/.exec(
+          await refreshedPage.text()
+        )![1]!
+        // 同码重放：真实重载后仍返回同一凭据。
+        const replay = await devicePost('/pairing', {
+          code: first.code,
+          installation: installationFor(machine_id, attempt)
+        })
+        assert.equal(replay.status, 200)
+        assert.equal(replay.value.credential, paired.value.credential)
+        assert.equal(replay.value.replayed, true)
+        // 面板列表：码已终结，明文消失。
+        const used = await resource('pairing_codes_list')
+        assert.equal(used.items[0].status, 'used')
+        assert.equal(used.items[0].code, undefined)
+        // 新码可作废；作废后的码不能兑换。
+        const second = await resource('pairing_codes_create', {})
+        const secondAttempt = second.code.split('.')[1]!
+        await resource('pairing_codes_revoke', { code_id: secondAttempt })
+        assert.equal(
+          (await resource('pairing_codes_list')).items.filter((entry: any) => entry.status === 'unused').length,
+          0
+        )
+        const revoked = await devicePost('/pairing', {
+          code: second.code,
+          installation: installationFor(second.machine_id, secondAttempt)
+        })
+        assert.notEqual(revoked.status, 200)
+        // 已发布 caller：主体是固定常量；删除后首台 Bearer 立即失效。
         const registry = parseRegistry(readRuntimeJson(runtimeReference(root, 'mcp-callers'), REGISTRY_MAX_BYTES))
-        assert.deepEqual(registry.callers.find((entry) => entry.principal.id === 'admin')!.principal.policy.grants, [])
-        assert(registry.callers.some((entry) => entry.principal.id === 'caller_' + claim.claim_id))
+        assert(registry.callers.some((entry) => entry.principal.id === SIMPLE_SETUP_ACTOR))
         assert.equal(
           (await resource('tokens_list')).items.find((entry: any) => entry.principal === 'dashboard-client').token,
           createdToken
         )
-        await resource('tokens_delete', { principal: 'caller_' + claim.claim_id })
-        const clientPath = runtimeReference(root, 'mcp-client')
-        const lineage = readRuntimeJson(clientPath) as { issued_at: number; expires_at: number }
-        writeSetupFile(clientPath, JSON.stringify({ ...lineage, expires_at: lineage.issued_at + 1 }), true)
-        const activationStatus = await devicePost('/pairing/claim/activation/status', {
-          attempt_id: claim.claim_id,
-          authentication,
-          providers: ['herdr']
-        })
-        assert.equal(activationStatus.phase, 'configured')
-        assert.equal(
-          parseRegistry(readRuntimeJson(runtimeReference(root, 'mcp-callers'), REGISTRY_MAX_BYTES)).callers.some(
-            (entry) => entry.principal.id === 'caller_' + claim.claim_id
-          ),
-          false
-        )
-        await resource('pairings_delete', { pairing_id })
-        assert.equal((await resource('pairings_list')).items.length, 0)
-        assert.equal(
-          (await fetch(network + '/admin/v1/devices/' + machine_id, { headers: { host, cookie } })).status,
-          200
-        )
-        await resource('tokens_delete', { principal: 'dashboard-client' })
+        await resource('tokens_delete', { principal: SIMPLE_SETUP_ACTOR })
         assert.equal(
           await active.authentication.authenticate(
-            new Request('http://127.0.0.1:' + mcp + '/mcp', { headers: { authorization: 'Bearer ' + createdToken } }),
+            new Request('http://127.0.0.1:' + mcp + '/mcp', {
+              headers: { authorization: 'Bearer ' + paired.value.mcp.token }
+            }),
             new AbortController().signal
           ),
           null
         )
         await resource('devices_delete', { machine_id })
+        assert.notEqual(
+          (
+            await devicePost('/pairing', {
+              code: first.code,
+              installation: installationFor(machine_id, attempt)
+            })
+          ).status,
+          200
+        )
         assert.equal(
           (readRuntimeJson(runtimeReference(root, 'providers'), 1_048_576) as { providers: unknown[] }).providers
             .length,
           0
         )
         await active.close()
-        active = await createProductionCliRuntime().gateway!(config)
+        active = await runtime.gateway!(config)
         const reloaded = await fetch(network + '/', {
           headers: { host, authorization: 'Basic ' + Buffer.from('admin:' + issued.secret).toString('base64') }
         })
@@ -272,16 +242,7 @@ for (const lan of [false, true]) {
         })
         assert.equal(devicesAfterRestart.status, 200)
         assert.equal((await devicesAfterRestart.json()).items.length, 0)
-
-        assert.equal(
-          await active.authentication.authenticate(
-            new Request('http://127.0.0.1:' + mcp + '/mcp', { headers: { authorization: 'Bearer ' + issued.secret } }),
-            new AbortController().signal
-          ),
-          null
-        )
       } finally {
-        client?.close()
         await active?.close()
         rmSync(root, { recursive: true, force: true })
       }

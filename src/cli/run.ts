@@ -63,9 +63,9 @@ export type CliRuntime = {
   // 启动受信出站宿主并返回其生命周期；具体认证和传输不由 CLI 补造。
   connector?: (config: ConnectorConfig) => Promise<RunningConnector>
 }
-// 已配对设备的重新配对：Gateway 用 --repair-device 签发新码，Connector 用 --repair 兑换。
-// 加入下一台设备：Gateway 用 --add-device 在已完成的引导之上再签发一次配对。
-export type CliPrepareOptions = { repair?: true; addDevice?: true; claim?: true }
+// Connector 首次配对：`rovloom connector --join <ws://host:port#code>` 单命令完成并直接运行。
+// Gateway 手动签发一张一机一码：`rovloom gateway --issue-code` 启动时打印完整加入命令。
+export type CliPrepareOptions = { join?: string; issueCode?: true }
 export type CliIo = {
   stdin: Readable
   stdout: Writable
@@ -83,9 +83,9 @@ type Command =
       path: string
       nonInteractive?: true
       serviceId?: string
-      repair?: true
-      addDevice?: true
-      claim?: true
+      join?: string
+      issueCode?: true
+      unpair?: true
     }
 
 // 解析固定命令形状，未知参数只返回稳定错误，不回显 argv。
@@ -143,33 +143,44 @@ export function parseCommand(args: readonly string[], environment?: ConfigPathEn
     throw new CliError('invalid_arguments')
   }
   const withoutNonInteractive = nonInteractive ? serviceArgs.slice(0, -1) : serviceArgs
-  // 重新配对标志只属于各自角色且必须交互：Gateway 是 --repair-device，Connector 是 --repair。
-  const flag = withoutNonInteractive[1]
-  const repair = withoutNonInteractive[0] === 'gateway' ? flag === '--repair-device' : flag === '--repair'
-  const addDevice = withoutNonInteractive[0] === 'gateway' && flag === '--add-device'
-  const claim = withoutNonInteractive[0] === 'connector' && flag === '--claim'
-  if ((repair || addDevice || claim) && nonInteractive) {
+  // Connector 用 --join <value> 单命令配对、--unpair 干净重置；Gateway 用 --issue-code 启动时签发一张一机一码。
+  const role = withoutNonInteractive[0]
+  if (role !== 'gateway' && role !== 'connector') {
     throw new CliError('invalid_arguments')
   }
-  const roleArgs =
-    repair || addDevice || claim
-      ? [withoutNonInteractive[0]!, ...withoutNonInteractive.slice(2)]
-      : withoutNonInteractive
-  if (
-    (roleArgs[0] === 'gateway' || roleArgs[0] === 'connector') &&
-    (roleArgs.length === 1 || (roleArgs.length === 3 && roleArgs[1] === '--config'))
-  ) {
-    return {
-      action: roleArgs[0],
-      path: resolveRoleConfigPath(roleArgs[0], roleArgs[2], environment),
-      ...(nonInteractive ? { nonInteractive: true } : {}),
-      ...(serviceId ? { serviceId } : {}),
-      ...(repair ? { repair: true as const } : {}),
-      ...(addDevice ? { addDevice: true as const } : {}),
-      ...(claim ? { claim: true as const } : {})
+  let explicit: string | undefined
+  let joinValue: string | undefined
+  let issueCode = false
+  let unpair = false
+  for (let index = 1; index < withoutNonInteractive.length; index++) {
+    const option = withoutNonInteractive[index]
+    if (option === '--config' && explicit === undefined) {
+      explicit = withoutNonInteractive[++index]
+      if (explicit === undefined || explicit.startsWith('--')) {
+        throw new CliError('invalid_arguments')
+      }
+    } else if (option === '--join' && role === 'connector' && joinValue === undefined && !unpair) {
+      joinValue = withoutNonInteractive[++index]
+      if (joinValue === undefined || !/^wss?:\/\/[^#\s]+#[A-Za-z0-9_.-]+$/.test(joinValue)) {
+        throw new CliError('invalid_arguments')
+      }
+    } else if (option === '--issue-code' && role === 'gateway' && !issueCode) {
+      issueCode = true
+    } else if (option === '--unpair' && role === 'connector' && !unpair && joinValue === undefined) {
+      unpair = true
+    } else {
+      throw new CliError('invalid_arguments')
     }
   }
-  throw new CliError('invalid_arguments')
+  return {
+    action: role,
+    path: resolveRoleConfigPath(role, explicit, environment),
+    ...(nonInteractive ? { nonInteractive: true } : {}),
+    ...(serviceId ? { serviceId } : {}),
+    ...(joinValue !== undefined ? { join: joinValue } : {}),
+    ...(issueCode ? { issueCode: true as const } : {}),
+    ...(unpair ? { unpair: true as const } : {})
+  }
 }
 
 // 等待角色结束或本地终止信号，最终释放桥接资源并传播关闭失败。
@@ -296,12 +307,16 @@ export async function runCli(
     if (io.signal.aborted) {
       return 0
     }
-    if (!command.nonInteractive) {
+    if (command.unpair) {
+      // 一次性命令：退役本地配对状态并清空地址，不进入角色启动或引导。
+      const { handleConnectorUnpair } = await import('./unpair.js')
+      return await handleConnectorUnpair(command.path, io)
+    }
+    if (!command.nonInteractive || command.join !== undefined || command.issueCode) {
       config =
         (await runtime.prepare?.(config, command.path, io, {
-          ...(command.repair ? { repair: true as const } : {}),
-          ...(command.addDevice ? { addDevice: true as const } : {}),
-          ...(command.claim ? { claim: true as const } : {})
+          ...(command.join !== undefined ? { join: command.join } : {}),
+          ...(command.issueCode ? { issueCode: true as const } : {})
         })) ?? config
     }
     if (config.role !== command.action) {

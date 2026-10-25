@@ -12,13 +12,14 @@ import type { VersionOffer } from '../wire/types.js'
 import type { GatewayIdentitySource } from '../mcp/management.js'
 import type { ManagementWriteHttpOptions } from '../admin/index.js'
 import { loadCredential } from '../transport/index.js'
+import { GatewayError } from '../contracts.js'
 import { CliError, selectedNativeProviders, type ConnectorConfig, type GatewayConfig } from './config.js'
 import { readSetupJson } from './setup-files.js'
 import { openCallerSource } from './caller-source.js'
 import { REGISTRY_MAX_BYTES } from './token-registry.js'
 import { readRuntimeJson, runtimeReference } from './runtime-files.js'
 import { createRuntimeCliRuntime } from './runtime.js'
-import { OnlinePairingHttp } from './online-pairing-http.js'
+import { SimplePairingHttp, PairingReplayCache } from './simple-pairing.js'
 import type { CliSetup } from './setup-runtime.js'
 import { boundedJson, object, fields } from '../wire/index.js'
 import { readRuntimeConfig } from './runtime-config.js'
@@ -194,12 +195,12 @@ function managedCaller(config: GatewayConfig, administrator?: GatewayIdentitySou
 
 // 默认Gateway打开真实双库并可等待首次配对；程序管理的provider仍由固定工厂核验。
 export function createProductionCliRuntime(sources: ProductionCliSources = {}, setup?: CliSetup) {
+  const pairingReplays = new PairingReplayCache()
   const runtime = createRuntimeCliRuntime({
     gateway: /* 常规启动只打开已配置资源，不注册设备、签发enrollment/token或bootstrap管理cookie。 */ async (config) => {
       privateDirectory(config.state_dir)
       privateDirectory(join(config.state_dir, 'managed'))
       const settings = readRuntimeConfig(config)
-      const onboarding = setup?.gateway(config)
       if (settings.provider_config_refs.length && !sources.gateway) {
         throw new CliError('backend_unavailable', 3)
       }
@@ -231,8 +232,9 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
       }
       let provider: ProductionGatewayResources | undefined
       let state: ReturnType<typeof openGatewayState> | undefined
-      let onlinePairing: OnlinePairingHttp | undefined
-      // 在线原生激活完成落盘后唤醒本轮重开；每个 Gateway 化身各自一份，未激活时永不兑现。
+      // 单码直连配对面：state 打开后立即建立；Store 受保护写端口的授权回调经此转发。
+      let simple: SimplePairingHttp | undefined
+      // 配对发布落盘后唤醒本轮重开；每个 Gateway 化身各自一份，未配对时永不兑现。
       let resolveActivation: (() => void) | undefined
       const activationReload = new Promise<void>((resolve) => {
         resolveActivation = resolve
@@ -243,9 +245,7 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
           /* shutdown始终撤去会话和caller来源，外部provider仍须报告其真实物理释放结果。 */ async () => {
             try {
               try {
-                if (state) {
-                  await onboarding?.detach(state)
-                }
+                await simple?.close()
               } finally {
                 await provider?.release()
               }
@@ -253,7 +253,6 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
               authority.close()
               protectedManagement?.close()
               caller.close()
-              onlinePairing?.close()
               state?.close()
             }
           }
@@ -292,22 +291,13 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
         state = openGatewayState({
           state_directory: config.state_dir,
           store: {
-            // 认领批准的凭据只暂存进同一在线 custody 实例；实例在状态打开后立即绑定，批准动作在此之前无从触发。
-            pairingClaimCustody: (event) => {
-              if (!onlinePairing) {
-                throw new Error('online_pairing_unavailable')
+            // 受保护写端口只认 SimplePairingHttp 登记过的一次性许可（provider 首次定义）。
+            management: (request) => {
+              if (!simple) {
+                throw new GatewayError('management_authorization_required')
               }
-              onlinePairing.hold(event)
-            },
-            ...(onboarding
-              ? {
-                  management: /* 正式Store消费该次provider/action/fence一次性确认。 */ (
-                    request: Parameters<
-                      NonNullable<NonNullable<Parameters<typeof openGatewayState>[0]['store']>['management']>
-                    >[0]
-                  ) => onboarding.approval.authorizeManagement(request)
-                }
-              : {})
+              return simple.authorizeManagement(request)
+            }
           },
           changed: /* 只在身份提交后断开同一runtime的设备通道，正常启动不调用它。 */ (machine) => {
             if (!gateway) {
@@ -316,17 +306,15 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
             gateway.transport.disconnect(machine)
           }
         })
+        simple = new SimplePairingHttp(
+          state,
+          config,
+          /* 发布落盘后重开以加载新 provider 与 caller 来源。 */ () => resolveActivation?.(),
+          pairingReplays
+        )
         protectedManagement?.bindResources(
           /* 管理员授权按 Store 当前设备/provider 生成。 */ () => state!.store.resources()
         )
-        const pairing = onboarding?.attach(state)
-        const online = new OnlinePairingHttp(state.store, Date.now, {
-          state,
-          config,
-          reload: /* 激活已落盘：重开后以真实工厂路径加载新 provider 与 caller 来源。 */ () => resolveActivation?.()
-        })
-        onlinePairing = online
-        online.reconcile()
         const anonymousManagement: ProductionManagementHost | undefined =
           config.management_enabled && !protectedManagement && !sources.management
             ? {
@@ -355,7 +343,8 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
                       store: state.store,
                       authorize: (identity) =>
                         protectedManagement!.isFullAdministrator(identity.caller, identity.management_session_ref),
-                      disconnect: (machine) => gateway?.transport.disconnect(machine)
+                      disconnect: (machine) => gateway?.transport.disconnect(machine),
+                      codes: simple.codes
                     })
                   : undefined,
                 assets: managementHost.http?.assets,
@@ -373,6 +362,7 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
               session: { sessions: authority.sessions, cookie_name: MANAGEMENT_COOKIE_NAME, authority }
             }
           : undefined
+        const pairingHttp = simple
         const options = {
           lifecycle: state.lifecycle,
           channels: state.channels,
@@ -383,22 +373,22 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
             port: settings.device_listener.port,
             offer: offer(),
             setupRequest:
-              /* 固定同一设备listener的专用配对handler，不替换WebSocket认证；setup 路径优先，在线认领路径在运行中网关常开。 */ (
+              /* 固定同一设备listener的专用配对handler，不替换WebSocket认证；已配对网关也保持可用以加入新设备。 */ (
                 request: Request
-              ) => pairing?.handle(request) ?? online.handle(request)
+              ) => pairingHttp.handle(request)
           },
           release
         }
         const common = {
           setupRequired: caller.setupRequired,
-          ...(onboarding
-            ? {
-                reconfigure: Promise.race([onboarding.reconfigure, activationReload]),
-                listening: /* 真实MCP地址和已建立Gateway同时存在后才开始本地问答。 */ async (url: string) => {
-                  await onboarding.listening(gateway!, url)
-                }
-              }
-            : { reconfigure: activationReload }),
+          reconfigure: activationReload,
+          listening: /* 真实MCP地址公布后按需签发一机一码（--issue-code）并打印完整加入命令。 */ async () => {
+            await setup?.gatewayListening(async () => {
+              const issued = pairingHttp.codes.create()
+              const base = gateway!.transport.url.replace(/\/connector$/, '')
+              return base + '#' + issued.code
+            })
+          },
           authentication: caller.authentication,
           catalog: provider?.catalog,
           management,

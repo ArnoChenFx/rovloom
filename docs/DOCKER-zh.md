@@ -79,26 +79,25 @@ docker compose run --rm gateway admin list
 已有可用密码时无需再次创建。密码丢失后重新运行 `admin create` 即可签发新密码；同名管理员的旧密码与
 已有浏览器会话立即失效，Gateway 无需重启。管理员密码只用于管理页，不能当作 MCP Bearer。
 
-登录后可新建配对申请，默认策略为 `rovloom_setup_v1`，再在 Connector 主机运行
-`rovloom connector --claim`，核对并批准认领码及本机原生安装访问。完整步骤和 MCP Bearer 的签发见
-[快速开始：启动与配对](QUICK-START-zh.md#3-启动与配对)。此方式下 Gateway 保持后台运行。
+登录后，在「配对设备」页生成一机一码并复制显示的加入命令，到 Connector 主机粘贴执行
+`rovloom connector --join ws://<地址>#<码>`——一条命令，无问答无批准。完整步骤和 MCP Bearer 的
+签发见[快速开始：启动与配对](QUICK-START-zh.md#3-启动与配对)。此方式下 Gateway 保持后台运行。
 
-## 通过终端首次配对
+## 通过终端签发配对码
 
-后台服务没有交互终端。在 Compose 目录的真实终端中先停止后台服务，再用同一组卷启动前台 Gateway：
+后台服务没有交互终端。在 Compose 目录的真实终端中用同一组卷运行一次前台命令即可打印加入命令：
 
 ```sh
-docker compose stop gateway
-docker compose run --rm --service-ports gateway
+docker compose run --rm --service-ports gateway gateway --issue-code
 ```
 
-必须带 `--service-ports`：`docker compose run` 默认不发布 Compose 里的端口，不带的话 Connector 连不上 Gateway。全新卷先执行上面的 init 命令。
-
-保持这个终端开启，用于配对和原生安装批准。在 Connector 主机（Linux x64、macOS 或 Windows x64）的另一个本地终端运行 `rovloom connector`，按[启动与配对](QUICK-START-zh.md#3-启动与配对)继续。不要让第二个 Gateway 使用同一份数据。
+必须带 `--service-ports`：`docker compose run` 默认不发布 Compose 里的端口，不带的话打印的
+地址从主机不可达。全新卷先执行上面的 init 命令。把打印的加入命令复制到 Connector 主机
+（Linux x64、macOS 或 Windows x64）执行。不要让第二个 Gateway 使用同一份数据。
 
 到达 `connector_ready` 后，先停止 Connector，再按 Ctrl-C 停止前台 Gateway。执行 `docker compose up -d`，然后重新启动主机 Connector。配置和配对保留在卷中。
 
-加入更多设备或重新配对某台设备时，先停止后台 Gateway，运行 `docker compose run --rm --service-ports gateway gateway --add-device`（或 `gateway --repair-device`），再按快速开始在 Connector 主机上继续。新增设备也可以不停止 Gateway：管理员在管理页新建配对申请，新设备运行 `rovloom connector --claim` 在线认领加入，见[配对](CONFIGURATION-zh.md#配对)。
+加入更多设备或重新配对某台设备时，在管理页生成新配对码（或按上节用 `--issue-code` 打印一条），到目标主机执行显示的加入命令即可；后台 Gateway 全程不停，见[配对](CONFIGURATION-zh.md#配对)。
 
 ## 配置、停止与升级
 

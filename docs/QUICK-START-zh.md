@@ -86,86 +86,64 @@ rovloom config init connector --provider herdr
 
 ## 3. 启动与配对
 
-首次配对可以选择下面任意一种方式。两种方式都需要在 Connector 所在机器的真实终端中
-确认 Gateway 地址与本地 Herdr/Luvus 安装。默认地址适用于同机部署；跨机器时先配置
-下文的[局域网访问](#局域网访问)。
+配对只需一条命令：启动 Gateway，生成一张一机一码，把显示的加入命令复制到 Connector
+机器执行——没有问答、批准或核对码。
 
-### 方式一：纯 CLI 启动与配对
-
-打开两个真实的本地终端并保持打开：
-
-| Gateway 所在机器 | Connector 所在机器 |
-|---|---|
-| `rovloom gateway` | `rovloom connector` |
-
-Docker Gateway：在 Compose 目录运行 `docker compose run --rm --service-ports gateway` 代替（先用 `docker compose stop gateway` 停掉正在运行的 Gateway）。
-
-1. **Gateway 终端**：批准配对，得到一次性码（5 分钟有效）。
-2. **Connector 终端**：输入 Gateway 地址（同一台机器用 `ws://127.0.0.1:9443`）和该码，并确认信任此 Gateway。
-3. **Connector 终端**：批准发现 Herdr/Luvus 安装。
-4. **Gateway 终端**：批准显示的安装及其工作区/Agent 访问。
-5. 保存 Gateway 打印的 **MCP 地址和 Bearer**（以及只显示一次的管理员密码）。等待 `connector_ready`。
-
-配对完成后，两个进程可以继续运行，接着按第 4 节配置 MCP 客户端。Docker 用户如果要
-切换到后台运行，先用 Ctrl-C 停止前台 Gateway，再运行 `docker compose up -d`；
-Connector 保持运行，配对状态保存在卷中。
-
-### 方式二：基于管理页启动与配对
-
-**在 Gateway 机器上：** 首次初始化配置，再跳过终端配对问答直接启动：
+**Gateway 机器上：**
 
 ```sh
-rovloom config init gateway
-rovloom gateway --non-interactive
+rovloom gateway
 ```
 
-已有 Gateway 配置时跳过 `config init`，不要覆盖原文件。
-最后一条命令保持前台运行；`--non-interactive` 只关闭 Gateway 的本地问答，管理页照常可用。
-首次启动会建立状态目录。在 **Gateway 机器的另一个终端**中创建管理员：
+Docker Gateway：按第 1 节初始化后 `docker compose up -d`。也可以用 `--non-interactive`
+无人值守运行，管理页照常可用。
+
+通过管理页配对（推荐）时，在 Gateway 机器的另一个终端创建管理员并保存密码
+（用户名默认 `admin`）：
 
 ```sh
 rovloom admin create
 ```
 
-保存打印的密码，用户名默认是 `admin`。已有可用管理员时跳过这条命令；再次 `create`
-会重新签发同名管理员的密码，并使旧密码与已有浏览器会话失效。
+Docker 使用 `docker compose run --rm gateway admin create`。再次 `create` 会重新签发
+同名管理员的密码，旧密码与已登录浏览器会话立即失效。
 
-Docker Gateway 已按第 1 节初始化后，改用：
+**生成配对码**，两种方式任选：
+
+- 管理页：浏览器打开 `http://127.0.0.1:9445/` 登录，进入**配对设备**点击**生成配对码**，
+  立即显示完整加入命令和复制按钮；未使用的码可随时在列表中作废。
+- 终端：`rovloom gateway --issue-code`，启动时打印一条加入命令。
+
+**Connector 机器上**，粘贴执行加入命令：
 
 ```sh
-docker compose up -d
-docker compose run --rm gateway admin create
+rovloom connector --join ws://127.0.0.1:9443#机器.码ID.秘密
 ```
 
-如果已经通过 `rovloom gateway` 启动，也可以在配对提示回答 `n`，Gateway 会保持运行；
-在另一个终端创建管理员后继续以下步骤。
+配对到此完成：Connector 写入 Gateway 地址、扫描本地 Herdr/Luvus 安装、一次请求用码
+换取设备凭据并直接启动运行。首台设备会额外打印一次 MCP 地址和 Bearer。几秒后设备
+出现在管理页中；Gateway 运行中自动加载新配置。
 
-1. 浏览器打开 `http://127.0.0.1:9445/` 并登录。远程访问使用下文配置的 Gateway IP 或 SSH 隧道。
-2. 在配对区填写设备名，保留默认策略 `rovloom_setup_v1`，新建申请并复制申请编号。
-   已有自定义策略列表时，选择其中允许的引用。
-3. 在准备好 Herdr/Luvus 的 **Connector 机器**上运行：
+配对响应丢失时，可及时重试同一加入命令。Gateway 在同一进程中最多缓存最近 10 分钟的
+交付结果，自动加载新配置不会清除；真正重启 Gateway 后需生成新码。
 
-   ```sh
-   rovloom connector --claim
-   ```
+一机一码：第一次成功兑换即消费该码，已用/作废/失败的码不能再次兑换——重新生成即可。
+用新码再次执行加入命令会把本机作为新设备重新配对；换成另一台 Gateway 的加入命令则直接
+把旧状态退役（保存在 `state/retired/`）并配对过去，无需手工清理。被 Gateway 吊销后的恢复
+路径相同：生成新码，重跑加入命令。需要彻底干净的起点时运行 `rovloom connector --unpair`：
+本地配对状态整体退役、Gateway 地址清空，之后可与任意 Gateway 从零配对。
 
-   按提示输入 Gateway 地址（同机为 `ws://127.0.0.1:9443`，局域网为 `ws://Gateway机器IP:9443`）、
-   配对申请编号，并确认信任该 Gateway。
-4. 核对 Connector 终端与网页显示的核对码一致，在网页复核并批准该认领。
-5. 在 Connector 终端确认本地安装授权，等待页面显示原生激活完成、设备就绪。
-   Gateway 在运行中加载新配置，不需要在 Gateway 终端批准安装。
-
-**获取 MCP Bearer：** 在面板打开**连接 MCP**，填写名称、选择有效期，点击**创建 Token**。
-Token 会保留在列表中，随时可以**显示、复制、删除**，刷新网页或重启 Gateway 后仍然可查看。
-面板新建的 Token 可以访问当前和之后配对的设备。旧版只保存摘要且没有原文副本的 Token
-需要重新签发。管理员密码与 MCP Bearer 是独立的凭据。
+**获取 MCP Bearer：** 首台设备由加入命令打印一次。之后在面板打开**连接 MCP**，填写
+名称、选择有效期，点击**创建 Token**。Token 会保留在列表中，随时可以**显示、复制、
+删除**，刷新网页或重启 Gateway 后仍然可查看。面板新建的 Token 可以访问当前和之后
+配对的设备。旧版只保存摘要且没有原文副本的 Token 需要重新签发。管理员密码与 MCP
+Bearer 是独立的凭据。
 
 在 AI 客户端填写 MCP 地址，并将 `Authorization` 设置为 `Bearer <TOKEN>`。
 远程访问时，将回环地址换成可访问的 Gateway 地址，并按下节开启 MCP 局域网访问。
 
-**设备**详情页可以删除设备并断开连接。**配对设备**页面会列出已保存的配对记录，也可以删除。
-删除未完成的配对会终止该次配对；删除已完成的配对记录会保留设备。
-删除设备会清理其运行配置、配对记录和调用内容，再次连接需要重新配对。
+**设备**详情页可以删除设备并断开连接。删除设备会清理其运行配置、配对记录和调用内容，
+再次连接需要重新配对。
 
 仍可使用 CLI：`rovloom token list` 和
 `rovloom token create --principal my_client --like EXISTING_CALLER_ID`。
@@ -223,8 +201,9 @@ Rovloom 不是 stdio MCP 服务。
 | 任务 | 做法 |
 |---|---|
 | 再次启动 | Gateway 机器运行 `rovloom gateway --non-interactive`，Connector 机器运行 `rovloom connector --non-interactive`；已保存的配对状态会复用。Docker Gateway 使用 `docker compose up -d`。 |
-| 加入更多设备 | Gateway 保持运行，在管理页新建申请，新设备运行 `rovloom connector --claim`。采用终端引导的部署也可停止 Gateway 后运行 `rovloom gateway --add-device`。原始 MCP caller 的授权会扩展到新设备；用 `rovloom token create --like` 克隆的令牌需要重新克隆。 |
-| 凭据丢失或泄漏 | 停止该 Connector，运行 `rovloom gateway --repair-device`，再在该设备上运行 `rovloom connector --repair`。原生设置与授权保留，进行中的调用结果变为未知。 |
+| 加入更多设备 | Gateway 保持运行，在管理页生成新配对码（或 `rovloom gateway --issue-code`），新设备执行显示的加入命令。原始 MCP caller 的授权会扩展到新设备；用 `rovloom token create --like` 克隆的令牌需要重新克隆。 |
+| 凭据丢失或泄漏 | 在管理页删除该设备并生成新配对码，在该机器上重新执行加入命令即可；本地配对状态自动退役，设备以新身份重新配对。进行中的调用结果变为未知。 |
+| 换到另一台 Gateway | 先停该 Connector，机器上直接执行新 Gateway 的加入命令（旧状态自动退役）；或先 `rovloom connector --unpair` 得到干净起点。 |
 | 开机自启 | `rovloom service install --role gateway`（或 `connector`），见[开机服务](SERVICE.md)。 |
 | 校验配置 | `rovloom config check --role gateway`（或 `connector`）。 |
 | 令牌、备份、升级 | [运维指南](OPERATIONS.md) |
@@ -241,7 +220,7 @@ Rovloom 不是 stdio MCP 服务。
 | 无法连接 / 地址被占用 | 检查端口、Gateway 监听地址和网络可达性。 |
 | HTTP 401 | 检查 `/mcp` 地址、Bearer 及其有效期。 |
 | `native_state_path_too_long` | 配对前换一个更短的 `data.directory`（Unix socket 路径长度限制）。 |
-| `invalid_device_credential` | 用 `--repair-device` / `--repair` 重新配对同一台设备。已撤销的设备不能重新配对。 |
+| `invalid_device_credential` | 生成新配对码并重新执行加入命令，本机即作为新设备重新配对。 |
 | Agent 没有回复 | 检查 Agent 的安装目录和模型登录；Connector 就绪不代表模型已回复。 |
 | 安装或退出被中断且结果不确定 | 保留现有数据并联系管理员；不要删除后重新注册。 |
 

@@ -178,60 +178,34 @@ updated too. A corrupt registry denies all authentication until it is repaired.
 
 ### Pairing
 
-A Connector needs a reachable Gateway address and completed pairing. On a real
-local terminal, Gateway approval issues a five-minute one-time code. The
-Connector asks for the address and the code (not echoed), saves its device
-credential privately, then confirms delivery. A separate owner approval of the
-measured native installation allows provider and caller configuration. Non-TTY
-startup never waits for input and never creates these permissions. Native
+A Connector needs a reachable Gateway address and completed pairing. Pairing is
+single-code and direct: the management page (or `rovloom gateway --issue-code`)
+generates a per-device code and displays the full join command, and the
+Connector machine runs `rovloom connector --join ws://<address>#<code>` once —
+no applications, approvals, check codes or terminal prompts. The command writes
+the Gateway address, scans the local native installation, exchanges the code
+for a device credential (the Gateway stores only its digest) and starts
+running; the first device also prints the MCP URL and Bearer.
+
+- One code per device: the first successful exchange consumes the code; used,
+  revoked or failed codes cannot be exchanged again — generate a new one.
+  Plaintext of unused codes stays in the Gateway's private state directory so
+  the page can redisplay them; it is wiped when a code terminates.
+- Running the join command again with a fresh code re-pairs this machine as a
+  new device; the previous local pairing state, including managed native roots,
+  is retired to `state/retired/` (managed instance data is preserved for manual
+  recovery). Use this path when a credential is lost or revoked. A join command
+  from a different Gateway likewise retires the old state and pairs there;
+  `rovloom connector --unpair` only retires and clears the address, without
+  pairing immediately.
+- Device credentials do not expire. They stop working on revocation or
+  re-pairing; a revoked device can only return as a new device.
+
+Native initialization is approved automatically: the Gateway compiles and
+verifies the measured installation manifest submitted by the device, publishes
+the provider and caller configuration and hot-reloads, with no downtime. Native
 initialization does not log in to a model provider, create an Agent or prove a
 model reply.
-
-- `rovloom gateway --add-device` pairs another Connector on top of a finished
-  setup. The existing MCP Bearer then covers the new device.
-- `rovloom gateway --repair-device` and `rovloom connector --repair` re-pair
-  the same device after its credential is lost or leaked. The old credential
-  stops working; native settings and MCP grants stay.
-
-**First pairing online (web-first).** The first Connector can join through the
-management page too, without touching the Gateway terminal:
-
-1. Start the Gateway (`rovloom gateway`). Approving the terminal prompt issues a
-   one-time code as before; **declining it keeps the Gateway running unpaired**
-   and prints the management-page path.
-2. Create the first administrator with `rovloom admin create` (it initializes
-   the caller registry) and sign in to the management page. The page preselects
-   the default pairing policy `rovloom_setup_v1`; existing custom policy lists
-   are preserved and unapproved references are still rejected.
-3. Create a pairing application and let the device join with
-   `rovloom connector --claim`, exactly like adding a device online below. The
-   administrator approves the check code, the credential is delivered, and the
-   online native activation publishes the provider and MCP caller state
-   without restarting the Gateway.
-
-**Adding a device online (claim).** A device can also be added while the
-Gateway keeps running, with no Gateway terminal present:
-
-1. An administrator creates a pairing application on the management page (a
-   device name and a selected policy reference) and hands the application
-   number to the new device's operator.
-2. On the new device, `rovloom connector --claim` confirms trust in the
-   Gateway address, takes the application number, submits the claim and
-   displays a check code.
-3. The administrator approves once the check code on the page matches the
-   device screen. The Gateway issues the credential in the same transaction
-   as the approval and delivers it over the claim channel; the device
-   confirms delivery and pairing is complete.
-
-Only digests of claim secrets are stored; the secrets never leave the device.
-Applications and claims expire, and a terminal or expired record can only be
-restarted explicitly by an administrator. After credential delivery, the
-Connector continues into online native activation automatically: it
-cross-checks the authorization derived from the policy reference with the
-Gateway, then submits the measured native installation; the Gateway publishes
-the provider bindings and caller configuration and hot-reloads, and the
-management page follows the claim until it shows as configured. No downtime,
-no Gateway terminal session and no manual configuration edits.
 
 `config check-runtime` checks the existing provider registry only. It does not
 check caller credentials, TLS trust, native binaries or a model connection.
@@ -405,10 +379,9 @@ does not skip the other, and any failure returns nonzero.
 |---|---|
 | `rovloom gateway [--config ABS] [--non-interactive]` | Starts the foreground Gateway. Default file: `~/.config/rovloom/gateway.json`. |
 | `rovloom connector [--config ABS] [--non-interactive]` | Starts the foreground Connector. Default file: `~/.config/rovloom/connector.json`. |
-| `rovloom gateway --add-device [--config ABS]` | Pairs an additional Connector on a finished setup. Stop the Gateway first. |
-| `rovloom gateway --repair-device [--config ABS]` | Re-pairs a device whose credential is lost or leaked. |
-| `rovloom connector --repair [--config ABS]` | The Connector side of `--repair-device`. |
-| `rovloom connector --claim [--config ABS]` | Online claim: pairs with a running Gateway using an application number from the management page; the credential is delivered online after the administrator approves the check code. |
+| `rovloom gateway --issue-code [--config ABS]` | Prints one per-device pairing code and the full join command at startup. |
+| `rovloom connector --join <ws://host:port#code> [--config ABS]` | Pairs with the Gateway and starts in one step; no prompts. |
+| `rovloom connector --unpair [--config ABS]` | Retires all local pairing state (including managed native roots) to `state/retired/` and clears the Gateway address; stop the Connector first. |
 
 An explicit `--config` takes priority and never falls back to the default. The
 file must match the role. A missing file is created at the selected path; an
@@ -416,7 +389,7 @@ existing file is never overwritten. Stop a foreground role with Ctrl-C. There
 is no `start`, `stop` or `restart` command at the top level. Ports are JSON
 fields, not flags.
 
-`--add-device`, `--repair-device` and `--repair` need a real local terminal and
+`--issue-code` and `--join` need no local terminal and
 cannot be combined with `--non-interactive`. `--non-interactive` disables the
 local setup prompts; the Windows service passes it automatically.
 
@@ -491,7 +464,7 @@ Bearers, TLS or model secrets, or arbitrary environment variables.
 | `3` | Backend or runtime unavailable, unsupported service platform, or a start refused because of crash residue. |
 
 Keep the error code when asking for help. Do not post real configuration,
-Bearers, administrator passwords or one-time codes.
+Bearers, administrator passwords or pairing codes.
 
 
 ### Result cleanup permission

@@ -3,7 +3,17 @@ import { LUVUS_OPERATION_METHODS } from '../runtime/luvus-operations.js'
 import { HERDR_WORKFLOW_METHODS } from '../connector/herdr/methods.js'
 import { CliError, luvusMode, type ConnectorConfig, type NativeProviderKind } from './config.js'
 import type { ProviderPolicies, V2Target } from '../wire/types.js'
-import type { PairingPlan } from './setup-approval.js'
+
+// 配对双方共用的计划事实：单码直连配对没有逐次人工批准，主体与谱系都是固定常量。
+export type SetupPlanFacts = Readonly<{
+  attempt_id: string
+  actor: string
+  lineage?: string
+  providers?: readonly NativeProviderKind[]
+}>
+// 单码直连配对的调用主体与策略修订标签：所有设备共用同一修订，加入新设备无需谱系协商。
+export const SIMPLE_SETUP_ACTOR = 'operator_simple_pairing'
+export const SIMPLE_SETUP_LINEAGE = 'simple'
 
 // Luvus 会话名随运行方式确定：附着用户真实的 default 会话，或 managed 隔离实例的 rovloom；Herdr 固定 default。
 export type SetupSessions = Readonly<{ luvus?: 'default' | 'rovloom' }>
@@ -56,7 +66,7 @@ export function setupProviderKinds(input: unknown): readonly NativeProviderKind[
 // 修订标签取自 lineage（首台设备那次引导的 attempt）：所有设备的本机策略共用同一修订，Gateway 才能同时就绪；
 // 标签只是命名这一代引导，策略内容（授权集合）随加入的设备增长。
 export function selectedSetupPolicies(
-  plan: Pick<PairingPlan, 'attempt_id' | 'actor' | 'lineage'>,
+  plan: Pick<SetupPlanFacts, 'attempt_id' | 'actor' | 'lineage'>,
   machine: string,
   kinds: readonly NativeProviderKind[],
   sessions: SetupSessions = {}
@@ -85,4 +95,18 @@ export function setupReference(attempt: string, kind: NativeProviderKind = 'luvu
 // Connector 按自己的运行方式选择 Luvus 会话：附着 default，managed 用 rovloom。
 export function setupSessionsFor(config: ConnectorConfig): SetupSessions {
   return Object.freeze({ luvus: luvusMode(config) === 'attach' ? ('default' as const) : ('rovloom' as const) })
+}
+
+// 单码直连配对的固定授权：主体与修订都是常量，Connector 与 Gateway 各自本地推导出逐字节一致的结果。
+export function simpleSetupAuthorization(
+  machine: string,
+  kinds: readonly NativeProviderKind[],
+  sessions: SetupSessions = {}
+): { principal_id: string; policies: ProviderPolicies } {
+  return selectedSetupPolicies(
+    { attempt_id: SIMPLE_SETUP_LINEAGE, actor: SIMPLE_SETUP_ACTOR, lineage: SIMPLE_SETUP_LINEAGE },
+    machine,
+    kinds,
+    sessions
+  )
 }

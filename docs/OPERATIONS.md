@@ -13,7 +13,7 @@
 
 每个角色只有一份用户配置：`~/.config/rovloom/gateway.json` / `connector.json`（Windows 同样用用户 home）。参数全集见[配置参考](CONFIGURATION.md)。程序自己的数据在 `data.directory`（默认 `~/.local/share/rovloom/<role>`），**整个目录一起保留**，不要手改里面的文件。
 
-> 加入更多设备：停止 Gateway，运行 `rovloom gateway --add-device`，在新机器上运行 `rovloom connector`，输入地址与一次性码（见[快速开始](QUICK-START-zh.md)）。现有 MCP Bearer 自动覆盖新设备；用 `token create --like` 克隆出的令牌需重新克隆。
+> 加入更多设备：Gateway 保持运行，在管理页生成新配对码（或 `rovloom gateway --issue-code`），新机器执行显示的加入命令（见[快速开始](QUICK-START-zh.md)）。现有 MCP Bearer 自动覆盖新设备；用 `token create --like` 克隆出的令牌需重新克隆。
 
 ## 2. 安装与升级
 
@@ -31,13 +31,14 @@
 |---|---|---|
 | 查看 / 创建 / 续期 / 轮换 / 吊销 MCP 令牌 | `rovloom token list\|create\|renew\|rotate\|revoke` | 原值只在 create / rotate 时在 stdout 显示一次；热生效，无需重启 |
 | 管理页管理员 | `rovloom admin create\|list\|revoke` | 首次配对完成时已自动创建 `admin`；丢了口令就再 create；热生效 |
-| 加入更多设备 | Gateway：`rovloom gateway --add-device`；新机器：`rovloom connector` | 需要真实终端；先停止 Gateway |
-| 设备凭据丢失 / 泄漏 | Gateway：`rovloom gateway --repair-device`；Connector：`rovloom connector --repair` | 同一设备重新配对，旧凭据立即失效，原生设置与 MCP 授权不变；先停该 Connector |
+| 加入更多设备 | 管理页生成配对码；新机器：`rovloom connector --join <命令>` | 无需终端问答，不停机 |
+| 设备凭据丢失 / 泄漏 | 生成新配对码，该机器重新执行 join 命令 | 本机作为新设备重新配对，本地旧状态自动退役到 `state/retired/` |
+| 换 Gateway / 干净重置 | Connector：`rovloom connector --unpair`，再用新加入命令 `--join` | 直接执行另一台 Gateway 的加入命令也会自动退役旧状态；managed 实例数据保留在 retired 目录 |
 | 撤销设备 | 管理页 → 撤销 | 撤销后不能重新配对，需作为新设备重新首次配对 |
 
 ## 5. 备份与恢复
 
-数据库快照只含脱敏的设备记录、调用状态与审计，**不含任何可用凭据**。从快照恢复后，每台设备都回到待配对状态：用 `--repair-device` / `--repair` 逐台重新配对，再逐个确认 provider。旧的调用与授权不会重新派发。因此快照的价值在于保留审计与调用历史，而不是快速回滚。步骤见 [存储](STORAGE.md#备份与恢复)。
+数据库快照只含脱敏的设备记录、调用状态与审计，**不含任何可用凭据**。从快照恢复后，每台设备都回到待配对状态：逐台生成新配对码并重新执行 join 命令，provider 随自动批准的安装清单重新发布。旧的调用与授权不会重新派发。因此快照的价值在于保留审计与调用历史，而不是快速回滚。步骤见 [存储](STORAGE.md#备份与恢复)。
 
 Docker 部署的备份就是备份卷：`docker compose down` 保留卷，`down -v` 删除。
 
@@ -66,11 +67,11 @@ rovloom storage resume --role gateway --json
 | Connector 一直 `disconnected` | Gateway 的 `devices.hostname` 是否允许远端；地址 / 防火墙；Gateway 判断线约 20 秒（空闲超时） |
 | MCP 401 | Bearer 是否过期（默认 30 天，`rovloom token renew`）；`/mcp` URL 是否与 `mcp.public_url` 一致 |
 | 调用停在 `dispatching` 很久 | 设备可能刚断网（Gateway 20 秒内发现后立即 `not_dispatched`）；已写出的调用是 `outcome_unknown`，**不会自动重发**，先核对再决定 |
-| `invalid_device_credential` | 凭据被撤销或重配：`--repair-device` / `--repair` |
+| `invalid_device_credential` | 凭据被撤销或重配：生成新码重新 join |
 | `configuration_required` | 需要真实本地终端完成配对 / 批准；不要删数据后重登记，结果不确定时保留原状态 |
 | Luvus / Herdr 不可用 | Connector 会按退避自动重新附着或重建；Linux 上附着要求对端是**你已安装的同一个**程序 |
 
-保留错误码求助；Bearer、管理员口令、一次性码不要贴出来。
+保留错误码求助；Bearer、管理员口令、配对码不要贴出来。
 
 ## 7. 验证你的部署
 

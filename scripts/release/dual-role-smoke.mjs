@@ -11,6 +11,15 @@ import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import { createDualRoleFixture } from './dual-role-fixture.mjs'
 import { createManagementHttpRead } from '../../src/webui/http-client.ts'
 
+/** Connector 只允许固定、无秘密的运行观察行；未知输出仍让发布验收失败。 */
+export function assertConnectorDiagnostics(text) {
+  assert.match(
+    text,
+    /^(?:connector_transport (?:disconnected|connecting|authenticated|ready|stopped) provider_ready=(?:true|false)(?: capacity=[a-z_]+ reclaim_at=\d+)?(?: reason=[a-z_]+)?\n)*$/u,
+    'dual_role_connector_stderr'
+  )
+}
+
 /** 真实close和有界输出共同决定成功；只给当前直接child发信号。 */
 export function startDualRoleSmokeProcess(
   binary,
@@ -108,11 +117,11 @@ export function startDualRoleSmokeProcess(
           assert.equal(result.signal, null, `dual_role_${name}_signal`)
           assert.equal(result.code, 0, `dual_role_${name}_exit:${stderrText}`)
           assert.equal(Buffer.concat(chunks.stdout).length, 0, `dual_role_${name}_stdout`)
-          // Gateway 启动公布管理页地址，是 stderr 唯一允许的状态行；Connector 保持静默。
+          // Gateway 公布管理页地址；Connector 只允许固定的 transport 观察行。
           if (name === 'gateway') {
             assert.match(stderrText, /^dashboard_listening http:\/\/127\.0\.0\.1:\d+\/\n$/u, `dual_role_${name}_stderr`)
           } else {
-            assert.equal(stderrText.length, 0, `dual_role_${name}_stderr`)
+            assertConnectorDiagnostics(stderrText)
           }
         }
       )

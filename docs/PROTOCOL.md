@@ -44,4 +44,4 @@ AI 客户端 ──MCP Streamable HTTP──▶ Gateway ──Wire v2 (WS/WSS)�
 
 ## 4. 配对（Gateway ↔ Connector 的专用 HTTP）
 
-`/pairing/redeem`、`/pairing/ack`、`/pairing/status`、`/pairing/native` 只在 Gateway 前台真实终端运行时开放：一次性码兑换设备凭据（凭据持久落盘后才确认）、批准原生来源。重新配对（`--repair-device` / `--repair`）与加入下一台设备（`--add-device`）使用同一组端点。命令见 [快速开始](QUICK-START-zh.md) 和 [运维指南](OPERATIONS.md)。
+`POST /pairing` 是唯一的配对端点，挂在设备 listener 上、随 Gateway 常开：请求携带一机一码与实测原生安装清单，响应一次交付设备凭据（及首台设备的 MCP Bearer）；原生安装经编译核验后自动批准。已用/作废的码返回 409。命令见 [快速开始](QUICK-START-zh.md) 和 [运维指南](OPERATIONS.md)。

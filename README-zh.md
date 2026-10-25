@@ -40,7 +40,7 @@ AI Agent 与 CLI 通过 MCP 访问 Gateway。每台设备运行一个 Connector 
 AI 客户端通过 MCP 访问 Gateway，并操作工作站上的真实会话。
 
 1. Gateway 主机：`rovloom gateway`。
-2. 工作站：`rovloom connector`，输入 Gateway 地址和一次性码。
+2. 工作站：粘贴 Gateway 打印的加入命令（`rovloom connector --join ws://…#码`）。
 3. 把 Gateway 的 MCP 地址和 Bearer 加到 AI 客户端，让它列出工作站的工作区。
 
 ## CLI 语言
@@ -65,7 +65,7 @@ Windows PowerShell 与 Docker Gateway 见[快速开始](docs/QUICK-START-zh.md)�
 | Gateway | x64、arm64 | x64、arm64 | x64、arm64 |
 | Connector | x64 | x64, arm64 | x64 |
 
-配对 Connector 需要真实的本地终端。
+配对只需一条 `rovloom connector --join` 命令，无需终端问答。
 
 ## 文档
 

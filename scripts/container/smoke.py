@@ -110,7 +110,7 @@ def smoke(image, version):
         logs = subprocess.run(['docker', 'logs', name], capture_output=True, text=True, timeout=5)
         expected_diagnostic = ('dashboard_listening http://127.0.0.1:9445/\n'
                                'gateway_listening http://127.0.0.1:9444/mcp\npairing_required\n'
-                               'Gateway is running; complete local pairing and native setup before using an Agent.\n')
+                               'Gateway is running; pair a Connector (management page or rovloom gateway --issue-code, then run the join command on the device) before using an Agent.\n')
         assert logs.returncode == 0 and logs.stdout == '' and logs.stderr == expected_diagnostic * 2
         return {'scope': 'native-linux-container', 'user': 10001, 'runtime': 'bun-dist', 'gateway': 'unpaired',
                 'mcpAuthentication': 'required', 'embeddedWebui': 'pass', 'persistentVolumes': 'pass',
