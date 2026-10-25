@@ -1,89 +1,60 @@
-// 将真实本地终端的首次引导接到唯一CLI；离线命令和非TTY运行不创建确认对象或读取stdin。
-import type { RoleConfig, GatewayConfig } from './config.js'
+// 把 CLI 的首次引导接到唯一运行时：Connector 的 --join 单命令配对与 Gateway 的 --issue-code 签发都在这里进入。
+import type { RoleConfig } from './config.js'
 import type { CliIo, CliPrepareOptions, RunningConnector } from './run.js'
-import { SetupTerminal } from './setup-terminal.js'
-import { GatewaySetup } from './setup-gateway.js'
-import { setupConnector } from './setup-connector.js'
-import { repairConnector } from './setup-repair.js'
-import { claimConnector } from './online-claim.js'
-import { CliError } from './config.js'
+import { joinConnector } from './join-connector.js'
+import { cliMessages, formatMessage } from './messages.js'
 import { LuvusAdapterError } from '../connector/luvus/types.js'
 import { HerdrLocalError } from '../connector/herdr/local.js'
-import { readRuntimeConfig } from './runtime-config.js'
-import { readSetupJson } from './setup-files.js'
-import { runtimeReference } from './runtime-files.js'
 
 export class CliSetup {
-  #terminal: SetupTerminal | undefined
-  #gateway: GatewaySetup | undefined
+  #io: CliIo | undefined
+  #issueCode = false
+  #issued = false
   #observation: ReturnType<typeof setInterval> | undefined
 
-  // 仅角色命令在读到实际用户文件后调用；缺少OS TTY时保留原明确待配置行为。
+  // 仅角色命令在读到实际用户文件后调用；join 是唯一的首配路径，普通启动不需要本地终端。
   async prepare(config: RoleConfig, path: string, io: CliIo, options?: CliPrepareOptions): Promise<RoleConfig> {
-    const terminal = SetupTerminal.open(path, config, io)
-    if (!terminal) {
-      // 重新配对必须有已核验的本地终端；没有时明确拒绝，而不是悄悄按普通启动继续。
-      if (options?.repair || options?.addDevice || options?.claim) {
-        throw new CliError('configuration_required')
-      }
-      return config
-    }
-    this.#terminal = terminal
     if (config.role === 'connector') {
-      if (options?.repair) {
-        await repairConnector(config, terminal)
-        terminal.finishQuestions()
-        return config
+      if (options?.join !== undefined) {
+        const joined = await joinConnector(config, path, io, options.join)
+        io.stderr.write('\n')
+        return joined
       }
-      if (options?.claim) {
-        const claimed = await claimConnector(config, terminal)
-        terminal.finishQuestions()
-        return claimed
-      }
-      return await setupConnector(config, terminal)
-    }
-    if (options?.addDevice) {
-      // 在已完成的引导之上加入下一台设备；没有任何引导记录时请直接运行 rovloom gateway 完成首次配对。
-      if (readSetupJson(runtimeReference(config.state_dir, 'setup-active')) === undefined) {
-        throw new CliError('configuration_required')
-      }
-      this.#gateway = new GatewaySetup(config, terminal, { addDevice: true })
+      // 已配对设备的日常启动：配对状态由运行时装配校验，CLI 不再问答。
       return config
     }
-    if (options?.repair) {
-      // 只能重新配对引导式配对过的设备：必须已有 Gateway 的引导记录。
-      if (readSetupJson(runtimeReference(config.state_dir, 'setup-active')) === undefined) {
-        throw new CliError('configuration_required')
-      }
-      this.#gateway = new GatewaySetup(config, terminal, { repair: true })
-      return config
-    }
-    if (
-      readRuntimeConfig(config).providers.length &&
-      readSetupJson(runtimeReference(config.state_dir, 'setup-active')) === undefined
-    ) {
-      terminal.finishQuestions()
-      return config
-    }
-    this.#gateway = new GatewaySetup(config, terminal)
+    this.#io = io
+    this.#issueCode = options?.issueCode === true
     return config
   }
 
-  // 只为同一已核验配置交付当前本机对象，不能从JSON还原初始化批准。
-  gateway(config: GatewayConfig): GatewaySetup | undefined {
-    return this.#gateway?.config === config ? this.#gateway : undefined
+  // Gateway 真实监听后按需签发一张一机一码并打印完整加入命令；每次进程只打印一次，重载不重复签发。
+  async gatewayListening(issue: () => Promise<string | undefined>): Promise<void> {
+    const io = this.#io
+    if (!io || !this.#issueCode || this.#issued || io.signal.aborted) {
+      return
+    }
+    const value = await issue()
+    if (value !== undefined) {
+      this.#issued = true
+      io.stderr.write(
+        formatMessage(cliMessages(io.language)['setup.gateway.joinCommandBlock'], {
+          command: 'rovloom connector --join ' + value
+        })
+      )
+    }
   }
 
   // 原生失败只交付现有适配器的有界固定代码；不打印child输出、异常message/stack、路径或请求。
   nativeFailed(error: unknown): void {
     if ((error instanceof LuvusAdapterError || error instanceof HerdrLocalError) && /^[a-z_]{1,80}$/.test(error.code)) {
-      this.#terminal?.show('native_unavailable ' + error.code + '\n')
+      this.#io?.stderr.write('native_unavailable ' + error.code + '\n')
     }
   }
 
   // 仅观察正式Connector持有的transport，不认证HTTP、不创建新epoch、不根据静态配置自报ready。
   observe(running: RunningConnector): void {
-    if (!running.transport || !this.#terminal) {
+    if (!running.transport) {
       return
     }
     let previous = ''
@@ -97,7 +68,7 @@ export class CliSetup {
           const current = status.phase + ':' + ready + ':' + (status.failure ?? '')
           if (current !== previous) {
             previous = current
-            this.#terminal!.show(
+            this.#io?.stderr.write(
               'connector_transport ' +
                 status.phase +
                 ' provider_ready=' +
@@ -128,12 +99,10 @@ export class CliSetup {
     )
   }
 
-  // 主进程所有退出路径恢复终端模式，不结束共享stdio或清理用户数据。
+  // 主进程所有退出路径清理观察计时器。
   close(): void {
     clearInterval(this.#observation)
     this.#observation = undefined
-    this.#terminal?.close()
-    this.#terminal = undefined
-    this.#gateway = undefined
+    this.#io = undefined
   }
 }

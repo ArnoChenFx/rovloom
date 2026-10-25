@@ -11,7 +11,6 @@ import { localLimits, verifyInstallation } from '../connector/luvus/local.js'
 import { effectiveBinDirectories } from '../connector/local/agent-path.js'
 import { runFixedProcess } from '../connector/luvus/io.js'
 import { LuvusDispatchClaims } from '../connector/luvus/claims.js'
-import type { DeviceCredential } from '../transport/identity.js'
 import { boundedJson, fields, hash, id, object, validatePolicies } from '../wire/index.js'
 import type { ProviderPolicies } from '../wire/types.js'
 import {
@@ -26,8 +25,7 @@ import { privateDirectory } from './first-config.js'
 import { readSetupJson, writeSetupJson } from './setup-files.js'
 import { runtimeReference } from './runtime-files.js'
 import { setupReference, setupSessionsFor, setupTarget } from './setup-policy.js'
-import { SetupTerminal } from './setup-terminal.js'
-import { connectorNativePrompt } from './setup-prompts.js'
+import type { SetupConsole } from './setup-console.js'
 import { cliMessages, formatMessage } from './messages.js'
 
 export type PreparedSetupNative = Readonly<{
@@ -42,13 +40,13 @@ export type PreparedSetupNative = Readonly<{
 }>
 
 // 首次兑换前即可核对Unix socket所需短路径，不先创建身份再要求用户迁移内部状态。
-export function assertSetupNativePath(config: ConnectorConfig, terminal: SetupTerminal): void {
+export function assertSetupNativePath(config: ConnectorConfig, console: SetupConsole): void {
   if (
     selectedNativeProviders(config).includes('luvus') &&
     luvusMode(config) === 'managed' &&
     Buffer.byteLength(join(config.state_dir, 'n')) > 52
   ) {
-    terminal.show(cliMessages(terminal.io.language)['setup.native.statePathTooLongLuvus'])
+    console.show(cliMessages(console.io.language)['setup.native.statePathTooLongLuvus'])
     throw new CliError('configuration_required')
   }
   // 只有隔离实例把 socket 放在 Connector 数据目录里；附着模式的端点在用户自己的配置目录，Windows 是命名管道。
@@ -58,7 +56,7 @@ export function assertSetupNativePath(config: ConnectorConfig, terminal: SetupTe
     process.platform !== 'win32' &&
     Buffer.byteLength(join(config.state_dir, 'hr/c/herdr/herdr-client.sock')) > 107
   ) {
-    terminal.show(cliMessages(terminal.io.language)['setup.native.statePathTooLongHerdr'])
+    console.show(cliMessages(console.io.language)['setup.native.statePathTooLongHerdr'])
     throw new CliError('configuration_required')
   }
 }
@@ -110,29 +108,30 @@ function prepared(value: unknown, attempt: string, machine: string, config: Conn
   return row as PreparedSetupNative
 }
 
-// 先取得本机明确确认再调用PR107正式发现接口；持久创建开始前故障可原attempt重试，之后保留位置等待核查。
+// 发现本地安装并初始化受保护root/持久账本；单码直连配对自动批准，不再逐次人工确认。
 export async function prepareSetupNative(
   config: ConnectorConfig,
-  terminal: SetupTerminal,
-  credential: DeviceCredential,
+  console: SetupConsole,
+  machine: string,
   attempt: string,
   authorization: Readonly<{ principal_id: string; policies: ProviderPolicies }>
 ): Promise<PreparedSetupNative> {
-  terminal.assertOwner()
+  console.assertOwner()
   id(attempt)
+  id(machine)
   id(authorization.principal_id)
   validatePolicies(authorization.policies)
   const path = runtimeReference(config.state_dir, 'native-setup')
   const existing = readSetupJson(path, 1_048_576)
   if (existing !== undefined) {
-    return prepared(existing, attempt, credential.machine_id, config)
+    return prepared(existing, attempt, machine, config)
   }
   const binary = setupBinary(config)
   const attach = luvusMode(config) === 'attach'
   if (!attach && process.platform === 'win32') {
     // 隔离实例依赖 POSIX 权限与 pidfd 进程模型；Windows 上目前只支持附着用户自己的会话。
-    terminal.show(
-      formatMessage(cliMessages(terminal.io.language)['setup.native.managedUnsupportedWindows'], {
+    console.show(
+      formatMessage(cliMessages(console.io.language)['setup.native.managedUnsupportedWindows'], {
         provider: 'luvus',
         configKey: 'luvus'
       })
@@ -141,19 +140,12 @@ export async function prepareSetupNative(
   }
   if (!attach && process.platform === 'darwin') {
     // 隔离实例依赖 Linux 的 pidfd 进程模型；macOS 上目前只支持附着用户自己的会话。
-    terminal.show(
-      formatMessage(cliMessages(terminal.io.language)['setup.native.managedUnsupportedMacos'], {
+    console.show(
+      formatMessage(cliMessages(console.io.language)['setup.native.managedUnsupportedMacos'], {
         provider: 'luvus',
         configKey: 'luvus'
       })
     )
-    throw new CliError('configuration_required')
-  }
-  if (
-    !(await terminal.confirm(
-      connectorNativePrompt(config.allow_terminal_execution, 'Luvus', attach, terminal.io.language)
-    ))
-  ) {
     throw new CliError('configuration_required')
   }
   const control = join(config.state_dir, 'control')
@@ -162,7 +154,7 @@ export async function prepareSetupNative(
   const home = join(config.state_dir, 'h')
   const work = join(config.state_dir, 'w')
   // 官方socket超过Unix地址长度后会退到root外；在创建root/账本前明确拒绝，不能绕过原endpoint门禁。
-  assertSetupNativePath(config, terminal)
+  assertSetupNativePath(config, console)
   for (const directory of [
     control,
     ...(attach ? [] : [stateRoot]),
@@ -173,7 +165,7 @@ export async function prepareSetupNative(
     privateDirectory(directory)
   }
   const reference = setupReference(attempt)
-  const target = setupTarget(credential.machine_id, 'luvus', setupSessionsFor(config))
+  const target = setupTarget(machine, 'luvus', setupSessionsFor(config))
   const discovered = await discoverLuvusInstallation(
     {
       target,
@@ -188,14 +180,14 @@ export async function prepareSetupNative(
       ...(attach ? { attach: true as const, user_home: homedir() } : {}),
       ...setupAgentDirectories(config)
     },
-    { revision: MANAGED_LUVUS_REVISION, signal: terminal.io.signal }
+    { revision: MANAGED_LUVUS_REVISION, signal: console.io.signal }
   )
   // 正式发现返回opaque compiled而不返回原字节；只用现有固定schema命令读取并与该实际编译身份交叉核对。
   const schema = await runFixedProcess(
     discovered.config,
     localLimits(discovered.config.limits),
     'schema',
-    terminal.io.signal
+    console.io.signal
   )
   if (schema.exit_code !== 0 || hash(schema.stdout) !== discovered.compiled.identity.schema_sha256) {
     throw new CliError('configuration_required')
@@ -228,12 +220,12 @@ export async function prepareSetupNative(
     }
   }
   boundedJson(remote, 1_048_576)
-  terminal.assertOwner()
+  console.assertOwner()
   // journal先持久发布；此后任何失败保留证据，不能通过重跑create清除原native或账本历史。
   writeSetupJson(path, {
     schema_version: 1,
     attempt_id: attempt,
-    machine_id: credential.machine_id,
+    machine_id: machine,
     phase: 'initializing'
   })
   if (attach) {
@@ -249,7 +241,7 @@ export async function prepareSetupNative(
     const result: PreparedSetupNative = {
       schema_version: 1,
       attempt_id: attempt,
-      machine_id: credential.machine_id,
+      machine_id: machine,
       phase: 'prepared',
       settings: config.native ?? {},
       reference,
@@ -285,7 +277,7 @@ export async function prepareSetupNative(
     const result: PreparedSetupNative = {
       schema_version: 1,
       attempt_id: attempt,
-      machine_id: credential.machine_id,
+      machine_id: machine,
       phase: 'prepared',
       settings: config.native ?? {},
       reference,

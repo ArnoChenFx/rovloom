@@ -10,7 +10,6 @@ import { observedHerdrSource } from '../connector/herdr/review.js'
 import { parseHerdrProviderRefConfig } from '../connector/herdr/provider.js'
 import type { HerdrProviderRefConfig } from '../connector/herdr/provider.js'
 import { LuvusDispatchClaims } from '../connector/luvus/claims.js'
-import type { DeviceCredential } from '../transport/identity.js'
 import type { ProviderPolicies } from '../wire/types.js'
 import { boundedJson, fields, hash, object } from '../wire/index.js'
 import { CliCancelled, CliError, herdrMode, type ConnectorConfig } from './config.js'
@@ -20,8 +19,7 @@ import { readSetupJson, writeSetupFile, writeSetupJson } from './setup-files.js'
 import { assertSetupNativePath, setupAgentDirectories, setupBinary } from './setup-native.js'
 import { setupReference, setupTarget } from './setup-policy.js'
 import { runtimeReference } from './runtime-files.js'
-import type { SetupTerminal } from './setup-terminal.js'
-import { connectorNativePrompt } from './setup-prompts.js'
+import type { SetupConsole } from './setup-console.js'
 import { cliMessages, formatMessage } from './messages.js'
 
 export type HerdrSetupRemote = Readonly<{
@@ -118,26 +116,26 @@ function prepared(value: unknown, config: ConnectorConfig, attempt: string, mach
   return row as PreparedSetupHerdr
 }
 
-// 本机明确批准后仅发现安装并创建隔离状态；实际server/peer来源由原生产工厂在正式启动时建立。
+// 发现本地 Herdr 安装并创建隔离状态；单码直连配对自动批准，实际server/peer来源由原生产工厂在正式启动时建立。
 export async function prepareSetupHerdr(
   config: ConnectorConfig,
-  terminal: SetupTerminal,
-  credential: DeviceCredential,
+  console: SetupConsole,
+  machine: string,
   attempt: string,
   authorization: Readonly<{ principal_id: string; policies: ProviderPolicies }>
 ): Promise<PreparedSetupHerdr> {
-  terminal.assertOwner()
+  console.assertOwner()
   const path = runtimeReference(config.state_dir, 'herdr-setup')
   const existing = readSetupJson(path, 1_048_576)
   if (existing !== undefined) {
-    return prepared(existing, config, attempt, credential.machine_id)
+    return prepared(existing, config, attempt, machine)
   }
   const binary = setupBinary(config, 'herdr')
   const attach = herdrMode(config) === 'attach'
   if (!attach && process.platform === 'win32') {
     // 隔离实例依赖 POSIX 权限与进程模型；Windows 上目前只支持附着用户自己的会话。
-    terminal.show(
-      formatMessage(cliMessages(terminal.io.language)['setup.native.managedUnsupportedWindows'], {
+    console.show(
+      formatMessage(cliMessages(console.io.language)['setup.native.managedUnsupportedWindows'], {
         provider: 'herdr',
         configKey: 'herdr'
       })
@@ -146,28 +144,21 @@ export async function prepareSetupHerdr(
   }
   if (!attach && process.platform === 'darwin') {
     // 隔离实例依赖 Linux 的 pidfd 进程模型；macOS 上目前只支持附着用户自己的会话。
-    terminal.show(
-      formatMessage(cliMessages(terminal.io.language)['setup.native.managedUnsupportedMacos'], {
+    console.show(
+      formatMessage(cliMessages(console.io.language)['setup.native.managedUnsupportedMacos'], {
         provider: 'herdr',
         configKey: 'herdr'
       })
     )
     throw new CliError('configuration_required')
   }
-  if (
-    !(await terminal.confirm(
-      connectorNativePrompt(config.allow_terminal_execution, 'Herdr', attach, terminal.io.language)
-    ))
-  ) {
-    throw new CliError('configuration_required')
-  }
-  assertSetupNativePath(config, terminal)
+  assertSetupNativePath(config, console)
   const root = join(config.state_dir, 'hr')
   privateDirectory(root)
   for (const name of ['h', 'c', 's', 'k', 't', 'w', 'control']) {
     privateDirectory(join(root, name))
   }
-  const target = setupTarget(credential.machine_id, 'herdr')
+  const target = setupTarget(machine, 'herdr')
   const reference = setupReference(attempt, 'herdr')
   const local: HerdrLocalConfig = {
     target,
@@ -189,7 +180,7 @@ export async function prepareSetupHerdr(
     ...setupAgentDirectories(config)
   }
   const measured = measureHerdrInstallation(local)
-  const scope = herdrDeadline(terminal.io.signal, 10_000)
+  const scope = herdrDeadline(console.io.signal, 10_000)
   let raw: Buffer
   let source: HerdrProviderRefConfig['expected_source']
   try {
@@ -201,7 +192,7 @@ export async function prepareSetupHerdr(
     }
     source = observedHerdrSource(label, measured.sha256, compiled.schema_sha256, compiled.protocol)
   } catch (error) {
-    if (terminal.io.signal.aborted && isStoppedHerdrCommandCancellation(error)) {
+    if (console.io.signal.aborted && isStoppedHerdrCommandCancellation(error)) {
       throw new CliCancelled()
     }
     throw error
@@ -234,11 +225,11 @@ export async function prepareSetupHerdr(
       claims: claimsRef
     }
   })
-  terminal.assertOwner()
+  console.assertOwner()
   writeSetupJson(path, {
     schema_version: 1,
     attempt_id: attempt,
-    machine_id: credential.machine_id,
+    machine_id: machine,
     phase: 'initializing'
   })
   writeSetupFile(schemaPath, raw)
@@ -250,7 +241,7 @@ export async function prepareSetupHerdr(
   const result: PreparedSetupHerdr = {
     schema_version: 1,
     attempt_id: attempt,
-    machine_id: credential.machine_id,
+    machine_id: machine,
     phase: 'prepared',
     settings: config.native ?? {},
     reference,

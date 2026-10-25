@@ -11,7 +11,7 @@ import { openCallerSource } from '../../src/cli/caller-source.js'
 import { runtimeReference, readRuntimeJson } from '../../src/cli/runtime-files.js'
 import { parseRegistry, REGISTRY_MAX_BYTES } from '../../src/cli/token-registry.js'
 import { writeSetupFile } from '../../src/cli/setup-files.js'
-import { publishFirstCallers } from '../../src/cli/setup-gateway.js'
+import { publishFirstCallers } from '../../src/cli/setup-publish.js'
 import { options as callOptions } from '../storage/helpers.js'
 import { context, setup, confirmed } from '../admin/write-helpers.js'
 

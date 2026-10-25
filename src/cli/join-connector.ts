@@ -1,0 +1,253 @@
+// 单码直连配对的 Connector 侧：`rovloom connector --join ws://host:port#machine.attempt.secret`。
+// 一条命令完成：写 Gateway 地址 → 本地推导固定授权 → 准备实测原生清单 → POST /pairing 换取设备凭据 → 落盘并直接进入运行。
+// 非交互、无确认问答；已配对状态与码目标不一致时先重置本地配对状态（作为新设备重新配对）。
+import { existsSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { parseNativeJson } from '../native-contract/json.js'
+import { createFileCredentialSink } from '../transport/credentials.js'
+import type { DeviceCredential } from '../transport/identity.js'
+import { boundedJson, fields, id, object } from '../wire/index.js'
+import {
+  CliError,
+  configDocument,
+  parseConfig,
+  readConfig,
+  selectedNativeProviders,
+  type ConnectorConfig
+} from './config.js'
+import { privateDirectory } from './first-config.js'
+import { cliMessages, formatMessage } from './messages.js'
+import { readSetupJson, setupFileStamp, writeSetupFile, writeSetupJson } from './setup-files.js'
+import { runtimeReference } from './runtime-files.js'
+import { assertSetupNativePath, prepareSetupNative } from './setup-native.js'
+import { prepareSetupHerdr } from './setup-herdr.js'
+import { simpleSetupAuthorization, setupSessionsFor } from './setup-policy.js'
+import { readRuntimeConfig } from './runtime-config.js'
+import { silentConsole } from './setup-console.js'
+import type { CliIo } from './run.js'
+
+export type JoinCode = Readonly<{
+  url: string
+  machine: string
+  attempt: string
+  secret: string
+  value: string
+}>
+
+// 只接受 ws/wss origin 加 #machine.attempt.secret 片段；地址部分须能通过配置的严格 URL 校验。
+export function parseJoinValue(value: string): JoinCode {
+  const hash = value.indexOf('#')
+  if (typeof value !== 'string' || hash <= 0 || hash === value.length - 1) {
+    throw new CliError('invalid_arguments')
+  }
+  const url = value.slice(0, hash)
+  const parts = value.slice(hash + 1).split('.')
+  if (parts.length !== 3) {
+    throw new CliError('invalid_arguments')
+  }
+  const [machine, attempt, secret] = parts
+  id(machine)
+  id(attempt)
+  if (typeof secret !== 'string' || !/^[A-Za-z0-9_-]{32,256}$/.test(secret)) {
+    throw new CliError('invalid_arguments')
+  }
+  const parsed = new URL(url)
+  if (
+    !['ws:', 'wss:'].includes(parsed.protocol) ||
+    !parsed.hostname ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    !['/', ''].includes(parsed.pathname)
+  ) {
+    throw new CliError('invalid_arguments')
+  }
+  return { url: parsed.origin, machine, attempt, secret, value: machine + '.' + attempt + '.' + secret }
+}
+
+// 有界、严格地读取配对响应；非 200 先释放未锁定的响应体再拒绝。
+async function responseJson(response: Response): Promise<Record<string, unknown>> {
+  if (!response.body || response.status !== 200) {
+    await response.body?.cancel().catch(/* 只释放响应流，不输出远端文本。 */ () => {})
+    throw new CliError('configuration_required')
+  }
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let bytes = 0
+  try {
+    while (true) {
+      const value = await reader.read()
+      if (value.done) {
+        break
+      }
+      bytes += value.value.length
+      if (bytes > 262_144) {
+        throw new CliError('configuration_required')
+      }
+      chunks.push(value.value)
+    }
+    const parsed = parseNativeJson(Buffer.concat(chunks, bytes), { object_bytes: 262_144 })
+    if (!parsed.ok) {
+      throw new CliError('configuration_required')
+    }
+    return object(parsed.value)
+  } finally {
+    await reader.cancel().catch(/* 只释放响应流。 */ () => {})
+    reader.releaseLock()
+  }
+}
+
+// URL只由严格角色origin解析；系统TLS验证和fetch重定向拒绝保持开启。
+async function post(config: ConnectorConfig, path: string, value: unknown, signal: AbortSignal, timeout = 300_000) {
+  const origin = new URL(config.gateway_url)
+  origin.protocol = origin.protocol === 'wss:' ? 'https:' : 'http:'
+  return await responseJson(
+    await fetch(new URL(path, origin), {
+      method: 'POST',
+      redirect: 'error',
+      headers: { 'content-type': 'application/json' },
+      body: boundedJson(value, 1_048_576),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(timeout)])
+    })
+  )
+}
+
+// 重新配对：清除上一台身份的本地配对状态（凭据、providers、引导记录与私有账本），保留用户配置与原生数据根。
+function resetLocalPairingState(config: ConnectorConfig): void {
+  for (const name of ['device', 'providers', 'pairing', 'pairing-claim', 'native-setup', 'herdr-setup']) {
+    rmSync(runtimeReference(config.state_dir, name), { force: true })
+  }
+  rmSync(join(config.state_dir, 'control', 'luvus-claims.db'), { force: true })
+}
+
+/** join 主流程：返回更新后的配置；失败保持固定错误码，不回显码原文。 */
+export async function joinConnector(
+  config: ConnectorConfig,
+  path: string,
+  io: CliIo,
+  value: string
+): Promise<ConnectorConfig> {
+  const code = parseJoinValue(value)
+  const console = silentConsole(io)
+  if (config.gateway_url && config.gateway_url !== code.url) {
+    // 已保存的地址与本次命令不一致：避免把既有配对状态静默搬到另一台 Gateway。
+    throw new CliError('configuration_required')
+  }
+  if (!config.gateway_url) {
+    // 写入 Gateway 地址前核对磁盘文件仍与内存配置一致，防止覆盖并发编辑。
+    if (boundedJson(configDocument(readConfig(path))) !== boundedJson(configDocument(config))) {
+      throw new CliError('config_changed')
+    }
+    config = parseConfig({ ...configDocument(config), gateway: { url: code.url } }) as ConnectorConfig
+    writeSetupFile(path, JSON.stringify(configDocument(config), null, 2) + '\n', true, setupFileStamp(path))
+  }
+  const paired = readSetupJson(runtimeReference(config.state_dir, 'pairing'))
+  if (readRuntimeConfig(config).providers.length > 0 || existsSync(runtimeReference(config.state_dir, 'device'))) {
+    const current = paired === undefined ? undefined : object(paired)
+    const machine = current && 'machine_id' in current ? String(current.machine_id) : undefined
+    if (machine === code.machine) {
+      // 同一设备的重复 join：状态已完整，直接按已配对启动。
+      return config
+    }
+    // 换了码（新设备身份）：重置本地配对状态后重新配对。
+    console.show(cliMessages(io.language)['setup.join.resettingState'])
+    resetLocalPairingState(config)
+  }
+  privateDirectory(config.state_dir)
+  privateDirectory(join(config.state_dir, 'managed'))
+  assertSetupNativePath(config, console)
+  const authorization = simpleSetupAuthorization(
+    code.machine,
+    selectedNativeProviders(config),
+    setupSessionsFor(config)
+  )
+  const prepared = []
+  for (const kind of selectedNativeProviders(config)) {
+    prepared.push(
+      await (kind === 'luvus' ? prepareSetupNative : prepareSetupHerdr)(
+        config,
+        console,
+        code.machine,
+        code.attempt,
+        authorization
+      )
+    )
+  }
+  const installations = prepared.map(
+    /* 每份清单只包含原生来源和公开schema，不包含Connector的本地路径或凭据。 */ (native) => ({
+      reference: native.reference,
+      value: native.remote
+    })
+  )
+  const installation =
+    installations.length === 1 && selectedNativeProviders(config)[0] === 'luvus' ? installations[0]! : { installations }
+  const applied = await post(config, '/pairing', { code: code.value, installation }, io.signal)
+  fields(applied, ['state', 'machine_id', 'recovery_generation', 'credential'], ['mcp', 'replayed'])
+  id(applied.machine_id)
+  id(applied.recovery_generation)
+  if (
+    applied.state !== 'paired' ||
+    applied.machine_id !== code.machine ||
+    typeof applied.credential !== 'string' ||
+    !/^[A-Za-z0-9_-]{32,256}$/.test(applied.credential)
+  ) {
+    throw new CliError('configuration_required')
+  }
+  const credential: DeviceCredential = {
+    machine_id: code.machine,
+    recovery_generation: applied.recovery_generation,
+    credential: applied.credential
+  }
+  const credentialPath = runtimeReference(config.state_dir, 'device')
+  const sink = createFileCredentialSink(credentialPath, credential, existsSync(credentialPath))
+  try {
+    await sink.deliver(credential, io.signal, { delivery_id: 'join_' + code.attempt, revision: 0 })
+  } finally {
+    sink.close()
+  }
+  writeSetupJson(
+    runtimeReference(config.state_dir, 'providers'),
+    {
+      schema_version: 1,
+      role: 'connector',
+      providers: prepared.map(
+        /* 程序自己的私有本地配置沿用既有生产工厂。 */ (native) => ({
+          reference: native.reference,
+          value: native.local
+        })
+      )
+    },
+    false,
+    1_048_576
+  )
+  writeSetupJson(
+    runtimeReference(config.state_dir, 'pairing'),
+    {
+      schema_version: 1,
+      attempt_id: code.attempt,
+      machine_id: code.machine,
+      gateway_url: config.gateway_url,
+      phase: 'configured'
+    },
+    false
+  )
+  console.show(
+    formatMessage(cliMessages(io.language)['setup.join.completed'], {
+      machine: code.machine,
+      url: config.gateway_url
+    }) +
+      formatMessage(cliMessages(io.language)['setup.join.providers'], {
+        entries: prepared.map((native) => (native as { reference: string }).reference).join(', ')
+      })
+  )
+  if (applied.mcp !== undefined) {
+    const mcp = object(applied.mcp)
+    fields(mcp, ['url', 'token'])
+    if (typeof mcp.url !== 'string' || typeof mcp.token !== 'string') {
+      throw new CliError('configuration_required')
+    }
+    console.show(formatMessage(cliMessages(io.language)['setup.join.mcpBlock'], { url: mcp.url, token: mcp.token }))
+  }
+  return config
+}

@@ -152,41 +152,20 @@ Gateway 每次认证都重读它，因此创建、续期、轮换和吊销**无�
 
 ### 配对
 
-Connector 需要可达的 Gateway 地址和已完成的配对。在真实本地终端上，Gateway
-批准后签发五分钟一次性码；Connector 输入地址和不回显的码，私密保存设备凭据，
-再确认交付。另需所有者单独批准实测的原生安装，才建立 provider 与 caller 配置。
-非 TTY 启动不等待输入，也不创建这些权限。原生初始化不会登录模型、创建 Agent 或证明模型回复。
+Connector 需要可达的 Gateway 地址和已完成的配对。配对是单码直连：管理页
+（或 `rovloom gateway --issue-code`）生成一机一码并显示完整加入命令，Connector
+机器执行 `rovloom connector --join ws://<地址>#<码>` 一次完成——没有申请、批准、
+核对码或终端问答。命令写入 Gateway 地址、扫描本地原生安装、用码换取设备凭据
+（Gateway 只存摘要）并直接启动；首台设备同时打印 MCP 地址与 Bearer。
 
-- `rovloom gateway --add-device`：在已完成的引导之上再配对一台 Connector，
-  现有 MCP Bearer 随之覆盖新设备。
-- `rovloom gateway --repair-device` 与 `rovloom connector --repair`：设备凭据丢失或泄漏时
-  重新配对同一设备。旧凭据立即失效，原生设置与 MCP 授权保持不变。
+- 一机一码：第一次成功兑换即消费该码；已用、作废或失败的码不能再次兑换，重新生成即可。
+  未使用码的明文保存在 Gateway 私有状态目录，管理页可随时重显；终结时明文抹掉。
+- 用新码再次执行加入命令会把本机作为新设备重新配对，旧的本地配对状态自动重置；
+  凭据丢失或泄漏时走这条路即可。
+- 设备凭据不过期，撤销或重新配对时失效；撤销后的设备只能作为新设备重新配对。
 
-**首次配对走管理页（网页引导）。** 第一台 Connector 也可以不经 Gateway 终端完成配对：
-
-1. 启动 Gateway（`rovloom gateway`）。在终端批准提示仍按原样签发一次性码；**拒绝提示**则
-   Gateway 保持未配对继续运行，并提示管理页路径。
-2. 用 `rovloom admin create` 创建第一位管理员（同时初始化调用方注册表）并登录管理页。
-   默认配对策略为页面预填的 `rovloom_setup_v1`；已有自定义策略列表会保留，未获允许的引用仍拒绝。
-3. 在管理页新建配对申请，设备按与下文在线新增设备相同的流程 `rovloom connector --claim`
-   加入；管理员批准核对码后凭据交付，在线原生激活发布 provider 与 MCP caller 状态，
-   Gateway 全程不停机。
-
-**在线新增设备（认领）。** Gateway 运行期间也能新增设备，不必停机，也不需要
-Gateway 终端在场：
-
-1. 管理员在管理页新建配对申请（设备名与选定的政策引用），得到申请编号，把编号
-   交给新设备的操作者。
-2. 新设备在本地终端运行 `rovloom connector --claim`，确认信任该 Gateway 地址、
-   输入申请编号，命令提交认领并显示核对码。
-3. 管理员核对管理页上的核对码与设备屏幕一致后批准。Gateway 在批准的同一事务中
-   签发凭据并经认领通道交付，设备确认后配对完成。
-
-认领秘密只保存摘要，原文不离开设备本机；申请与认领都有时限，进入终态或过期的
-记录只能由管理员显式重启。凭据交付后，Connector 自动续跑原生激活：先向 Gateway
-核对按政策引用派生的授权摘要，再提交实测的原生安装；Gateway 发布 provider 绑定
-与 caller 配置并热重载，管理页把认领跟踪到已完成原生激活。全程不停机、无需在
-Gateway 终端操作或手工改配置。
+原生初始化自动批准：Gateway 编译核验设备提交的实测安装清单后发布 provider 与
+caller 配置并热重载，全程不停机。原生初始化不会登录模型、创建 Agent 或证明模型回复。
 
 `config check-runtime` 只检查已有 provider registry，不检查 caller 凭据、TLS 信任、
 原生 binary 或模型连接。
@@ -323,15 +302,13 @@ Agent/模型访问配置位于 runtime 的私有 HOME/XDG。managed 模式下其
 |---|---|
 | `rovloom gateway [--config ABS] [--non-interactive]` | 启动前台 Gateway。默认文件 `~/.config/rovloom/gateway.json`。 |
 | `rovloom connector [--config ABS] [--non-interactive]` | 启动前台 Connector。默认文件 `~/.config/rovloom/connector.json`。 |
-| `rovloom gateway --add-device [--config ABS]` | 在已完成的引导之上再配对一台 Connector。先停止 Gateway。 |
-| `rovloom gateway --repair-device [--config ABS]` | 重新配对凭据丢失或泄漏的设备。 |
-| `rovloom connector --repair [--config ABS]` | `--repair-device` 的 Connector 端。 |
-| `rovloom connector --claim [--config ABS]` | 在线认领：凭管理页的申请编号向运行中的 Gateway 申请配对，管理员核对码批准后在线取回凭据。 |
+| `rovloom gateway --issue-code [--config ABS]` | 启动时打印一张一机一码及完整加入命令。 |
+| `rovloom connector --join <ws://host:port#码> [--config ABS]` | 一条命令完成配对并启动；无任何问答。 |
 
 显式 `--config` 优先，无效时不会回退。所选文件必须匹配角色。缺失文件会在所选位置生成，已有文件不会被覆盖。
 Ctrl-C 停止前台角色，顶层没有 `start`、`stop` 或 `restart`。端口是 JSON 字段，不是命令行选项。
 
-`--add-device`、`--repair-device`、`--repair` 需要真实本地终端，不能与 `--non-interactive` 合用。
+`--issue-code` 与 `--join` 不需要本地终端，可与 `--non-interactive` 合用。
 `--non-interactive` 关闭本地交互引导，Windows 服务会自动传入。
 
 ### Service 命令
@@ -396,7 +373,7 @@ macOS 和 Windows 上 Connector 附着你已在运行的 Herdr / Luvus，仅在�
 | `2` | 参数或配置错误，含 `invalid_arguments`、`configuration_required`。 |
 | `3` | 后端或运行时不可用、服务平台不支持，或因崩溃残留而拒绝启动。 |
 
-求助时保留错误码，不要贴出真实配置、Bearer、管理员密码或一次性码。
+求助时保留错误码，不要贴出真实配置、Bearer、管理员密码或配对码。
 
 
 ### 结果清理权限

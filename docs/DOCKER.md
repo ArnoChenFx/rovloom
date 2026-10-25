@@ -83,10 +83,10 @@ Skip creation if you already have a working password. If it is lost, rerun `admi
 the previous password and existing browser sessions for that administrator stop working immediately, without
 restarting the Gateway. The administrator password is for the management page and cannot be used as an MCP Bearer.
 
-After signing in, create a pairing application with the default policy `rovloom_setup_v1`, then run
-`rovloom connector --claim` on the Connector host. Review and approve the claim code and local native installation
-access. See [Quick Start: Start and pair](QUICK-START.md#3-start-and-pair) for the full flow and MCP Bearer issuance.
-The Gateway stays in the background throughout this flow.
+After signing in, generate a per-device pairing code on the **Pair a device** page and copy the displayed
+join command. On the Connector host, paste it: `rovloom connector --join ws://<gateway>#<code>` — one command,
+no prompts or approvals. See [Quick Start: Start and pair](QUICK-START.md#3-start-and-pair) for the full flow
+and MCP Bearer issuance. The Gateway stays in the background throughout this flow.
 
 ## First pairing from a terminal
 
@@ -103,7 +103,9 @@ Keep this terminal open for pairing and native installation approval. On the Con
 
 When setup reaches `connector_ready`, stop the Connector, then stop the foreground Gateway with Ctrl-C. Run `docker compose up -d` and restart the host Connector. Configuration and pairing stay in the volumes.
 
-To add another device or re-pair a device, stop the background Gateway and run `docker compose run --rm --service-ports gateway gateway --add-device` (or `gateway --repair-device`). Then continue on the Connector host as in the Quick Start. To add a device without stopping the Gateway, use online claim instead: create a pairing application on the management page and run `rovloom connector --claim` on the new device; see [Pairing](CONFIGURATION.md#pairing).
+To add another device or re-pair a device, generate a new pairing code on the management page (or run
+`docker compose run --rm gateway gateway --issue-code`) and run the displayed join command on the target host.
+The background Gateway never stops; see [Pairing](CONFIGURATION.md#pairing).
 
 ## Configure, stop and upgrade
 

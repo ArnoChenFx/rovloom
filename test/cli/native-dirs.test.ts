@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { configDocument, configTemplate, parseConfig } from '../../src/cli/config.js'
 import type { ConnectorConfig } from '../../src/cli/config.js'
 import { assertSetupNativePath, setupAgentDirectories, setupBinary } from '../../src/cli/setup-native.js'
-import type { SetupTerminal } from '../../src/cli/setup-terminal.js'
+import type { SetupConsole } from '../../src/cli/setup-console.js'
 import { privateHerdrTestRoot } from '../connector/herdr/private-root.js'
 
 /** 以给定 PATH 运行；只改本进程环境变量并在结束后恢复。 */
@@ -89,7 +89,7 @@ test('Herdr 私有 socket 路径检查按更长的 herdr-client.sock 计算（He
   const terminal = {
     io: { signal: new AbortController().signal },
     show: (text: string) => shown.push(text)
-  } as unknown as SetupTerminal
+  } as unknown as SetupConsole
   // herdr.sock 恰好 107 字节但 herdr-client.sock 超限：旧检查会放行，随后 Herdr 启动即退出。
   const suffix = '/hr/c/herdr/herdr.sock'
   const dataDirectory = '/' + 'a'.repeat(107 - suffix.length - 1)

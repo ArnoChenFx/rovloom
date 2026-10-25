@@ -12,7 +12,7 @@
 import argparse, json, os, re, shutil, subprocess, sys, tempfile, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from quickstart import ANSI, CODE, Term, redact  # noqa: E402
+from quickstart import ANSI, CODE, JOIN, Term, redact  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -69,12 +69,11 @@ def main():
         # “Gateway 未安装 runtime”：Gateway 容器里找不到 herdr；Connector 容器看不到 Gateway 的数据目录。
         probe = docker('run', '--rm', '--user', uid_gid, '-e', 'PATH=/usr/local/bin:/usr/bin:/bin', args.image, 'sh', '-c', 'command -v herdr || echo absent')
         assert probe.stdout.strip() == 'absent', probe.stdout
+        gateway_cmd = gateway_cmd + ['--issue-code']
         gateway = Term('gateway', gateway_cmd, env, home_g); terms.append(gateway)
-        gateway.expect('Pair one Connector'); gateway.send('y\n')
-        code = CODE.search(gateway.expect('Gateway address and code')).group(0)
+        join_value = JOIN.search(gateway.expect('rovloom connector --join ')).group(0)
+        connector_cmd = connector_cmd + ['--join', join_value]
         connector = Term('connector', connector_cmd, env, home_c); terms.append(connector)
-        connector.expect('Gateway address'); connector.send(f'ws://{gw_name}:9443\n')
-        connector.expect('One-time pairing code'); connector.send(code + '\n')
         deadline, ready = time.time() + 240, False
         while time.time() < deadline and not ready:
             connector.pump(1.0); gateway.pump(0.3)
@@ -85,16 +84,16 @@ def main():
                     term.buf = b''; term.send('y\n')
             glog = ANSI.sub(b'', gateway.log).decode('utf8', 'replace')
             clog = ANSI.sub(b'', connector.log).decode('utf8', 'replace')
-            ready = 'connector_ready' in glog and 'provider_ready=true' in clog
+            ready = 'provider_ready=true' in clog
             for term in (connector, gateway):
                 if term.child.poll() is not None:
                     raise RuntimeError(f'{term.name} exited {term.child.returncode}: {redact(term.text())}')
         if not ready:
-            raise RuntimeError('timeout waiting for connector_ready\n' + redact(ANSI.sub(b"", connector.log).decode("utf8", "replace")))
-        log = ANSI.sub(b'', gateway.log).decode('utf8', 'replace')
+            raise RuntimeError('timeout waiting for provider_ready\n' + redact(ANSI.sub(b"", connector.log).decode("utf8", "replace")))
+        log = ANSI.sub(b'', connector.log).decode('utf8', 'replace')
         info = {'url': re.search(r'MCP URL: (\S+)', log).group(1),
                 'token': re.search(r'Bearer \(private\): (\S+)', log).group(1),
-                'targets': json.loads(re.search(r'Targets: (\[.*\])', log).group(1))}
+                'targets': [{'machine_id': join_value.split('#')[1].split('.')[0], 'provider_id': 'herdr'}]}
         out = os.path.join(work, 'mcp.json')
         open(out, 'w').write(json.dumps(info)); os.chmod(out, 0o600)
         print('READY', json.dumps({'mcp_url': info['url'], 'targets': info['targets']}), flush=True)

@@ -7,7 +7,7 @@ import { hash } from '../../src/wire/index.js'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
 import { selectedSetupPolicies, setupProviderKinds, setupReference, setupTarget } from '../../src/cli/setup-policy.js'
 import { publishSetupSchemas, reviewSetupManifest } from '../../src/cli/setup-manifest.js'
-import type { PairingPlan } from '../../src/cli/setup-approval.js'
+import type { SetupPlanFacts } from '../../src/cli/setup-policy.js'
 import { privateHerdrTestRoot } from '../connector/herdr/private-root.js'
 import { privateDirectory } from '../../src/cli/first-config.js'
 import { createProductionCliRuntime } from '../../src/cli/production.js'
@@ -15,17 +15,9 @@ import { configTemplate, type ConnectorConfig } from '../../src/cli/config.js'
 import { saveCredential } from '../../src/transport/credentials.js'
 import { writeSetupJson } from '../../src/cli/setup-files.js'
 
-const plan: PairingPlan = {
-  schema_version: 1,
+const plan: SetupPlanFacts = {
   attempt_id: 'synthetic_attempt',
-  actor: 'synthetic_operator',
-  uid: 0,
-  generation: 'synthetic_generation',
-  name: 'synthetic_connector',
-  created_at: 1,
-  expires_at: 2,
-  phase: 'paired',
-  machine_id: 'synthetic_machine'
+  actor: 'synthetic_operator'
 }
 
 // 只制作设备的非秘密声明，binary摘要故意不对应任何官方发行版；Gateway仍须核验原字节及全部协议根。
@@ -40,7 +32,7 @@ function manifest() {
           schema_bundle: raw,
           config: {
             version: 1,
-            target: setupTarget(plan.machine_id!, 'herdr'),
+            target: setupTarget('synthetic_machine', 'herdr'),
             binding_revision: 1,
             config_ref: setupReference(plan.attempt_id, 'herdr'),
             peer_policy_revision: 'setup_local_' + plan.attempt_id,
@@ -70,16 +62,16 @@ test(
     ]) {
       assert.throws(/* 空、重复、逆序及对象均不是合法固定选择。 */ () => setupProviderKinds(value))
     }
-    const selected = selectedSetupPolicies(plan, plan.machine_id!, ['luvus', 'herdr'])
+    const selected = selectedSetupPolicies(plan, 'synthetic_machine', ['luvus', 'herdr'])
     const [luvus, herdr] = selected.policies.caller.grants
-    assert.deepEqual(luvus!.target, setupTarget(plan.machine_id!, 'luvus'))
-    assert.deepEqual(herdr!.target, setupTarget(plan.machine_id!, 'herdr'))
+    assert.deepEqual(luvus!.target, setupTarget('synthetic_machine', 'luvus'))
+    assert.deepEqual(herdr!.target, setupTarget('synthetic_machine', 'herdr'))
     assert(luvus!.methods.includes('pane.status'))
     assert(!herdr!.methods.includes('pane.status'))
     assert(herdr!.methods.includes('workspace.move_block'))
     assert(!luvus!.methods.includes('workspace.move_block'))
     assert.deepEqual(selected.policies.local.grants, selected.policies.caller.grants)
-    assert.equal(selectedSetupPolicies(plan, plan.machine_id!, ['herdr']).policies.caller.grants.length, 1)
+    assert.equal(selectedSetupPolicies(plan, 'synthetic_machine', ['herdr']).policies.caller.grants.length, 1)
   }
 )
 
@@ -89,7 +81,7 @@ test(
     const root = privateHerdrTestRoot('.setup-manifest-')
     try {
       const input = manifest()
-      const result = await reviewSetupManifest(input, plan, plan.machine_id!, root, new AbortController().signal)
+      const result = await reviewSetupManifest(input, plan, 'synthetic_machine', root, new AbortController().signal)
       assert.deepEqual(result.kinds, ['herdr'])
       assert.match(result.fingerprint, /^[a-f0-9]{64}$/)
       assert.equal(result.reviewed[0]!.label, 'synthetic-future')
@@ -129,7 +121,7 @@ test(
       for (const value of invalid) {
         await assert.rejects(
           /* 不给错误配置另一条宽松接纳路径。 */ () =>
-            reviewSetupManifest(value, plan, plan.machine_id!, root, new AbortController().signal)
+            reviewSetupManifest(value, plan, 'synthetic_machine', root, new AbortController().signal)
         )
       }
       await assert.rejects(
@@ -137,7 +129,7 @@ test(
           reviewSetupManifest(
             original,
             { ...plan, providers: ['luvus'] },
-            plan.machine_id!,
+            'synthetic_machine',
             root,
             new AbortController().signal
           )
@@ -154,7 +146,13 @@ test(
   /* 使用真实原有Herdr Gateway资源预检；不创建transport、身份或原生进程。 */ async () => {
     const root = privateHerdrTestRoot('.setup-manifest-')
     try {
-      const result = await reviewSetupManifest(manifest(), plan, plan.machine_id!, root, new AbortController().signal)
+      const result = await reviewSetupManifest(
+        manifest(),
+        plan,
+        'synthetic_machine',
+        root,
+        new AbortController().signal
+      )
       privateDirectory(join(root, 'managed'))
       await publishSetupSchemas(result.reviewed, new AbortController().signal)
       const schema = result.reviewed[0]!.schema!
@@ -187,7 +185,7 @@ test(
         native: { provider }
       } as ConnectorConfig
       const credential = {
-        machine_id: plan.machine_id!,
+        machine_id: 'synthetic_machine',
         recovery_generation: 'synthetic_generation',
         credential: 'SYNTHETIC_UNUSED_DEVICE_CREDENTIAL'.padEnd(48, 'x')
       }

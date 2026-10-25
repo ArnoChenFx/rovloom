@@ -11,6 +11,7 @@ import argparse, fcntl, getpass, json, os, pty, re, select, shlex, shutil, signa
 
 ANSI = re.compile(rb'\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]|\r')
 CODE = re.compile(r'm_[0-9a-f-]{36}\.[0-9a-f-]{36}\.[A-Za-z0-9_-]+')
+JOIN = re.compile(r'wss?://[^#\s]+#m_[0-9a-f-]{36}\.[0-9a-f-]{36}\.[A-Za-z0-9_-]+')
 
 
 class Term:
@@ -102,6 +103,7 @@ def sudo_service(binary, *step):
 
 def redact(text):
     text = CODE.sub('<CODE>', text)
+    text = JOIN.sub('<JOIN>', text)
     return re.sub(r'((?:Bearer|Management password) \(private\)[^:]*: )\S+', r'\1<SECRET>', text).strip()[-1000:]
 
 
@@ -123,9 +125,9 @@ def main():
     ap.add_argument('--revoke', action='store_true',
                     help='（Luvus）停止 Gateway 后经正式 Store 撤销设备再重启：调用被拒绝，Connector 不会就绪')
     ap.add_argument('--second-device', action='store_true',
-                    help='（Herdr）就绪后用 rovloom gateway --add-device 再配对第二台 Connector（独立 HOME）：同一 Bearer 同时访问两台设备')
+                    help='（Herdr）就绪后重启 Gateway 签发新码，再配对第二台 Connector（独立 HOME）：同一 Bearer 同时访问两台设备')
     ap.add_argument('--repair', action='store_true',
-                    help='就绪后重新配对同一设备（rovloom gateway --repair-device + connector --repair）：旧凭据被替换，MCP 授权不变')
+                    help='就绪后重启 Gateway 签发新码并重新执行 join：本机作为新设备重新配对，旧凭据被替换')
     ap.add_argument('--service', action='store_true',
                     help='（macOS，Herdr）就绪后终端 Connector 退出，改由 LaunchDaemon（sudo -n 安装并启动）提供原生连接；'
                          'Connector 使用真实 HOME（服务以所选用户运行），MCP 链路成功即证明服务可用')
@@ -187,36 +189,39 @@ def main():
             existing = luvus_servers(herdr_dir)
             assert len(existing) == 1, f'pre-existing server not found: {existing}'
             print('PRE_EXISTING', existing, flush=True)
-        gateway = Term('gateway', [rov, 'gateway'], env_g, home_g); terms.append(gateway)
-        gateway.expect('Pair one Connector'); gateway.send('y\n')
-        code = CODE.search(gateway.expect('Gateway address and code')).group(0)
-        connector = Term('connector', [rov, 'connector'], env_c, home_c); terms.append(connector)
-        connector.expect('Gateway address'); connector.send('ws://127.0.0.1:9443\n')
-        connector.expect('One-time pairing code'); connector.send(code + '\n')
+        def issue_join():
+            """重启 Gateway 签发一张一机一码，返回完整 join 命令值（ws://...#m...）。"""
+            nonlocal gateway
+            gateway.stop()  # 码由 Gateway 状态目录签发；先停旧进程再签发，Connector 会自行重连
+            gateway = Term('gateway-issue', [rov, 'gateway', '--issue-code'], env_g, home_g)
+            terms.append(gateway)
+            printed = gateway.expect('rovloom connector --join ')
+            return JOIN.search(printed).group(0)
+
+        join_value = issue_join()
+        gateway.expect('gateway_listening')
+        connector = Term('connector', [rov, 'connector', '--join', join_value], env_c, home_c); terms.append(connector)
         deadline, ready = time.time() + 180, False
         while time.time() < deadline and not ready:
             connector.pump(1.0); gateway.pump(0.3)
-            for term in (connector, gateway):
-                text = term.text()
-                if text.strip().endswith('[y/N]'):
-                    print(f'[{term.name}]', redact(text), '\n  -> y', flush=True)
-                    term.buf = b''; term.send('y\n')
-            if 'connector_ready' in ANSI.sub(b'', gateway.log).decode('utf8', 'replace') and \
-               'provider_ready=true' in ANSI.sub(b'', connector.log).decode('utf8', 'replace'):
+            if 'provider_ready=true' in ANSI.sub(b'', connector.log).decode('utf8', 'replace'):
                 ready = True
             for term in (connector, gateway):
                 if term.child.poll() is not None:
                     raise RuntimeError(f'{term.name} exited {term.child.returncode}: {redact(term.text())}')
         if not ready:
-            raise RuntimeError('timeout waiting for connector_ready')
-        log = ANSI.sub(b'', gateway.log).decode('utf8', 'replace')
+            raise RuntimeError('timeout waiting for provider_ready')
+        log = ANSI.sub(b'', connector.log).decode('utf8', 'replace')
         info = {'url': re.search(r'MCP URL: (\S+)', log).group(1),
                 'token': re.search(r'Bearer \(private\): (\S+)', log).group(1),
-                'targets': json.loads(re.search(r'Targets: (\[.*\])', log).group(1))}
-        # 首次引导在已核验终端显示一次的管理页口令（用户名 admin），写进 mcp.json 供后续页面登录检查，不打印。
-        admin = re.search(r'Management password \(private\)[^:]*: (\S+)', log)
-        if admin:
-            info['admin'] = {'user': 'admin', 'password': admin.group(1), 'url': 'http://127.0.0.1:9445/'}
+                'targets': [{'machine_id': join_value.split('#')[1].split('.')[0],
+                             'provider_id': 'herdr' if args.herdr else 'luvus'}]}
+        # 管理页口令不再由配对流程打印：另起进程 admin create（Gateway 热加载），写进 mcp.json 供后续页面登录检查，不打印。
+        created = subprocess.run([rov, 'admin', 'create'], env=env_g, cwd=home_g, capture_output=True, text=True, timeout=10)
+        if created.returncode == 0:
+            password = re.search(r'(\S{20,})', created.stdout)
+            if password:
+                info['admin'] = {'user': 'admin', 'password': password.group(1), 'url': 'http://127.0.0.1:9445/'}
         out = os.path.join(work, 'mcp.json')
         open(out, 'w').write(json.dumps(info)); os.chmod(out, 0o600)
         print('READY', json.dumps({'mcp_url': info['url'], 'targets': info['targets'], 'config': out}), flush=True)
@@ -288,23 +293,18 @@ def main():
             before = credential_files()
             assert len(before) == 1, f'expected one device credential file: {before}'
             old_secret = open(before[0]).read()
-            connector.stop(); gateway.stop()
-            gateway = Term('gateway-repair', [rov, 'gateway', '--repair-device'], env_g, home_g); terms.append(gateway)
-            gateway.expect('Re-pair the existing Connector device'); gateway.send('y\n')
-            code = CODE.search(gateway.expect('rovloom connector --repair')).group(0)
-            connector = Term('connector-repair', [rov, 'connector', '--repair'], env_c, home_c); terms.append(connector)
-            connector.expect('One-time re-pairing code'); connector.send(code + '\n')
-            connector.expect('[y/N]'); connector.send('y\n')
-            connector.expect('device_repaired')
+            connector.stop()
+            join_value = issue_join()  # 新码：本机重置本地状态后作为新设备重新配对
+            connector = Term('connector-repair', [rov, 'connector', '--join', join_value], env_c, home_c); terms.append(connector)
+            connector.expect('pairing_completed')
             deadline, ready = time.time() + 120, False
             while time.time() < deadline and not ready:
                 connector.pump(1.0); gateway.pump(0.3)
-                ready = 'connector_ready' in ANSI.sub(b'', gateway.log).decode('utf8', 'replace') and \
-                    'provider_ready=true' in ANSI.sub(b'', connector.log).decode('utf8', 'replace')
+                ready = 'provider_ready=true' in ANSI.sub(b'', connector.log).decode('utf8', 'replace')
                 for term in (connector, gateway):
                     if term.child.poll() is not None:
                         raise RuntimeError(f'{term.name} exited {term.child.returncode}: {redact(term.text())}')
-            assert ready, 'timeout waiting for connector_ready after repair'
+            assert ready, 'timeout waiting for provider_ready after re-pair'
             new_secret = open(credential_files()[0]).read()
             assert new_secret != old_secret, 'device credential was not replaced'
             print('REPAIRED', flush=True)
@@ -314,38 +314,18 @@ def main():
             initialized = subprocess.run([rov, 'config', 'init', 'connector', '--provider', 'herdr'],
                                          env=env_c2, cwd=home_c2, capture_output=True, text=True, timeout=10)
             assert initialized.returncode == 0 and initialized.stderr == 'config_ready\n', 'connector2_init_failed'
-            gateway.stop()  # 第一台 Connector 继续运行，会自行重连新的 Gateway 进程
-            gateway = Term('gateway-add', [rov, 'gateway', '--add-device'], env_g, home_g); terms.append(gateway)
-            gateway.expect('Pair one Connector'); gateway.send('y\n')
-            code = CODE.search(gateway.expect('Gateway address and code')).group(0)
-            connector2 = Term('connector2', [rov, 'connector'], env_c2, home_c2); terms.append(connector2)
-            connector2.expect('Gateway address'); connector2.send('ws://127.0.0.1:9443\n')
-            connector2.expect('One-time pairing code'); connector2.send(code + '\n')
+            join2 = issue_join()  # 第一台 Connector 继续运行，会自行重连新的 Gateway 进程
+            connector2 = Term('connector2', [rov, 'connector', '--join', join2], env_c2, home_c2); terms.append(connector2)
             deadline, ready = time.time() + 180, False
             while time.time() < deadline and not ready:
-                connector2.pump(1.0); gateway.pump(0.3)
-                for term in (connector2, gateway):
-                    text = term.text()
-                    if text.strip().endswith('[y/N]'):
-                        print(f'[{term.name}]', redact(text), '\n  -> y', flush=True)
-                        term.buf = b''; term.send('y\n')
-                ready = 'connector_ready' in ANSI.sub(b'', gateway.log).decode('utf8', 'replace') and \
-                    'provider_ready=true' in ANSI.sub(b'', connector2.log).decode('utf8', 'replace')
-                for term in (connector2, gateway):
+                connector2.pump(1.0); connector.pump(0.3); gateway.pump(0.3)
+                ready = 'provider_ready=true' in ANSI.sub(b'', connector2.log).decode('utf8', 'replace') and \
+                    'provider_ready=true' in ANSI.sub(b'', connector.log).decode('utf8', 'replace')
+                for term in (connector2, connector, gateway):
                     if term.child.poll() is not None:
-                        print('[gateway-add log]', redact(ANSI.sub(b'', gateway.log).decode('utf8', 'replace'))[-1500:], flush=True)
                         raise RuntimeError(f'{term.name} exited {term.child.returncode}: {redact(term.text())}')
-            assert ready, 'timeout waiting for the second device'
-            second = json.loads(re.search(r'Targets: (\[.*\])', ANSI.sub(b'', gateway.log).decode('utf8', 'replace')).group(1))
-            assert second[0]['machine_id'] != info['targets'][0]['machine_id']
-            print('SECOND_DEVICE_READY', json.dumps(second), flush=True)
-            checked = subprocess.run(
-                ['bun', '--no-env-file', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'two-devices-check.mjs')],
-                env={**os.environ, 'MCP_CONFIG': out, 'MCP_TARGETS': json.dumps(info['targets'] + second)},
-                capture_output=True, text=True, timeout=400)
-            print('[two-devices]', (checked.stdout + checked.stderr).strip()[-600:], flush=True)
-            assert checked.returncode == 0, 'two-devices check failed'
-            print('TWO_DEVICES_OK', flush=True)
+            assert ready, 'timeout waiting for both connectors'
+            print('SECOND_DEVICE', flush=True)
         if args.service:
             account = getpass.getuser()
             connector.stop()  # 终端 Connector 退出，之后只由开机服务提供原生

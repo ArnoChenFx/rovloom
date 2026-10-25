@@ -91,97 +91,64 @@ This creates configuration without starting the Connector or asking for an addre
 
 ## 3. Start and pair
 
-Choose either flow below for first pairing. Both require a real terminal on the Connector machine
-to confirm the Gateway address and local Herdr/Luvus installation. The default addresses assume
-both roles run on the same machine; for separate machines, configure [LAN access](#lan-access) first.
+Pairing is one command. Start the Gateway, generate a per-device pairing code, then run the
+displayed join command on the Connector machine — no prompts, approvals or verification codes.
 
-### Option A: Start and pair entirely through the CLI
-
-Open two real local terminals and keep them open:
-
-| Gateway machine | Connector machine |
-|---|---|
-| `rovloom gateway` | `rovloom connector` |
-
-Docker Gateway: run `docker compose run --rm --service-ports gateway` in the Compose directory instead (stop
-any running Gateway first with `docker compose stop gateway`).
-
-1. **Gateway terminal:** approve pairing to get a one-time code (valid for five minutes).
-2. **Connector terminal:** enter the Gateway address (`ws://127.0.0.1:9443` on the same machine) and
-   the code, and confirm you trust this Gateway.
-3. **Connector terminal:** approve discovery of the Herdr/Luvus installation.
-4. **Gateway terminal:** approve the displayed installation and its workspace/Agent access.
-5. Save the **MCP URL and Bearer** the Gateway prints (and the admin password, shown once).
-   Wait for `connector_ready`.
-
-Both processes can keep running after pairing; continue to section 4 to configure your MCP client.
-To move a Docker Gateway to the background, stop its foreground process with Ctrl-C and run
-`docker compose up -d`. Keep the Connector running; pairing state is retained in the volumes.
-
-### Option B: Start and pair through the management page
-
-**On the Gateway machine:** initialize configuration and start without the terminal pairing prompts:
+**On the Gateway machine:**
 
 ```sh
-rovloom config init gateway
-rovloom gateway --non-interactive
+rovloom gateway
 ```
 
-Skip `config init` when Gateway configuration already exists; preserve the existing file.
-The last command stays in the foreground. `--non-interactive` disables only the Gateway's local
-prompts; the management page remains available. First startup creates the state directories.
-In **another terminal on the Gateway machine**, create an administrator:
+Docker Gateway: `docker compose up -d` after initializing as in section 1. The Gateway can also
+run unattended with `--non-interactive`; the management page stays available.
+
+If you pair through the management page (recommended), create an administrator in another
+terminal on the Gateway machine and save the password (default username `admin`):
 
 ```sh
 rovloom admin create
 ```
 
-Save the printed password; the default username is `admin`. Skip this command if you already have
-working administrator credentials. Running `create` again replaces that administrator's password
-and invalidates the old password and existing browser sessions.
+Docker uses `docker compose run --rm gateway admin create`. Running `create` again re-issues
+that administrator's password and invalidates old passwords and browser sessions.
 
-For a Docker Gateway initialized in section 1, use instead:
+**Generate a pairing code** — either way works:
+
+- Management page: open `http://127.0.0.1:9445/`, sign in, go to **Pair a device** and click
+  **Generate code**. The full join command appears with a copy button; unused codes can be
+  revoked from the list.
+- Terminal: run `rovloom gateway --issue-code` and it prints one join command at startup.
+
+**On the Connector machine**, paste the join command:
 
 ```sh
-docker compose up -d
-docker compose run --rm gateway admin create
+rovloom connector --join ws://127.0.0.1:9443#MACHINE.CODE_ID.SECRET
 ```
 
-If you already started `rovloom gateway`, answer `n` to its pairing prompt. It keeps running;
-create the administrator from another terminal and continue below.
+That is the whole pairing: the Connector writes the Gateway address, scans the local
+Herdr/Luvus installation, exchanges the code for device credentials in one request, and starts
+running. On the first device it also prints the MCP URL and Bearer once. The device shows up in
+the management page a few seconds later; the Gateway loads the new configuration while running.
 
-1. Open `http://127.0.0.1:9445/` in your browser and sign in. For remote access, use the Gateway IP
-   configured below or an SSH tunnel.
-2. Enter a device name in the pairing section, keep the default policy `rovloom_setup_v1`, create
-   an application and copy its application number. If you have a custom policy list, select an allowed reference.
-3. On the **Connector machine**, with Herdr/Luvus ready, run:
+Codes are one per device: the first successful exchange consumes the code, and a used, revoked
+or failed code cannot be exchanged again — generate a new one. Running the join command again
+with a fresh code re-pairs this machine as a new device; the previous local pairing state is
+reset automatically.
 
-   ```sh
-   rovloom connector --claim
-   ```
-
-   Enter the Gateway address (`ws://127.0.0.1:9443` on the same machine or
-   `ws://GATEWAY_IP:9443` on your LAN), the application number, and confirm trust in the Gateway.
-4. Check that the code on the Connector terminal matches the code on the page; review and approve
-   the claim on the page.
-5. Approve local installation access in the Connector terminal. Wait until native activation is
-   complete and the device is ready. The Gateway loads the new configuration while running;
-   no installation approval is needed in its terminal.
-
-**Get an MCP Bearer:** open **Connect MCP** in the Dashboard, enter a name and expiry,
-then click **Create token**. Tokens stay in this list: use **Show**, **Copy**, or **Delete**
-whenever needed, including after refreshing or restarting the Gateway. New Dashboard tokens
-can access current and future paired devices. Older hash-only tokens must be reissued if
-no original copy remains. The administrator password is separate from the MCP Bearer.
+**Get an MCP Bearer:** the join command prints it once for the first device. Afterwards open
+**Connect MCP** in the Dashboard, enter a name and expiry, then click **Create token**.
+Tokens stay in this list: use **Show**, **Copy**, or **Delete** whenever needed, including
+after refreshing or restarting the Gateway. Dashboard tokens can access current and future
+paired devices. Older hash-only tokens must be reissued if no original copy remains. The
+administrator password is separate from the MCP Bearer.
 
 Configure the MCP endpoint and `Authorization: Bearer <TOKEN>` in your AI client. For remote
 access, replace a loopback hostname with the reachable Gateway address and enable MCP LAN
 access as described below.
 
-The **Devices** detail page can delete a device and disconnect it. **Pair device** also lists
-saved pairing records, which can be deleted. Deleting an unfinished pairing stops it;
-deleting a completed pairing record keeps its device. Device deletion removes that device's
-runtime bindings, pairing records and call content; reconnecting requires pairing again.
+The **Devices** detail page can delete a device and disconnect it. Device deletion removes that
+device's runtime bindings, pairing records and call content; reconnecting requires pairing again.
 
 CLI remains available: `rovloom token list` and
 `rovloom token create --principal my_client --like EXISTING_CALLER_ID`.
@@ -246,8 +213,8 @@ See the [management page guide](GATEWAY-WEBUI.md).
 | Task | How |
 |---|---|
 | Start again | Run `rovloom gateway --non-interactive` on the Gateway machine and `rovloom connector --non-interactive` on the Connector machine; saved pairing state is reused. For Docker Gateway, use `docker compose up -d`. |
-| Add another device | Keep the Gateway running, create an application on the management page, and run `rovloom connector --claim` on the new device. Deployments using terminal setup can also stop the Gateway and run `rovloom gateway --add-device`. The original MCP caller's access expands to the new device; tokens made with `rovloom token create --like` must be re-created. |
-| Credential lost or leaked | Stop that Connector, run `rovloom gateway --repair-device`, then `rovloom connector --repair` on the device. Native setup and access are kept; in-flight calls become unknown. |
+| Add another device | Keep the Gateway running, generate a new pairing code on the management page (or `rovloom gateway --issue-code`), and run the displayed join command on the new device. The original MCP caller's access expands to the new device; tokens made with `rovloom token create --like` must be re-created. |
+| Credential lost or leaked | Delete the device on the management page (or simply) generate a new pairing code and run the join command on that machine; the local pairing state resets and the device re-pairs as a new identity. In-flight calls become unknown. |
 | Run at boot | `rovloom service install --role gateway` (or `connector`) — see [Boot services](SERVICE.md). |
 | Validate configuration | `rovloom config check --role gateway` (or `connector`). |
 | Tokens, backup, upgrades | [Operations guide](OPERATIONS.md) |
@@ -264,7 +231,7 @@ Each role keeps one configuration file, created on first run and never reset:
 | Cannot connect / address in use | Check ports, the Gateway listener address and network reachability. |
 | HTTP 401 | Check the `/mcp` URL, the Bearer and its expiry. |
 | `native_state_path_too_long` | Choose a shorter `data.directory` before pairing (Unix socket path limit). |
-| `invalid_device_credential` | Re-pair the same device with `--repair-device` / `--repair`. A revoked device cannot be re-paired. |
+| `invalid_device_credential` | Generate a new pairing code and run the join command again to re-pair this machine as a new device. |
 | No Agent reply | Check the Agent's installation directory and model login; a ready Connector does not mean the model replied. |
 | Setup interrupted with an uncertain outcome | Keep the existing data and ask your administrator; do not delete it and register again. |
 

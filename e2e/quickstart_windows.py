@@ -16,6 +16,7 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 ANSI = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Z0-9]|\r')
 CODE = re.compile(r'm_[0-9a-f-]{36}\.[0-9a-f-]{36}\.[A-Za-z0-9_-]+')
+JOIN = re.compile(r'wss?://[^#\s]+#m_[0-9a-f-]{36}\.[0-9a-f-]{36}\.[A-Za-z0-9_-]+')
 
 
 class Term:
@@ -83,6 +84,7 @@ class Term:
 
 def redact(text):
     text = CODE.sub('<CODE>', text)
+    text = JOIN.sub('<JOIN>', text)
     return re.sub(r'((?:Bearer|Management password) \(private\)[^:]*: )\S+', r'\1<SECRET>', text).strip()[-1000:]
 
 
@@ -178,12 +180,9 @@ def main():
             existing = native_servers(herdr_dir, exe)
             assert len(existing) == 1, f'pre-existing server not found: {existing}'
             print('PRE_EXISTING', existing, flush=True)
-        gateway = Term('gateway', [rov, 'gateway'], env_g, home_g); terms.append(gateway)
-        gateway.expect('Pair one Connector'); gateway.send('y\n')
-        code = CODE.search(gateway.expect('Gateway address and code')).group(0)
-        connector = Term('connector', [rov, 'connector'], env_c, home_c); terms.append(connector)
-        connector.expect('Gateway address'); connector.send('ws://127.0.0.1:9443\n')
-        connector.expect('One-time pairing code'); connector.send(code + '\n')
+        gateway = Term('gateway', [rov, 'gateway', '--issue-code'], env_g, home_g); terms.append(gateway)
+        join_value = JOIN.search(gateway.expect('rovloom connector --join ')).group(0)
+        connector = Term('connector', [rov, 'connector', '--join', join_value], env_c, home_c); terms.append(connector)
         deadline, ready = time.time() + 240, False
         while time.time() < deadline and not ready:
             time.sleep(1.0)
@@ -192,17 +191,18 @@ def main():
                 if text.strip().endswith('[y/N]'):
                     print(f'[{term.name}]', redact(text), '\n  -> y', flush=True)
                     term.reset(); term.send('y\n')
-            if 'connector_ready' in gateway.clean_log() and 'provider_ready=true' in connector.clean_log():
+            if 'provider_ready=true' in connector.clean_log():
                 ready = True
             for term in (connector, gateway):
                 if not term.alive():
                     raise RuntimeError(f'{term.name} exited: {redact(term.text())}')
         if not ready:
-            raise RuntimeError('timeout waiting for connector_ready; connector tail: ' + redact(connector.clean_log()))
-        log = gateway.clean_log()
+            raise RuntimeError('timeout waiting for provider_ready; connector tail: ' + redact(connector.clean_log()))
+        log = connector.clean_log()
         info = {'url': re.search(r'MCP URL: (\S+)', log).group(1),
                 'token': re.search(r'Bearer \(private\): (\S+)', log).group(1),
-                'targets': json.loads(re.search(r'Targets: (\[.*\])', log).group(1))}
+                'targets': [{'machine_id': join_value.split('#')[1].split('.')[0],
+                             'provider_id': 'herdr' if kind == 'herdr' else 'luvus'}]}
         out = os.path.join(work, 'mcp.json')
         open(out, 'w').write(json.dumps(info))
         print('READY', json.dumps({'mcp_url': info['url'], 'targets': info['targets'], 'config': out}), flush=True)

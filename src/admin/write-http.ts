@@ -203,6 +203,9 @@ export function createManagementHandler(options: ManagementWriteHttpOptions) {
           'tokens_create',
           'tokens_delete',
           'tokens_rotate',
+          'pairing_codes_list',
+          'pairing_codes_create',
+          'pairing_codes_revoke',
           'pairings_list',
           'pairings_delete',
           'devices_delete'

@@ -7,7 +7,6 @@ import { createLocalizer } from './i18n.js'
 import { createUiPreferences, type UiPreferences } from './preferences.js'
 import { createPreferenceControl } from './preference-control.js'
 import { createDeviceActions } from './device-actions.js'
-import { createPairingActions } from './pairing-actions.js'
 import { uiIcon } from './icons.js'
 import { createResourcePanel } from './resource-panel.js'
 import type { ResourceTransport } from './resource-client.js'
@@ -140,42 +139,17 @@ export function mountWebUi(
   if (actions) {
     footer.before(actions.region)
   }
-  const pairing = management
-    ? createPairingActions({
-        transport: management,
-        committed() {
-          resourcePanel?.refresh()
-        },
-        /** 配对轮询发现会话/权限失效时与设备操作走同一清空路径。 */
-        authorizationLost(problem) {
-          if (disposed) {
-            return
-          }
-          reader.dispose()
-          actions?.clear()
-          pairing?.clear()
-          paint({ snapshot: null, pending: false, stale: true, ageMs: 0, problem }, route)
-        }
-      })
-    : undefined
-  if (pairing) {
-    footer.before(pairing.region)
-  }
-
   const resourcePanel = resources
     ? createResourcePanel({
         transport: resources,
-        committed(machine, pairingId) {
+        committed(machine) {
           if (machine) {
             location.hash = '#view=devices'
-          } else if (pairingId) {
-            pairing?.remove(pairingId)
           }
         },
         authorizationLost(problem) {
           reader.dispose()
           actions?.clear()
-          pairing?.clear()
           paint({ snapshot: null, pending: false, stale: true, ageMs: 0, problem }, route)
         }
       })
@@ -201,9 +175,7 @@ export function mountWebUi(
     indicator.dataset.state = state.pending ? 'pending' : state.stale ? 'stale' : state.snapshot ? 'current' : 'empty'
     if (['unauthenticated', 'forbidden', 'not_found'].includes(state.problem ?? '')) {
       actions?.clear()
-      pairing?.clear()
     }
-    pairing?.update(i18n, !!state.snapshot && !state.stale && state.snapshot.value.status.mode === 'active')
     actions?.update(
       i18n,
       !!state.snapshot && !state.stale && state.snapshot.value.status.mode === 'active',
@@ -224,9 +196,6 @@ export function mountWebUi(
     statusValue.textContent = i18n.t(
       active ? 'gateway.active' : state.snapshot ? (state.stale ? 'reader.stale' : 'gateway.degraded') : 'reader.empty'
     )
-    if (pairing) {
-      pairing.region.hidden = section !== 'pairing' || !active
-    }
     renderPage(content, state, current, i18n, !!actions, filter)
     const authorized = active && !['unauthenticated', 'forbidden', 'not_found'].includes(state.problem ?? '')
     resourcePanel?.update(current, i18n, authorized)
@@ -396,7 +365,6 @@ export function mountWebUi(
   function navigate(): void {
     filter = { query: '', status: 'all' }
     actions?.suspend()
-    pairing?.suspend()
     if (location.hash === '#management-content') {
       content.focus()
       return
@@ -411,7 +379,6 @@ export function mountWebUi(
   function visibility(): void {
     if (document.visibilityState === 'hidden') {
       actions?.suspend()
-      pairing?.suspend()
     }
     reader.visible(document.visibilityState !== 'hidden')
   }
@@ -429,7 +396,6 @@ export function mountWebUi(
   /** 页面离开时销毁在途请求及定时器，后退不会重复任何写入。 */
   function hide(): void {
     actions?.suspend()
-    pairing?.suspend()
     reader.dispose()
     resourcePanel?.clear()
     content.replaceChildren()
@@ -444,7 +410,6 @@ export function mountWebUi(
     reader.dispose()
     resourcePanel?.dispose()
     actions?.dispose()
-    pairing?.dispose()
     content.removeEventListener('click', deviceAction)
     content.removeEventListener('click', filterDevices)
     content.removeEventListener('input', searchDevices)

@@ -5,6 +5,7 @@ import type { ManagementWriteHttpOptions } from '../admin/write-http.js'
 import { ManagementServiceError } from '../admin/write-service.js'
 import { CliError, type GatewayConfig } from './config.js'
 import { isAdminPlaceholder } from './admin-registry.js'
+import type { PairingCodes } from './pairing-codes.js'
 import { runtimeReference, readRuntimeJson } from './runtime-files.js'
 import { readSetupJson, setupFileStamp, writeSetupFile } from './setup-files.js'
 import {
@@ -23,6 +24,8 @@ export function createManagementResources(options: {
   store: Store
   authorize(identity: Parameters<Resources['execute']>[2]): boolean
   disconnect(machine: string): void
+  /** 一机一码账本：生成/作废/列表；未注入时配对码操作明确拒绝。 */
+  codes?: PairingCodes
 }): Resources {
   const path = runtimeReference(options.config.state_dir, options.config.authentication_ref)
   return {
@@ -33,6 +36,56 @@ export function createManagementResources(options: {
       try {
         const args = object(input)
         const actor = identity.caller.principal_id
+        if (operation === 'pairing_codes_list') {
+          if (!options.codes) {
+            throw new ManagementServiceError('backend_unavailable')
+          }
+          const codes = options.codes
+          fields(args, [])
+          const items = codes.list()
+          return {
+            device_port: options.config.device_port,
+            items: items.map((entry) => ({
+              code_id: entry.code_id,
+              machine_id: entry.machine_id,
+              name: entry.name,
+              created_at: entry.created_at,
+              status: entry.status,
+              used_at: entry.used_at ?? null,
+              // 未使用码附完整值（面板拼接加入命令）；终结条目只保留对账字段。
+              ...(entry.status === 'unused' && entry.secret
+                ? { code: entry.machine_id + '.' + entry.code_id + '.' + entry.secret }
+                : {})
+            }))
+          }
+        }
+        if (operation === 'pairing_codes_create') {
+          if (!options.codes) {
+            throw new ManagementServiceError('backend_unavailable')
+          }
+          const codes = options.codes
+          fields(args, [], ['name'])
+          if (args.name !== undefined && (typeof args.name !== 'string' || args.name.length > 63)) {
+            throw new ManagementServiceError('invalid_arguments')
+          }
+          const issued = codes.create(args.name)
+          return {
+            code: issued.code,
+            machine_id: issued.entry.machine_id,
+            name: issued.entry.name,
+            created_at: issued.entry.created_at,
+            device_port: options.config.device_port
+          }
+        }
+        if (operation === 'pairing_codes_revoke') {
+          if (!options.codes) {
+            throw new ManagementServiceError('backend_unavailable')
+          }
+          fields(args, ['code_id'])
+          id(args.code_id)
+          options.codes.revoke(args.code_id as string)
+          return { revoked: true }
+        }
         if (operation === 'pairings_list') {
           fields(args, [], ['cursor'])
           const cursor = args.cursor ?? 0
