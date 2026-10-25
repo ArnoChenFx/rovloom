@@ -399,7 +399,7 @@ function decode(input: string | Uint8Array, context: CodecContext, limit: number
     case 'dispatch_refused':
       capability(context, 'dispatch_refusal')
       fields(p, ['attempt', 'code'])
-      oneOf(p.code, ['terminal_execution_disabled'])
+      oneOf(p.code, ['terminal_execution_disabled', 'policy_revision_stale'])
       anchored(frame, p, context)
       break
     case 'cancel': {
@@ -486,7 +486,7 @@ export function discardFencedWireFrame(
     case 'dispatch_refused':
       capability(context, 'dispatch_refusal')
       fields(p, ['attempt', 'code'])
-      oneOf(p.code, ['terminal_execution_disabled'])
+      oneOf(p.code, ['terminal_execution_disabled', 'policy_revision_stale'])
       break
     case 'response':
       fields(p, ['attempt', 'native_response'])

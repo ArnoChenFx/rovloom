@@ -207,8 +207,8 @@ Connector 不依赖 Gateway 额外交付的 TTL 或上下文。受保护配置�
 
 `dispatch_refused` 只在双方协商 `dispatch_refusal` 后由 Connector 发送，须经当前认证连接和独立登记的完整 attempt 校验。
 
-- `code` 目前只允许 `terminal_execution_disabled`，不承载原生响应、异常正文或任意字符串。
-- 它只接受真实的本机 adapter 明确报告 `not_dispatched` 的终端最终门禁拒绝。`accepted` 之后仍可确证未写出。普通异常、原生 error、超时和 `outcome_unknown` 都不能生成此证明。
+- `code` 目前允许 `terminal_execution_disabled` 与 `policy_revision_stale`，不承载原生响应、异常正文或任意字符串。
+- 它只接受真实的本机 adapter 明确报告 `not_dispatched` 的终端最终门禁拒绝，或准入层在写出任何原生字节前即确定的策略 revision 漂移（网关盖章的 `caller/local_policy_revision` 与 Connector 受保护快照不一致）。`accepted` 之后仍可确证未写出。普通异常、原生 error、超时和 `outcome_unknown` 都不能生成此证明。
 - Gateway 先在账本事务中核对原 tuple、当前 provider 与 epoch、固定 deadline，提交拒绝和必要审计，之后才清理该 call 的在途与读取上下文。
 - 只有尚未到期的 `dispatching` / `connector_accepted` 可变为 `not_dispatched`。已 unknown、已响应或已拒绝的状态保持不变，不续期，不重派。合法的拒绝不关闭连接，不取消其它在途调用。
 - 未协商、认证或锚点错误、存储提交失败都保守拒绝，不发布虚假终态。

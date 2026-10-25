@@ -1194,7 +1194,7 @@ export class Store {
   }
   /** 仅由已认证 Wire 拒绝路径调用；原子提交确定未写出，未知或既有终态绝不倒退。 */
   commitDispatchRefusal(binding: AttemptBinding, code: DispatchRefusalCode): boolean {
-    if (code !== 'terminal_execution_disabled') {
+    if (code !== 'terminal_execution_disabled' && code !== 'policy_revision_stale') {
       throw new GatewayError('invalid_dispatch_refusal')
     }
     return this.transaction(

@@ -13,7 +13,14 @@ import type { NativeConnectorOptions } from '../../src/transport/connector.js'
 import type { GatewayOptions } from '../../src/transport/gateway.js'
 import type { NativeBinding } from '../../src/native-contract/index.js'
 import type { CompiledContract } from '../../src/native-contract/index.js'
-import type { ContractSource, ProviderBinding, ProviderPolicy, V2Target, VersionOffer } from '../../src/wire/types.js'
+import type {
+  ContractSource,
+  ProviderBinding,
+  ProviderPolicies,
+  ProviderPolicy,
+  V2Target,
+  VersionOffer
+} from '../../src/wire/types.js'
 import { contractRef } from '../../src/wire/index.js'
 import { compiled, G, identity, json } from '../native-contract/helpers.js'
 import { source } from '../wire/helpers.js'
@@ -86,6 +93,10 @@ export function fixture(
   const grants: ProviderPolicy['grants'] = []
   const principal = { id: 'synthetic', policy: { revision: 'caller1', grants } }
   const local: ProviderPolicy = { revision: 'local1', grants }
+  /** Connector 侧准入快照；与 gateway 的 local 分开维护，供测试制造双侧 revision 漂移。 */
+  const connectorSnapshot: ProviderPolicy = { revision: 'local1', grants }
+  /** gateway 侧实时注册表；默认与 connector 快照一致。 */
+  const gatewayPolicies: ProviderPolicies = { caller: principal.policy, local }
   const router = new Router(
     store,
     /** 向 Router 提供 fixture 的本地策略，用于双端 grant 交集测试。 */
@@ -148,7 +159,7 @@ export function fixture(
       }
     },
     /** 返回 fixture 当前 caller 与 local 策略，允许测试即时撤权行为。 */
-    policies: () => ({ caller: principal.policy, local }),
+    policies: () => ({ caller: principal.policy, local: connectorSnapshot }),
     /** 提供离线测试分类权限，不在生产入口创建默认授权。 */
     authority: () => ({ owner: false, raw_requested: false }),
     /** 取得测试当前 reader ID，验证读取与派发身份分别受控。 */
@@ -157,7 +168,13 @@ export function fixture(
   /** 为每条模拟连接创建真实 Wire/native adapter，并统计打开与关闭的宿主资源。 */
   const session = (connection: Connection, channel?: SocketChannel): Session => {
     openedSessions++
-    const services = backendServices(connection)
+    /** gateway 侧会话（带 channel）用实时注册表；connector 侧会话用固定的准入快照，模拟双侧漂移。 */
+    const services = channel
+      ? {
+          ...backendServices(connection),
+          policies: () => ({ caller: gatewayPolicies.caller, local: gatewayPolicies.local })
+        }
+      : backendServices(connection)
     const backend = persistentBackend(store, services)
     const original =
       channel && host.adapter ? host.adapter(connection, channel, services) : createLuvusWireAdapter(backend)
@@ -303,6 +320,7 @@ export function fixture(
     backendServices,
     configs,
     localBindings,
+    connectorSnapshot,
     encoded,
     pair,
     connector,
