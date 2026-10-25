@@ -15,7 +15,14 @@ import {
 export function stubFixture(mode: string, directory: string) {
   const marker = 'SYNTHETIC_SECRET_DO_NOT_PRINT'
   const target = { machine_id: 'machine', provider_id: 'provider', profile: 'session', session: 'isolated' }
-  const machine = { machine_id: 'machine', name: 'isolated', status: 'active', link: 'ready', credential: marker }
+  const machine = {
+    machine_id: 'machine',
+    name: 'isolated',
+    status: 'active',
+    link: 'ready',
+    targets: [target],
+    credential: marker
+  }
   const methods = ['uhp.ping', 'workspace.list', 'task.list', 'agent.status', 'pane.capture']
   const calls = new Map<string, Record<string, unknown>>()
   const keys = new Map<string, string>()

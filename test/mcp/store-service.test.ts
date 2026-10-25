@@ -661,6 +661,104 @@ test(
 )
 
 test(
+  '设备视图回传完整授权 tuple，runtime_discover 可直接使用该 tuple 而不必猜 session',
+  /** 元数据层必须自描述：调用方从 machines_list 取到的 target 原样回传即可通过可见性检查。 */ async () => {
+    const f = storeFixture()
+    try {
+      const listed = await f.service.execute('machines_get', { machine_id: 'machine_a' }, context())
+      assert.deepEqual(listed.data.targets, [target])
+      // 原样回传该 tuple 必须通过可见性检查，而不是返回 not_found。
+      await assert.rejects(
+        f.service.execute(
+          'runtime_discover',
+          { target: listed.data.targets[0]!, expected_binding_revision: 1 },
+          context()
+        ),
+        /* 没有接线 catalog 时报告后端缺失，证明可见性与 revision 检查已通过。 */ code('backend_unavailable')
+      )
+      // 只改 session 名就会退回 not_found，说明元组必须逐字段一致。
+      const guessed = { ...target, profile: 'session' as const, session: 'guessed' }
+      await assert.rejects(
+        f.service.execute('runtime_discover', { target: guessed, expected_binding_revision: 1 }, context()),
+        code('not_found')
+      )
+      // 未被授权的设备 provider 不进入 targets。
+      const second = await f.service.execute('machines_get', { machine_id: 'machine_b' }, context())
+      assert.deepEqual(second.data.targets, [secondTarget])
+    } finally {
+      f.close()
+    }
+  }
+)
+
+test(
+  'MCP 设备连接与 provider 就绪来自真实传输观测，无观测时保持未核实',
+  /** 同一观测来源同时驱动管理面与 MCP 视图，revision 不符的旧观测不能为新绑定背书。 */ async () => {
+    const f = storeFixture()
+    try {
+      const health = f.store.health()
+      const at = f.store.clock()
+      const verified = <T>(value: T) => ({
+        verification: 'verified' as const,
+        observed_at: at,
+        source: 'gateway_transport' as const,
+        value
+      })
+      const service = new StoreGatewayService({
+        store: f.store,
+        identities: f.identities,
+        localPolicies: f.localPolicies,
+        transportObservations: {
+          snapshot: () => ({
+            observed_at: at,
+            recovery_generation: health.generation,
+            transport: verified('available' as const),
+            devices: [
+              {
+                machine_id: 'machine_a',
+                connection: verified({
+                  state: 'online' as const,
+                  connection_epoch_ref: 'epoch_ref',
+                  last_heartbeat_at: at - 1000
+                }),
+                authentication: verified({ state: 'authenticated' as const, last_failure: null }),
+                providers: [
+                  { provider_id: 'luvus_a', binding_revision: 1, dispatch_ready: verified(true) },
+                  /* revision 已过期：不能把旧就绪投影给当前绑定。 */
+                  { provider_id: 'luvus_b', binding_revision: 99, dispatch_ready: verified(true) }
+                ]
+              }
+            ]
+          })
+        }
+      })
+      const machine = await service.execute('machines_get', { machine_id: 'machine_a' }, context())
+      assert.equal(machine.data.link, 'connected')
+      const ready = await service.execute(
+        'providers_get',
+        { machine_id: 'machine_a', provider_id: 'luvus_a' },
+        context()
+      )
+      assert.equal(ready.data.readiness, 'ready')
+      // 没有观测的设备不被推断为在线；其 provider 就绪也保持未核实。
+      const unseen = await service.execute('machines_get', { machine_id: 'machine_b' }, context())
+      assert.equal(unseen.data.link, 'unverified')
+      const unseenProvider = await service.execute(
+        'providers_get',
+        { machine_id: 'machine_b', provider_id: 'luvus_b' },
+        context()
+      )
+      assert.equal(unseenProvider.data.readiness, 'unverified')
+      // 没有观测来源时全部保持未核实，与既有行为一致。
+      const bare = await f.service.execute('machines_get', { machine_id: 'machine_a' }, context())
+      assert.equal(bare.data.link, 'unverified')
+    } finally {
+      f.close()
+    }
+  }
+)
+
+test(
   'Store.resources 只读枚举全部设备及其 provider',
   /** 管理员的全设备授权据此按现状生成；不含凭据，不改变任何状态。 */ () => {
     const f = storeFixture()

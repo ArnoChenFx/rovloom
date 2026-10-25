@@ -15,8 +15,8 @@ AI 客户端 ──MCP Streamable HTTP──▶ Gateway ──Wire v2 (WS/WSS)�
 
 | 工具 | 作用 |
 |---|---|
-| `machines_list` / `machines_get` | 当前调用方可见的设备。分页与计数都经过授权。`link` 对活动设备恒为 `unverified`，实时传输状态见管理页 |
-| `providers_list` / `providers_get` | 设备下已配置的 provider（kind、revision、readiness） |
+| `machines_list` / `machines_get` | 当前调用方可见的设备。分页与计数都经过授权。`link` 对活动设备取自 Gateway 的真实传输观测：有可信在线证据时为 `connected`，否则为 `unverified`（不推断 `offline`）；`pending` / `revoked` 恒为 `offline`。每条记录另带 `targets`——调用方在该设备上获授权的完整 tuple，可原样作为 `runtime_*` 的 `target` |
+| `providers_list` / `providers_get` | 设备下已配置的 provider（kind、revision、readiness）。`readiness` 取自同一传输观测，且必须与当前 `binding_revision` 一致；禁用或无证据时分别为 `unavailable` / `unverified` |
 | `runtime_discover` | 显式 Target 与 revision 下的有效能力及来源，不授予执行权限 |
 | `runtime_describe` | 精确方法的原生参数、分类和限制 |
 | `runtime_call` | 提交一次原生调用：显式 Target、revision、`contract_ref`、绝对 `deadline`、可选 `client_request_key`、`wait_ms` 短等 |

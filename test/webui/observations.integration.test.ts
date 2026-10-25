@@ -137,7 +137,8 @@ test(
         )
       )
       const projection = project(f)
-      assert.deepEqual(Object.keys(projection).sort(), ['device', 'transport'])
+      // MCP 视图复用同一投影的 link/providerReady，管理面只消费 device；公开接口不得扩散其它成员。
+      assert.deepEqual(Object.keys(projection).sort(), ['device', 'link', 'providerReady', 'transport'])
       assert.equal(Object.hasOwn(device(f, a.machine_id), 'runtime'), false)
       f.store.setProviderEnabled(a.machine_id, 'provider', 1, false)
       assert.equal(device(f, a.machine_id).connection.verification, 'verified')

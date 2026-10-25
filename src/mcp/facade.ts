@@ -54,13 +54,16 @@ function failed(code: string, outcome?: 'not_dispatched'): CallToolResult {
 // 仅投影公开字段，剔除服务误带的本机配置或凭据字段。
 function pick(data: Record<string, unknown>, keys: string[]): Record<string, unknown> {
   return Object.fromEntries(
-    keys.map(/* 为每个允许字段构造公开键值对，不复制其余服务数据。 */ (key) => [key, data[key]])
+    keys.flatMap(
+      /* 缺失字段不投影为 undefined：规范编码拒绝 undefined，会让整条回复失败。 */
+      (key) => (data[key] === undefined ? [] : [[key, data[key]]])
+    )
   )
 }
 
 // 按工具职责收窄公开视图，只投影允许字段。
 function publicReply(name: ToolName, data: Record<string, unknown>): Record<string, unknown> {
-  const machineKeys = ['machine_id', 'name', 'status', 'link']
+  const machineKeys = ['machine_id', 'name', 'status', 'link', 'targets']
   const providerKeys = ['machine_id', 'provider_id', 'kind', 'binding_revision', 'enabled', 'readiness']
   if (name === 'machines_get') {
     return pick(data, machineKeys)

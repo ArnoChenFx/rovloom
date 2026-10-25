@@ -148,8 +148,8 @@ runtime_call
 
 | 工具 | 职责 |
 |---|---|
-| `machines_list` / `machines_get` | 查询可见设备 |
-| `providers_list` / `providers_get` | 查询可见 provider、kind、binding revision、readiness |
+| `machines_list` / `machines_get` | 查询可见设备，含 `link` 与该调用方获授权的完整 `targets`（可直接作为 `runtime_*` 的 Target） |
+| `providers_list` / `providers_get` | 查询可见 provider、kind、binding revision、readiness（后两者来自真实传输观测） |
 | `runtime_discover` | 某个 Target 的有效能力与来源，不授予执行权限 |
 | `runtime_describe` | 精确方法的原生参数、分类和限制 |
 | `runtime_call` | 发起调用，可短等或返回 `call_id` |

@@ -235,7 +235,11 @@ export class StoreGatewayService implements GatewayService {
   }
 
   // 投影持久设备状态；没有 live transport 证据时不将旧 online 行宣称为当前连接或认证成功。
-  private machine(machineId: string): MachineView {
+  private machine(
+    machineId: string,
+    targets: readonly V2Target[],
+    observed: ManagementTransportProjection
+  ): MachineView {
     const machine = this.options.store.machine(machineId)
     if (!persistedStates.has(machine.status)) {
       throw new FacadeServiceError('unavailable')
@@ -244,24 +248,29 @@ export class StoreGatewayService implements GatewayService {
       machine_id: machine.machine_id,
       name: machine.name,
       status: machine.status === 'pending' ? 'pending' : machine.status === 'revoked' ? 'revoked' : 'active',
-      link: machine.status === 'pending' || machine.status === 'revoked' ? 'offline' : 'unverified'
+      // pending/revoked 是持久事实；active 设备的连接只取自真实传输观测，无证据时为 unverified。
+      link:
+        machine.status === 'pending' || machine.status === 'revoked' ? 'offline' : observed.link(machine.machine_id),
+      // 只列出调用方当前获授权的完整 tuple，runtime_* 可直接原样回传。
+      targets: targets.map(/* 输出独立副本，调用方修改返回值不影响授权快照。 */ (target) => structuredClone(target))
     }
   }
 
-  // 只输出当前数据库 binding 的公开字段；没有 native adapter 时启用也不能报告 ready。
-  private provider(machine: string, provider: string): ProviderView {
+  // 只输出当前数据库 binding 的公开字段；readiness 来自真实传输观测，没有证据时保持未核实。
+  private provider(machine: string, provider: string, observed: ManagementTransportProjection): ProviderView {
     const binding = this.options.store.provider(machine, provider)
     if (!binding) {
       throw new FacadeServiceError('not_found')
     }
+    const enabled = binding.enabled && this.options.store.machine(machine).status !== 'revoked'
     return {
       machine_id: binding.machine_id,
       provider_id: binding.provider_id,
       kind: binding.kind,
       binding_revision: binding.binding_revision,
       enabled: binding.enabled,
-      readiness:
-        !binding.enabled || this.options.store.machine(machine).status === 'revoked' ? 'unavailable' : 'unverified'
+      // 禁用或无观测时不报告 ready；观测必须匹配当前 binding revision。
+      readiness: !enabled ? 'unavailable' : observed.providerReady(machine, provider, binding.binding_revision)
     }
   }
 
@@ -435,6 +444,8 @@ export class StoreGatewayService implements GatewayService {
     const machines = [
       ...new Set(visible.map(/* 提取授权目标中的稳定设备 ID，不建立第二份注册表。 */ (row) => row.target.machine_id))
     ].sort()
+    // 连接与 provider 就绪来自同一实际传输的只读观测；没有来源时各层保持未核实。
+    const observed = this.observe(now, this.options.store.health())
     const scope = {
       principal: principal.id,
       policy: principal.policy,
@@ -453,11 +464,24 @@ export class StoreGatewayService implements GatewayService {
       if (!machineId || !machines.includes(machineId)) {
         throw new FacadeServiceError('not_found')
       }
-      return this.machine(machineId)
+      return this.machine(
+        machineId,
+        /* 只回传该设备下当前获授权的完整 tuple。 */ visible
+          .filter((row) => row.target.machine_id === machineId)
+          .map((row) => row.target),
+        observed
+      )
     }
     if (request.name === 'machines_list') {
       return this.page(
-        machines.map(/* 从真实 Store 读取每个当前授权设备的公开投影。 */ (machine) => this.machine(machine)),
+        machines.map(
+          /* 从真实 Store 读取每个当前授权设备的公开投影。 */ (machine) =>
+            this.machine(
+              machine,
+              visible.filter((row) => row.target.machine_id === machine).map((row) => row.target),
+              observed
+            )
+        ),
         request.args,
         scope,
         now
@@ -480,12 +504,12 @@ export class StoreGatewayService implements GatewayService {
         if (!ids.includes(request.args.provider_id)) {
           throw new FacadeServiceError('not_found')
         }
-        return this.provider(request.args.machine_id, request.args.provider_id)
+        return this.provider(request.args.machine_id, request.args.provider_id, observed)
       }
       return this.page(
         ids.map(
           /* 读取每个当前授权 binding，剔除其内部配置引用。 */ (provider) =>
-            this.provider(request.args.machine_id, provider)
+            this.provider(request.args.machine_id, provider, observed)
         ),
         request.args,
         scope,
@@ -568,10 +592,15 @@ export class StoreGatewayService implements GatewayService {
   }
 
   // 管理面只输出词法安全的非秘密配置引用，绝不展开路径、环境或未核实的 native 信息。
-  private providerSnapshot(machine: string, provider: string, now: number): ProviderSnapshot {
+  private providerSnapshot(
+    machine: string,
+    provider: string,
+    now: number,
+    observed: ManagementTransportProjection
+  ): ProviderSnapshot {
     const binding = this.options.store.provider(machine, provider)!
     return {
-      ...this.provider(machine, provider),
+      ...this.provider(machine, provider, observed),
       config_ref: idPattern.test(binding.config_ref) ? binding.config_ref : null,
       observed_at: now,
       runtime: { verification: 'unverified', reason_code: 'backend_unavailable' }
@@ -731,7 +760,8 @@ export class StoreGatewayService implements GatewayService {
         ].sort()
         result = this.page(
           ids.map(
-            /* 读取当前binding和安全引用，现场运行状态保持未核实。 */ (id) => this.providerSnapshot(machine!, id, now)
+            /* 读取当前binding和安全引用，现场运行状态保持未核实。 */ (id) =>
+              this.providerSnapshot(machine!, id, now, observed)
           ),
           args as { cursor?: string; limit?: number },
           scope,
@@ -741,7 +771,7 @@ export class StoreGatewayService implements GatewayService {
         if (!this.allowed(admin, 'providers_read', machine, provider)) {
           throw new FacadeServiceError('not_found')
         }
-        result = this.providerSnapshot(machine!, provider!, now)
+        result = this.providerSnapshot(machine!, provider!, now, observed)
       } else {
         if (
           !this.allowed(admin, 'permissions_read', machine) ||
@@ -750,7 +780,7 @@ export class StoreGatewayService implements GatewayService {
           throw new FacadeServiceError('not_found')
         }
         if (provider) {
-          this.provider(machine!, provider)
+          this.provider(machine!, provider, observed)
         } else {
           this.options.store.machine(machine!)
         }

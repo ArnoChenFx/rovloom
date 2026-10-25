@@ -11,6 +11,14 @@ export interface ManagementTransportProjection {
   readonly transport: ManagementStatus['components']['transport']
   /** 只接收共享服务已经授权、读取的单台设备；没有匹配观测时保持未知。 */
   device(device: DeviceSnapshot): DeviceSnapshot
+  /** 当前可信传输证据下的设备连接；无证据时保持未知，不从持久状态推断。 */
+  link(machine_id: string): 'connected' | 'unverified'
+  /** 指定 provider 在给定绑定 revision 下的派发就绪；revision 不符或无证据时保持未知。 */
+  providerReady(
+    machine_id: string,
+    provider_id: string,
+    binding_revision: number
+  ): 'ready' | 'unavailable' | 'unverified'
 }
 
 /** 可信宿主逐次取样；异常只成为不可用，调用方随后采集同一Store的时间/代次与模式fence。 */
@@ -191,6 +199,53 @@ export function createManagementTransportProjection(
         observed_at: device.observed_at,
         connection: link,
         authentication: auth
+      }
+    },
+    /** 只把已核实的在线连接投影为 connected；其余一律 unverified，不推测 offline。 */
+    link: (machine_id: string): 'connected' | 'unverified' => {
+      if (transport !== 'available') {
+        return 'unverified'
+      }
+      const observed = devices.get(machine_id)
+      if (!observed) {
+        return 'unverified'
+      }
+      try {
+        return connection(observed.connection, fence).verification === 'verified' ? 'connected' : 'unverified'
+      } catch {
+        return 'unverified'
+      }
+    },
+    /** 绑定 revision 必须与观测一致，否则旧观测不能为新绑定背书；无证据时保持 unverified。 */
+    providerReady: (
+      machine_id: string,
+      provider_id: string,
+      binding_revision: number
+    ): 'ready' | 'unavailable' | 'unverified' => {
+      if (transport !== 'available') {
+        return 'unverified'
+      }
+      const observed = devices.get(machine_id)
+      if (!observed) {
+        return 'unverified'
+      }
+      try {
+        const provider = observed.providers.find(
+          /* 只认同一 provider 且同一 binding revision 的当前观测。 */ (entry) =>
+            entry.provider_id === provider_id && entry.binding_revision === binding_revision
+        )
+        if (!provider || provider.dispatch_ready.verification !== 'verified') {
+          return 'unverified'
+        }
+        if (
+          !current(provider.dispatch_ready.observed_at, fence) ||
+          provider.dispatch_ready.source !== 'gateway_transport'
+        ) {
+          return 'unverified'
+        }
+        return provider.dispatch_ready.value ? 'ready' : 'unavailable'
+      } catch {
+        return 'unverified'
       }
     }
   })
