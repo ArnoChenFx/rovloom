@@ -125,7 +125,10 @@ rovloom connector --join ws://127.0.0.1:9443#机器.码ID.秘密
 出现在管理页中；Gateway 运行中自动加载新配置。
 
 一机一码：第一次成功兑换即消费该码，已用/作废/失败的码不能再次兑换——重新生成即可。
-用新码再次执行加入命令会把本机作为新设备重新配对，旧的本地配对状态自动重置。
+用新码再次执行加入命令会把本机作为新设备重新配对；换成另一台 Gateway 的加入命令则直接
+把旧状态退役（保存在 `state/retired/`）并配对过去，无需手工清理。被 Gateway 吊销后的恢复
+路径相同：生成新码，重跑加入命令。需要彻底干净的起点时运行 `rovloom connector --unpair`：
+本地配对状态整体退役、Gateway 地址清空，之后可与任意 Gateway 从零配对。
 
 **获取 MCP Bearer：** 首台设备由加入命令打印一次。之后在面板打开**连接 MCP**，填写
 名称、选择有效期，点击**创建 Token**。Token 会保留在列表中，随时可以**显示、复制、
@@ -196,7 +199,8 @@ Rovloom 不是 stdio MCP 服务。
 |---|---|
 | 再次启动 | Gateway 机器运行 `rovloom gateway --non-interactive`，Connector 机器运行 `rovloom connector --non-interactive`；已保存的配对状态会复用。Docker Gateway 使用 `docker compose up -d`。 |
 | 加入更多设备 | Gateway 保持运行，在管理页生成新配对码（或 `rovloom gateway --issue-code`），新设备执行显示的加入命令。原始 MCP caller 的授权会扩展到新设备；用 `rovloom token create --like` 克隆的令牌需要重新克隆。 |
-| 凭据丢失或泄漏 | 在管理页删除该设备并生成新配对码，在该机器上重新执行加入命令即可；本地配对状态自动重置，设备以新身份重新配对。进行中的调用结果变为未知。 |
+| 凭据丢失或泄漏 | 在管理页删除该设备并生成新配对码，在该机器上重新执行加入命令即可；本地配对状态自动退役，设备以新身份重新配对。进行中的调用结果变为未知。 |
+| 换到另一台 Gateway | 先停该 Connector，机器上直接执行新 Gateway 的加入命令（旧状态自动退役）；或先 `rovloom connector --unpair` 得到干净起点。 |
 | 开机自启 | `rovloom service install --role gateway`（或 `connector`），见[开机服务](SERVICE.md)。 |
 | 校验配置 | `rovloom config check --role gateway`（或 `connector`）。 |
 | 令牌、备份、升级 | [运维指南](OPERATIONS.md) |

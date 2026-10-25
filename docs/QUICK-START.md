@@ -133,8 +133,11 @@ the management page a few seconds later; the Gateway loads the new configuration
 
 Codes are one per device: the first successful exchange consumes the code, and a used, revoked
 or failed code cannot be exchanged again — generate a new one. Running the join command again
-with a fresh code re-pairs this machine as a new device; the previous local pairing state is
-reset automatically.
+with a fresh code re-pairs this machine as a new device; a join command from a different
+Gateway retires the previous local state (kept under `state/retired/`) and pairs there without
+manual cleanup. Recovery after revocation is the same path: generate a new code and re-run the
+join command. For a completely clean slate, run `rovloom connector --unpair`: all local pairing
+state is retired and the Gateway address is cleared, after which any Gateway can be joined fresh.
 
 **Get an MCP Bearer:** the join command prints it once for the first device. Afterwards open
 **Connect MCP** in the Dashboard, enter a name and expiry, then click **Create token**.
@@ -214,7 +217,8 @@ See the [management page guide](GATEWAY-WEBUI.md).
 |---|---|
 | Start again | Run `rovloom gateway --non-interactive` on the Gateway machine and `rovloom connector --non-interactive` on the Connector machine; saved pairing state is reused. For Docker Gateway, use `docker compose up -d`. |
 | Add another device | Keep the Gateway running, generate a new pairing code on the management page (or `rovloom gateway --issue-code`), and run the displayed join command on the new device. The original MCP caller's access expands to the new device; tokens made with `rovloom token create --like` must be re-created. |
-| Credential lost or leaked | Delete the device on the management page (or simply) generate a new pairing code and run the join command on that machine; the local pairing state resets and the device re-pairs as a new identity. In-flight calls become unknown. |
+| Credential lost or leaked | Delete the device on the management page (or simply) generate a new pairing code and run the join command on that machine; the local pairing state retires and the device re-pairs as a new identity. In-flight calls become unknown. |
+| Moving to another Gateway | Stop that Connector and run the new Gateway's join command (previous state retires automatically); or run `rovloom connector --unpair` first for a clean slate. |
 | Run at boot | `rovloom service install --role gateway` (or `connector`) — see [Boot services](SERVICE.md). |
 | Validate configuration | `rovloom config check --role gateway` (or `connector`). |
 | Tokens, backup, upgrades | [Operations guide](OPERATIONS.md) |

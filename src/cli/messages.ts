@@ -28,6 +28,7 @@ Usage:
   rovloom config check-runtime [--role gateway|connector] [--config /absolute/path/config.json]
   rovloom gateway [--issue-code] [--config /absolute/path/config.json] [--non-interactive]
   rovloom connector --join <ws://host:port#pairing-code> [--config /absolute/path/config.json]
+  rovloom connector --unpair [--non-interactive]
   rovloom service --help
   rovloom token --help
   rovloom doctor --help
@@ -38,7 +39,9 @@ gateway / connector starts the matching role. Pairing is one command: create a p
 management page (or run 'rovloom gateway --issue-code' to print one), then run the displayed join command on the
 Connector machine. No prompts, approvals or verification codes.
 --issue-code makes the running Gateway print one fresh per-device pairing code and the full join command.
---join pairs and starts in one step; running it again with a new code re-pairs this machine as a new device.
+--join pairs and starts in one step; running it again with a new code re-pairs this machine as a new device,
+and a join command from a different Gateway retires the previous local state and pairs there.
+--unpair retires all local pairing state (kept under state/retired/) and clears the Gateway address for a clean start.
 --non-interactive disables local interactive behavior (services run this way).
 token manages MCP Bearer tokens, admin manages management-page administrators, and service manages boot services; see each --help.
 config check validates the configuration file read-only; check-runtime additionally verifies program-managed state without reading credentials.
@@ -108,11 +111,15 @@ Windows uses the explicitly selected existing user with S4U, without storing a p
     '{provider}_managed_unsupported_on_windows: set native.{configKey}.mode to "attach".\n',
   'setup.native.managedUnsupportedMacos':
     '{provider}_managed_unsupported_on_macos: set native.{configKey}.mode to "attach".\n',
-  'setup.join.resettingState':
-    'Previous pairing state found for another device; resetting it before pairing as a new device.\n',
   'setup.join.completed': 'pairing_completed: device {machine} is paired with {url}.\n',
   'setup.join.providers': 'providers: {entries}\n',
   'setup.join.mcpBlock': 'MCP URL: {url}\nBearer (private): {token}\n',
+  'setup.join.resettingState':
+    'Previous pairing state for another device was retired to {retired}; pairing as a new device.\n',
+  'setup.join.switchingGateway': 'Joining a different Gateway; previous pairing state was retired to {retired}.\n',
+  'unpair.completed':
+    'unpair_completed: local pairing state was retired to {retired} and the Gateway address was cleared.\nRun rovloom connector --join to pair with any Gateway.\n',
+  'unpair.empty': 'unpair_completed: no local pairing state found; nothing to reset.\n',
   'setup.native.statePathTooLongLuvus':
     'native_state_path_too_long: choose a shorter data.directory before initialization (Luvus state path maximum 52 UTF-8 bytes).\n',
   'setup.native.statePathTooLongHerdr':
@@ -167,6 +174,7 @@ export const chinese: Readonly<Record<MessageKey, string>> = Object.freeze({
   rovloom config check-runtime [--role gateway|connector] [--config /absolute/path/config.json]
   rovloom gateway [--issue-code] [--config /absolute/path/config.json] [--non-interactive]
   rovloom connector --join <ws://host:port#配对码> [--config /absolute/path/config.json]
+  rovloom connector --unpair [--non-interactive]
   rovloom service --help
   rovloom token --help
   rovloom doctor --help
@@ -175,7 +183,9 @@ export const chinese: Readonly<Record<MessageKey, string>> = Object.freeze({
 
 gateway / connector 启动对应角色。配对只需一条命令：在管理页生成一机一码（或运行 rovloom gateway --issue-code 打印一张），把显示的加入命令复制到 Connector 机器执行即可。没有问答、批准或核对码。
 --issue-code 让运行中的 Gateway 打印一张新的一机一码及完整加入命令。
---join 一条命令完成配对并启动；用新码再次执行即把本机作为新设备重新配对。
+--join 一条命令完成配对并启动；用新码再次执行即把本机作为新设备重新配对，
+换一台 Gateway 的加入命令则会退役旧状态并直接配对过去。
+--unpair 把本地配对状态整体退役（保留在 state/retired/）并清空 Gateway 地址，得到干净的起点。
 --non-interactive 关闭本地交互行为（服务以此运行）。
 token 管理 MCP Bearer 令牌，admin 管理管理页管理员，service 管理开机服务；详见各自的 --help。
 config check 只读检查配置文件；check-runtime 另核对程序管理的状态，不读取凭据。
@@ -245,10 +255,14 @@ Windows 使用显式选择的既有用户与 S4U，不保存密码、不要求�
     '{provider}_managed_unsupported_on_windows: Windows 上暂不支持 managed，请把 native.{configKey}.mode 设为 "attach"。\n',
   'setup.native.managedUnsupportedMacos':
     '{provider}_managed_unsupported_on_macos: macOS 上暂不支持 managed，请把 native.{configKey}.mode 设为 "attach"。\n',
-  'setup.join.resettingState': '发现另一台设备的旧配对状态；正在重置后以新设备身份重新配对。\n',
   'setup.join.completed': 'pairing_completed: 设备 {machine} 已与 {url} 完成配对。\n',
   'setup.join.providers': 'providers: {entries}\n',
   'setup.join.mcpBlock': 'MCP URL: {url}\nBearer (private): {token}\n',
+  'setup.join.resettingState': '另一台设备的旧配对状态已退役到 {retired}；正以新设备身份重新配对。\n',
+  'setup.join.switchingGateway': '正在加入另一台 Gateway；旧配对状态已退役到 {retired}。\n',
+  'unpair.completed':
+    'unpair_completed: 本地配对状态已退役到 {retired}，Gateway 地址已清空。\n运行 rovloom connector --join 即可与任意 Gateway 重新配对。\n',
+  'unpair.empty': 'unpair_completed: 本机没有可重置的配对状态。\n',
   'setup.native.statePathTooLongLuvus':
     'native_state_path_too_long: 初始化前请缩短 data.directory（Luvus 状态路径最多52个UTF-8字节）。\n',
   'setup.native.statePathTooLongHerdr':

@@ -32,7 +32,8 @@
 | 查看 / 创建 / 续期 / 轮换 / 吊销 MCP 令牌 | `rovloom token list\|create\|renew\|rotate\|revoke` | 原值只在 create / rotate 时在 stdout 显示一次；热生效，无需重启 |
 | 管理页管理员 | `rovloom admin create\|list\|revoke` | 首次配对完成时已自动创建 `admin`；丢了口令就再 create；热生效 |
 | 加入更多设备 | 管理页生成配对码；新机器：`rovloom connector --join <命令>` | 无需终端问答，不停机 |
-| 设备凭据丢失 / 泄漏 | 生成新配对码，该机器重新执行 join 命令 | 本机作为新设备重新配对，本地旧状态自动重置 |
+| 设备凭据丢失 / 泄漏 | 生成新配对码，该机器重新执行 join 命令 | 本机作为新设备重新配对，本地旧状态自动退役到 `state/retired/` |
+| 换 Gateway / 干净重置 | Connector：`rovloom connector --unpair`，再用新加入命令 `--join` | 直接执行另一台 Gateway 的加入命令也会自动退役旧状态；managed 实例数据保留在 retired 目录 |
 | 撤销设备 | 管理页 → 撤销 | 撤销后不能重新配对，需作为新设备重新首次配对 |
 
 ## 5. 备份与恢复

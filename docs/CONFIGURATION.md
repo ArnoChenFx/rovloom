@@ -192,8 +192,12 @@ running; the first device also prints the MCP URL and Bearer.
   Plaintext of unused codes stays in the Gateway's private state directory so
   the page can redisplay them; it is wiped when a code terminates.
 - Running the join command again with a fresh code re-pairs this machine as a
-  new device; the previous local pairing state resets automatically. Use this
-  path when a credential is lost or leaked.
+  new device; the previous local pairing state, including managed native roots,
+  is retired to `state/retired/` (managed instance data is preserved for manual
+  recovery). Use this path when a credential is lost or revoked. A join command
+  from a different Gateway likewise retires the old state and pairs there;
+  `rovloom connector --unpair` only retires and clears the address, without
+  pairing immediately.
 - Device credentials do not expire. They stop working on revocation or
   re-pairing; a revoked device can only return as a new device.
 
@@ -377,6 +381,7 @@ does not skip the other, and any failure returns nonzero.
 | `rovloom connector [--config ABS] [--non-interactive]` | Starts the foreground Connector. Default file: `~/.config/rovloom/connector.json`. |
 | `rovloom gateway --issue-code [--config ABS]` | Prints one per-device pairing code and the full join command at startup. |
 | `rovloom connector --join <ws://host:port#code> [--config ABS]` | Pairs with the Gateway and starts in one step; no prompts. |
+| `rovloom connector --unpair [--config ABS]` | Retires all local pairing state (including managed native roots) to `state/retired/` and clears the Gateway address; stop the Connector first. |
 
 An explicit `--config` takes priority and never falls back to the default. The
 file must match the role. A missing file is created at the selected path; an

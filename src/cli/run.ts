@@ -85,6 +85,7 @@ type Command =
       serviceId?: string
       join?: string
       issueCode?: true
+      unpair?: true
     }
 
 // 解析固定命令形状，未知参数只返回稳定错误，不回显 argv。
@@ -142,10 +143,11 @@ export function parseCommand(args: readonly string[], environment?: ConfigPathEn
     throw new CliError('invalid_arguments')
   }
   const withoutNonInteractive = nonInteractive ? serviceArgs.slice(0, -1) : serviceArgs
-  // Connector 用 --join <value> 单命令配对；Gateway 用 --issue-code 启动时签发一张一机一码。
+  // Connector 用 --join <value> 单命令配对、--unpair 干净重置；Gateway 用 --issue-code 启动时签发一张一机一码。
   const flag = withoutNonInteractive[1]
   const join = withoutNonInteractive[0] === 'connector' && flag === '--join' ? withoutNonInteractive[2] : undefined
   const issueCode = withoutNonInteractive[0] === 'gateway' && flag === '--issue-code'
+  const unpair = withoutNonInteractive[0] === 'connector' && flag === '--unpair'
   if (join !== undefined) {
     if (
       withoutNonInteractive.length !== 3 ||
@@ -154,10 +156,10 @@ export function parseCommand(args: readonly string[], environment?: ConfigPathEn
     ) {
       throw new CliError('invalid_arguments')
     }
-  } else if (issueCode && withoutNonInteractive.length !== 2) {
+  } else if ((issueCode || unpair) && withoutNonInteractive.length !== 2) {
     throw new CliError('invalid_arguments')
   }
-  const roleArgs = join !== undefined || issueCode ? [withoutNonInteractive[0]!] : withoutNonInteractive
+  const roleArgs = join !== undefined || issueCode || unpair ? [withoutNonInteractive[0]!] : withoutNonInteractive
   if (
     (roleArgs[0] === 'gateway' || roleArgs[0] === 'connector') &&
     (roleArgs.length === 1 || (roleArgs.length === 3 && roleArgs[1] === '--config'))
@@ -168,7 +170,8 @@ export function parseCommand(args: readonly string[], environment?: ConfigPathEn
       ...(nonInteractive ? { nonInteractive: true } : {}),
       ...(serviceId ? { serviceId } : {}),
       ...(join !== undefined ? { join } : {}),
-      ...(issueCode ? { issueCode: true as const } : {})
+      ...(issueCode ? { issueCode: true as const } : {}),
+      ...(unpair ? { unpair: true as const } : {})
     }
   }
   throw new CliError('invalid_arguments')
@@ -297,6 +300,11 @@ export async function runCli(
     }
     if (io.signal.aborted) {
       return 0
+    }
+    if (command.unpair) {
+      // 一次性命令：退役本地配对状态并清空地址，不进入角色启动或引导。
+      const { handleConnectorUnpair } = await import('./unpair.js')
+      return await handleConnectorUnpair(command.path, io)
     }
     if (!command.nonInteractive) {
       config =

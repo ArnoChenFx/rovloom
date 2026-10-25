@@ -1,7 +1,7 @@
 // 单码直连配对的 Connector 侧：`rovloom connector --join ws://host:port#machine.attempt.secret`。
 // 一条命令完成：写 Gateway 地址 → 本地推导固定授权 → 准备实测原生清单 → POST /pairing 换取设备凭据 → 落盘并直接进入运行。
 // 非交互、无确认问答；已配对状态与码目标不一致时先重置本地配对状态（作为新设备重新配对）。
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseNativeJson } from '../native-contract/json.js'
 import { createFileCredentialSink } from '../transport/credentials.js'
@@ -24,6 +24,7 @@ import { prepareSetupHerdr } from './setup-herdr.js'
 import { simpleSetupAuthorization, setupSessionsFor } from './setup-policy.js'
 import { readRuntimeConfig } from './runtime-config.js'
 import { silentConsole } from './setup-console.js'
+import { retirePairingState } from './unpair.js'
 import type { CliIo } from './run.js'
 
 export type JoinCode = Readonly<{
@@ -113,14 +114,6 @@ async function post(config: ConnectorConfig, path: string, value: unknown, signa
   )
 }
 
-// 重新配对：清除上一台身份的本地配对状态（凭据、providers、引导记录与私有账本），保留用户配置与原生数据根。
-function resetLocalPairingState(config: ConnectorConfig): void {
-  for (const name of ['device', 'providers', 'pairing', 'pairing-claim', 'native-setup', 'herdr-setup']) {
-    rmSync(runtimeReference(config.state_dir, name), { force: true })
-  }
-  rmSync(join(config.state_dir, 'control', 'luvus-claims.db'), { force: true })
-}
-
 /** join 主流程：返回更新后的配置；失败保持固定错误码，不回显码原文。 */
 export async function joinConnector(
   config: ConnectorConfig,
@@ -130,29 +123,37 @@ export async function joinConnector(
 ): Promise<ConnectorConfig> {
   const code = parseJoinValue(value)
   const console = silentConsole(io)
-  if (config.gateway_url && config.gateway_url !== code.url) {
-    // 已保存的地址与本次命令不一致：避免把既有配对状态静默搬到另一台 Gateway。
-    throw new CliError('configuration_required')
+  const stateExists =
+    readRuntimeConfig(config).providers.length > 0 || existsSync(runtimeReference(config.state_dir, 'device'))
+  if (stateExists) {
+    const paired = readSetupJson(runtimeReference(config.state_dir, 'pairing'))
+    const current = paired === undefined ? undefined : object(paired)
+    const machine = current && 'machine_id' in current ? String(current.machine_id) : undefined
+    if (machine === code.machine && config.gateway_url === code.url) {
+      // 同一设备对同一 Gateway 的重复 join：状态已完整，直接按已配对启动。
+      return config
+    }
+    // 换码即换设备身份（吊销恢复），换地址即换 Gateway：码本身就是意图证明，旧状态整体退役后重新配对。
+    // managed 模式的原生根必须回到空白才能重新初始化，因此退役目录而不是只删文件。
+    const retired = retirePairingState(config, console)
+    if (retired !== undefined) {
+      console.show(
+        formatMessage(
+          cliMessages(io.language)[
+            config.gateway_url === code.url ? 'setup.join.resettingState' : 'setup.join.switchingGateway'
+          ],
+          { retired }
+        )
+      )
+    }
   }
-  if (!config.gateway_url) {
-    // 写入 Gateway 地址前核对磁盘文件仍与内存配置一致，防止覆盖并发编辑。
+  if (config.gateway_url !== code.url) {
+    // 写入（或换写）Gateway 地址前核对磁盘文件仍与内存配置一致，防止覆盖并发编辑。
     if (boundedJson(configDocument(readConfig(path))) !== boundedJson(configDocument(config))) {
       throw new CliError('config_changed')
     }
     config = parseConfig({ ...configDocument(config), gateway: { url: code.url } }) as ConnectorConfig
     writeSetupFile(path, JSON.stringify(configDocument(config), null, 2) + '\n', true, setupFileStamp(path))
-  }
-  const paired = readSetupJson(runtimeReference(config.state_dir, 'pairing'))
-  if (readRuntimeConfig(config).providers.length > 0 || existsSync(runtimeReference(config.state_dir, 'device'))) {
-    const current = paired === undefined ? undefined : object(paired)
-    const machine = current && 'machine_id' in current ? String(current.machine_id) : undefined
-    if (machine === code.machine) {
-      // 同一设备的重复 join：状态已完整，直接按已配对启动。
-      return config
-    }
-    // 换了码（新设备身份）：重置本地配对状态后重新配对。
-    console.show(cliMessages(io.language)['setup.join.resettingState'])
-    resetLocalPairingState(config)
   }
   privateDirectory(config.state_dir)
   privateDirectory(join(config.state_dir, 'managed'))

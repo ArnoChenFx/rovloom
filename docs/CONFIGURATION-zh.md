@@ -160,8 +160,10 @@ Connector 需要可达的 Gateway 地址和已完成的配对。配对是单码�
 
 - 一机一码：第一次成功兑换即消费该码；已用、作废或失败的码不能再次兑换，重新生成即可。
   未使用码的明文保存在 Gateway 私有状态目录，管理页可随时重显；终结时明文抹掉。
-- 用新码再次执行加入命令会把本机作为新设备重新配对，旧的本地配对状态自动重置；
-  凭据丢失或泄漏时走这条路即可。
+- 用新码再次执行加入命令会把本机作为新设备重新配对，旧的本地配对状态连同 managed
+  原生根整体退役到 `state/retired/`（managed 实例数据保留可人工恢复）；凭据丢失或被
+  吊销时走这条路即可。换成另一台 Gateway 的加入命令同样自动退役旧状态并直接配对过去，
+  `rovloom connector --unpair` 则只做退役与地址清空、不立即配对。
 - 设备凭据不过期，撤销或重新配对时失效；撤销后的设备只能作为新设备重新配对。
 
 原生初始化自动批准：Gateway 编译核验设备提交的实测安装清单后发布 provider 与
@@ -304,6 +306,7 @@ Agent/模型访问配置位于 runtime 的私有 HOME/XDG。managed 模式下其
 | `rovloom connector [--config ABS] [--non-interactive]` | 启动前台 Connector。默认文件 `~/.config/rovloom/connector.json`。 |
 | `rovloom gateway --issue-code [--config ABS]` | 启动时打印一张一机一码及完整加入命令。 |
 | `rovloom connector --join <ws://host:port#码> [--config ABS]` | 一条命令完成配对并启动；无任何问答。 |
+| `rovloom connector --unpair [--config ABS]` | 把本地配对状态（含 managed 原生根）整体退役到 `state/retired/` 并清空 Gateway 地址；先停该 Connector。 |
 
 显式 `--config` 优先，无效时不会回退。所选文件必须匹配角色。缺失文件会在所选位置生成，已有文件不会被覆盖。
 Ctrl-C 停止前台角色，顶层没有 `start`、`stop` 或 `restart`。端口是 JSON 字段，不是命令行选项。
