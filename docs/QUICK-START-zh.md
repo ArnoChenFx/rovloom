@@ -64,7 +64,7 @@ docker compose pull
 docker compose up -d
 ```
 
-9443、9444、9445 端口需要空闲（Compose 从 bridge 网络发布这三个端口）；镜像内已设置 `ROVLOOM_CONTAINER=1`，首次启动会自动生成容器监听配置（`0.0.0.0` + `management.lan: true`）。卷、备份和升级见 [Docker 部署](DOCKER-zh.md)。
+9443、9444、9445 端口需要空闲（Compose 从 bridge 网络发布这三个端口）；镜像内已设置 `ROVLOOM_CONTAINER=1`，首次启动会自动生成容器监听配置（三个监听都绑 `0.0.0.0`）。卷、备份和升级见 [Docker 部署](DOCKER-zh.md)。
 
 ## 2. 准备 Connector 所在机器
 
@@ -152,17 +152,16 @@ Docker 使用 `docker compose run --rm gateway token ...`。
 
 ### 局域网访问
 
-普通 CLI 初始化默认三个监听都只允许回环访问。同机部署可跳过本节。
-Docker 镜像内已设置 `ROVLOOM_CONTAINER=1`，其首次生成的配置默认启用 `management.lan`；
-宿主机 IP 能否访问仍取决于 Compose 的端口映射。旧配置迁移及端口映射示例见 [Docker 部署](DOCKER-zh.md)。
-首次在 Gateway 机器上执行 `rovloom config init gateway` 后，编辑
+监听 hostname 是唯一开关：`0.0.0.0` 即接受任意 Host 的明文 HTTP 访问，`127.0.0.1` 只接受回环寻址；没有单独的 `lan` 字段。Docker 镜像内已设置 `ROVLOOM_CONTAINER=1`，首次生成的配置默认把三个监听都绑到 `0.0.0.0`；
+宿主机 IP 能否访问仍取决于 Compose 的端口映射。端口映射示例见 [Docker 部署](DOCKER-zh.md)。
+npm 安装的二进制默认 MCP 与设备通道为 `0.0.0.0`、管理页为 `127.0.0.1`；要在局域网打开管理页，首次启动后编辑
 `~/.config/rovloom/gateway.json`，保留其余字段，按需修改以下监听分组；已有配置直接编辑：
 
 ```json
 {
   "devices": {"hostname": "0.0.0.0", "port": 9443},
-  "mcp": {"hostname": "0.0.0.0", "port": 9444, "lan": true},
-  "management": {"enabled": true, "hostname": "0.0.0.0", "port": 9445, "lan": true}
+  "mcp": {"hostname": "0.0.0.0", "port": 9444},
+  "management": {"enabled": true, "hostname": "0.0.0.0", "port": 9445}
 }
 ```
 

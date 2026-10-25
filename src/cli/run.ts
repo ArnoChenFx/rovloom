@@ -336,20 +336,10 @@ export async function runCli(
       throw new CliError('backend_unavailable', 3)
     }
     let reload = false
-    let warnedWildcard = false
     let shownDashboard = false
     do {
       reload = false
       const gateway = await runtime.gateway(config)
-      // 通配监听是明文 HTTP 暴露到所有网卡：提示一次，防护靠 Bearer/管理员密码与宿主机防火墙或 TLS 反代。
-      if (
-        !warnedWildcard &&
-        (isWildcardHostname(config.mcp_hostname) ||
-          (config.management_enabled && isWildcardHostname(config.management_hostname)))
-      ) {
-        warnedWildcard = true
-        io.stderr.write(cliMessages(io.language)['run.wildcardListenWarning'])
-      }
       try {
         // 只有宿主建立后才加载HTTP SDK；stdin EOF和客户端断开均不结束Gateway。
         const { startHttpFacade } = await import('../mcp/http.js')
@@ -359,7 +349,7 @@ export async function runCli(
           hostname: config.mcp_hostname,
           port: config.mcp_port,
           ...(config.mcp_public_url ? { publicUrl: config.mcp_public_url } : {}),
-          ...(config.mcp_lan ? { lan: true } : {}),
+          lan: isWildcardHostname(config.mcp_hostname),
           ...(io.language ? { language: io.language } : {}),
           diagnostic: /* 只把受限诊断码写入stderr，不输出凭据、URL或协议正文。 */ (code) => io.stderr.write(code + '\n')
         })

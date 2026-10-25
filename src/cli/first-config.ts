@@ -50,8 +50,7 @@ function defaults(
       ...config,
       mcp_hostname: '0.0.0.0',
       device_hostname: '0.0.0.0',
-      management_hostname: '0.0.0.0',
-      management_lan: true
+      management_hostname: '0.0.0.0'
     }
   }
   return config

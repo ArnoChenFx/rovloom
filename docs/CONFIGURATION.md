@@ -16,7 +16,7 @@ rovloom config init connector --provider herdr
 rovloom config init gateway --container
 ```
 
-`--provider` accepts `luvus`, `herdr` or `mixed` for Connector only. `--container` applies to Gateway only, explicitly binds MCP, devices and management to `0.0.0.0`, and sets `management.lan: true`; keep the maintained Compose MCP / management mappings on host loopback. Configure MCP LAN / `public_url` separately. Without this flag, Gateway keeps the normal loopback defaults. `--config` chooses the configuration file, while the default state path still belongs to the current user's home.
+`--provider` accepts `luvus`, `herdr` or `mixed` for Connector only. `--container` applies to Gateway only and explicitly binds MCP, devices and management to `0.0.0.0`; keep the maintained Compose MCP / management mappings on host loopback. Configure `public_url` separately for proxied clients. Without this flag, Gateway keeps the normal defaults (wildcard MCP and device listeners, loopback management). `--config` chooses the configuration file, while the default state path still belongs to the current user's home.
 
 Initialization does not start services, create device identities or authorize native access. It uses the same exclusive first-file publication as role startup. Existing files are never overwritten; an explicit provider / listener request that conflicts with them returns `config_exists`. To edit an existing deployment, first review its configuration and pairing state, then use `config check` before restarting.
 
@@ -63,18 +63,16 @@ Setting an address does not pair the device or install a native provider.
 | `data` | Object, required | Contains only `directory`. |
 | `data.directory` | Normalized absolute path string, ≤4096 characters, required | `<home>/.local/share/rovloom/<role>`; separate private data for each role. |
 | Gateway `mcp` | Object, required | Contains `hostname`, `port`; Streamable HTTP `/mcp`. |
-| `mcp.hostname` | String, required | `127.0.0.1`; also accepts `::1`, `0.0.0.0`, `::`. Wildcard binds are for isolated environments such as containers. They listen on every interface over plain HTTP (the Gateway logs a `wildcard_listener` warning): Host/Origin validation still uses the matching loopback address, but that only stops browser DNS rebinding, not a network client that sends a loopback `Host`. Keep a firewall or TLS reverse proxy in front; any other Host needs `public_url`. |
+| `mcp.hostname` | String, required | `127.0.0.1`; also accepts `::1`, `0.0.0.0`, `::`. A wildcard bind listens on every interface over plain HTTP and accepts any `Host` on the fixed `/mcp` path (Bearer still required); a loopback bind accepts only loopback addressing. Keep a firewall or TLS reverse proxy in front of wildcard listeners; any other Host needs `public_url`. |
 | `mcp.port` | Integer 1–65535, required | `9444`. |
 | `mcp.public_url` | String, optional | Trusted external address behind a reverse proxy / TLS terminator, exactly `https://host[:port]/mcp` (no credentials, query or other path). When set, the Gateway also accepts requests whose `Host` is that host (and its CORS origin); every other `Host` is still rejected, and forwarded headers are never trusted. The listener itself stays on loopback; the Bearer is still required. |
-| `mcp.lan` | Literal `true`, optional | Explicit plaintext-LAN opt-in for the MCP listener. Only valid together with a wildcard `mcp.hostname` (`0.0.0.0` or `::`); loopback or proxied configurations reject it. When set, the listener additionally accepts any `Host` on the fixed `/mcp` path over plain HTTP (Bearer still required) and same-origin browser `Origin` values. Host validation otherwise stays loopback-only, so existing container setups behave exactly as before unless they add this field. Never expose the listener beyond a trusted LAN without a firewall or TLS reverse proxy. |
 | Gateway `devices` | Object, required | Contains `hostname`, `port`; WS `/connector`. |
-| `devices.hostname` | String, required | `127.0.0.1`; also `::1`, `0.0.0.0`, `::`. Defaults do not accept remote devices. |
+| `devices.hostname` | String, required | `127.0.0.1`; also `::1`, `0.0.0.0`, `::`. A wildcard bind accepts remote devices. |
 | `devices.port` | Integer 1–65535, required | `9443`. |
-| Gateway `management` | Object, required | Contains `enabled`, `port` and optional `hostname`, `lan`; local HTTP management page. |
+| Gateway `management` | Object, required | Contains `enabled`, `hostname` and `port`; local HTTP management page. |
 | `management.enabled` | Boolean, required | `true`; `false` disables this listener. Enabling it grants no administrator identity. |
 | `management.port` | Integer 1–65535, required even when disabled | `9445`. |
-| `management.hostname` | String, optional | `127.0.0.1`; also accepts `0.0.0.0` for isolated environments such as containers. Session and Host validation still use the `127.0.0.1` origin. |
-| `management.lan` | Literal `true`, optional | Plaintext-LAN access for the management page; written by default by `config init gateway --container` and omitted by normal initialization. Only valid together with `management.hostname: "0.0.0.0"`; loopback configurations reject it. When set, the page additionally accepts any `Host` over plain HTTP (cookies are `HttpOnly`/`SameSite=Strict` but not `Secure`; cross-site requests are still refused by the same-origin checks). Without this field LAN access still returns 403 and the SSH-tunnel guidance below still applies. The Gateway logs the existing `wildcard_listener` warning. Serve the page over a TLS reverse proxy if it leaves a trusted LAN. |
+| `management.hostname` | String, optional, written by default | `127.0.0.1`; also accepts `0.0.0.0` for LAN access. A wildcard bind accepts any `Host` over plain HTTP (cookies are `HttpOnly`/`SameSite=Strict` but not `Secure`; cross-site requests are still refused by the same-origin checks); a loopback bind only accepts loopback addressing. Serve the page over a TLS reverse proxy if it leaves a trusted LAN. |
 | Connector `gateway` | Object, required | Contains only `url`. |
 | `gateway.url` | String, required | `""` while setup is pending; otherwise WS/WSS origin, ≤2048 characters, e.g. `ws://192.0.2.10:9443` or `wss://gateway.example`. No credentials/query/fragment/path except optional trailing `/`. Product selects `/connector`. |
 | Connector `allow_terminal_execution` | Boolean, optional | `false`, also when omitted. Only literal `true` enables direct terminal input and custom launch/restore commands through the existing local guard. Edit this single user file and restart Connector; it does not change installation settings or caller/local grants. |
@@ -217,11 +215,10 @@ to an external standard HTTPS/WSS reverse proxy. Connector WSS always uses syste
 certificate validation. There is no custom CA or skip-verification option.
 
 For LAN clients without a proxy, set `mcp.hostname` / `management.hostname` to a
-wildcard address and add the explicit `lan: true` opt-in to those listener
-groups. Both then accept LAN hosts over plain HTTP — the MCP listener requires
-its Bearer, and the management page keeps its cookie, CSRF and same-origin
-checks, but neither has transport encryption or network-layer isolation. The
-Gateway logs a `wildcard_listener` warning; keep a firewall around the LAN and
+wildcard address. Those listeners then accept LAN hosts over plain HTTP — the
+MCP listener requires its Bearer, and the management page keeps its cookie,
+CSRF and same-origin checks, but neither has transport encryption or
+network-layer isolation. Keep a firewall around the LAN and
 put a TLS reverse proxy in front of anything that leaves it.
 
 ## Native installation

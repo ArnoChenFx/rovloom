@@ -1,4 +1,4 @@
-// 显式局域网配置字段：只与通配绑定同用，回环配置不接受，文档序列化保持往返一致。
+// 通配绑定即明文局域网放行：lan 字段已删除，hostname 是唯一开关；回环绑定只接纳回环 Host。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { configDocument, configTemplate, parseConfig } from '../../src/cli/config.js'
@@ -6,29 +6,28 @@ import type { GatewayConfig } from '../../src/cli/config.js'
 
 const base = configDocument(configTemplate('gateway')) as {
   mcp: Record<string, unknown>
+  devices: Record<string, unknown>
   management: Record<string, unknown>
 }
 
-test('gateway config accepts lan only with wildcard bindings and round-trips both groups', () => {
-  const wildcard = {
-    ...base,
-    mcp: { ...base.mcp, hostname: '0.0.0.0', lan: true },
-    management: { ...base.management, hostname: '0.0.0.0', lan: true }
-  }
-  const parsed = parseConfig(wildcard) as GatewayConfig
-  assert.equal(parsed.mcp_lan, true)
-  assert.equal(parsed.management_lan, true)
-  assert.deepEqual(configDocument(parsed), wildcard)
-  // 回环监听不存在局域网路径：lan 与回环绑定组合一律拒绝。
-  assert.throws(() => parseConfig({ ...base, mcp: { ...base.mcp, lan: true } }))
-  assert.throws(() => parseConfig({ ...base, management: { ...base.management, lan: true } }))
-  // 通配但没有显式 lan：保持既有容器语义（Host 校验仍按回环），序列化不添字段。
-  const containerOnly = parseConfig({
+test('wildcard bindings round-trip without lan fields and loopback keeps explicit management hostname', () => {
+  // 模板默认：MCP/设备通道通配，管理页回环；三个 hostname 全部显式落盘。
+  assert.deepEqual(base.mcp, { hostname: '0.0.0.0', port: 9444 })
+  assert.deepEqual(base.devices, { hostname: '0.0.0.0', port: 9443 })
+  assert.deepEqual(base.management, { enabled: true, hostname: '127.0.0.1', port: 9445 })
+  assert.deepEqual(configDocument(parseConfig(base) as GatewayConfig), base)
+  // 通配管理页绑定往返一致，序列化不添任何 lan 字段。
+  const wildcardManagement = parseConfig({
     ...base,
     management: { ...base.management, hostname: '0.0.0.0' }
   }) as GatewayConfig
-  assert.equal(containerOnly.management_lan, undefined)
-  // lan 只接受字面 true。
-  assert.throws(() => parseConfig({ ...base, mcp: { ...base.mcp, hostname: '0.0.0.0', lan: false } }))
-  assert.throws(() => parseConfig({ ...base, management: { ...base.management, hostname: '0.0.0.0', lan: 'yes' } }))
+  assert.deepEqual(configDocument(wildcardManagement), {
+    ...base,
+    management: { ...base.management, hostname: '0.0.0.0' }
+  })
+  // lan 字段已删除：任何分组出现即拒绝，不接受 true/false/其它值。
+  assert.throws(() => parseConfig({ ...base, mcp: { ...base.mcp, lan: true } }))
+  assert.throws(() => parseConfig({ ...base, mcp: { ...base.mcp, lan: false } }))
+  assert.throws(() => parseConfig({ ...base, management: { ...base.management, lan: true } }))
+  assert.throws(() => parseConfig({ ...base, management: { ...base.management, lan: 'yes' } }))
 })

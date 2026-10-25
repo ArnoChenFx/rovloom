@@ -101,8 +101,6 @@ Gateway services support Linux systemd, macOS system LaunchDaemons and Windows b
 Windows uses the explicitly selected existing user with S4U, without storing a password or requiring login. It does not provide an interactive desktop or Windows network credentials/EFS access. Running services receive a local shutdown request; queued/start-racing tasks return service_busy without forced termination; uninstall never stops it.
 `,
   'guard.bunUnsupported': 'Rovloom requires Bun {minimum} or newer (https://bun.sh); this runtime is not supported.\n',
-  'run.wildcardListenWarning':
-    'wildcard_listener\nMCP/management listen on all interfaces over plain HTTP; protect them with a firewall or a TLS reverse proxy.\n',
   'run.pairingRequiredHint':
     'Gateway is running; pair a Connector (management page or rovloom gateway --issue-code, then run the join command on the device) before using an Agent.\n',
   'run.configurationRequiredHint':
@@ -245,8 +243,6 @@ Gateway 服务支持 Linux systemd、macOS 系统 LaunchDaemons 和 Windows 开�
 Windows 使用显式选择的既有用户与 S4U，不保存密码、不要求登录；不提供交互桌面或 Windows 网络凭据/EFS 访问。运行中的服务收到本地停止请求；排队/启动竞态中的任务返回 service_busy 且不强停；uninstall 从不停止它。
 `,
   'guard.bunUnsupported': 'Rovloom 需要 Bun {minimum} 或更高版本（https://bun.sh）；当前运行时不受支持。\n',
-  'run.wildcardListenWarning':
-    'wildcard_listener\nMCP/管理页监听所有网卡且为明文 HTTP；请用防火墙或 TLS 反向代理收口。\n',
   'run.pairingRequiredHint':
     'Gateway 已启动；使用 Agent 前先配对一台 Connector（管理页或 rovloom gateway --issue-code 生成配对码，设备执行加入命令）。\n',
   'run.configurationRequiredHint':

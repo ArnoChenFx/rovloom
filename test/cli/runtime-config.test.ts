@@ -100,7 +100,7 @@ test(
       }
       writeFileSync(join(directory, 'runtime.json'), '{"secret":"SYNTHETIC_IGNORED_OLD_INPUT"}', { mode: 0o600 })
       const settings = readRuntimeConfig(config)
-      assert.deepEqual(settings.device_listener, { hostname: '127.0.0.1', port: 9333 })
+      assert.deepEqual(settings.device_listener, { hostname: '0.0.0.0', port: 9333 })
       assert.deepEqual(settings.providers, [])
       writeFileSync(
         join(directory, 'managed', 'providers.json'),

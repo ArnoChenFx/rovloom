@@ -3,7 +3,6 @@ import { posix, win32 } from 'node:path'
 import { canonical } from '../contracts.js'
 import { readPrivateBytes } from '../storage/files.js'
 import { parseNativeJson } from '../native-contract/json.js'
-import { isWildcardHostname } from '../mcp/listen.js'
 import { binDirectories } from '../connector/local/agent-path.js'
 
 export type GatewayConfig = Readonly<{
@@ -15,16 +14,12 @@ export type GatewayConfig = Readonly<{
   mcp_port: number
   // 反向代理 / TLS 终止后的对外 MCP 地址（https://host[:port]/mcp）；缺省只接受回环地址。
   mcp_public_url?: string
-  // 显式局域网选择：仅可与通配 mcp 绑定同时使用；接受任意 Host 的明文 HTTP MCP 请求。
-  mcp_lan?: true
   authentication_ref: string
   device_hostname: '127.0.0.1' | '::1' | '0.0.0.0' | '::'
   device_port: number
   management_enabled: boolean
   management_hostname: '127.0.0.1' | '0.0.0.0'
   management_port: number
-  // 显式局域网选择：仅可与 0.0.0.0 管理绑定同时使用；接受局域网 Host 的明文 HTTP 管理页。
-  management_lan?: true
 }>
 export type ConnectorConfig = Readonly<{
   schema_version: 1
@@ -197,7 +192,7 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
       }
       return raw as number
     }
-    const listener = /* 监听地址只接纳回环与通配地址；通配绑定时校验来源仍按回环规范地址。 */ (
+    const listener = /* 监听地址只接纳回环与通配地址；通配绑定即接受任意 Host 的明文同源访问，回环仅回环寻址。 */ (
       raw: unknown,
       optional: string[] = []
     ) => {
@@ -206,14 +201,10 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
       if (!hosts.includes(row.hostname as string)) {
         return fail()
       }
-      if (row.lan !== undefined && row.lan !== true) {
-        return fail()
-      }
       return {
         hostname: row.hostname as GatewayConfig['device_hostname'],
         port: port(row.port),
-        public_url: row.public_url as string | undefined,
-        ...(row.lan === true ? { lan: true as const } : {})
+        public_url: row.public_url as string | undefined
       }
     }
     if (input.schema_version !== 1 || !['gateway', 'connector'].includes(input.role as string)) {
@@ -225,16 +216,12 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
     }
     if (input.role === 'gateway') {
       exact(input, ['schema_version', 'role', 'data', 'mcp', 'devices', 'management'])
-      const mcp = listener(input.mcp, ['public_url', 'lan'])
+      const mcp = listener(input.mcp, ['public_url'])
       if (mcp.public_url !== undefined && !publicMcpUrl(mcp.public_url)) {
         return fail()
       }
-      if (mcp.lan !== undefined && (mcp.lan !== true || !isWildcardHostname(mcp.hostname))) {
-        // 明文局域网访问必须显式选择，且只在通配绑定下有效；回环监听不存在局域网路径。
-        return fail()
-      }
       const devices = listener(input.devices)
-      const management = exact(input.management, ['enabled', 'port'], ['hostname', 'lan'])
+      const management = exact(input.management, ['enabled', 'port'], ['hostname'])
       if (typeof management.enabled !== 'boolean') {
         return fail()
       }
@@ -243,9 +230,6 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
       }
       const managementHostname = (management.hostname ?? '127.0.0.1') as GatewayConfig['management_hostname']
       const managementPort = port(management.port)
-      if (management.lan !== undefined && (management.lan !== true || managementHostname !== '0.0.0.0')) {
-        return fail()
-      }
       if (
         new Set([mcp.port, devices.port, ...(management.enabled ? [managementPort] : [])]).size !==
         (management.enabled ? 3 : 2)
@@ -260,13 +244,11 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
         mcp_hostname: mcp.hostname as GatewayConfig['mcp_hostname'],
         mcp_port: mcp.port,
         ...(mcp.public_url !== undefined ? { mcp_public_url: mcp.public_url as string } : {}),
-        ...(mcp.lan === true ? { mcp_lan: true as const } : {}),
         device_hostname: devices.hostname,
         device_port: devices.port,
         management_enabled: management.enabled,
         management_hostname: managementHostname,
         management_port: managementPort,
-        ...(management.lan === true ? { management_lan: true as const } : {}),
         authentication_ref: 'mcp-callers'
       })
     }
@@ -347,15 +329,13 @@ export function configDocument(config: RoleConfig): Record<string, unknown> {
         mcp: {
           hostname: config.mcp_hostname,
           port: config.mcp_port,
-          ...(config.mcp_public_url !== undefined ? { public_url: config.mcp_public_url } : {}),
-          ...(config.mcp_lan === true ? { lan: true } : {})
+          ...(config.mcp_public_url !== undefined ? { public_url: config.mcp_public_url } : {})
         },
         devices: { hostname: config.device_hostname, port: config.device_port },
         management: {
           enabled: config.management_enabled,
-          ...(config.management_hostname !== '127.0.0.1' ? { hostname: config.management_hostname } : {}),
-          port: config.management_port,
-          ...(config.management_lan === true ? { lan: true } : {})
+          hostname: config.management_hostname,
+          port: config.management_port
         }
       }
     : {
@@ -385,9 +365,9 @@ export function configTemplate(
           schema_version: 1,
           role,
           data: { directory: paths.join(base, role) },
-          mcp: { hostname: '127.0.0.1', port: 9444 },
-          devices: { hostname: '127.0.0.1', port: 9443 },
-          management: { enabled: true, port: 9445 }
+          mcp: { hostname: '0.0.0.0', port: 9444 },
+          devices: { hostname: '0.0.0.0', port: 9443 },
+          management: { enabled: true, hostname: '127.0.0.1', port: 9445 }
         }
       : {
           schema_version: 1,

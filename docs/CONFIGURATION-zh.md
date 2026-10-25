@@ -15,7 +15,7 @@ rovloom config init connector --provider herdr
 rovloom config init gateway --container
 ```
 
-`--provider` 只适用于 Connector，可选 `luvus`、`herdr`、`mixed`。`--container` 只适用于 Gateway，显式将 MCP、设备和管理监听设为 `0.0.0.0`，并设置 `management.lan: true`；维护的 Compose 文件仍把 MCP / 管理端口只发布到宿主回环。MCP LAN / `public_url` 需单独配置。不带该参数时，Gateway 保持普通回环默认值。`--config` 只选择配置文件，默认状态路径仍属于当前用户 home。
+`--provider` 只适用于 Connector，可选 `luvus`、`herdr`、`mixed`。`--container` 只适用于 Gateway，显式将 MCP、设备和管理监听设为 `0.0.0.0`；维护的 Compose 文件仍把 MCP / 管理端口只发布到宿主回环。`public_url` 需单独配置。不带该参数时，Gateway 保持普通默认值（MCP 与设备通道通配，管理页回环）。`--config` 只选择配置文件，默认状态路径仍属于当前用户 home。
 
 初始化不启动服务、不创建设备身份、不批准 native 访问，沿用角色首次启动的独占文件发布机制。已有文件不覆盖；显式 provider / 监听请求与已有内容冲突时返回 `config_exists`。已有部署应先核对配置和配对状态，编辑后用 `config check` 校验再重启。
 
@@ -60,18 +60,16 @@ Connector，通常为 `~/.config/rovloom/connector.json`：
 | `data` | object，必填 | 仅含 `directory`。 |
 | `data.directory` | 规范绝对路径 string，≤4096 字符，必填 | `<home>/.local/share/rovloom/<role>`；各角色独立私有数据。 |
 | Gateway `mcp` | object，必填 | 含 `hostname`、`port`；Streamable HTTP `/mcp`。 |
-| `mcp.hostname` | string，必填 | `127.0.0.1`，也接受 `::1`、`0.0.0.0`、`::`。通配绑定用于容器等隔离环境，监听所有网卡且为明文 HTTP（Gateway 会输出 `wildcard_listener` 告警）：Host/Origin 校验仍按对应回环地址，但那只防浏览器 DNS 重绑定，挡不住手工带回环 `Host` 的网络客户端。请用防火墙或 TLS 反向代理收口；其它 Host 需配 `public_url`。 |
+| `mcp.hostname` | string，必填 | `127.0.0.1`，也接受 `::1`、`0.0.0.0`、`::`。通配绑定监听所有网卡且为明文 HTTP，接受任意 Host 的固定 `/mcp` 请求（仍需 Bearer）；回环绑定只接受回环寻址。通配监听请用防火墙或 TLS 反向代理收口；其它 Host 需配 `public_url`。 |
 | `mcp.port` | integer 1–65535，必填 | `9444`。 |
 | `mcp.public_url` | 字符串，可选 | 反向代理 / TLS 终止后的受信对外地址，必须恰为 `https://host[:port]/mcp`（无凭据、查询或其它路径）。配置后 Gateway 额外接受 `Host` 为该主机的请求（及其 CORS 来源），其余 `Host` 仍被拒绝，也从不信任转发头；监听仍只在回环，仍需 Bearer。 |
-| `mcp.lan` | 字面量 `true`，可选 | MCP 监听的明文局域网显式选择。只能与通配 `mcp.hostname`（`0.0.0.0` 或 `::`）同时使用；回环或代理配置一律拒绝。设置后监听额为接受任意 Host 的固定 `/mcp` 明文 HTTP 请求（仍需 Bearer）及浏览器同源 Origin。其余 Host 校验仍保持回环不变，因此既有容器配置不添加该字段时行为完全一致。请勿将监听暴露到不可信局域网之外，必要时用防火墙或 TLS 反向代理收口。 |
 | Gateway `devices` | object，必填 | 含 `hostname`、`port`；WS `/connector`。 |
-| `devices.hostname` | string，必填 | `127.0.0.1`，也接受 `::1`、`0.0.0.0`、`::`；默认不接受远程设备。 |
+| `devices.hostname` | string，必填 | `127.0.0.1`，也接受 `::1`、`0.0.0.0`、`::`；通配绑定接受远程设备。 |
 | `devices.port` | integer 1–65535，必填 | `9443`。 |
-| Gateway `management` | object，必填 | 含 `enabled`、`port` 与可选 `hostname`、`lan`；本地 HTTP 管理页。 |
+| Gateway `management` | object，必填 | 含 `enabled`、`hostname` 与 `port`；本地 HTTP 管理页。 |
 | `management.enabled` | boolean，必填 | `true`；`false` 关闭该监听。启用不授予管理员身份。 |
 | `management.port` | integer 1–65535，关闭时也必填 | `9445`。 |
-| `management.hostname` | string，可选 | `127.0.0.1`，也接受 `0.0.0.0`（容器等隔离环境）。会话与 Host 校验仍按 `127.0.0.1` 来源。 |
-| `management.lan` | 字面量 `true`，可选 | 管理页的明文局域网选择；`config init gateway --container` 默认写入，普通初始化省略。只能与 `management.hostname: "0.0.0.0"` 同时使用；回环配置一律拒绝。设置后管理页额为接受任意 Host 的明文 HTTP 访问（Cookie 仍为 `HttpOnly`/`SameSite=Strict`，但不是 `Secure`；跨站请求仍被同源检查拒绝）。不添加该字段时局域网访问仍返回 403，下文的 SSH 端口转发指引继续适用。Gateway 会输出既有 `wildcard_listener` 告警。页面离开受信局域网时请用 TLS 反向代理收口。 |
+| `management.hostname` | string，可选，默认写出 | `127.0.0.1`，也接受 `0.0.0.0`（局域网访问）。通配绑定接受任意 Host 的明文 HTTP 访问（Cookie 仍为 `HttpOnly`/`SameSite=Strict`，但不是 `Secure`；跨站请求仍被同源检查拒绝）；回环绑定只接受回环寻址。页面离开受信局域网时请用 TLS 反向代理收口。 |
 | Connector `gateway` | object，必填 | 仅含 `url`。 |
 | `gateway.url` | string，必填 | 初始化前为 `""`；其余为 ≤2048 字符的 WS/WSS origin，如 `ws://192.0.2.10:9443` 或 `wss://gateway.example`。不带凭据/查询/片段/路径，可带末尾 `/`；产品固定使用 `/connector`。 |
 | Connector `allow_terminal_execution` | boolean，可选 | `false`；省略也关闭。只有字面量 `true` 开启直接终端输入及自定义启动/恢复命令。修改这一份用户文件并重启 Connector，不改变安装设置或 caller/local grants。 |
@@ -177,10 +175,8 @@ caller 配置并热重载，全程不停机。原生初始化不会登录模型�
 Gateway 在本机/可信网络使用普通 HTTP/WS，公网 TLS 由外部标准 HTTPS/WSS 反向代理
 终止。Connector WSS 始终使用系统证书验证，没有自定义 CA 或跳过验证选项。
 
-无代理的局域网客户端：把 `mcp.hostname` / `management.hostname` 设为通配地址，并在对应
-监听分组加显式 `lan: true` 选择。两者随后接受局域网 Host 的明文 HTTP——MCP 仍需 Bearer，
-管理页保留 Cookie、CSRF 与同源检查，但两者都没有传输加密和网络层隔离。Gateway 会输出
-`wildcard_listener` 告警；请用防火墙收口局域网，并在任何离开局域网的路径前加 TLS 反向代理。
+无代理的局域网客户端：把 `mcp.hostname` / `management.hostname` 设为通配地址。这些监听随后接受局域网 Host 的明文 HTTP——MCP 仍需 Bearer，
+管理页保留 Cookie、CSRF 与同源检查，但两者都没有传输加密和网络层隔离。请用防火墙收口局域网，并在任何离开局域网的路径前加 TLS 反向代理。
 
 ## 原生安装
 

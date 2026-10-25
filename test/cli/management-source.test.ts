@@ -281,13 +281,13 @@ test(
 )
 
 test(
-  '显式局域网管理页接受局域网 Host 的同源登录，跨站 Origin 与未选择时不变',
-  /** resolveLease 的 Origin/Host 核对按配置的 LAN 选择逐请求放宽，其余边界保持。 */ async () => {
+  '通配管理页绑定接受局域网 Host 的同源登录，跨站 Origin 与回环绑定时不变',
+  /** resolveLease 的 Origin/Host 核对按管理页绑定逐请求放宽，其余边界保持。 */ async () => {
     if (process.platform !== 'linux') {
       return
     }
     const f = await managementSourceFixture()
-    const lanConfig = { ...f.config, management_lan: true as const } as typeof f.config
+    const lanConfig = { ...f.config, management_hostname: '0.0.0.0' as const } as typeof f.config
     for (const [config, lan] of [
       [f.config, false],
       [lanConfig, true]
