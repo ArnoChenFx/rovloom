@@ -1,6 +1,6 @@
 /** 挂载内置管理页面并管理导航/可见性资源；读取适配层不接收浏览器自报管理员身份。 */
 import { createSnapshotReader, ReadError, type ReadClock, type SnapshotReader, type TimedSnapshot } from './reader.js'
-import { parseRoute, renderPage, type PageRoute, type PageView, type DeviceFilter } from './view.js'
+import { parseRoute, renderPage, type PageRoute, type PageView, type DeviceFilter, type CallFilter } from './view.js'
 import { checkPage } from './validate.js'
 import type { ReaderState } from './reader.js'
 import { createLocalizer } from './i18n.js'
@@ -49,7 +49,7 @@ export function mountWebUi(
   const sidebarCaption = element('p', '', 'sidebar-caption')
   const navHeading = element('p', '', 'nav-heading')
   const navigation = element('nav', '', 'sidebar-nav')
-  const navLinks = (['overview', 'devices', 'pairing', 'connect'] as const).map((section) => {
+  const navLinks = (['overview', 'devices', 'calls', 'pairing', 'connect'] as const).map((section) => {
     const link = element('a', '', 'nav-link')
     link.href = section === 'overview' ? '#' : '#view=' + section
     const label = element('span')
@@ -104,7 +104,8 @@ export function mountWebUi(
   header.append(headerLabel, headerActions)
   const skip = element('a', '', 'skip-link')
   skip.href = '#management-content'
-  const footer = element('footer', '', 'muted')
+  // 页脚只作为动作区/资源面板的插入锚点保留，不再显示任何文案或分割线。
+  const footer = element('footer', '', 'footer-anchor')
   const copyFeedback = element('span', '', 'visually-hidden')
   copyFeedback.setAttribute('role', 'status')
   copyFeedback.setAttribute('aria-live', 'polite')
@@ -112,6 +113,7 @@ export function mountWebUi(
   root.replaceChildren(skip, sidebar, workspace)
   let route = parseRoute(location.hash)
   let filter: DeviceFilter = { query: '', status: 'all' }
+  let callFilter: CallFilter = 'all'
   let reader: SnapshotReader<PageView>
   let disposed = false
   let i18n = createLocalizer('en')
@@ -196,13 +198,15 @@ export function mountWebUi(
         item.link.removeAttribute('aria-current')
       }
     }
-    title.textContent = i18n.t(('nav.' + section) as 'nav.overview' | 'nav.devices' | 'nav.pairing' | 'nav.connect')
+    title.textContent = i18n.t(
+      ('nav.' + section) as 'nav.overview' | 'nav.devices' | 'nav.calls' | 'nav.pairing' | 'nav.connect'
+    )
     const active = !!state.snapshot && !state.stale && state.snapshot.value.status.mode === 'active'
     sidebarStatus.dataset.state = active ? 'current' : 'unknown'
     statusValue.textContent = i18n.t(
       active ? 'gateway.active' : state.snapshot ? (state.stale ? 'reader.stale' : 'gateway.degraded') : 'reader.empty'
     )
-    renderPage(content, state, current, i18n, !!actions, filter)
+    renderPage(content, state, current, i18n, !!actions, filter, callFilter)
     const authorized = active && !['unauthenticated', 'forbidden', 'not_found'].includes(state.problem ?? '')
     resourcePanel?.update(current, i18n, authorized)
     if (resourcePanel && section === 'connect' && authorized) {
@@ -233,14 +237,13 @@ export function mountWebUi(
     docs.href = `https://github.com/ArnoChenFx/rovloom/blob/main/docs/QUICK-START${state.language === 'zh-CN' ? '-zh' : ''}.md`
     for (const item of navLinks) {
       item.label.textContent = t(
-        ('nav.' + item.section) as 'nav.overview' | 'nav.devices' | 'nav.pairing' | 'nav.connect'
+        ('nav.' + item.section) as 'nav.overview' | 'nav.devices' | 'nav.calls' | 'nav.pairing' | 'nav.connect'
       )
     }
     commandbar.setAttribute('aria-label', t('app.subtitle'))
     refresh.textContent = t('action.refresh')
     cancel.textContent = t('action.cancel')
     skip.textContent = t('app.skip')
-    footer.textContent = t(actions ? 'app.managedFooter' : 'app.footer')
     language.update(i18n, state.language)
     theme.update(i18n, state.theme)
     if (languageChanged && reader) {
@@ -348,6 +351,17 @@ export function mountWebUi(
     }
   }
 
+  /** 调用状态筛选只重绘当前页；不发起新的服务端读取，也不改动统计范围。 */
+  function filterCalls(event: MouseEvent): void {
+    const button =
+      event.target instanceof Element ? event.target.closest<HTMLButtonElement>('[data-call-filter]') : null
+    const selected = button?.dataset.callFilter
+    if (selected === 'all' || selected === 'responded' || selected === 'pending' || selected === 'failed') {
+      callFilter = selected
+      paint(reader.state(), route)
+    }
+  }
+
   /** 复制仅由明确用户点击触发，结果未知时不宣称成功。 */
   async function copy(event: MouseEvent): Promise<void> {
     const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button[data-copy]') : null
@@ -370,6 +384,7 @@ export function mountWebUi(
   /** 哈希导航、后退与分页都先清理旧路由资源，再获取新目标。 */
   function navigate(): void {
     filter = { query: '', status: 'all' }
+    callFilter = 'all'
     actions?.suspend()
     if (location.hash === '#management-content') {
       content.focus()
@@ -418,6 +433,7 @@ export function mountWebUi(
     actions?.dispose()
     content.removeEventListener('click', deviceAction)
     content.removeEventListener('click', filterDevices)
+    content.removeEventListener('click', filterCalls)
     content.removeEventListener('input', searchDevices)
     root.removeEventListener('click', copy)
     skip.removeEventListener('click', skipContent)
@@ -438,6 +454,7 @@ export function mountWebUi(
   cancel.addEventListener('click', cancelRead)
   content.addEventListener('click', deviceAction)
   content.addEventListener('click', filterDevices)
+  content.addEventListener('click', filterCalls)
   content.addEventListener('input', searchDevices)
   root.addEventListener('click', copy)
   window.addEventListener('hashchange', navigate)

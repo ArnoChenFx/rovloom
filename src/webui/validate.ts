@@ -1,5 +1,8 @@
 /** 页面消费共享 DTO 的有界校验：未知字段/秘密正文不能留入页面快照或错误。 */
 import type {
+  CallAggregate,
+  CallListReply,
+  CallSummary,
   DeviceSnapshot,
   ManagementStatus,
   Observed,
@@ -311,7 +314,168 @@ function permissions(value: PermissionSnapshot, page: PageView, route: PageRoute
   }
 }
 
-/** 对六项共享读取的传输回复复用展示字段校验；不替代服务的查询和资源授权。 */
+/** 调用视图只接受账本枚举与有界文本；请求/响应正文、凭据与原生引用均不属于允许字段。 */
+const callStateValues = [
+  'created',
+  'dispatching',
+  'connector_accepted',
+  'responded',
+  'not_dispatched',
+  'outcome_unknown'
+] as const
+
+/** 单条调用记录：目标 profile/session 与状态都必须来自共享枚举。 */
+function callSummary(value: CallSummary): void {
+  record(value, [
+    'call_id',
+    'principal',
+    'machine_id',
+    'provider_id',
+    'provider_kind',
+    'method',
+    'state',
+    'dispatched',
+    'target',
+    'outcome',
+    'created_at',
+    'deadline',
+    'content_status'
+  ])
+  text(value.call_id)
+  text(value.principal)
+  text(value.machine_id)
+  text(value.provider_id)
+  text(value.method, 256)
+  choice(value.provider_kind, ['luvus', 'herdr'])
+  choice(value.state, callStateValues)
+  choice(value.dispatched, [true, false])
+  record(value.target, ['profile', 'session'])
+  choice(value.target.profile, ['session', 'host'])
+  if (value.target.profile === 'session') {
+    text(value.target.session, 1024)
+  } else if (value.target.session !== null) {
+    invalid()
+  }
+  choice(value.outcome, [null, 'result', 'error'])
+  time(value.created_at)
+  time(value.deadline)
+  choice(value.content_status, ['available', 'expired', 'discarded', 'unavailable'])
+}
+
+/** 分布统计的每个分类都有界且计数为正整数，不把零值行当作观测。 */
+function count(value: unknown): asserts value is number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    invalid()
+  }
+}
+
+/** 调用聚合与窗口声明一致：total 等于状态计数之和，窗口边界单调。 */
+function callAggregate(value: CallAggregate, total: number): void {
+  record(value, ['total', 'by_state', 'by_provider', 'by_principal', 'by_method'])
+  if (value.total !== total) {
+    invalid()
+  }
+  bounded(value.by_state, 6)
+  let states = 0
+  for (const row of value.by_state) {
+    record(row, ['state', 'count'])
+    choice(row.state, callStateValues)
+    count(row.count)
+    states += row.count
+  }
+  if (value.by_state.length && states !== value.total) {
+    invalid()
+  }
+  for (const [rows, limit, inspect] of [
+    [
+      value.by_provider,
+      8,
+      (row: { provider_id: string; kind: string; count: number }) => {
+        record(row, ['provider_id', 'kind', 'count'])
+        text(row.provider_id)
+        choice(row.kind, ['luvus', 'herdr'])
+        count(row.count)
+      }
+    ],
+    [
+      value.by_principal,
+      8,
+      (row: { principal: string; count: number }) => {
+        record(row, ['principal', 'count'])
+        text(row.principal)
+        count(row.count)
+      }
+    ],
+    [
+      value.by_method,
+      8,
+      (row: { method: string; count: number }) => {
+        record(row, ['method', 'count'])
+        text(row.method, 256)
+        count(row.count)
+      }
+    ]
+  ] as const) {
+    bounded(rows, limit)
+    for (const row of rows as readonly Record<string, unknown>[]) {
+      inspect(row as never)
+    }
+  }
+}
+
+/** 调用列表与窗口同属一次采样；分页游标只作为不透明文本。 */
+function callList(value: CallListReply, serverTime: number | null): void {
+  record(
+    value,
+    ['items', 'next_cursor', 'observed_at', 'aggregate', 'window'],
+    ['items', 'observed_at', 'aggregate', 'window']
+  )
+  time(value.observed_at)
+  if (serverTime !== null && value.observed_at > serverTime) {
+    invalid()
+  }
+  bounded(value.items, 200)
+  if (value.next_cursor !== undefined) {
+    text(value.next_cursor)
+  }
+  const seen = new Set<string>()
+  for (const item of value.items) {
+    callSummary(item)
+    if (seen.has(item.call_id) || (serverTime !== null && item.created_at > serverTime)) {
+      invalid()
+    }
+    seen.add(item.call_id)
+  }
+  callAggregate(value.aggregate, value.items.length)
+  record(value.window, ['since', 'first_at', 'last_at', 'sampled', 'truncated'])
+  time(value.window.since)
+  choice(value.window.truncated, [true, false])
+  // 采样数可为 0（空窗口），但必须是非负安全整数。
+  if (
+    typeof value.window.sampled !== 'number' ||
+    !Number.isSafeInteger(value.window.sampled) ||
+    // 采样数与统计总数同一范围，两者必须相等，避免页面出现互相矛盾的总数。
+    value.window.sampled !== value.aggregate.total
+  ) {
+    invalid()
+  }
+  if (value.window.first_at !== null) {
+    time(value.window.first_at)
+  }
+  if (value.window.last_at !== null) {
+    time(value.window.last_at)
+  }
+  if (
+    value.window.since > value.observed_at ||
+    (value.window.first_at !== null &&
+      value.window.last_at !== null &&
+      (value.window.first_at > value.window.last_at || value.window.last_at > value.observed_at))
+  ) {
+    invalid()
+  }
+}
+
+/** 对七项共享读取的传输回复复用展示字段校验；不替代服务的查询和资源授权。 */
 export function checkManagementReadReply<K extends ManagementReadOperation>(
   operation: K,
   input: unknown,
@@ -338,6 +502,17 @@ export function checkManagementReadReply<K extends ManagementReadOperation>(
       const item = value as PermissionSnapshot
       permissionShape(item)
       if (item.target.machine_id !== target.machine_id || item.target.provider_id !== target.provider_id) {
+        invalid()
+      }
+    } else if (operation === 'calls_list') {
+      const list = value as CallListReply
+      callList(list, null)
+      const requested = target.machine_id
+      if (requested !== undefined && list.items.some((item) => item.machine_id !== requested)) {
+        invalid()
+      }
+      const states = (args as { states?: readonly string[] }).states
+      if (states !== undefined && list.items.some((item) => !states.includes(item.state))) {
         invalid()
       }
     } else if (operation === 'devices_list' || operation === 'providers_list') {
@@ -405,7 +580,16 @@ export function checkPage(snapshot: TimedSnapshot<PageView>, route: PageRoute): 
   try {
     record(snapshot, ['value', 'serverTime', 'observedAt', 'sessionExpiresAt'])
     const page = snapshot.value
-    record(page, ['status', 'devices', 'device', 'providers', 'permissions', 'providersProblem'])
+    record(page, [
+      'status',
+      'devices',
+      'device',
+      'providers',
+      'permissions',
+      'providersProblem',
+      'calls',
+      'callsProblem'
+    ])
     status(page.status)
     time(snapshot.serverTime)
     time(snapshot.observedAt)
@@ -444,6 +628,13 @@ export function checkPage(snapshot: TimedSnapshot<PageView>, route: PageRoute): 
     if (route.machineId !== null && (page.devices.items.length || page.devices.next_cursor !== undefined)) {
       invalid()
     }
+    // 调用窗口只在调用页读取；其它页面不能夹带调用数据或部分失败标记。
+    if (page.calls !== null && route.section !== 'calls') {
+      invalid()
+    }
+    if (page.callsProblem !== null && route.section !== 'calls') {
+      invalid()
+    }
     if (
       page.device === null &&
       (page.providers.items.length || page.providers.next_cursor !== undefined || page.permissions !== null)
@@ -473,6 +664,17 @@ export function checkPage(snapshot: TimedSnapshot<PageView>, route: PageRoute): 
       if (page.permissions.observed_at > snapshot.serverTime) {
         invalid()
       }
+    }
+    choice(page.callsProblem, [null, 'forbidden', 'unavailable'])
+    if (page.calls !== null) {
+      callList(page.calls, snapshot.serverTime)
+      // 调用窗口只在无设备目标的调用页出现；其设备范围由服务端授权，页面只展示。
+      if (route.machineId !== null || route.section !== 'calls') {
+        invalid()
+      }
+    }
+    if (page.callsProblem !== null && page.calls !== null) {
+      invalid()
     }
     if (new TextEncoder().encode(JSON.stringify(snapshot)).byteLength > 524_288) {
       invalid()

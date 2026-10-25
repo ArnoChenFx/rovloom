@@ -42,6 +42,7 @@ export type {
   CallOptions,
   CallAdmissionOptions,
   CallAdmission,
+  CallWindowRow,
   ManagementRequest,
   StoreOptions,
   ResultPage
@@ -51,6 +52,7 @@ import type {
   CallOptions,
   CallAdmissionOptions,
   CallAdmission,
+  CallWindowRow,
   Machine,
   Metadata,
   Row,
@@ -1519,6 +1521,31 @@ export class Store {
       eof: cursor + data.length === row.bytes,
       ...row
     }
+  }
+  // 管理面只读窗口：按调用方已授权设备集合读取元数据行，不展开原文、绑定或证据；调用方另做逐行授权。
+  callsWindow(machines: readonly string[], since: number, limit: number): CallWindowRow[] {
+    // 参数上限远低于 SQLite 的绑定变量上限，避免超长 IN 列表在旧版本构建上失败。
+    if (!Array.isArray(machines) || machines.length > 900) {
+      throw new GatewayError('invalid_arguments')
+    }
+    if (!Number.isSafeInteger(since) || since < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 4096) {
+      throw new GatewayError('invalid_arguments')
+    }
+    if (!machines.length) {
+      return []
+    }
+    // 管理只读窗口在存储降级下仍可读，与其它管理读取一致；它不写入、不续期也不复活内容。
+    const now = this.time()
+    const placeholders = machines.map(/* 每个授权设备各占一个绑定参数，不拼接设备 ID 文本。 */ () => '?').join(',')
+    // 只读窗口沿用元数据期限，不因管理查看延长任何调用或内容寿命。
+    return this.db
+      .prepare(
+        `SELECT call_id,principal,machine_id,provider_id,provider_kind,method,state,target_json,
+        created,deadline,content_expires,content_status,response_category,epoch FROM calls
+        WHERE machine_id IN (${placeholders}) AND created>=? AND metadata_expires>?
+        ORDER BY created DESC,call_id LIMIT ?`
+      )
+      .all(...machines, since, now, limit) as CallWindowRow[]
   }
   // 审计/恢复只供独立受保护管理面；普通 Principal 不持有此入口。
   auditRecords() {

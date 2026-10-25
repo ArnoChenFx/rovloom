@@ -11,6 +11,7 @@ export type ManagementReadOperation =
   | 'providers_list'
   | 'providers_get'
   | 'permissions_get'
+  | 'calls_list'
 
 /** 由共享受保护管理传输提供；真正 AdminContext 只能在服务端中间件注入。 */
 export type ManagementReadTransport = <K extends ManagementReadOperation>(
@@ -76,13 +77,26 @@ export function createManagementPageRead(transport: ManagementReadTransport): Pa
       device: null,
       providers: { items: [] },
       permissions: null,
-      providersProblem: null
+      providersProblem: null,
+      calls: null,
+      callsProblem: null
     }
     if (route.machineId === null) {
       page.devices = await execute('devices_list', {
         limit: 50,
         ...(route.cursor === null ? {} : { cursor: route.cursor })
       })
+      if (route.section === 'calls') {
+        // 调用窗口与设备列表同属全局范围；部分失败只标记该区块，不清空整页。
+        try {
+          page.calls = await execute('calls_list', {
+            limit: 50,
+            ...(route.callsCursor === null ? {} : { cursor: route.callsCursor })
+          })
+        } catch (error) {
+          page.callsProblem = partialProblem(error)
+        }
+      }
     } else {
       const target = { machine_id: route.machineId }
       const device = await execute('devices_get', target)
@@ -116,6 +130,10 @@ export function createManagementPageRead(transport: ManagementReadTransport): Pa
       (page.permissions.recovery_generation !== after.recovery_generation ||
         page.permissions.policy_revision !== after.policy_revision)
     ) {
+      throw new ReadError('conflict')
+    }
+    // 调用窗口的采样时点必须落在同一次读取的状态 fence 内，不能与新的全局状态混拼。
+    if (page.calls && (page.calls.observed_at < before.observed_at || page.calls.observed_at > after.observed_at)) {
       throw new ReadError('conflict')
     }
     page.status = after

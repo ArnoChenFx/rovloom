@@ -104,7 +104,7 @@ code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; fo
 .read-indicator[data-state='current']::before { background: var(--good-text); }
 .read-indicator[data-state='stale'] { color: var(--warning-text); }
 .read-indicator[data-state='pending']::before { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
-.content, footer, .pairing-section, .operation-region { width: 100%; max-width: 1360px; margin-inline: auto; padding-inline: 40px; }
+.content, .pairing-section, .operation-region { width: 100%; max-width: 1360px; margin-inline: auto; padding-inline: 40px; }
 .content { padding-block: 20px 36px; min-height: calc(100dvh - 210px); }
 .content[data-section='pairing'], .content[data-section='connect'] { min-height: 0; padding-bottom: 0; }
 .page-heading { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-bottom: 24px; }
@@ -188,6 +188,48 @@ summary { cursor: pointer; }
 /* 概览摘要只列名称与 ID，完整检索和分页留在设备页。 */
 .overview-device-list .device-card { grid-template-columns: minmax(0,1fr); padding: 14px 24px; }
 .overview-device-list .device-name { margin-bottom: 0; }
+/* 调用页：状态环形图、分类条与明细列表，全部来自共享采样窗口。 */
+.call-charts { display: grid; grid-template-columns: minmax(0,1.4fr) repeat(3,minmax(0,1fr)); gap: 16px; margin-bottom: 24px; }
+.call-distribution { min-width: 0; padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
+.distribution-heading { display: flex; flex-direction: column; gap: 3px; margin-bottom: 14px; }
+.distribution-heading h3 { font-size: 13px; }
+.distribution-heading .muted { font-size: 11px; }
+.distribution-list, .state-legend { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
+/* 分类名与技术标识不截断成不可读片段：单行省略只在宽度确实不足时发生，并保留 title 全文。 */
+.distribution-row { display: grid; grid-template-columns: minmax(0,1.25fr) minmax(40px,1fr) auto; align-items: center; gap: 10px; }
+.distribution-label { min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.distribution-bar { height: 8px; border-radius: 4px; background: var(--subtle); overflow: hidden; }
+.distribution-fill { display: block; width: var(--share,0%); height: 100%; border-radius: inherit; background: var(--accent); }
+.distribution-fill.warning { background: var(--warning-text); }
+.distribution-value { font-size: 12px; font-weight: 550; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 图例占满环形图右侧可用宽度；窄屏时环形图与图例上下堆叠，名称不省略。 */
+.call-states { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: 16px; }
+.call-states .distribution-heading { grid-column: 1 / -1; }
+.state-ring { position: relative; width: 106px; height: 106px; display: grid; place-items: center; border-radius: 50%; background: var(--ring,var(--subtle)); }
+.state-ring::after { content: ''; position: absolute; inset: 14px; border-radius: 50%; background: var(--surface); }
+.state-ring-center { position: relative; z-index: 1; display: grid; justify-items: center; line-height: 1.25; }
+.state-ring-total { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.state-ring-center .muted { font-size: 10px; text-align: center; }
+.state-legend li { display: grid; grid-template-columns: 8px minmax(0,1fr) auto; align-items: center; gap: 8px; font-size: 12px; }
+.state-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tone,var(--muted)); }
+.state-name { min-width: 0; overflow-wrap: anywhere; }
+.state-count { font-variant-numeric: tabular-nums; }
+.call-filters { flex-wrap: wrap; }
+.call-columns, .call-card { display: grid; grid-template-columns: minmax(0,1.25fr) minmax(0,1.2fr) minmax(0,.95fr) minmax(0,.85fr); gap: 20px; }
+.call-columns { padding: 10px 24px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--subtle); color: var(--muted); font-size: 11px; }
+.call-list { margin: 0; padding: 0; list-style: none; }
+.call-card { align-items: start; padding: 16px 24px; border-bottom: 1px solid var(--border); }
+.call-card:last-child { border-bottom: 0; }
+.call-card:hover { background: color-mix(in srgb,var(--subtle) 60%,transparent); }
+.call-card > div { min-width: 0; }
+.call-method { display: block; font-size: 13px; overflow-wrap: anywhere; }
+.call-identity > code { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.call-principal { display: block; font-size: 12px; overflow-wrap: anywhere; }
+.call-source p, .call-time p { font-size: 11px; }
+.call-state { display: grid; gap: 4px; justify-items: start; }
+.call-state .badge { font-size: 11px; white-space: normal; }
+.call-time strong { font-size: 12px; font-weight: 550; }
+.mono { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; }
 /* 分组设备详情与明确确认的管理操作。 */
 .back-link { display: block; margin-bottom: 16px; color: var(--muted); font-size: 12px; text-decoration: none; }
 .page-heading:has(.back-link) { display: block; }
@@ -290,15 +332,15 @@ dd { margin: 0; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
 .loading .state-symbol { border-width: 2px; border-top-color: var(--accent); animation: spin 1s linear infinite; }
 .notice { padding: 14px 18px; margin-bottom: 22px; border: 1px solid var(--notice-border); border-radius: 9px; font-size: 12px; }
 .gateway .notice { margin-top: 16px; }
-footer { padding-block: 20px 24px; color: var(--muted); font-size: 11px; }
-footer::before { display: block; content: ''; height: 1px; background: var(--border); margin-bottom: 16px; }
+/* 页脚只作为动作区与资源面板的插入锚点，不渲染文案或分割线。 */
+.footer-anchor { padding-block: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .loading .state-symbol, .read-indicator[data-state='pending']::before { animation: none; } }
 @media (max-width: 1200px) {
   .sidebar { width: 200px; padding-inline: 16px; }
   .workspace { margin-left: 200px; }
-  .topbar, .content, footer, .pairing-section, .operation-region { padding-inline: 28px; }
+  .topbar, .content, .pairing-section, .operation-region { padding-inline: 28px; }
   .device-card, .device-columns { gap: 14px; }
   .device-tools { flex-wrap: wrap; }
   .search-field { flex: 1 1 220px; width: auto; }
@@ -318,9 +360,10 @@ footer::before { display: block; content: ''; height: 1px; background: var(--bor
   .overview-metrics { gap: 12px; }
   .metric-card { padding: 18px; }
   .device-columns, .device-card { grid-template-columns: minmax(0,1.5fr) minmax(0,1fr) minmax(0,.8fr) minmax(0,.85fr); gap: 12px; }
+  .call-charts { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 680px) {
-  .topbar, .content, footer, .pairing-section, .operation-region { padding-inline: 20px; }
+  .topbar, .content, .pairing-section, .operation-region { padding-inline: 20px; }
   .page-heading { align-items: flex-start; flex-wrap: wrap; gap: 18px; margin-bottom: 24px; }
   .eyebrow { font-size: 10px; }
   .metric-card { padding: 16px; }
@@ -334,6 +377,10 @@ footer::before { display: block; content: ''; height: 1px; background: var(--bor
   .gateway .gateway-facts { grid-template-columns: 1fr; }
   .device-columns { display: none; }
   .device-card { grid-template-columns: 1fr 1fr; gap: 18px; padding: 20px; }
+  .call-charts { grid-template-columns: 1fr; }
+  .call-columns { display: none; }
+  .call-card { grid-template-columns: 1fr 1fr; gap: 14px; padding: 18px 20px; }
+  .call-identity { grid-column: 1 / -1; }
   .device-identity { grid-column: 1 / -1; }
   .device-observations { grid-column: 1 / -1; }
   .device-name { font-size: 14px; }
@@ -358,7 +405,7 @@ footer::before { display: block; content: ''; height: 1px; background: var(--bor
   .sidebar { padding-inline: 16px; }
   .sidebar-nav { gap: 4px; }
   .nav-link { flex: 1 1 calc(50% - 4px); font-size: 12px; justify-content: flex-start; padding-inline: 10px; }
-  .topbar, .content, footer, .pairing-section, .operation-region { padding-inline: 16px; }
+  .topbar, .content, .pairing-section, .operation-region { padding-inline: 16px; }
   .topbar { flex-wrap: wrap; gap: 8px; }
   .topbar-actions { gap: 8px; }
   .topbar .header-label { font-size: 12px; }

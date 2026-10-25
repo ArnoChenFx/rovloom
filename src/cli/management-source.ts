@@ -46,9 +46,14 @@ function grant(input: unknown): ManagementGrant {
     reference(value.machine_id)
     reference(value.provider_id)
   } else if (
-    ['devices_read', 'devices_rename', 'devices_disconnect', 'devices_revoke', 'permissions_read'].includes(
-      value.action as string
-    )
+    [
+      'devices_read',
+      'devices_rename',
+      'devices_disconnect',
+      'devices_revoke',
+      'permissions_read',
+      'calls_read'
+    ].includes(value.action as string)
   ) {
     fields(value, ['action', 'machine_id'])
     reference(value.machine_id)
@@ -266,7 +271,8 @@ export function openProtectedManagementSource(
         'devices_rename',
         'devices_disconnect',
         'devices_revoke',
-        'permissions_read'
+        'permissions_read',
+        'calls_read'
       ] as const) {
         grants.push({ action, machine_id: resource.machine_id })
       }

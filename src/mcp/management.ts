@@ -1,5 +1,6 @@
 /** MCP/CLI 与 WebUI 共用的管理契约；类型按管理面提供方维护，不实现身份或后台服务。 */
 import type { Principal } from '../router.js'
+import type { CallState } from '../contracts.js'
 
 export type CallerIdentity = Readonly<{ principal_id: string }>
 export type Page<T> = { items: T[]; next_cursor?: string }
@@ -23,10 +24,17 @@ export type ManagementPermission =
   | 'providers_read'
   | 'providers_manage'
   | 'permissions_read'
+  | 'calls_read'
 export type ManagementGrant =
   | { action: 'gateway_read' | 'devices_register' }
   | {
-      action: 'devices_read' | 'devices_rename' | 'devices_disconnect' | 'devices_revoke' | 'permissions_read'
+      action:
+        | 'devices_read'
+        | 'devices_rename'
+        | 'devices_disconnect'
+        | 'devices_revoke'
+        | 'permissions_read'
+        | 'calls_read'
       machine_id: string
     }
   | { action: 'providers_read' | 'providers_manage'; machine_id: string; provider_id: string }
@@ -116,6 +124,58 @@ export type PermissionDecision = {
   allowed: boolean
   reason_code: 'allowed' | 'forbidden' | 'backend_unavailable' | 'storage_degraded'
 }
+/**
+ * 管理面调用记录投影：只含账本元数据与调用方已提交的命令名，
+ * 不含请求正文、响应正文、凭据或原生会话引用。
+ */
+export type CallSummary = {
+  call_id: string
+  principal: string
+  machine_id: string
+  provider_id: string
+  provider_kind: 'luvus' | 'herdr'
+  method: string
+  state: CallState
+  /** 派发后的连接代次存在与否；原始 epoch 引用不离开账本。 */
+  dispatched: boolean
+  /** 目标只保留 profile 与调用方声明的 session 名，不含原生句柄或凭据。 */
+  target: { profile: 'session' | 'host'; session: string | null }
+  /** 已落盘响应类别；未响应或原文不可用时为 null。 */
+  outcome: 'result' | 'error' | null
+  created_at: number
+  deadline: number
+  /** 内容是否仍可读；到期或丢弃后只保留状态，不复活原文。 */
+  content_status: 'available' | 'expired' | 'discarded' | 'unavailable'
+}
+/** 单次采样内的分布统计，覆盖当前授权设备范围，不受分页影响。 */
+export type CallAggregate = {
+  total: number
+  by_state: readonly { state: CallState; count: number }[]
+  by_provider: readonly { provider_id: string; kind: 'luvus' | 'herdr'; count: number }[]
+  by_principal: readonly { principal: string; count: number }[]
+  by_method: readonly { method: string; count: number }[]
+}
+export type CallWindow = {
+  /** 统计窗口起点；更早的调用已不在窗口内或已被清理。 */
+  since: number
+  /** 窗口中最早与最晚一条调用的登记时间；窗口为空时为 null。 */
+  first_at: number | null
+  last_at: number | null
+  /** 实际纳入统计的行数，与 `sampled` 一起说明是否为窗口全量。 */
+  sampled: number
+  /** 窗口内行数超过单次采样上限；列表仍可分页，但统计只覆盖采样的最新部分。 */
+  truncated: boolean
+}
+export type CallListReply = Page<CallSummary> & {
+  observed_at: number
+  aggregate: CallAggregate
+  window: CallWindow
+}
+export type CallListArguments = AdminPage & {
+  /** 可选设备范围；缺省覆盖当前管理员全部 devices_read 授权。 */
+  machine_id?: string
+  states?: readonly CallState[]
+}
 export type PermissionSnapshot = {
   target: ResourceTarget
   principal_id: string
@@ -200,6 +260,7 @@ export type ManagementArguments = {
   providers_list: AdminPage & { machine_id: string }
   providers_get: { machine_id: string; provider_id: string }
   permissions_get: ResourceTarget
+  calls_list: CallListArguments
   operations_get: { request_id: string; history_epoch: string; recovery_generation: string }
   confirmations_create: ConfirmationDraft
   confirmations_confirm: ManagementWrite & { operation_digest: string }
@@ -257,6 +318,7 @@ export type ManagementReply = {
   providers_list: Page<ProviderSnapshot>
   providers_get: ProviderSnapshot
   permissions_get: PermissionSnapshot
+  calls_list: CallListReply
   operations_get: OperationReceipt
   confirmations_create: ConfirmationView
   confirmations_confirm: ConfirmationView

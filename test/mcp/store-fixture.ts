@@ -118,6 +118,8 @@ export function storeFixture(mode: 'active' | 'storage_degraded' = 'active', mut
       { action: 'devices_read', machine_id: 'machine_a' },
       { action: 'devices_read', machine_id: 'machine_b' },
       { action: 'permissions_read', machine_id: 'machine_a' },
+      // 调用窗口默认只授予 machine_a；machine_b 用于验证越范围拒绝。
+      { action: 'calls_read', machine_id: 'machine_a' },
       { action: 'devices_revoke', machine_id: 'machine_a' },
       { action: 'providers_read', machine_id: 'machine_a', provider_id: 'luvus_a' },
       { action: 'providers_read', machine_id: 'machine_a', provider_id: 'herdr_a' },

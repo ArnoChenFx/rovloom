@@ -63,7 +63,8 @@ const readNames = new Set([
   'devices_get',
   'providers_list',
   'providers_get',
-  'permissions_get'
+  'permissions_get',
+  'calls_list'
 ])
 
 /** 仅输出固定公共码，底层 SQL、路径、身份后端异常与用户内容均不离开服务。 */

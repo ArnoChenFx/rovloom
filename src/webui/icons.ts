@@ -5,6 +5,7 @@ const paths = {
   pairing:
     'M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3M21 16v3a2 2 0 0 1-2 2h-3M12 8v8M8 12h8',
   connect: 'M9 8 6 12l3 4M15 8l3 4-3 4M13 5l-2 14',
+  calls: 'M4 6h16M4 12h10M4 18h7M18 14v4M16 16h4',
   arrow: 'M5 12h14M14 7l5 5-5 5',
   plus: 'M12 5v14M5 12h14',
   search: 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',
