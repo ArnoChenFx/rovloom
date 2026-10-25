@@ -282,15 +282,17 @@ export function createSnapshotReader<T>(
     if (disposed) {
       return
     }
+    // 先进入停止状态与清空数据，再结束在途请求：finish() 内部会调用 schedulePoll()，
+    // 若此时 stopped 仍为 false 就会重新排上 5 秒轮询，认证失败后仍会自动重试并恢复数据。
+    // expire() 也用同一顺序。
+    stopped = next === 'unauthenticated' || next === 'forbidden' || next === 'not_found'
+    snapshot = null
+    receivedAt = 0
+    problem = next
     clearPoll()
     clock.clear(tick)
     active?.abort.abort()
     active?.finish()
-    snapshot = null
-    receivedAt = 0
-    problem = next
-    // 认证类失败后自动轮询停止，等待明确的用户动作或页面重新可见。
-    stopped = next === 'unauthenticated' || next === 'forbidden' || next === 'not_found'
     publish()
   }
 

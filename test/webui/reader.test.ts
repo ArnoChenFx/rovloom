@@ -240,6 +240,51 @@ test(
   }
 )
 
+// 读取在途时 reset 是最容易漏的顺序：finish() 内部会重新安排轮询，stopped 必须先置位。
+test(
+  '读取在途时 reset 不留下自动轮询，推进时钟也不新增读取',
+  /** 写请求认证失败时通常仍有在途读取；此时 reset 后必须等用户明确重试。 */ async () => {
+    const timer = fakeClock()
+    const pending = deferred<TimedSnapshot<string>>()
+    let reads = 0
+    const reader = createSnapshotReader(
+      /** 首次读取保持挂起，模拟 reset 发生时仍有在途请求。 */
+      () => {
+        reads++
+        return pending.promise
+      },
+      /** 直接观察状态。 */
+      () => {},
+      timer.clock
+    )
+    const first = reader.refresh()
+    await flush()
+    assert.equal(reads, 1)
+    assert.equal(reader.state().pending, true)
+    reader.reset('forbidden')
+    // 在途请求被取消，状态立即进入认证失败且无数据。
+    assert.equal(reader.state().snapshot, null)
+    assert.equal(reader.state().problem, 'forbidden')
+    assert.equal(reader.state().pending, false)
+    pending.resolve(sample())
+    await first
+    await flush()
+    // 关键断言：reset 后没有任何定时器，推进时钟也不会自动重读或恢复数据。
+    assert.equal(timer.count(), 0)
+    timer.advance(60_000)
+    await flush()
+    assert.equal(reads, 1)
+    assert.equal(reader.state().snapshot, null)
+    assert.equal(reader.state().problem, 'forbidden')
+    // 用户明确刷新仍然可以恢复。
+    const before = reads
+    await reader.refresh()
+    assert.equal(reads, before + 1)
+    assert.equal(reader.state().snapshot?.value, 'machine-a')
+    reader.dispose()
+  }
+)
+
 // 页面隐藏后重新可见也必须能从 reset 状态恢复，而 dispose 过的 reader 不会。
 test(
   'reset 后重新可见可恢复读取，dispose 后则永久停止',
