@@ -23,6 +23,7 @@ import { writeSetupJson } from '../../src/cli/setup-files.js'
 import { setupReference, setupTarget, simpleSetupAuthorization } from '../../src/cli/setup-policy.js'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
 import { hash } from '../../src/wire/index.js'
+import { writeAdminFiles } from '../../src/cli/admin-command.js'
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'rovloom-pairing-recovery-'))
@@ -134,6 +135,55 @@ test('配对上下文须验证秘密，查询不消费配对码，也不返回�
     assert.equal(f.http.codes.list()[0]!.status, 'unused')
     assert.equal((await f.http.handle(post(issued.code))!).status, 200)
     assert.equal((await f.http.handle(request(issued.code))!).status, 200)
+  } finally {
+    await f.close()
+  }
+})
+
+test('没有设备且 providers 文件为空时，保留 admin 与 claim 初始化身份完成配对', { timeout: 20_000 }, async () => {
+  const f = fixture()
+  try {
+    writeAdminFiles(f.config, 'admin', Date.now())
+    const first = f.http.codes.create()
+    assert.equal((await f.http.handle(post(first.code))!).status, 200)
+    const lineage = 'claim_' + first.entry.code_id
+    const actor = 'caller_' + lineage
+    const clientPath = runtimeReference(f.config.state_dir, 'mcp-client')
+    const registryPath = runtimeReference(f.config.state_dir, 'mcp-callers')
+    const providersPath = runtimeReference(f.config.state_dir, 'providers')
+    const client = JSON.parse(readFileSync(clientPath, 'utf8'))
+    const registry = JSON.parse(readFileSync(registryPath, 'utf8'))
+    client.principal_id = actor
+    client.attempt_id = lineage
+    registry.local_policy.revision = 'setup_local_' + lineage
+    const caller = registry.callers.find(
+      (entry: { principal: { id: string } }) => entry.principal.id === 'operator_simple_pairing'
+    )!
+    const admin = structuredClone(
+      registry.callers.find((entry: { principal: { id: string } }) => entry.principal.id === 'admin')
+    )
+    caller.principal.id = actor
+    caller.principal.policy.revision = 'setup_caller_' + lineage
+    writeSetupJson(clientPath, client, true)
+    writeSetupJson(registryPath, registry, true)
+    f.state.store.deleteDevice(first.entry.machine_id, 'fixture_cleanup')
+    writeSetupJson(providersPath, { schema_version: 1, role: 'gateway', providers: [] }, true)
+    assert.equal(f.state.store.resources().length, 0)
+    const next = f.http.codes.create()
+    const manifest = installation(next.code)
+    manifest.installations[0]!.value.config.peer_policy_revision = 'setup_local_' + lineage
+    const result = await f.http.handle(post(next.code, manifest))!
+    assert.equal(result.status, 200, JSON.stringify(await result.clone().json()))
+    assert.deepEqual(JSON.parse(readFileSync(clientPath, 'utf8')), client)
+    const updated = JSON.parse(readFileSync(registryPath, 'utf8'))
+    assert.equal(
+      updated.callers.find((entry: { principal: { id: string } }) => entry.principal.id === actor).token_sha256,
+      caller.token_sha256
+    )
+    assert.deepEqual(
+      updated.callers.find((entry: { principal: { id: string } }) => entry.principal.id === 'admin'),
+      admin
+    )
   } finally {
     await f.close()
   }
