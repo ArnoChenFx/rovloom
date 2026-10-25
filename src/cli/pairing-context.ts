@@ -48,9 +48,10 @@ export function gatewayPairingContext(config: GatewayConfig): PairingContext {
     resource
   )
   const caller = registry.callers.find((entry) => entry.principal.id === actor)
+  // 原 MCP 令牌可被撤销；缓存仍标识配对谱系，后续合并不得重新创建这个调用方。
   if (
     registry.local_policy.revision !== 'setup_local_' + lineage ||
-    caller?.principal.policy.revision !== 'setup_caller_' + lineage
+    (caller !== undefined && caller.principal.policy.revision !== 'setup_caller_' + lineage)
   ) {
     throw new GatewayError('pairing_conflict')
   }

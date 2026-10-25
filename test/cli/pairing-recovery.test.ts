@@ -24,6 +24,7 @@ import { setupReference, setupTarget, simpleSetupAuthorization } from '../../src
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
 import { hash } from '../../src/wire/index.js'
 import { writeAdminFiles } from '../../src/cli/admin-command.js'
+import { createGatewayCaller, revokeCaller } from '../../src/cli/token-registry.js'
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'rovloom-pairing-recovery-'))
@@ -184,6 +185,30 @@ test('没有设备且 providers 文件为空时，保留 admin 与 claim 初始�
       updated.callers.find((entry: { principal: { id: string } }) => entry.principal.id === 'admin'),
       admin
     )
+  } finally {
+    await f.close()
+  }
+})
+
+test('撤销原 MCP 令牌后仍可配对，原令牌不会被恢复', { timeout: 20_000 }, async () => {
+  const f = fixture()
+  try {
+    const first = f.http.codes.create()
+    assert.equal((await f.http.handle(post(first.code))!).status, 200)
+    const path = runtimeReference(f.config.state_dir, 'mcp-callers')
+    const registry = JSON.parse(readFileSync(path, 'utf8'))
+    const oldHash = registry.callers[0].token_sha256
+    const added = createGatewayCaller(registry, 'current_client', Date.now())
+    const next = revokeCaller(added.registry, 'operator_simple_pairing')
+    const currentHash = next.callers.find((entry) => entry.principal.id === 'current_client')!.token_sha256
+    writeSetupJson(path, next, true)
+    const issued = f.http.codes.create()
+    const result = await f.http.handle(post(issued.code))!
+    assert.equal(result.status, 200, JSON.stringify(await result.clone().json()))
+    const updated = JSON.parse(readFileSync(path, 'utf8'))
+    assert(!updated.callers.some((entry: { token_sha256: string }) => entry.token_sha256 === oldHash))
+    assert(updated.callers.some((entry: { token_sha256: string }) => entry.token_sha256 === currentHash))
+    assert.equal(updated.callers.length, 1)
   } finally {
     await f.close()
   }
