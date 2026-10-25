@@ -38,26 +38,23 @@ def contrast_check(page):
 
 
 class PreferenceControl:
-    """通过用户实际可见的图标和选项操作偏好，不直接修改展示状态。"""
+    """Operate the same one-click controls users see."""
 
     def __init__(self, page, kind):
-        """取得稳定入口与它控制的选项面板。"""
         self.root = page.locator(f'[data-preference="{kind}"]')
         self.trigger = self.root.locator('.preference-trigger')
-        self.panel = self.root.locator('.preference-panel')
 
     def choose(self, value):
-        """点击图标后选择固定枚举，并核对面板收起和焦点返回。"""
-        if self.trigger.get_attribute('aria-expanded') != 'true':
+        assert value in ['zh-CN', 'en', 'light', 'dark']
+        if self.value() != value:
             self.trigger.click()
-        self.panel.locator(f'[data-choice="{value}"]').click()
-        expect(self.panel).to_be_hidden()
+        else:
+            self.trigger.focus()
         expect(self.trigger).to_be_focused()
         assert self.value() == value
 
     def value(self):
-        """从对辅助技术公开的选择状态读取当前枚举。"""
-        return self.panel.locator('[aria-pressed="true"]').get_attribute('data-choice')
+        return self.trigger.get_attribute('data-value')
 
 
 def controls(page):
@@ -66,80 +63,57 @@ def controls(page):
 
 
 def icon_interactions(page, output, checks):
-    """验证图标入口、展开、选择、键盘退出、外部关闭及窄屏面板边界。"""
+    """A single pointer or keyboard activation changes the preference with no menu."""
     language, theme = controls(page)
     route = page.evaluate('location.hash')
-    assert page.locator('.preferences select').count() == 0
+    assert page.locator('.preferences select,.preference-panel,[aria-haspopup]').count() == 0
     assert page.locator('.preference-trigger svg[aria-hidden="true"]').count() == 2
     for control in [language, theme]:
+        original = control.value()
+        target = control.trigger.get_attribute('data-next-value')
+        assert original != target
         assert control.trigger.inner_text() == ''
         assert control.trigger.get_attribute('title')
-        control.trigger.focus()
-        page.keyboard.press('Enter')
-        expect(control.panel).to_be_visible()
-        page.keyboard.press('Tab')
-        expect(control.panel.locator('button').first).to_be_focused()
-        page.keyboard.press('End')
-        expect(control.panel.locator('button').last).to_be_focused()
-        page.keyboard.press('Home')
-        page.keyboard.press('ArrowUp')
-        expect(control.panel.locator('button').last).to_be_focused()
-        page.keyboard.press('ArrowDown')
-        expect(control.panel.locator('button').first).to_be_focused()
-        page.keyboard.press('Escape')
-        expect(control.panel).to_be_hidden()
+        assert control.trigger.get_attribute('aria-expanded') is None
+        control.trigger.click()
+        assert control.value() == target
         expect(control.trigger).to_be_focused()
-        page.keyboard.press('ArrowUp')
-        expect(control.panel.locator('button').last).to_be_focused()
-        page.keyboard.press('Escape')
+        page.keyboard.press('Enter')
+        assert control.value() == original
+        page.keyboard.press('Space')
+        assert control.value() == target
+        page.keyboard.press('Tab')
+        expect(control.trigger).not_to_be_focused()
+        control.trigger.click()
+        assert control.value() == original
         control.trigger.dblclick()
-        expect(control.panel).to_be_hidden()
-    language.trigger.click()
-    theme.trigger.click()
-    expect(language.panel).to_be_hidden()
-    expect(theme.panel).to_be_visible()
-    page.locator('h1').click()
-    expect(theme.panel).to_be_hidden()
-    language.trigger.focus()
-    page.keyboard.press('Space')
-    page.keyboard.press('Tab')
-    page.keyboard.press('Shift+Tab')
-    page.keyboard.press('Shift+Tab')
-    expect(language.panel).to_be_hidden()
-    theme.trigger.focus()
-    page.keyboard.press('ArrowDown')
-    page.keyboard.press('ArrowDown')
-    page.keyboard.press('Enter')
-    expect(theme.trigger).to_be_focused()
-    assert theme.value() == 'light'
+        assert control.value() == original
     assert route == page.evaluate('location.hash')
-    for width in [320, 480, 481, 760, 761, 1050, 1051, 1440]:
-        page.set_viewport_size({'width': width, 'height': 960})
+    for width in [320,480,481,760,761,1050,1051,1440]:
+        page.set_viewport_size({'width':width,'height':960})
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
         brand = page.locator('.brand').bounding_box()
         first = language.trigger.bounding_box()
-        assert brand['x'] + brand['width'] <= first['x']
-        for control in [language, theme]:
+        assert brand['x'] + brand['width'] <= first['x'] or brand['y'] + brand['height'] <= first['y']
+        for control in [language,theme]:
             control.trigger.click()
-            box = control.panel.bounding_box()
+            box = control.trigger.bounding_box()
             assert box['x'] >= 0 and box['x'] + box['width'] <= width
-            assert box['y'] > control.trigger.bounding_box()['y']
-            if width in [320, 1440]:
-                page.screenshot(path=str(output / f'icons-{control.root.get_attribute("data-preference")}-{width}.png'), full_page=True)
-            page.keyboard.press('Escape')
-    language.trigger.click()
+        assert page.locator('.preference-panel').count() == 0
+    language.trigger.focus()
+    page.keyboard.press('Tab')
+    expect(theme.trigger).to_be_focused()
     page.evaluate("location.hash='#machine=fixture-a'")
     page.locator('.provider-card').first.wait_for()
-    expect(language.panel).to_be_hidden()
     expect(page.locator('main')).to_be_focused()
-    checks.append('icon controls: localized names/current values, keyboard selection, Escape/focus exit/outside close, repeated clicks, navigation and eight viewport widths')
+    checks.append('one-click language/theme toggles: pointer, Enter/Space, stable focus, no menus, repeated activation, navigation and eight viewport widths')
 
 
 
 def first_paint(browser, base, output, checks, page_error):
     """暂停主模块，核对保存主题在首次绘制前生效且无需主模块装载。"""
     records = []
-    for system, saved, background in [('light', 'dark', 'rgb(17, 19, 24)'), ('dark', 'light', 'rgb(246, 247, 249)')]:
+    for system, saved, background in [('light', 'dark', 'rgb(16, 24, 19)'), ('dark', 'light', 'rgb(247, 249, 245)')]:
         context = browser.new_context(locale='en-US', color_scheme=system, viewport={'width': 900, 'height': 650})
         context.add_init_script("localStorage.setItem('rovloom.webui.theme'," + json.dumps(saved) + ");window.themePaints=[];new PerformanceObserver(/** 捕获实际首帧属性和背景，不依赖模块完成后的断言。 */list=>{for(const entry of list.getEntries())window.themePaints.push({name:entry.name,theme:document.documentElement.dataset.theme,background:getComputedStyle(document.documentElement).backgroundColor})}).observe({type:'paint',buffered:true})")
         page = context.new_page()
@@ -182,10 +156,10 @@ def first_paint(browser, base, output, checks, page_error):
     page.route('**/browser.js', hold_system)
     page.goto(base + '/', wait_until='commit')
     page.wait_for_selector('body', state='attached')
-    page.wait_for_function("() => getComputedStyle(document.documentElement).backgroundColor==='rgb(246, 247, 249)'")
+    page.wait_for_function("() => getComputedStyle(document.documentElement).backgroundColor==='rgb(247, 249, 245)'")
     assert page.locator('html').get_attribute('data-theme') is None
     page.emulate_media(color_scheme='dark')
-    page.wait_for_function("() => getComputedStyle(document.documentElement).backgroundColor==='rgb(17, 19, 24)'")
+    page.wait_for_function("() => getComputedStyle(document.documentElement).backgroundColor==='rgb(16, 24, 19)'")
     assert page.locator('html').get_attribute('data-theme') is None
     assert page.locator('#rovloom-management').inner_text() == ''
     for route in held:
@@ -258,7 +232,7 @@ def main():
                 assert page.get_by_role('heading', name=device_name, exact=True).count() == 1
                 assert page.locator('main code').first.inner_text() == 'fixture-a'
                 logo = page.get_by_role('img', name='Rovloom', exact=True)
-                assert logo.evaluate('/* 核对品牌原图与实际显示尺寸。 */ (el)=>el.complete&&el.naturalWidth===256&&el.naturalHeight===256&&el.width===48&&el.height===48')
+                assert logo.evaluate('/* 核对品牌原图与实际显示尺寸。 */ (el)=>el.complete&&el.naturalWidth===2172&&el.naturalHeight===724&&Math.abs(el.getBoundingClientRect().width/el.getBoundingClientRect().height-3)<0.01')
                 contrast_check(page)
                 page.evaluate("window.webUiFixture.mode='hold'")
                 page.get_by_role('button', name=words['refresh'], exact=True).click()
@@ -290,7 +264,7 @@ def main():
                 page.keyboard.press('Tab')
                 assert theme_control.trigger.evaluate('/* 核对键盘焦点与可见轮廓。 */ (el)=>document.activeElement===el&&getComputedStyle(el).outlineStyle!=="none"')
                 page.screenshot(path=str(output / f'{language}-{theme}.png'), full_page=True)
-                checks.append(f'{language}/{theme}: square logo, text contrast, keyboard focus and 320px layout')
+                checks.append(f'{language}/{theme}: official wordmark proportions, text contrast, keyboard focus and 320px layout')
 
                 page.evaluate("window.webUiFixture.mode='stale_children'")
                 page.get_by_role('button', name=words['refresh'], exact=True).click()
@@ -359,10 +333,6 @@ def main():
         page.emulate_media(color_scheme='dark')
         assert page.locator('html').get_attribute('lang') == 'zh-CN'
         assert page.locator('html').get_attribute('data-theme') == 'light'
-        language_control.choose('system')
-        theme_control.choose('system')
-        expect(page.locator('html')).to_have_attribute('data-theme', 'dark')
-        assert page.locator('html').get_attribute('lang') == 'en'
         checks.append('system language/theme changes are live; manual choices remain independent; focused route link survives localization')
         page.goto(base + '/fixtures/#machine=fixture-a')
         page.locator('.provider-card').first.wait_for()
@@ -379,10 +349,11 @@ def main():
         assert page.evaluate('window.webUiFixture.reads') == count
         checks.append('language/theme switches preserve the original monotonic expiry boundary without a new read')
         page.evaluate("Object.defineProperty(navigator,'languages',{configurable:true,value:['en-US']})")
-        language_control.choose('system')
-        theme_control.choose('system')
+        page.evaluate("localStorage.removeItem('rovloom.webui.language');localStorage.removeItem('rovloom.webui.theme')")
+        page.reload()
+        page.locator('.provider-card').first.wait_for()
         before = page.evaluate('({language:document.documentElement.lang,theme:document.documentElement.dataset.theme})')
-        page.evaluate("window.webUiFixture.dispose();Object.defineProperty(navigator,'languages',{configurable:true,value:['zh-CN']});window.dispatchEvent(new Event('languagechange'))")
+        page.evaluate("window.webUiFixture.dispose();Object.defineProperty(navigator,'languages',{configurable:true,value:['en-US']});window.dispatchEvent(new Event('languagechange'))")
         page.emulate_media(color_scheme='light')
         page.wait_for_timeout(100)
         assert page.locator('#rovloom-management').inner_text() == ''
@@ -405,8 +376,8 @@ def main():
             assert page.locator('html').get_attribute('lang') == 'en'
             assert page.locator('html').get_attribute('data-theme') == 'dark'
             language_control, theme_control = controls(page)
-            assert language_control.value() == 'system'
-            assert theme_control.value() == 'system'
+            assert language_control.value() == 'en'
+            assert theme_control.value() == 'dark'
             language_control.choose('zh-CN')
             theme_control.choose('light')
             assert page.locator('html').get_attribute('lang') == 'zh-CN'

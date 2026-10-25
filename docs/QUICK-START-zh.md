@@ -155,28 +155,22 @@ docker compose run --rm gateway admin create
 5. 在 Connector 终端确认本地安装授权，等待页面显示原生激活完成、设备就绪。
    Gateway 在运行中加载新配置，不需要在 Gateway 终端批准安装。
 
-**获取 MCP Bearer：** 网页配对完成后，在 Gateway 机器的另一个终端运行：
+**获取 MCP Bearer：** 在面板打开**连接 MCP**，填写名称、选择有效期，点击**创建 Token**。
+Token 会保留在列表中，随时可以**显示、复制、删除**，刷新网页或重启 Gateway 后仍然可查看。
+面板新建的 Token 可以访问当前和之后配对的设备。旧版只保存摘要且没有原文副本的 Token
+需要重新签发。管理员密码与 MCP Bearer 是独立的凭据。
 
-```sh
-rovloom token list
-```
+在 AI 客户端填写 MCP 地址，并将 `Authorization` 设置为 `Bearer <TOKEN>`。
+远程访问时，将回环地址换成可访问的 Gateway 地址，并按下节开启 MCP 局域网访问。
 
-找到列表中的实际调用方 ID（网页首次配对生成的主体形如 `caller_…`），用它替换下面的
-`EXISTING_CALLER_ID`，签发一个客户端专用令牌：
+**设备**详情页可以删除设备并断开连接。**配对设备**页面会列出已保存的配对记录，也可以删除。
+删除未完成的配对会终止该次配对；删除已完成的配对记录会保留设备。
+删除设备会清理其运行配置、配对记录和调用内容，再次连接需要重新配对。
 
-```sh
-rovloom token create --principal my_client --like EXISTING_CALLER_ID
-```
-
-保存只打印一次的令牌原文，它就是第 4 节使用的 Bearer。Docker 用户用镜像入口运行上述命令：
-
-```sh
-docker compose run --rm gateway token list
-docker compose run --rm gateway token create --principal my_client --like EXISTING_CALLER_ID
-```
-
-管理员密码不能充当 MCP Bearer；网页用于配对和管理设备，
-MCP 服务仍需在 AI 客户端中配置。
+仍可使用 CLI：`rovloom token list` 和
+`rovloom token create --principal my_client --like EXISTING_CALLER_ID`。
+Docker 使用 `docker compose run --rm gateway token ...`。
+为支持以后查看，新 Token 原文会保存在 Gateway 的私有状态目录，备份时请将其作为凭据保存。
 
 ### 局域网访问
 

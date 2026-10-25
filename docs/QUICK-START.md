@@ -168,28 +168,26 @@ create the administrator from another terminal and continue below.
    complete and the device is ready. The Gateway loads the new configuration while running;
    no installation approval is needed in its terminal.
 
-**Get an MCP Bearer:** after web pairing completes, run this in another terminal on the Gateway machine:
+**Get an MCP Bearer:** open **Connect MCP** in the Dashboard, enter a name and expiry,
+then click **Create token**. Tokens stay in this list: use **Show**, **Copy**, or **Delete**
+whenever needed, including after refreshing or restarting the Gateway. New Dashboard tokens
+can access current and future paired devices. Older hash-only tokens must be reissued if
+no original copy remains. The administrator password is separate from the MCP Bearer.
 
-```sh
-rovloom token list
-```
+Configure the MCP endpoint and `Authorization: Bearer <TOKEN>` in your AI client. For remote
+access, replace a loopback hostname with the reachable Gateway address and enable MCP LAN
+access as described below.
 
-Find the actual caller ID in the list (the first web pairing creates one named `caller_…`).
-Replace `EXISTING_CALLER_ID` below with that ID and issue a token dedicated to your client:
+The **Devices** detail page can delete a device and disconnect it. **Pair device** also lists
+saved pairing records, which can be deleted. Deleting an unfinished pairing stops it;
+deleting a completed pairing record keeps its device. Device deletion removes that device's
+runtime bindings, pairing records and call content; reconnecting requires pairing again.
 
-```sh
-rovloom token create --principal my_client --like EXISTING_CALLER_ID
-```
-
-Save the token printed once; it is the Bearer used in section 4. Docker users run these commands through the image entrypoint:
-
-```sh
-docker compose run --rm gateway token list
-docker compose run --rm gateway token create --principal my_client --like EXISTING_CALLER_ID
-```
-
-The administrator password cannot be used as an MCP Bearer.
-The page handles device pairing and management; configure the MCP server in your AI client.
+CLI remains available: `rovloom token list` and
+`rovloom token create --principal my_client --like EXISTING_CALLER_ID`.
+In Docker use `docker compose run --rm gateway token ...`.
+New tokens are stored as readable values in the Gateway's private state directory so the
+Dashboard can display them later; include that directory when backing up credentials.
 
 ### LAN access
 

@@ -30,14 +30,14 @@ def visible_layout(page, narrow=False):
     assert bounds(page, '.topbar')['y'] < bounds(page, '.commandbar')['y']
     assert bounds(page, '.commandbar')['y'] < bounds(page, 'main')['y']
     assert page.locator('.brand-logo').evaluate(
-        '/* 品牌使用原方形资源，不能被挤压。 */ el => el.width === 48 && el.height === 48 && el.naturalWidth === el.naturalHeight')
+        '/* 完整字标保持品牌原图的3:1比例。 */ el => el.naturalWidth / el.naturalHeight === 3 && Math.abs(el.getBoundingClientRect().width / el.getBoundingClientRect().height - 3) < 0.01')
     assert page.locator('main').evaluate(
         '/* 正文必须有适度最大宽度和内边距。 */ el => el.clientWidth <= 1280 && parseFloat(getComputedStyle(el).paddingLeft) >= 16')
     assert page.locator('main').evaluate('''/* 检查实际可见技术文字没有缩成装饰小字。 */ el =>
         [...el.querySelectorAll('dt, dd, .badge, .device-name, code')].every(
             /* 忽略原生折叠区隐藏文字。 */ node => !node.getClientRects().length || parseFloat(getComputedStyle(node).fontSize) >= 12)''')
     if narrow:
-        assert page.locator('.preference-trigger, .toolbar button').evaluate_all('''/* 窄屏常用控件保留48px命中高度。 */
+        assert page.locator('.preference-trigger:visible, .toolbar button:visible').evaluate_all('''/* 窄屏常用控件保留48px命中高度。 */
             nodes => nodes.every(/* 逐个读取实际命中高度。 */ node => node.getBoundingClientRect().height >= 48)''')
     contrast_check(page)
 
@@ -99,7 +99,7 @@ def main():
                 snapshot(page, output, f'{language}-{theme}-list-desktop')
                 page.set_viewport_size({'width': 320, 'height': 900})
                 snapshot(page, output, f'{language}-{theme}-list-320', narrow=True)
-                checks.append(f'{language}/{theme}: aligned desktop columns, visible device rows, square logo, readable text and 320px list')
+                checks.append(f'{language}/{theme}: aligned desktop columns, visible device rows, original wordmark proportions, readable text and 320px list')
 
                 page.set_viewport_size({'width': 1440, 'height': 1024})
                 page.locator('.device-name').first.click()

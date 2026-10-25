@@ -16,6 +16,7 @@ import type { GatewayConfig } from '../../src/cli/config.js'
 import { initializeRoleConfig } from '../../src/cli/config-init.js'
 import { writeAdminFiles } from '../../src/cli/admin-command.js'
 import { createProductionCliRuntime } from '../../src/cli/production.js'
+import { writeSetupFile } from '../../src/cli/setup-files.js'
 import { readRuntimeJson, runtimeReference } from '../../src/cli/runtime-files.js'
 import { parseRegistry, REGISTRY_MAX_BYTES } from '../../src/cli/token-registry.js'
 import { setupReference, setupTarget } from '../../src/cli/setup-policy.js'
@@ -92,6 +93,20 @@ for (const lan of [false, true]) {
           })
           assert.equal(denied.status, status)
         }
+        const resource = async (operation: string, args = {}) => {
+          await new Promise((resolve) => setTimeout(resolve, 300)) // replenish the shared write budget between scripted requests
+          const response = await fetch(network + '/admin/v1/resources/' + operation, {
+            method: 'POST',
+            headers: actionHeaders,
+            body: JSON.stringify(args)
+          })
+          assert.equal(response.status, 200, operation)
+          assert.equal(response.headers.get('cache-control'), 'no-store')
+          return response.json()
+        }
+        await resource('tokens_create', { principal: 'dashboard-client', days: 365 })
+        const createdToken = (await resource('tokens_list')).items[0].token
+        assert.match(createdToken, /^[A-Za-z0-9_-]{43}$/)
         client = createManagementWriteClient({
           csrf: async () => csrf,
           fetcher: (path, init) => {
@@ -205,6 +220,59 @@ for (const lan of [false, true]) {
         const registry = parseRegistry(readRuntimeJson(runtimeReference(root, 'mcp-callers'), REGISTRY_MAX_BYTES))
         assert.deepEqual(registry.callers.find((entry) => entry.principal.id === 'admin')!.principal.policy.grants, [])
         assert(registry.callers.some((entry) => entry.principal.id === 'caller_' + claim.claim_id))
+        assert.equal(
+          (await resource('tokens_list')).items.find((entry: any) => entry.principal === 'dashboard-client').token,
+          createdToken
+        )
+        await resource('tokens_delete', { principal: 'caller_' + claim.claim_id })
+        const clientPath = runtimeReference(root, 'mcp-client')
+        const lineage = readRuntimeJson(clientPath) as { issued_at: number; expires_at: number }
+        writeSetupFile(clientPath, JSON.stringify({ ...lineage, expires_at: lineage.issued_at + 1 }), true)
+        const activationStatus = await devicePost('/pairing/claim/activation/status', {
+          attempt_id: claim.claim_id,
+          authentication,
+          providers: ['herdr']
+        })
+        assert.equal(activationStatus.phase, 'configured')
+        assert.equal(
+          parseRegistry(readRuntimeJson(runtimeReference(root, 'mcp-callers'), REGISTRY_MAX_BYTES)).callers.some(
+            (entry) => entry.principal.id === 'caller_' + claim.claim_id
+          ),
+          false
+        )
+        await resource('pairings_delete', { pairing_id })
+        assert.equal((await resource('pairings_list')).items.length, 0)
+        assert.equal(
+          (await fetch(network + '/admin/v1/devices/' + machine_id, { headers: { host, cookie } })).status,
+          200
+        )
+        await resource('tokens_delete', { principal: 'dashboard-client' })
+        assert.equal(
+          await active.authentication.authenticate(
+            new Request('http://127.0.0.1:' + mcp + '/mcp', { headers: { authorization: 'Bearer ' + createdToken } }),
+            new AbortController().signal
+          ),
+          null
+        )
+        await resource('devices_delete', { machine_id })
+        assert.equal(
+          (readRuntimeJson(runtimeReference(root, 'providers'), 1_048_576) as { providers: unknown[] }).providers
+            .length,
+          0
+        )
+        await active.close()
+        active = await createProductionCliRuntime().gateway!(config)
+        const reloaded = await fetch(network + '/', {
+          headers: { host, authorization: 'Basic ' + Buffer.from('admin:' + issued.secret).toString('base64') }
+        })
+        assert.equal(reloaded.status, 200)
+        const currentCookie = reloaded.headers.get('set-cookie')!.split(';')[0]!
+        const devicesAfterRestart = await fetch(network + '/admin/v1/devices', {
+          headers: { host, cookie: currentCookie }
+        })
+        assert.equal(devicesAfterRestart.status, 200)
+        assert.equal((await devicesAfterRestart.json()).items.length, 0)
+
         assert.equal(
           await active.authentication.authenticate(
             new Request('http://127.0.0.1:' + mcp + '/mcp', { headers: { authorization: 'Bearer ' + issued.secret } }),

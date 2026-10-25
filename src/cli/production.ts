@@ -23,6 +23,7 @@ import type { CliSetup } from './setup-runtime.js'
 import { boundedJson, object, fields } from '../wire/index.js'
 import { readRuntimeConfig } from './runtime-config.js'
 import { canonicalLoopbackHost, isWildcardHostname } from '../mcp/listen.js'
+import { createManagementResources } from './management-resources.js'
 import { loadProductManagementAssets } from './management-assets.js'
 import { openProtectedManagementSource } from './management-source.js'
 import {
@@ -348,6 +349,15 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
               pairingPolicy: managementHost.pairingPolicy?.bind(managementHost),
               providerEnable: managementHost.providerEnable?.bind(managementHost),
               http: {
+                resources: protectedManagement
+                  ? createManagementResources({
+                      config,
+                      store: state.store,
+                      authorize: (identity) =>
+                        protectedManagement!.isFullAdministrator(identity.caller, identity.management_session_ref),
+                      disconnect: (machine) => gateway?.transport.disconnect(machine)
+                    })
+                  : undefined,
                 assets: managementHost.http?.assets,
                 publicError: managementHost.http?.publicError?.bind(managementHost.http),
                 initializePage: configuredManagement

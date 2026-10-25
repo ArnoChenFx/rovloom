@@ -260,7 +260,7 @@ test('token CLI manages the registry file and the local client credential end to
     const workerToken = result.out.trim()
     assert.match(workerToken, /^[A-Za-z0-9_-]{43}$/)
     assert.equal(stored().callers[1]!.token_sha256, digestToken(workerToken))
-    assert(!readFileSync(callers, 'utf8').includes(workerToken))
+    assert.equal(stored().callers[1]!.token, workerToken)
 
     result = await run('rotate', '--principal', 'owner', '--grace-minutes', '5')
     assert.equal(result.code, 0)

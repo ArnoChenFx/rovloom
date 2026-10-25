@@ -20,6 +20,7 @@ test(
       assets: f.assets
     })
     try {
+      assert.equal(source.isFullAdministrator(f.lease.caller, f.lease.management_session_ref), false)
       const signal = new AbortController().signal
       assert.deepEqual(await source.management.resolveLease(f.request(), signal), f.lease)
       for (const request of [
@@ -134,6 +135,8 @@ test(
         try {
           const caller = f.lease.caller
           const ref = f.lease.management_session_ref
+          assert.equal(source.isFullAdministrator(caller, ref), true)
+          assert.equal(source.isFullAdministrator({ principal_id: 'other' }, ref), false)
           const bare = source.administrator(caller, ref)!
           assert.deepEqual(bare.grants, [])
           let machines = [{ machine_id: 'm_one', provider_ids: ['p_a'] }]

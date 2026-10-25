@@ -1,4 +1,4 @@
-// MCP Bearer 令牌注册表：只保存摘要、主体策略与固定到期，供 CLI 修改与 Gateway 每次认证热读。
+// MCP Bearer registry: authentication uses hashes; newly issued tokens remain available to administrators.
 import { createHash, randomBytes } from 'node:crypto'
 import type { Principal } from '../router.js'
 import type { ProviderPolicy } from '../wire/types.js'
@@ -13,6 +13,8 @@ const DAY = 86_400_000
 export type CallerEntry = {
   principal: Principal
   token_sha256: string
+  token?: string
+  scope?: 'gateway'
   issued_at: number
   expires_at: number
   // 轮换后的有界重叠期：旧令牌在此之前仍可认证，之后自动失效。
@@ -29,7 +31,7 @@ export type CallerRegistry = {
 const HEX = /^[a-f0-9]{64}$/
 const PRINCIPAL = /^[a-zA-Z0-9_-]{1,128}$/
 
-/** 令牌摘要；Gateway 与 CLI 都只处理摘要，不保存令牌原值。 */
+/** Authentication digest; recoverable tokens are stored separately in the private registry. */
 export function digestToken(token: string): string {
   return createHash('sha256').update(token).digest('hex')
 }
@@ -63,7 +65,16 @@ export function parseRegistry(value: unknown, resource?: string): CallerRegistry
     const digests = new Set<string>()
     for (const input of source.callers) {
       const caller = object(input)
-      fields(caller, ['principal', 'token_sha256', 'issued_at', 'expires_at'], ['previous'])
+      fields(caller, ['principal', 'token_sha256', 'issued_at', 'expires_at'], ['previous', 'token', 'scope'])
+      if (
+        (caller.scope !== undefined && caller.scope !== 'gateway') ||
+        (caller.token !== undefined &&
+          (typeof caller.token !== 'string' ||
+            !/^[A-Za-z0-9_-]{43}$/.test(caller.token) ||
+            digestToken(caller.token) !== caller.token_sha256))
+      ) {
+        invalid()
+      }
       const principal = object(caller.principal)
       fields(principal, ['id', 'policy'], ['permissions'])
       if (principal.permissions !== undefined) {
@@ -127,7 +138,7 @@ function find(registry: CallerRegistry, principal: string): number {
   return index
 }
 
-/** 新主体：策略克隆自已有主体，防止 CLI 凭空扩大权限；返回令牌原值仅此一次。 */
+/** 新主体：策略克隆自已有主体，防止 CLI 凭空扩大权限；保留原文供管理员后续查看。 */
 export function createCaller(
   registry: CallerRegistry,
   principal: string,
@@ -146,7 +157,9 @@ export function createCaller(
   const expires_at = now + ttl(days)
   const entry: CallerEntry = {
     principal: { ...structuredClone(template.principal), id: principal },
+    ...(template.scope ? { scope: template.scope } : {}),
     token_sha256: digestToken(token),
+    token,
     issued_at: now,
     expires_at
   }
@@ -203,7 +216,9 @@ export function rotateCaller(
   const expires_at = now + ttl(options.days)
   const entry: CallerEntry = {
     principal: old.principal,
+    ...(old.scope ? { scope: old.scope } : {}),
     token_sha256: digestToken(token),
+    token,
     issued_at: now,
     expires_at,
     ...(grace > 0
@@ -245,4 +260,26 @@ export function summarize(registry: CallerRegistry, now: number): CallerSummary[
       rotating: entry.previous !== undefined && now < entry.previous.expires_at
     })
   )
+}
+
+/** Full Gateway tokens follow the local policy as devices are paired. */
+export function createGatewayCaller(registry: CallerRegistry, principal: string, now: number, days = 365) {
+  if (
+    !PRINCIPAL.test(principal) ||
+    registry.callers.some((entry) => entry.principal.id === principal) ||
+    registry.callers.length >= MAX_CALLERS
+  ) {
+    throw new CliError('invalid_arguments')
+  }
+  const token = newToken()
+  const expires_at = now + ttl(days)
+  const entry: CallerEntry = {
+    principal: { id: principal, policy: structuredClone(registry.local_policy) },
+    scope: 'gateway',
+    token,
+    token_sha256: digestToken(token),
+    issued_at: now,
+    expires_at
+  }
+  return { registry: { ...registry, callers: [...registry.callers, entry] }, token, expires_at }
 }

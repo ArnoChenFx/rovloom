@@ -69,10 +69,12 @@ function activationFacts(
     !/^[A-Za-z0-9_-]{43}$/.test(client.token) ||
     !Number.isSafeInteger(client.issued_at) ||
     !Number.isSafeInteger(client.expires_at) ||
-    Number(client.expires_at) <= Date.now()
+    Number(client.expires_at) <= Number(client.issued_at)
   ) {
     throw new CliError('configuration_required')
   }
+  // This record also identifies the policy lineage. Expiry or deletion of its MCP token
+  // must not prevent another Connector from pairing; authentication still checks the registry.
   const additional = client.attempt_id !== claim.claim_id
   return {
     ...(additional ? { lineage: client.attempt_id as string } : {}),

@@ -4,6 +4,16 @@ import assert from 'node:assert/strict'
 import { parseRoute, routeHref } from '../../src/webui/view.js'
 import { unavailableRead } from '../../src/webui/page.js'
 
+test('workspace navigation round-trips separately from explicit device targets', () => {
+  for (const section of ['devices', 'pairing', 'connect'] as const) {
+    const route = { machineId: null, cursor: null, providerCursor: null, section }
+    assert.deepEqual(parseRoute(routeHref(route)), route)
+  }
+  assert.deepEqual(parseRoute('#machine=a&view=pairing'), { machineId: 'a', cursor: null, providerCursor: null })
+  assert.deepEqual(parseRoute('#view=pairing&view=connect'), { machineId: null, cursor: null, providerCursor: null })
+  assert.deepEqual(parseRoute('#view=unknown'), { machineId: null, cursor: null, providerCursor: null })
+})
+
 // 不透明 machine_id 与 cursor 在片段内安全往返，设备详情不会沿用列表页游标。
 test(
   '机器与分页引用编码往返，不隐式继承其它目标',
