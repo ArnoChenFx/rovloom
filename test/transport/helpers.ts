@@ -13,6 +13,12 @@ import type { NativeConnectorOptions } from '../../src/transport/connector.js'
 import type { GatewayOptions } from '../../src/transport/gateway.js'
 import type { NativeBinding } from '../../src/native-contract/index.js'
 import type { CompiledContract } from '../../src/native-contract/index.js'
+import {
+  ConnectorAttemptBook,
+  CONNECTOR_MAX_DEADLINE_MS,
+  connectorAdmissionAdapter,
+  createConnectorAdmissionBackend
+} from '../../src/runtime/connector-attempts.js'
 import type {
   ContractSource,
   ProviderBinding,
@@ -42,6 +48,8 @@ type FixtureHost = {
     channel: SocketChannel,
     services: Parameters<typeof persistentBackend>[1]
   ): Session['adapter']
+  /** Connector 侧改用生产同款准入后端（快照 policies + 本机 attempt 锚点）；默认直连 Store。 */
+  connectorAdmission?: boolean
 }
 
 /** 建立纯 mock 身份和原生来源的隔离 Gateway fixture，复用真实 Store/Router/validator。 */
@@ -176,8 +184,41 @@ export function fixture(
         }
       : backendServices(connection)
     const backend = persistentBackend(store, services)
-    const original =
-      channel && host.adapter ? host.adapter(connection, channel, services) : createLuvusWireAdapter(backend)
+    let original: Session['adapter']
+    if (!channel && host.connectorAdmission) {
+      // 生产同款：Connector 侧 attempt 锚点在本机准入后端，不在 Gateway Store；revision 核对用快照。
+      const book = new ConnectorAttemptBook({ maximum_deadline_ms: CONNECTOR_MAX_DEADLINE_MS, now: () => now })
+      const admission = createConnectorAdmissionBackend({
+        connection,
+        routes: [...localBindings.values()]
+          .filter(/** 只为已配对的 provider 建立受保护路由。 */ (p) => p.machine_id === connection.machine_id)
+          .map(
+            /** 路由固定 fixture principal，与生产单路由同构。 */ (p) => ({
+              target: {
+                machine_id: p.machine_id,
+                provider_id: p.provider_id,
+                profile: 'session' as const,
+                session: 'synthetic'
+              },
+              principal_id: principal.id
+            })
+          ),
+        book,
+        source: {
+          policies: () => ({ caller: principal.policy, local: connectorSnapshot }),
+          now: () => now
+        }
+      })
+      const inner = createLuvusWireAdapter({
+        ...backend,
+        attempt: (call, attempt) => admission.attempt(call, attempt),
+        contentStatus: (binding) => admission.contentStatus(binding),
+        currentPrincipal: () => principal.id
+      })
+      original = connectorAdmissionAdapter(admission, inner)
+    } else {
+      original = channel && host.adapter ? host.adapter(connection, channel, services) : createLuvusWireAdapter(backend)
+    }
     const adapter = {
       ...original,
       /** 先调用真实 adapter 编码，再记录不含认证 secret 的业务帧供扫描。 */

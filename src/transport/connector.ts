@@ -7,6 +7,7 @@ import {
   assertBinding,
   boundedJson,
   decodeWireFrame,
+  encodeDispatchRefusalFrame,
   encodeWireFrame,
   fail,
   hash,
@@ -440,6 +441,36 @@ export function createConnector(options: ConnectorOptions) {
       return undefined
     }
   }
+  /**
+   * 准入拒绝发生在原 adapter 登记执行锚点之前，拒绝帧不能经 session.adapter.encode
+   * （anchored 需要从未建立的锚点）；只绑定当前连接编码，锚点复核由网关在其自身账本完成。
+   */
+  function writeStaleRefusal(stale: AttemptIdentity): void {
+    if (!session || !connection || !ws || ws.readyState !== 1) {
+      fail('connection_unavailable')
+    }
+    const raw = budget(
+      encodeDispatchRefusalFrame(
+        envelope(connection, 'dispatch_refused', { attempt: stale, code: 'policy_revision_stale' }),
+        {
+          phase: 'authenticated',
+          direction: 'connector_to_gateway',
+          connection: {
+            machine_id: connection.machine_id,
+            recovery_generation: connection.recovery_generation,
+            connection_epoch: connection.connection_epoch,
+            authenticated: true,
+            active: true,
+            negotiated: connection.negotiated
+          }
+        }
+      ),
+      limits.frame_bytes
+    )
+    if (ws.bufferedAmount + Buffer.byteLength(raw) > limits.frame_bytes || ws.send(raw) <= 0) {
+      fail('transport_backpressure')
+    }
+  }
   /** 在原 Wire 上下文内发送单个响应帧；超过单帧上限的响应在 write 的预算检查处失败，不分片。 */
   function sendResponse(binding: AttemptBinding, response: JsonObject, active: Connection, current: Session): void {
     const { machine_id: _machine, recovery_generation: _generation, connection_epoch: _epoch, ...attempt } = binding
@@ -717,7 +748,11 @@ export function createConnector(options: ConnectorOptions) {
             ) {
               const stale = decodeStaleAttempt(event.data)
               if (stale) {
-                write(envelope(connection, 'dispatch_refused', { attempt: stale, code: 'policy_revision_stale' }))
+                // 已进入执行或已接受的 attempt 不生成拒绝证明：重发帧不携带拒绝权，静默丢弃。
+                const replayed = stale.call_id + ':' + stale.attempt_id
+                if (!running.has(replayed) && !seen.has(replayed)) {
+                  writeStaleRefusal(stale)
+                }
                 return
               }
             }

@@ -440,6 +440,27 @@ export function decodeWireFrame(input: string | Uint8Array, context: CodecContex
   return decode(input, context, LIMITS.frame_bytes)
 }
 
+/**
+ * 准入拒绝发生在原 adapter 登记执行锚点之前，编码只绑定当前连接与 attempt 结构。
+ * 执行锚点、双端策略与 revision 的全量复核由网关接收端 anchored 链在其自身账本上完成。
+ */
+export function encodeDispatchRefusalFrame(
+  frame: Extract<WireEnvelope, { type: 'dispatch_refused' }>,
+  context: AuthContext
+): string {
+  const snapshot = object(parseJson(boundedJson(frame)))
+  authenticateEnvelope(snapshot, context)
+  if (context.direction !== 'connector_to_gateway') {
+    fail('direction_not_allowed')
+  }
+  capability(context, 'dispatch_refusal')
+  const p = object(snapshot.payload)
+  fields(p, ['attempt', 'code'])
+  oneOf(p.code, ['terminal_execution_disabled', 'policy_revision_stale'])
+  bind(snapshot, p.attempt)
+  return boundedJson(snapshot)
+}
+
 /** 只丢弃已永久失效 provider 的迟到 RPC 数据；不返回 payload、原生上下文或任何执行/读取许可。 */
 export function discardFencedWireFrame(
   input: string | Uint8Array,

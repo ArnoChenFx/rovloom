@@ -1201,7 +1201,10 @@ export class Store {
       /** 先落实原固定 deadline，再核对当前完整锚点；审计提交前不发布拒绝。 */ (now) => {
         this.stopWhere('call_id=? AND deadline<=?', [binding.call_id, String(now)], 'deadline_exceeded', now)
         const row = this.responseAnchorRow(binding)
-        if (!['dispatching', 'connector_accepted'].includes(row.state)) {
+        // 准入拒绝只能发生在首个 request 帧被接受前；已接受状态只认可执行器自身的未写出证明。
+        const eligible =
+          row.state === 'dispatching' || (row.state === 'connector_accepted' && code === 'terminal_execution_disabled')
+        if (!eligible) {
           return false
         }
         this.db.prepare("UPDATE calls SET state='not_dispatched',reserved=0 WHERE call_id=?").run(binding.call_id)
