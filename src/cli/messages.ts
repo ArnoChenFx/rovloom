@@ -71,7 +71,7 @@ pairs the first Connector online (create a pairing application, then run rovloom
   rovloom token permissions --principal ID --discard-response true|false
 
 The token registry lives in the Gateway state directory; the Gateway re-reads it on every authentication, so changes apply immediately without a restart.
-create/rotate write the new token value to stdout once (the registry stores only SHA-256 digests); everything else goes to stderr.
+create/rotate write the new token value to stdout once (new tokens are kept in the private registry and can be viewed again in the Dashboard); everything else goes to stderr.
 create clones the new principal's permissions from the existing principal named by --like, without widening them. renew extends the expiry; the token stays the same.
 rotate issues a new token; the old one keeps working within --grace-minutes (default 0, immediate invalidation). revoke removes the principal.
 permissions manages the explicit result-discard permission, hot-reloaded and off by default. Read and save anything you need before discarding results.
@@ -267,7 +267,7 @@ Agent 与模型登录需独立准备；原生 ready 不代表模型已回复。
   rovloom token permissions --principal ID --discard-response true|false
 
 令牌注册表位于 Gateway 状态目录；Gateway 每次认证重读，修改立即生效、无需重启。
-create/rotate 把新令牌原值只写到 stdout 一次（注册表只保存 SHA-256 摘要）；其余信息写到 stderr。
+create/rotate 把新令牌原值只写到 stdout 一次（新令牌保存在私有注册表，可在管理员面板再次查看）；其余信息写到 stderr。
 create 的新主体权限克隆自 --like 指定的现有主体，不扩大权限。renew 延长到期时间、令牌不变。
 rotate 签发新令牌；--grace-minutes 内旧令牌继续有效（默认 0，立即失效）。revoke 删除主体。
 permissions 显式管理结果删除权限，热生效；默认关闭。删除结果前应先读取并保存所需内容。

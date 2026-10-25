@@ -116,7 +116,7 @@ runtime_call
 
 | 对象 | 方式 |
 |---|---|
-| MCP 调用方 | Bearer 令牌，默认 30 天有效。`rovloom token create / list / renew / rotate / revoke` 管理，热生效，注册表只存摘要。资源 URL 与配置的 `mcp.public_url` 比较（只比较 Host 与固定 `/mcp` 路径，不信转发头），兼容反向代理与 TLS 终止 |
+| MCP 调用方 | Bearer 令牌，默认 30 天有效。`rovloom token create / list / renew / rotate / revoke` 管理，热生效；新令牌保留原文供管理员面板再次查看，认证仍核对摘要。面板可直接创建、查看、复制和删除令牌，默认有效期 365 天。资源 URL 与配置的 `mcp.public_url` 比较（只比较 Host 与固定 `/mcp` 路径，不信转发头），兼容反向代理与 TLS 终止 |
 | 设备 | 一次性配对码（默认 10 分钟有效，并发兑换只有一次成功），或在线认领（管理页申请 + 核对码批准，批准与签发同一事务、凭据在线交付）换取设备凭据。凭据不过期，撤销或重新配对时失效。重复连接默认拒绝。凭据丢失或泄漏时用 `--repair-device` / `--repair` 重新配对同一设备。撤销后的设备只能作为新设备重新配对 |
 | 管理员 | 独立 listener（默认 `127.0.0.1:9445`）、独立的管理员口令（`rovloom admin`）与 CSRF。高影响操作（改名、断开、撤销、禁用 provider）要求管理员在页面上两步确认。MCP 不提供任何管理工具 |
 

@@ -77,7 +77,9 @@ export function publishFirstCallers(
   const registry = parseRegistry(previous, resource)
   const kept = registry.callers.filter(
     /* 管理员占位保留；非占位条目必须是同一请求的原样重入，其余状态一律拒绝。 */ (entry) =>
-      isAdminPlaceholder(entry) || boundedJson(entry, REGISTRY_MAX_BYTES) === boundedJson(caller, REGISTRY_MAX_BYTES)
+      isAdminPlaceholder(entry) ||
+      entry.scope === 'gateway' ||
+      boundedJson(entry, REGISTRY_MAX_BYTES) === boundedJson(caller, REGISTRY_MAX_BYTES)
   )
   if (kept.length !== registry.callers.length) {
     throw new CliError('configuration_required')

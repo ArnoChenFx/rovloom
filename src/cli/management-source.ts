@@ -383,6 +383,13 @@ export function openProtectedManagementSource(
   }
   return Object.freeze({
     administrator,
+    isFullAdministrator(caller: CallerIdentity, sessionRef: string): boolean {
+      try {
+        return !!administrator(caller, sessionRef) && session(caller, sessionRef)?.scope === 'all_devices'
+      } catch {
+        return false
+      }
+    },
     management,
     bindResources: /** Gateway 状态打开后绑定一次只读的设备/provider 枚举，用于 scope=all_devices 的动态授权。 */ (
       value: NonNullable<typeof resources>

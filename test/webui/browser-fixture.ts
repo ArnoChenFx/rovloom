@@ -1,10 +1,11 @@
 /** 真实浏览器交互的隔离测试入口，仅注入展示投影，不模拟后端授权成功。 */
 import { mountWebUi, ReadError, type PageRead, type TimedSnapshot, type PageView } from '../../src/webui/index.js'
-import { fixtureReply } from './fixtures.js'
+import { fixtureReply, fixtureDevice } from './fixtures.js'
 import { createManagementPageRead } from '../../src/webui/read.js'
 
 type FixtureMode =
   | 'normal'
+  | 'showcase'
   | 'hold'
   | '401'
   | '403'
@@ -85,6 +86,33 @@ const read: PageRead = async (route, signal) => {
     throw new Error('fixture-secret-never-render-this')
   }
   const result = await baseRead(route, signal)
+  if (fixture.mode === 'showcase') {
+    const samples = ['studio-workstation', 'macbook-pro', 'home-server', 'build-runner'].map((name, index) => {
+      const device = fixtureDevice('fixture-a')
+      device.machine_id = `demo-device-${index + 1}`
+      device.name = name
+      device.labels = index < 2 ? ['development', 'workspace'] : index === 2 ? ['home', 'server'] : ['build']
+      if (index === 2 && device.connection.verification === 'verified') {
+        device.persisted_state = 'offline'
+        device.connection.value.state = 'offline'
+        device.connection.value.last_heartbeat_at = result.serverTime - 180_000
+      }
+      if (index === 3) {
+        device.persisted_state = 'pending'
+        device.connection = { verification: 'unverified', reason_code: 'not_recorded' }
+        device.authentication = { verification: 'unverified', reason_code: 'not_recorded' }
+      }
+      return device
+    })
+    if (route.machineId) {
+      result.value.device = samples.find((device) => device.machine_id === route.machineId) ?? samples[0]!
+      for (const provider of result.value.providers.items) {
+        provider.machine_id = result.value.device.machine_id
+      }
+    } else {
+      result.value.devices = { items: samples }
+    }
+  }
   if (fixture.mode === 'hold') {
     return new Promise(
       /** 故意不响应取消，检验迟到保护。 */

@@ -43,8 +43,8 @@ def main():
         assert page.evaluate('typeof window.webUiFixture') == 'undefined'
         logo = page.get_by_role('img', name='Rovloom', exact=True)
         logo.wait_for()
-        assert logo.evaluate('(el) => el.complete && el.naturalWidth === 256 && el.naturalHeight === 256')
-        assert logo.evaluate('(el) => el.width === 48 && el.height === 48')
+        assert logo.evaluate('(el) => el.complete && el.naturalWidth === 2172 && el.naturalHeight === 724')
+        assert logo.evaluate('(el) => Math.abs(el.getBoundingClientRect().width / el.getBoundingClientRect().height - 3) < 0.01')
         logo_response = page.request.get(base + '/rovloom-mark-transparent.png')
         assert logo_response.ok
         assert logo_response.headers['content-type'] == 'image/png'
@@ -54,20 +54,20 @@ def main():
         assert wordmark.ok and wordmark.headers['content-type'] == 'image/png'
         assert wordmark.body() == (repo / 'docs/assets/brand/rovloom-logo.png').read_bytes()
         checks.append('生产入口不可用且无 fixture 数据或身份回退')
-        checks.append('顶栏和 favicon 使用独立256px透明背景橙R，横版全名图仍可用；两资产原字节可加载')
+        checks.append('侧栏使用官方横版完整字标，favicon 使用独立橙R；两资产原字节可加载')
 
         page.goto(base + '/fixtures/')
         page.locator('.device-card').first.wait_for()
         assert page.locator('.device-card').count() == 2
         assert page.locator('.device-card img').count() == 0
         assert page.get_by_role('img', name='Rovloom', exact=True).evaluate(
-            '(el) => el.complete && el.naturalWidth === 256 && el.naturalHeight === 256')
+            '(el) => el.complete && el.naturalWidth === 2172 && el.naturalHeight === 724')
         assert '<img src=x' in page.locator('.device-name').first.inner_text()
         page.locator('.device-name').first.focus()
         page.wait_for_timeout(1200)
         assert page.locator('.device-name').first.evaluate('(el) => el === document.activeElement')
         page.screenshot(path=str(output / 'desktop.png'), full_page=True)
-        page.locator('.topbar').screenshot(path=str(output / 'branding.png'))
+        page.locator('.brand').screenshot(path=str(output / 'branding.png'))
         checks.append('双机器隔离展示、XSS 转义及轮询年龄更新保留键盘焦点')
 
         page.evaluate("window.webUiFixture.mode='stale_children'")
@@ -101,7 +101,7 @@ def main():
                            ('stale_children', '连接观测已过期')]:
             page.evaluate('(mode) => { window.webUiFixture.mode=mode }', mode)
             page.get_by_role('button', name='刷新', exact=True).click()
-            page.get_by_text(text, exact=False).first.wait_for()
+            page.get_by_text(text, exact=False).filter(visible=True).first.wait_for()
             assert page.get_by_text('快照有效', exact=True).count() == 1
             assert page.locator('.provider-card .good').count() == 0
             if mode in ('stale_device', 'stale_connection', 'stale_auth', 'stale_children'):
@@ -142,7 +142,7 @@ def main():
         for mode, text in [('unverified', '连接未核实'), ('heartbeat', 'heartbeat_timeout'), ('reconnecting', '重新握手中')]:
             page.evaluate('(mode) => { window.webUiFixture.mode=mode }', mode)
             page.get_by_role('button', name='刷新', exact=True).click()
-            page.get_by_text(text, exact=False).first.wait_for()
+            page.get_by_text(text, exact=False).filter(visible=True).first.wait_for()
             if mode == 'unverified':
                 badges = page.locator('main .badges').first.inner_text()
                 assert '已认证' not in badges and '在线' not in badges
@@ -193,11 +193,11 @@ def main():
         page.get_by_text('快照有效', exact=True).wait_for()
         checks.append('重复点击有界、取消后可刷新且旧响应不生效')
 
-        for mode, text in [('stale', '快照已过期'), ('empty', '此范围尚无设备'), ('503', '管理读取尚不可用'),
+        for mode, text in [('stale', '快照已过期'), ('empty', '你的第一台设备'), ('503', '管理读取尚不可用'),
                            ('degraded', '存储降级')]:
             page.evaluate('(mode) => { window.webUiFixture.mode=mode }', mode)
             page.get_by_role('button', name='刷新', exact=True).click()
-            page.get_by_text(text, exact=False).first.wait_for()
+            page.get_by_text(text, exact=False).filter(visible=True).first.wait_for()
             assert 'fixture-secret-never-render-this' not in page.content()
         checks.append('过期、空态、503与存储降级')
 

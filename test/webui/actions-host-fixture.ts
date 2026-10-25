@@ -1,4 +1,10 @@
 /** 仅显式本地页面验收使用：真实临时 Store/写服务/会话 handler，读观测标为合成且不连用户设备。 */
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createManagementResources } from '../../src/cli/management-resources.js'
+import { configTemplate, type GatewayConfig } from '../../src/cli/config.js'
+import { writeAdminFiles } from '../../src/cli/admin-command.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { setup } from '../admin/write-helpers.js'
 import { StoreManagementWriteService } from '../../src/admin/write-service.js'
@@ -23,6 +29,10 @@ export function createActionsHostFixture(origin: string) {
       confirmation_id: randomUUID()
     })
   })
+  const directory = mkdtempSync(join(tmpdir(), 'rovloom-dashboard-resources-'))
+  mkdirSync(join(directory, 'managed'))
+  const config = { ...configTemplate('gateway'), state_dir: directory } as GatewayConfig
+  writeAdminFiles(config, 'fixture_admin', Date.now())
   const devices = [f.store.register('owned_page_a'), f.store.register('owned_page_b')]
   for (const device of devices) {
     const enrollment = f.store.issueEnrollment(device.machine_id)
@@ -127,7 +137,9 @@ export function createActionsHostFixture(origin: string) {
         }
       }
       if (operation === 'devices_list') {
-        return { items: await Promise.all(devices.map(/** 当前临时设备列表。 */ (d) => device(d.machine_id))) } as never
+        return {
+          items: await Promise.all(f.store.resources().map(/** 当前临时设备列表。 */ (d) => device(d.machine_id)))
+        } as never
       }
       if (operation === 'devices_get') {
         return (await device((args as { machine_id: string }).machine_id)) as never
@@ -174,7 +186,13 @@ export function createActionsHostFixture(origin: string) {
     origin,
     service,
     authenticate: adapter.authenticate,
-    verifyCsrf: adapter.verifyCsrf
+    verifyCsrf: adapter.verifyCsrf,
+    resources: createManagementResources({
+      config,
+      store: f.store,
+      authorize: () => mode !== '401' && mode !== '403',
+      disconnect: () => {}
+    })
   })
   return {
     cookie: 'fixture_admin=' + cookie + '; HttpOnly; SameSite=Strict; Path=/',
@@ -312,12 +330,14 @@ export function createActionsHostFixture(origin: string) {
         }
       }
       return Response.json({
-        devices: devices.map(
-          /** 只输出公开字段，凭据及其摘要也不进入测试页面。 */ (d) => {
-            const row = f.store.machine(d.machine_id)
-            return { machine_id: row.machine_id, name: row.name, status: row.status }
-          }
-        ),
+        devices: devices
+          .filter((device) => f.store.resources().some((entry) => entry.machine_id === device.machine_id))
+          .map(
+            /** 只输出公开字段，凭据及其摘要也不进入测试页面。 */ (d) => {
+              const row = f.store.machine(d.machine_id)
+              return { machine_id: row.machine_id, name: row.name, status: row.status }
+            }
+          ),
         providers: devices.flatMap(
           /** 只输出自有fixture实例的公开状态。 */ (d) => {
             const p = f.store.provider(d.machine_id, 'fixture-provider')
@@ -338,6 +358,7 @@ export function createActionsHostFixture(origin: string) {
       release?.()
       handler.stop()
       f.close()
+      rmSync(directory, { recursive: true, force: true })
     }
   }
 }

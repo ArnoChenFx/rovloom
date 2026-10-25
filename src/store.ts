@@ -613,6 +613,49 @@ export class Store {
   revoke(machine: string): void {
     this.devices.revoke(machine)
   }
+  /** Administrator CRUD uses the same writer and lifecycle invalidation as revocation. */
+  deleteDevice(machine: string, actor: string): void {
+    this.transaction((now) => {
+      this.devices.applyRevoke(machine, now)
+      for (const table of ['pairing_claims', 'enrollments', 'admin_pairings', 'providers', 'calls', 'machines']) {
+        this.db.prepare(`DELETE FROM ${table} WHERE machine_id=?`).run(machine)
+      }
+      this.audit('machine_deleted', actor, now, undefined, { machine_id: machine })
+    }, false)
+  }
+  listPairings(
+    offset = 0
+  ): { pairing_id: string; machine_id: string; name: string; status: string; expires: number }[] {
+    return this.db
+      .prepare(`SELECT p.pairing_id,p.machine_id,m.name,
+      CASE WHEN p.status='pending' AND p.expires<=? THEN 'expired' ELSE p.status END AS status,p.expires
+      FROM admin_pairings p JOIN machines m ON m.machine_id=p.machine_id ORDER BY p.expires DESC,p.pairing_id LIMIT 51 OFFSET ?`)
+      .all(this.clock(), offset) as {
+      pairing_id: string
+      machine_id: string
+      name: string
+      status: string
+      expires: number
+    }[]
+  }
+  deletePairing(pairing: string, actor: string): string | null {
+    return this.transaction((now) => {
+      const application = this.devices.pairingApplication(pairing)
+      if (!application) {
+        throw new GatewayError('pairing_not_found')
+      }
+      // Unfinished credentials must not outlive the deleted application.
+      const unfinished = this.db
+        .prepare("SELECT claim_id FROM pairing_claims WHERE pairing_id=? AND status IN ('approved','delivered')")
+        .get(pairing)
+      if (unfinished) {
+        this.devices.applyRevoke(application.machine_id, now)
+      }
+      this.db.prepare('DELETE FROM admin_pairings WHERE pairing_id=?').run(pairing)
+      this.audit('pairing_deleted', actor, now, undefined, { pairing_id: pairing, machine_id: application.machine_id })
+      return unfinished ? application.machine_id : null
+    }, false)
+  }
   // 为设备登记唯一且完整的 provider 绑定，拒绝覆盖既有身份。
   defineProvider(binding: ProviderBinding): ProviderBinding {
     validateProvider(binding)

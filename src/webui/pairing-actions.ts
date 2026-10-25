@@ -1,7 +1,9 @@
 /** 管理页在线配对区：新建申请、跟踪认领、核对核对码后批准签发；全部写操作复用确认/回执 flow。 */
 import type { ManagementReply } from '../mcp/management.js'
 import { DEFAULT_PAIRING_POLICY_REF } from '../pairing-policy.js'
-import type { Localizer, MessageKey } from './i18n.js'
+import type { Localizer, MessageKey, UiLanguage } from './i18n.js'
+import { uiIcon } from './icons.js'
+import { copyControl } from './clipboard.js'
 import { createPairingManagementFlow, type PairingManagementState } from './pairing-flow.js'
 import {
   checkManagementWriteReply,
@@ -32,6 +34,25 @@ type Entry = {
   status: PairingStatus['status']
   claim?: NonNullable<PairingStatus['claim']>
   item: HTMLLIElement
+  /** 上次渲染签名；内容未变时不再重建子树，保持用户选区与复制按钮状态。 */
+  rendered?: string
+}
+
+/** 上次渲染签名；内容未变时不再重建子树，保持用户选区与已绑定的批准按钮。 */
+export function entryRenderSignature(
+  language: UiLanguage,
+  entry: Readonly<Pick<Entry, 'name' | 'machine_id' | 'pairing_id' | 'status' | 'claim'>>
+): string {
+  return [
+    language,
+    entry.name,
+    entry.machine_id,
+    entry.pairing_id,
+    entry.status,
+    entry.claim?.status ?? '',
+    entry.claim?.user_code ?? '',
+    entry.claim?.activation ?? ''
+  ].join('|')
 }
 
 /** 创建固定控件；申请编号、核对码与服务回复只通过 textContent 进入页面。 */
@@ -45,9 +66,22 @@ function node<K extends keyof HTMLElementTagNameMap>(tag: K, className = ''): HT
 export function createPairingActions(options: {
   transport: ManagementWriteTransport
   authorizationLost(problem: 'unauthenticated' | 'forbidden'): void
+  committed?(): void
   pollMs?: number
 }) {
   const region = node('section', 'pairing-section')
+  const steps = node('ol', 'pairing-steps')
+  const stepItems = ['pairing.stepCreate', 'pairing.stepRun', 'pairing.stepApprove'].map((key, index) => {
+    const item = node('li')
+    const number = node('span', 'pairing-step-number')
+    number.textContent = String(index + 1).padStart(2, '0')
+    const label = node('span')
+    item.append(number, label)
+    steps.append(item)
+    return { item, label, key: key as MessageKey }
+  })
+  const layout = node('div', 'pairing-layout')
+  const setup = node('div', 'pairing-setup')
   const heading = node('h2')
   const intro = node('p', 'muted')
   const form = node('form', 'pairing-form')
@@ -59,7 +93,10 @@ export function createPairingActions(options: {
   nameInput.maxLength = 63
   nameInput.pattern = '[a-z0-9][a-z0-9._-]{0,62}'
   nameInput.autocomplete = 'off'
-  nameLabel.append(nameCaption, nameInput)
+  const nameHint = node('small', 'field-hint')
+  nameHint.id = 'pairing-name-hint'
+  nameInput.setAttribute('aria-describedby', nameHint.id)
+  nameLabel.append(nameCaption, nameInput, nameHint)
   const policyLabel = node('label')
   const policyCaption = node('span')
   const policyInput = node('input')
@@ -71,7 +108,10 @@ export function createPairingActions(options: {
   policyLabel.append(policyCaption, policyInput)
   const create = node('button', 'pairing-confirm')
   create.type = 'submit'
-  form.append(nameLabel, policyLabel, create)
+  const advanced = node('details', 'pairing-advanced')
+  const advancedSummary = node('summary')
+  advanced.append(advancedSummary, policyLabel)
+  form.append(nameLabel, advanced, create)
   const reviewBox = node('div', 'pairing-review')
   reviewBox.hidden = true
   const reviewText = node('p', 'pairing-status')
@@ -89,7 +129,21 @@ export function createPairingActions(options: {
   message.setAttribute('role', 'status')
   message.setAttribute('aria-live', 'polite')
   const list = node('ul', 'pairing-entries')
-  region.append(heading, intro, form, reviewBox, message, list)
+  setup.append(heading, intro, form, reviewBox, message)
+  const guide = node('aside', 'pairing-guide')
+  const guideIcon = node('span', 'pairing-guide-icon')
+  guideIcon.append(uiIcon('connect'))
+  const guideHeading = node('h2')
+  const guideDescription = node('p', 'muted')
+  const command = node('div', 'command-snippet')
+  const commandCode = node('code')
+  commandCode.textContent = 'rovloom connector --claim'
+  const commandCopy = copyControl('rovloom connector --claim', '')
+  command.append(commandCode, commandCopy)
+  const guideNote = node('p', 'pairing-guide-note')
+  guide.append(guideIcon, guideHeading, guideDescription, command, guideNote)
+  layout.append(setup, guide)
+  region.append(steps, layout, list)
 
   let i18n: Localizer | undefined
   let available = false
@@ -210,6 +264,12 @@ export function createPairingActions(options: {
     if (!i18n) {
       return
     }
+    // 展示内容不变时跳过重建：整棵子树被 replaceChildren 会随秒级 tick 摧毁用户选中的申请编号与复制按钮状态。
+    const signature = entryRenderSignature(i18n.language, entry)
+    if (entry.rendered === signature) {
+      return
+    }
+    entry.rendered = signature
     const t = i18n.t.bind(i18n)
     entry.item.replaceChildren()
     const head = node('div', 'pairing-entry-head')
@@ -232,19 +292,21 @@ export function createPairingActions(options: {
                   : t('pairing.waitingClaim')
     head.append(title, status)
     entry.item.append(head)
+    status.classList.add('badge')
     const facts = node('dl', 'facts')
     const idTerm = node('dt')
     idTerm.textContent = t('pairing.application')
     const idValue = node('dd')
     const idCode = node('code')
     idCode.textContent = entry.pairing_id
-    idValue.append(idCode)
+    idValue.append(idCode, copyControl(entry.pairing_id, t('copy.id')))
     const machineTerm = node('dt')
     machineTerm.textContent = t('pairing.machine')
     const machineValue = node('dd')
     machineValue.textContent = entry.machine_id
     facts.append(idTerm, idValue, machineTerm, machineValue)
     entry.item.append(facts)
+    updateSteps()
     if (entry.status === 'pending' && entry.claim?.status === 'pending') {
       const codeLabel = node('p', 'muted')
       codeLabel.textContent = t('pairing.userCode')
@@ -266,6 +328,22 @@ export function createPairingActions(options: {
       entry.item.append(codeLabel, code, approve)
     }
   }
+  /** 只依据实际申请/认领阶段推进步骤；未激活时不宣称设备已可用。 */
+  function updateSteps(): void {
+    const entry = [...entries.values()].at(-1)
+    const finished = entry?.claim?.activation === 'configured' || (entry?.status === 'paired' && !entry.claim)
+    const stage =
+      !entry || ['expired', 'failed', 'cancelled'].includes(entry.status) ? 0 : finished ? 3 : entry.claim ? 2 : 1
+    for (const [index, step] of stepItems.entries()) {
+      step.item.dataset.state = index < stage ? 'complete' : index === stage ? 'current' : 'upcoming'
+      if (index === stage) {
+        step.item.setAttribute('aria-current', 'step')
+      } else {
+        step.item.removeAttribute('aria-current')
+      }
+    }
+  }
+
   /** 新增条目并立即渲染；同 pairing_id 重入时只更新状态。 */
   function addEntry(entry: Entry): void {
     const existing = entries.get(entry.pairing_id)
@@ -275,6 +353,7 @@ export function createPairingActions(options: {
       return
     }
     entries.set(entry.pairing_id, entry)
+    options.committed?.()
     list.append(entry.item)
     renderEntry(entry)
   }
@@ -366,7 +445,19 @@ export function createPairingActions(options: {
       available = isAvailable
       region.hidden = !isAvailable
       const t = localizer.t.bind(localizer)
-      heading.textContent = t('pairing.title')
+      heading.textContent = t('pairing.formTitle')
+      for (const step of stepItems) {
+        step.label.textContent = t(step.key)
+      }
+      updateSteps()
+      nameInput.placeholder = t('pairing.namePlaceholder')
+      nameHint.textContent = t('pairing.nameHint')
+      advancedSummary.textContent = t('pairing.advanced')
+      guideHeading.textContent = t('pairing.guideTitle')
+      guideDescription.textContent = t('pairing.guideDescription')
+      guideNote.textContent = t('pairing.guideNote')
+      commandCopy.setAttribute('aria-label', t('copy.action'))
+      commandCopy.title = t('copy.action')
       intro.textContent = t('pairing.intro')
       nameCaption.textContent = t('pairing.name')
       policyCaption.textContent = t('pairing.policy')
@@ -385,6 +476,17 @@ export function createPairingActions(options: {
     /** 页面隐藏时暂停轮询；恢复由下一次 update 重新启动。 */
     suspend(): void {
       stopPolling()
+    },
+    remove(pairingId: string): void {
+      entries.get(pairingId)?.item.remove()
+      entries.delete(pairingId)
+      if (flowIntent && 'pairing_id' in flowIntent && flowIntent.pairing_id === pairingId) {
+        flow?.dispose()
+        flow = undefined
+        flowIntent = undefined
+        reviewBox.hidden = true
+      }
+      updateSteps()
     },
     /** 会话/权限失效时清空条目与意图，旧数据不能继续操作。 */
     clear(): void {

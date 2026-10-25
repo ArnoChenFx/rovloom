@@ -2,6 +2,8 @@
 import type { DeviceSnapshot, ManagementStatus, ManagementReply, PermissionSnapshot } from '../mcp/management.js'
 import type { ReaderState } from './reader.js'
 import { createLocalizer, type Localizer, type MessageKey } from './i18n.js'
+import { uiIcon, type IconName } from './icons.js'
+import { copyControl } from './clipboard.js'
 
 /** 仅组合一次页面读取，所有业务对象仍是共享 DTO。 */
 export interface PageView {
@@ -12,7 +14,13 @@ export interface PageView {
   permissions: PermissionSnapshot | null
   providersProblem: 'forbidden' | 'unavailable' | null
 }
-export type PageRoute = { machineId: string | null; cursor: string | null; providerCursor: string | null }
+export type PageRoute = {
+  machineId: string | null
+  cursor: string | null
+  providerCursor: string | null
+  section?: 'devices' | 'pairing' | 'connect'
+}
+export type DeviceFilter = { query: string; status: 'all' | 'online' | 'attention' }
 type PageSection = { heading: HTMLElement; body: HTMLElement }
 
 const connectionNames = {
@@ -93,6 +101,9 @@ export function routeHref(route: PageRoute): string {
   if (route.providerCursor !== null) {
     parameters.set('providers', route.providerCursor)
   }
+  if (route.machineId === null && route.section) {
+    parameters.set('view', route.section)
+  }
   return `#${parameters.toString()}`
 }
 
@@ -104,7 +115,7 @@ export function parseRoute(hash: string): PageRoute {
     return empty
   }
   const parameters = new URLSearchParams(hash.replace(/^#/, ''))
-  for (const key of ['machine', 'cursor', 'providers']) {
+  for (const key of ['machine', 'cursor', 'providers', 'view']) {
     if (parameters.getAll(key).length > 1 || (parameters.get(key)?.length ?? 0) > 1_024) {
       return empty
     }
@@ -113,7 +124,10 @@ export function parseRoute(hash: string): PageRoute {
   return {
     machineId,
     cursor: machineId ? null : parameters.get('cursor') || null,
-    providerCursor: machineId ? parameters.get('providers') || null : null
+    providerCursor: machineId ? parameters.get('providers') || null : null,
+    ...(!machineId && ['devices', 'pairing', 'connect'].includes(parameters.get('view') ?? '')
+      ? { section: parameters.get('view') as PageRoute['section'] }
+      : {})
   }
 }
 
@@ -175,7 +189,7 @@ function currentDeviceLink(device: DeviceSnapshot, freshness: Freshness): boolea
 }
 
 /** 分开显示持久状态、连接与认证；过期的已验证来源仅可作为历史，不呈绿色在线。 */
-function deviceBadges(device: DeviceSnapshot, freshness: Freshness): HTMLElement {
+function deviceBadges(device: DeviceSnapshot, freshness: Freshness, compact = false): HTMLElement {
   const { i18n } = freshness
   const { t } = i18n
   const result = node('div', '', 'badges')
@@ -243,7 +257,9 @@ function deviceBadges(device: DeviceSnapshot, freshness: Freshness): HTMLElement
   } else {
     result.append(badge(t('device.authUnknown', { reason: i18n.reason(authentication.reason_code) }), 'warning'))
   }
-  result.append(badge(t('device.readyUnknown')))
+  if (!compact) {
+    result.append(badge(t('device.readyUnknown')))
+  }
   return result
 }
 
@@ -301,21 +317,169 @@ function deviceActions(page: PageView, freshness: Freshness, connected: boolean)
   return section
 }
 
+/** 统计仅覆盖当前授权页；过期时不把历史连接显示为当前在线或离线。 */
+function overviewMetrics(page: PageView, freshness: Freshness): HTMLElement {
+  const t = freshness.i18n.t
+  const online = page.devices.items.filter((device) => currentDeviceLink(device, freshness)).length
+  const section = node('section', '', 'overview-metrics')
+  section.setAttribute('aria-label', t('nav.overview'))
+  const rows: [MessageKey, MessageKey, string, IconName][] = [
+    ['overview.visible', 'overview.visibleNote', String(page.devices.items.length), 'devices'],
+    ['overview.online', 'overview.onlineNote', freshness.pageStale ? '—' : String(online), 'shield'],
+    [
+      'overview.attention',
+      'overview.attentionNote',
+      freshness.pageStale ? '—' : String(page.devices.items.length - online),
+      'attention'
+    ]
+  ]
+  for (const [label, description, value, icon] of rows) {
+    const card = node('article', '', 'metric-card')
+    const top = node('div', '', 'metric-heading')
+    top.append(node('span', t(label)), uiIcon(icon))
+    card.append(top, node('strong', value, 'metric-value'), node('p', t(description), 'muted'))
+    section.append(card)
+  }
+  section.append(node('p', t('overview.scope'), 'metric-scope'))
+  return section
+}
+
+/** 向用户说明当前客户端配置流程，不从管理页端口推测 MCP 地址或展示任何凭据。 */
+function guidePage(section: 'pairing' | 'connect', i18n: Localizer, management: boolean): PageSection {
+  const { t } = i18n
+  const heading = node('header', '', 'page-heading')
+  const copy = node('div', '', 'heading-copy')
+  copy.append(node('p', t('nav.workspace'), 'eyebrow'))
+  copy.append(node('h1', t(section === 'pairing' ? 'pairing.pageTitle' : 'connect.title')))
+  copy.append(node('p', t(section === 'pairing' ? 'pairing.pageDescription' : 'connect.description'), 'muted'))
+  heading.append(copy)
+  const body = node('section', '', 'connection-guide')
+  if (section === 'pairing') {
+    if (!management) {
+      const empty = node('div', '', 'empty')
+      empty.append(uiIcon('shield'), node('h2', t('pairing.loginRequired')), node('p', t('pairing.loginHint'), 'muted'))
+      body.append(empty)
+    }
+    return { heading, body }
+  }
+  const commands = ['rovloom token list', 'rovloom token create --principal my_client --like EXISTING_CALLER_ID']
+  for (const [index, title, description] of [
+    [0, 'connect.stepOne', 'connect.stepOneNote'],
+    [1, 'connect.stepTwo', 'connect.stepTwoNote'],
+    [2, 'connect.stepThree', 'connect.stepThreeNote']
+  ] as const) {
+    const card = node('article', '', 'connection-step')
+    const number = node('span', String(index + 1).padStart(2, '0'), 'step-number')
+    const details = node('div', '', 'connection-step-body')
+    details.append(node('h2', t(title)), node('p', t(description), 'muted'))
+    if (index < commands.length) {
+      const command = commands[index]!
+      const block = node('div', '', 'command-snippet')
+      block.append(node('code', command), copyControl(command, t('copy.action')))
+      const docker = node('details', '', 'docker-command')
+      docker.dataset.disclosure = 'docker-command-' + index
+      docker.append(node('summary', t('connect.docker')))
+      const dockerCommand = command.replace(/^rovloom /u, 'docker compose run --rm gateway ')
+      const snippet = node('div', '', 'command-snippet')
+      snippet.append(node('code', dockerCommand), copyControl(dockerCommand, t('copy.action')))
+      docker.append(snippet)
+      details.append(block, docker)
+    } else {
+      const link = node('a', t('connect.docs'), 'text-link')
+      link.href = `https://github.com/ArnoChenFx/rovloom/blob/main/docs/QUICK-START${i18n.language === 'zh-CN' ? '-zh' : ''}.md`
+      link.target = '_blank'
+      link.rel = 'noreferrer noopener'
+      details.append(link)
+    }
+    card.append(number, details)
+    body.append(card)
+  }
+  return { heading, body }
+}
+
 /** 列表只展示后端返回的授权页，不将页长宣称为设备总数。 */
-function deviceList(page: PageView, freshness: Freshness): PageSection {
+function deviceList(page: PageView, freshness: Freshness, route: PageRoute, filter: DeviceFilter): PageSection {
   const { i18n } = freshness
   const { t } = i18n
   const heading = node('header', '', 'page-heading')
-  heading.append(node('h1', t('devices.heading')), node('p', t('devices.description'), 'muted'))
+  const overview = route.section !== 'devices'
+  const copy = node('div', '', 'heading-copy')
+  copy.append(node('p', t('overview.eyebrow'), 'eyebrow'))
+  copy.append(
+    node('h1', t(overview ? 'overview.title' : 'devices.heading')),
+    node('p', t(overview ? 'overview.description' : 'devices.description'), 'muted')
+  )
+  heading.append(copy)
+  const add = node('a', '', 'primary-button')
+  add.href = '#view=pairing'
+  add.append(uiIcon('plus'), node('span', t('nav.pairing')))
+  heading.append(add)
   const section = node('section', '', 'devices-section')
+  const sectionHeader = node('div', '', 'section-heading')
+  const sectionCopy = node('div')
+  sectionCopy.append(
+    node('h2', t(overview ? 'overview.deviceSection' : 'devices.heading')),
+    node('p', t('overview.deviceSubtitle'), 'muted')
+  )
+  sectionHeader.append(sectionCopy)
+  if (overview) {
+    const all = node('a', '', 'text-link')
+    all.href = '#view=devices'
+    all.append(node('span', t('overview.manage')), uiIcon('arrow'))
+    sectionHeader.append(all)
+  }
+  section.append(sectionHeader)
+  if (page.devices.items.length) {
+    const tools = node('div', '', 'device-tools')
+    const search = node('label', '', 'search-field')
+    const input = node('input')
+    input.type = 'search'
+    input.name = 'device-search'
+    input.value = filter.query
+    input.placeholder = t('devices.searchPlaceholder')
+    input.setAttribute('aria-label', t('devices.search'))
+    search.append(uiIcon('search'), input)
+    const filters = node('div', '', 'device-filters')
+    filters.setAttribute('role', 'group')
+    filters.setAttribute('aria-label', t('devices.health'))
+    for (const [value, key] of [
+      ['all', 'devices.filterAll'],
+      ['online', 'devices.filterOnline'],
+      ['attention', 'devices.filterAttention']
+    ] as const) {
+      const button = node('button', t(key))
+      button.type = 'button'
+      button.dataset.deviceFilter = value
+      button.setAttribute('aria-pressed', String(value === filter.status))
+      filters.append(button)
+    }
+    tools.append(search, filters)
+    section.append(tools)
+  }
+  const items = page.devices.items.filter((device) => {
+    const query = filter.query.trim().toLocaleLowerCase(i18n.language)
+    const matches =
+      !query ||
+      [device.name, device.machine_id, ...(device.labels ?? [])].some((value) =>
+        value.toLocaleLowerCase(i18n.language).includes(query)
+      )
+    const online = currentDeviceLink(device, freshness)
+    return matches && (filter.status === 'all' || (filter.status === 'online' ? online : !online))
+  })
   if (page.devices.items.length === 0) {
     const empty = node('div', '', 'empty')
-    empty.append(node('h2', t('devices.emptyHeading')), node('p', t('devices.empty'), 'muted'))
+    const symbol = node('span', '', 'empty-illustration')
+    symbol.append(uiIcon('devices'))
+    empty.append(symbol, node('h2', t('empty.title')), node('p', t('empty.description'), 'muted'))
+    const pair = node('a', '', 'primary-button')
+    pair.href = '#view=pairing'
+    pair.append(uiIcon('plus'), node('span', t('nav.pairing')))
+    empty.append(pair)
     section.append(empty)
   }
   const columns = node('div', '', 'device-columns')
   columns.setAttribute('aria-hidden', 'true')
-  for (const key of ['devices.identity', 'devices.health', 'devices.activity', 'devices.observations'] as const) {
+  for (const key of ['devices.identity', 'devices.health', 'devices.activity', 'devices.record'] as const) {
     columns.append(node('span', t(key)))
   }
   if (page.devices.items.length) {
@@ -323,13 +487,19 @@ function deviceList(page: PageView, freshness: Freshness): PageSection {
   }
   const list = node('ul', '', 'device-list')
   list.setAttribute('aria-label', t('devices.heading'))
-  for (const device of page.devices.items) {
+  for (const device of items) {
     const row = node('li', '', 'device-card')
     const identity = node('div', '', 'device-identity')
     const link = node('a', device.name, 'device-name')
     link.href = routeHref({ machineId: device.machine_id, cursor: null, providerCursor: null })
-    identity.append(link, node('code', device.machine_id))
-    identity.append(
+    const deviceIcon = node('span', '', 'device-icon')
+    deviceIcon.append(uiIcon('devices'))
+    const deviceCopy = node('div', '', 'device-copy')
+    const identifier = node('code', device.machine_id)
+    identifier.title = device.machine_id
+    deviceCopy.append(link, identifier)
+    identity.append(deviceIcon, deviceCopy)
+    deviceCopy.append(
       node(
         'p',
         device.labels === null
@@ -341,7 +511,7 @@ function deviceList(page: PageView, freshness: Freshness): PageSection {
       )
     )
     const health = node('div', '', 'device-health')
-    health.append(node('span', t('devices.health'), 'cell-label'), deviceBadges(device, freshness))
+    health.append(node('span', t('devices.health'), 'cell-label'), deviceBadges(device, freshness, true))
     const heartbeat = device.connection.verification === 'verified' ? device.connection.value.last_heartbeat_at : null
     const activity = node('div', '', 'device-activity')
     activity.append(node('span', t('devices.activity'), 'cell-label'))
@@ -350,29 +520,53 @@ function deviceList(page: PageView, freshness: Freshness): PageSection {
     )
     activity.append(node('p', t('devices.received', { time: i18n.timestamp(heartbeat) }), 'muted'))
     const observations = node('div', '', 'device-observations')
-    observations.append(node('span', t('devices.observations'), 'cell-label'))
-    observations.append(listObservation('devices.observed', device.observed_at, freshness))
-    observations.append(
+    const record = node('details', '', 'device-record')
+    record.dataset.disclosure = 'device-record-' + device.machine_id
+    const summary = node('summary', t('devices.record'))
+    record.append(summary)
+    record.append(listObservation('devices.observed', device.observed_at, freshness))
+    record.append(
       listObservation(
         'devices.connectionObserved',
         device.connection.verification === 'verified' ? device.connection.observed_at : null,
         freshness
       )
     )
-    observations.append(
+    record.append(
       listObservation(
         'devices.authObserved',
         device.authentication.verification === 'verified' ? device.authentication.observed_at : null,
         freshness
       )
     )
+    record.append(node('p', t('device.readyUnknown'), 'muted'))
+    const inspect = node('a', '', 'inspect-device')
+    inspect.href = link.href
+    inspect.setAttribute('aria-label', t('devices.open', { name: device.name }))
+    inspect.append(uiIcon('arrow'))
+    observations.append(record, inspect)
     row.append(identity, health, activity, observations)
     list.append(row)
   }
   section.append(list)
+  if (page.devices.items.length && !items.length) {
+    const empty = node('div', '', 'empty search-empty')
+    empty.append(uiIcon('search'), node('h3', t('devices.noMatches')), node('p', t('devices.noMatchesHint'), 'muted'))
+    section.append(empty)
+  }
+  if (page.devices.items.length) {
+    section.append(
+      node('p', t('devices.results', { shown: items.length, count: page.devices.items.length }), 'list-count')
+    )
+  }
   if (page.devices.next_cursor !== undefined) {
     const next = node('a', t('devices.next'), 'button-link')
-    next.href = routeHref({ machineId: null, cursor: page.devices.next_cursor, providerCursor: null })
+    next.href = routeHref({
+      machineId: null,
+      cursor: page.devices.next_cursor,
+      providerCursor: null,
+      section: route.section
+    })
     section.append(next)
   }
   return { heading, body: section }
@@ -579,7 +773,8 @@ export function renderPage(
   state: ReaderState<PageView>,
   route: PageRoute,
   i18n: Localizer = createLocalizer('zh-CN'),
-  management = false
+  management = false,
+  filter: DeviceFilter = { query: '', status: 'all' }
 ): void {
   const { t } = i18n
   const focused =
@@ -589,6 +784,12 @@ export function renderPage(
   const metadataWasOpen = content.querySelector<HTMLDetailsElement>('.gateway-metadata')?.open ?? false
   const metadataHadFocus =
     content.contains(document.activeElement) && document.activeElement?.matches('.gateway-metadata > summary')
+  const disclosures = new Map(
+    [...content.querySelectorAll<HTMLDetailsElement>('details[data-disclosure]')].map((details) => [
+      details.dataset.disclosure,
+      details.open
+    ])
+  )
   const view = document.createDocumentFragment()
   if (state.problem) {
     const message = node('p', t(problemNames[state.problem]), 'notice warning')
@@ -628,8 +829,36 @@ export function renderPage(
     gatewayHeading.append(
       badge(state.stale ? t('reader.stale') : t('gateway.fresh'), state.stale ? 'warning' : 'neutral')
     )
-    gateway.append(gatewayHeading)
-    gateway.append(
+    const mark = node('span', '', 'gateway-symbol')
+    mark.append(uiIcon('gateway'))
+    gatewayHeading.prepend(mark)
+    const components = node('div', '', 'gateway-components')
+    for (const [name, key] of [
+      ['store', 'overview.store'],
+      ['transport', 'overview.transport'],
+      ['native', 'overview.native']
+    ] as const) {
+      const item = node('div', '', 'component-item')
+      item.append(
+        node('span', t(key), 'muted'),
+        badge(
+          t(`overview.${status.components[name]}`),
+          status.components[name] === 'available' && !state.stale ? 'good' : 'neutral'
+        )
+      )
+      components.append(item)
+    }
+    gateway.append(gatewayHeading, components)
+    const metadata = node('details', '', 'gateway-metadata')
+    metadata.open = metadataWasOpen
+    metadata.append(node('summary', t('gateway.metadata')))
+    metadata.append(
+      facts([
+        [t('gateway.generation'), status.recovery_generation],
+        [t('gateway.policy'), status.policy_revision]
+      ])
+    )
+    metadata.append(
       facts(
         [
           [t('gateway.listener'), t('gateway.listenerUnknown')],
@@ -655,27 +884,33 @@ export function renderPage(
         'gateway-facts'
       )
     )
-    const metadata = node('details', '', 'gateway-metadata')
-    metadata.open = metadataWasOpen
-    metadata.append(node('summary', t('gateway.metadata')))
-    metadata.append(
-      facts([
-        [t('gateway.generation'), status.recovery_generation],
-        [t('gateway.policy'), status.policy_revision]
-      ])
-    )
     gateway.append(metadata)
     if (status.mode !== 'active') {
       gateway.append(node('p', t('gateway.degradedNote'), 'notice warning'))
     }
     const section =
-      route.machineId === null
-        ? deviceList(page, freshness)
-        : deviceDetail(page, freshness, management && status.mode === 'active' && !state.stale)
-    view.append(section.heading, gateway, section.body)
+      route.machineId !== null
+        ? deviceDetail(page, freshness, management && status.mode === 'active' && !state.stale)
+        : route.section === 'pairing' || route.section === 'connect'
+          ? guidePage(route.section, i18n, management)
+          : deviceList(page, freshness, route, filter)
+    view.append(section.heading)
+    if (route.section === 'pairing' && (state.stale || status.mode !== 'active')) {
+      view.append(node('p', t(state.stale ? 'reader.stale' : 'gateway.degradedNote'), 'notice warning'))
+    }
+    if (route.machineId !== null || !['pairing', 'connect'].includes(route.section ?? '')) {
+      if (route.machineId === null) {
+        view.append(overviewMetrics(page, freshness))
+      }
+      view.append(gateway)
+    }
+    view.append(section.body)
   }
   const identity = routeHref(route)
   if (content.dataset.route === identity) {
+    for (const details of view.querySelectorAll<HTMLDetailsElement>('details[data-disclosure]')) {
+      details.open = disclosures.get(details.dataset.disclosure) ?? false
+    }
     syncChildren(content, view)
   } else {
     content.replaceChildren(view)

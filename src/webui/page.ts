@@ -1,6 +1,6 @@
 /** 挂载内置管理页面并管理导航/可见性资源；读取适配层不接收浏览器自报管理员身份。 */
 import { createSnapshotReader, ReadError, type ReadClock, type SnapshotReader, type TimedSnapshot } from './reader.js'
-import { parseRoute, renderPage, type PageRoute, type PageView } from './view.js'
+import { parseRoute, renderPage, type PageRoute, type PageView, type DeviceFilter } from './view.js'
 import { checkPage } from './validate.js'
 import type { ReaderState } from './reader.js'
 import { createLocalizer } from './i18n.js'
@@ -8,17 +8,17 @@ import { createUiPreferences, type UiPreferences } from './preferences.js'
 import { createPreferenceControl } from './preference-control.js'
 import { createDeviceActions } from './device-actions.js'
 import { createPairingActions } from './pairing-actions.js'
+import { uiIcon } from './icons.js'
+import { createResourcePanel } from './resource-panel.js'
+import type { ResourceTransport } from './resource-client.js'
+import { copyText } from './clipboard.js'
 import type { ManagementWriteTransport } from './write-contract.js'
 
 /** 接入共享管理读取后的页面投影函数；不是授权接口，不能代替每次后端鉴权。 */
 export type PageRead = (route: Readonly<PageRoute>, signal: AbortSignal) => Promise<TimedSnapshot<PageView>>
 
 /** 创建固定的页面节点，不把任何身份、秘密或设备输入写进 HTML 字符串。 */
-function element<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  text: string,
-  className = ''
-): HTMLElementTagNameMap[K] {
+function element<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = ''): HTMLElementTagNameMap[K] {
   const result = document.createElement(tag)
   result.textContent = text
   result.className = className
@@ -35,22 +35,53 @@ export function mountWebUi(
   root: HTMLElement,
   read: PageRead = unavailableRead,
   clock?: ReadClock,
-  management?: ManagementWriteTransport
+  management?: ManagementWriteTransport,
+  resources?: ResourceTransport
 ): () => void {
-  const header = element('header', '', 'topbar')
+  const sidebar = element('aside', '', 'sidebar')
   const brand = element('a', '', 'brand')
   brand.href = '#'
   const logo = element('img', '', 'brand-logo')
-  logo.src = './rovloom-mark-transparent.png'
+  logo.src = './rovloom-logo.png'
   logo.alt = 'Rovloom'
-  logo.width = 48
-  logo.height = 48
-  brand.append(logo, element('span', 'Rovloom', 'brand-name'))
+  logo.width = 180
+  logo.height = 60
+  brand.append(logo)
+  const sidebarCaption = element('p', '', 'sidebar-caption')
+  const navHeading = element('p', '', 'nav-heading')
+  const navigation = element('nav', '', 'sidebar-nav')
+  const navLinks = (['overview', 'devices', 'pairing', 'connect'] as const).map((section) => {
+    const link = element('a', '', 'nav-link')
+    link.href = section === 'overview' ? '#' : '#view=' + section
+    const label = element('span')
+    link.append(uiIcon(section), label)
+    navigation.append(link)
+    return { section, link, label }
+  })
+  const resourceHeading = element('p', '', 'nav-heading resource-heading')
+  const docs = element('a', '', 'nav-link docs-link')
+  docs.target = '_blank'
+  docs.rel = 'noopener noreferrer'
+  const docsLabel = element('span')
+  docs.append(uiIcon('book'), docsLabel)
+  const sidebarStatus = element('div', '', 'sidebar-status')
+  const statusIcon = element('span', '', 'sidebar-gateway-icon')
+  statusIcon.append(uiIcon('gateway'))
+  const statusCopy = element('div')
+  const statusLabel = element('strong', 'Gateway')
+  const statusValue = element('span', '', 'sidebar-status-value')
+  statusCopy.append(statusLabel, statusValue)
+  sidebarStatus.append(statusIcon, statusCopy)
+  sidebar.append(brand, sidebarCaption, navHeading, navigation, resourceHeading, docs, sidebarStatus)
+  const workspace = element('div', '', 'workspace')
+  const header = element('header', '', 'topbar')
+  const headerLabel = element('div', '', 'header-label')
+  headerLabel.append(uiIcon('overview'))
   const title = element('span', '', 'brand-context')
+  headerLabel.append(title)
   const preferencesBar = element('div', '', 'preferences')
-  const commandbar = element('nav', '', 'commandbar')
-  const sectionLink = element('a', '', 'section-nav')
-  sectionLink.href = '#'
+  const commandbar = element('div', '', 'commandbar')
+  commandbar.setAttribute('role', 'toolbar')
   const toolbar = element('div', '', 'toolbar')
   const refresh = element('button', '')
   refresh.type = 'button'
@@ -64,33 +95,24 @@ export function mountWebUi(
   content.tabIndex = -1
   refresh.setAttribute('aria-controls', content.id)
   cancel.setAttribute('aria-controls', content.id)
-  const language = createPreferenceControl(
-    'language',
-    [
-      ['system', 'language.system'],
-      ['zh-CN', 'language.chinese'],
-      ['en', 'language.english']
-    ],
-    /** 语言选择只保存现有展示枚举，不触发设备读取。 */ (value) => preferences.setLanguage(value)
-  )
-  const theme = createPreferenceControl(
-    'theme',
-    [
-      ['system', 'theme.system'],
-      ['light', 'theme.light'],
-      ['dark', 'theme.dark']
-    ],
-    /** 主题选择只更新本页样式与既有偏好。 */ (value) => preferences.setTheme(value)
-  )
+  const language = createPreferenceControl('language', (value) => preferences.setLanguage(value))
+  const theme = createPreferenceControl('theme', (value) => preferences.setTheme(value))
   preferencesBar.append(language.root, theme.root)
   toolbar.append(indicator, refresh, cancel)
-  commandbar.append(sectionLink, toolbar)
-  header.append(brand, title, preferencesBar)
+  commandbar.append(toolbar)
+  const headerActions = element('div', '', 'topbar-actions')
+  headerActions.append(commandbar, preferencesBar)
+  header.append(headerLabel, headerActions)
   const skip = element('a', '', 'skip-link')
   skip.href = '#management-content'
   const footer = element('footer', '', 'muted')
-  root.replaceChildren(skip, header, commandbar, content, footer)
+  const copyFeedback = element('span', '', 'visually-hidden')
+  copyFeedback.setAttribute('role', 'status')
+  copyFeedback.setAttribute('aria-live', 'polite')
+  workspace.append(header, content, copyFeedback, footer)
+  root.replaceChildren(skip, sidebar, workspace)
   let route = parseRoute(location.hash)
+  let filter: DeviceFilter = { query: '', status: 'all' }
   let reader: SnapshotReader<PageView>
   let disposed = false
   let i18n = createLocalizer('en')
@@ -121,6 +143,9 @@ export function mountWebUi(
   const pairing = management
     ? createPairingActions({
         transport: management,
+        committed() {
+          resourcePanel?.refresh()
+        },
         /** 配对轮询发现会话/权限失效时与设备操作走同一清空路径。 */
         authorizationLost(problem) {
           if (disposed) {
@@ -135,6 +160,28 @@ export function mountWebUi(
     : undefined
   if (pairing) {
     footer.before(pairing.region)
+  }
+
+  const resourcePanel = resources
+    ? createResourcePanel({
+        transport: resources,
+        committed(machine, pairingId) {
+          if (machine) {
+            location.hash = '#view=devices'
+          } else if (pairingId) {
+            pairing?.remove(pairingId)
+          }
+        },
+        authorizationLost(problem) {
+          reader.dispose()
+          actions?.clear()
+          pairing?.clear()
+          paint({ snapshot: null, pending: false, stale: true, ageMs: 0, problem }, route)
+        }
+      })
+    : undefined
+  if (resourcePanel) {
+    footer.before(resourcePanel.region)
   }
 
   /** 稳定工具栏与当前快照重新本地化；不替换 reader、路由、等待信号或时间锚点。 */
@@ -152,7 +199,6 @@ export function mountWebUi(
     )
     content.setAttribute('aria-busy', String(state.pending))
     indicator.dataset.state = state.pending ? 'pending' : state.stale ? 'stale' : state.snapshot ? 'current' : 'empty'
-    sectionLink.setAttribute('aria-current', current.machineId === null ? 'page' : 'location')
     if (['unauthenticated', 'forbidden', 'not_found'].includes(state.problem ?? '')) {
       actions?.clear()
       pairing?.clear()
@@ -163,7 +209,33 @@ export function mountWebUi(
       !!state.snapshot && !state.stale && state.snapshot.value.status.mode === 'active',
       state.snapshot ? state.snapshot.observedAt + state.ageMs : undefined
     )
-    renderPage(content, state, current, i18n, !!actions)
+    const section = current.machineId ? 'devices' : (current.section ?? 'overview')
+    content.dataset.section = section
+    for (const item of navLinks) {
+      if (item.section === section) {
+        item.link.setAttribute('aria-current', 'page')
+      } else {
+        item.link.removeAttribute('aria-current')
+      }
+    }
+    title.textContent = i18n.t(('nav.' + section) as 'nav.overview' | 'nav.devices' | 'nav.pairing' | 'nav.connect')
+    const active = !!state.snapshot && !state.stale && state.snapshot.value.status.mode === 'active'
+    sidebarStatus.dataset.state = active ? 'current' : 'unknown'
+    statusValue.textContent = i18n.t(
+      active ? 'gateway.active' : state.snapshot ? (state.stale ? 'reader.stale' : 'gateway.degraded') : 'reader.empty'
+    )
+    if (pairing) {
+      pairing.region.hidden = section !== 'pairing' || !active
+    }
+    renderPage(content, state, current, i18n, !!actions, filter)
+    const authorized = active && !['unauthenticated', 'forbidden', 'not_found'].includes(state.problem ?? '')
+    resourcePanel?.update(current, i18n, authorized)
+    if (resourcePanel && section === 'connect' && authorized) {
+      const guide = content.querySelector<HTMLElement>('.connection-guide')
+      if (guide) {
+        guide.hidden = true
+      }
+    }
   }
 
   /** 偏好仅改变文案与 CSS 主题；标题、语言和无障碍名称随词典同步。 */
@@ -177,15 +249,25 @@ export function mountWebUi(
     document.documentElement.dataset.theme = state.theme
     document.title = t('app.title')
     brand.setAttribute('aria-label', t('app.navigation'))
-    title.textContent = t('app.console')
-    sectionLink.textContent = t('devices.heading')
+    title.textContent = t('nav.console')
+    sidebarCaption.textContent = t('app.console')
+    navHeading.textContent = t('nav.workspace')
+    resourceHeading.textContent = t('nav.resources')
+    navigation.setAttribute('aria-label', t('app.subtitle'))
+    docsLabel.textContent = t('nav.docs')
+    docs.href = `https://github.com/ArnoChenFx/rovloom/blob/main/docs/QUICK-START${state.language === 'zh-CN' ? '-zh' : ''}.md`
+    for (const item of navLinks) {
+      item.label.textContent = t(
+        ('nav.' + item.section) as 'nav.overview' | 'nav.devices' | 'nav.pairing' | 'nav.connect'
+      )
+    }
     commandbar.setAttribute('aria-label', t('app.subtitle'))
     refresh.textContent = t('action.refresh')
     cancel.textContent = t('action.cancel')
     skip.textContent = t('app.skip')
     footer.textContent = t(actions ? 'app.managedFooter' : 'app.footer')
-    language.update(i18n, state.languageChoice)
-    theme.update(i18n, state.themeChoice)
+    language.update(i18n, state.language)
+    theme.update(i18n, state.theme)
     if (languageChanged && reader) {
       paint(reader.state(), route)
     }
@@ -219,6 +301,7 @@ export function mountWebUi(
 
   /** 手动刷新只读快照，重复点击由 reader 合并。 */
   function refreshPage(): void {
+    resourcePanel?.refresh()
     void reader.refresh()
   }
 
@@ -272,12 +355,48 @@ export function mountWebUi(
     }
   }
 
+  /** 仅筛选当前已授权列表页；不构造新的设备读取或写入。 */
+  function searchDevices(event: Event): void {
+    if (event.target instanceof HTMLInputElement && event.target.name === 'device-search') {
+      filter.query = event.target.value
+      paint(reader.state(), route)
+    }
+  }
+
+  function filterDevices(event: MouseEvent): void {
+    const button =
+      event.target instanceof Element ? event.target.closest<HTMLButtonElement>('[data-device-filter]') : null
+    const selected = button?.dataset.deviceFilter
+    if (selected === 'all' || selected === 'online' || selected === 'attention') {
+      filter.status = selected
+      paint(reader.state(), route)
+    }
+  }
+
+  /** 复制仅由明确用户点击触发，结果未知时不宣称成功。 */
+  async function copy(event: MouseEvent): Promise<void> {
+    const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button[data-copy]') : null
+    if (!button || button.disabled || !root.contains(button)) {
+      return
+    }
+    const value = button.dataset.copy
+    if (value === undefined) {
+      return
+    }
+    copyFeedback.textContent = ''
+    const success = await copyText(value)
+    if (!disposed) {
+      copyFeedback.textContent = i18n.t(success ? 'copy.done' : 'copy.failed')
+      button.title = copyFeedback.textContent
+      button.dataset.copied = String(success)
+    }
+  }
+
   /** 哈希导航、后退与分页都先清理旧路由资源，再获取新目标。 */
   function navigate(): void {
+    filter = { query: '', status: 'all' }
     actions?.suspend()
     pairing?.suspend()
-    language.close()
-    theme.close()
     if (location.hash === '#management-content') {
       content.focus()
       return
@@ -311,9 +430,8 @@ export function mountWebUi(
   function hide(): void {
     actions?.suspend()
     pairing?.suspend()
-    language.close()
-    theme.close()
     reader.dispose()
+    resourcePanel?.clear()
     content.replaceChildren()
   }
 
@@ -324,9 +442,13 @@ export function mountWebUi(
     }
     disposed = true
     reader.dispose()
+    resourcePanel?.dispose()
     actions?.dispose()
     pairing?.dispose()
     content.removeEventListener('click', deviceAction)
+    content.removeEventListener('click', filterDevices)
+    content.removeEventListener('input', searchDevices)
+    root.removeEventListener('click', copy)
     skip.removeEventListener('click', skipContent)
     refresh.removeEventListener('click', refreshPage)
     cancel.removeEventListener('click', cancelRead)
@@ -344,6 +466,9 @@ export function mountWebUi(
   refresh.addEventListener('click', refreshPage)
   cancel.addEventListener('click', cancelRead)
   content.addEventListener('click', deviceAction)
+  content.addEventListener('click', filterDevices)
+  content.addEventListener('input', searchDevices)
+  root.addEventListener('click', copy)
   window.addEventListener('hashchange', navigate)
   document.addEventListener('visibilitychange', visibility)
   window.addEventListener('pageshow', show)

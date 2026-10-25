@@ -11,6 +11,9 @@ import { ManagementServiceError } from './write-service.js'
 
 export type ManagementWriteHttpOptions = ManagementHttpOptions & {
   origin: string
+  resources?: {
+    execute(operation: string, args: unknown, identity: ManagementHttpIdentity, signal: AbortSignal): unknown
+  }
   /** 复用既有管理员会话的 CSRF 后端，缺失或非 true 均拒绝；请求体不能自报通过。 */
   verifyCsrf(request: Request, identity: ManagementHttpIdentity, signal: AbortSignal): Promise<boolean>
 }
@@ -80,7 +83,7 @@ export function createManagementHandler(options: ManagementWriteHttpOptions) {
   /** 实际异步任务完成前保留额度；取消只停止前端等待，已提交操作由原回执对账。 */
   async function perform(
     request: Request,
-    operation: ManagementOperation,
+    operation: ManagementOperation | `resources/${string}`,
     controller: AbortController
   ): Promise<Response> {
     const identity = await options.authenticate(request, controller.signal)
@@ -134,7 +137,13 @@ export function createManagementHandler(options: ManagementWriteHttpOptions) {
       return failure('invalid_arguments', 400)
     }
     const context: AdminContext = { ...identity, wait_signal: controller.signal }
-    const reply = await options.service.execute(operation, args as ManagementArguments[typeof operation], context)
+    const reply = operation.startsWith('resources/')
+      ? await options.resources!.execute(operation.slice('resources/'.length), args, identity, controller.signal)
+      : await options.service.execute(
+          operation as ManagementOperation,
+          args as ManagementArguments[ManagementOperation],
+          context
+        )
     if (controller.signal.aborted) {
       return failure('outcome_unconfirmed', 503)
     }
@@ -157,7 +166,7 @@ export function createManagementHandler(options: ManagementWriteHttpOptions) {
       } catch {
         return failure('forbidden', 403)
       }
-      if (!url.pathname.startsWith('/admin/v1/actions/')) {
+      if (!url.pathname.startsWith('/admin/v1/actions/') && !url.pathname.startsWith('/admin/v1/resources/')) {
         return reads.fetch(request)
       }
       let size = 0
@@ -183,7 +192,23 @@ export function createManagementHandler(options: ManagementWriteHttpOptions) {
       if (request.method !== 'POST') {
         return failure('method_not_allowed', 405)
       }
-      const operation = routes.get(url.pathname)
+      const resource = url.pathname.startsWith('/admin/v1/resources/')
+        ? url.pathname.slice('/admin/v1/resources/'.length)
+        : null
+      const operation =
+        resource !== null &&
+        options.resources &&
+        [
+          'tokens_list',
+          'tokens_create',
+          'tokens_delete',
+          'tokens_rotate',
+          'pairings_list',
+          'pairings_delete',
+          'devices_delete'
+        ].includes(resource)
+          ? (`resources/${resource}` as const)
+          : routes.get(url.pathname)
       if (!operation) {
         return failure('not_found', 404)
       }

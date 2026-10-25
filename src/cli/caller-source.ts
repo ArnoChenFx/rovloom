@@ -91,7 +91,12 @@ export function openCallerSource(
           /* 吊销（删除）或到期都撤去当前身份，旧MCP会话或长等待不能滑动续期。 */ (entry) =>
             entry.principal.id === caller.principal_id && active(entry, now)
         )
-        const principal = found ? structuredClone(found.principal) : null
+        const principal = found
+          ? structuredClone({
+              ...found.principal,
+              policy: found.scope === 'gateway' ? registry.local_policy : found.principal.policy
+            })
+          : null
         return found && time() < found.expires_at ? principal : null
       } catch {
         return null
