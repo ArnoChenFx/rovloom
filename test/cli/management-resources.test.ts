@@ -79,7 +79,7 @@ test('Dashboard tokens persist across reopen, authenticate, follow new devices a
       issued_at: Date.now(),
       expires_at: Date.now() + 86400000
     })
-    assert.equal(caller.identities.principal({ principal_id: 'claude' })!.policy.revision, 'local')
+    assert.equal(caller.identities.principal({ principal_id: 'claude' })!.policy.revision, 'caller')
     caller.close()
     caller = openCallerSource(path, registry.resource)
     assert.equal(o.execute('tokens_list').items.find((entry: any) => entry.principal === 'claude').token, token)

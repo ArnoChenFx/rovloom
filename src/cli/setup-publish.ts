@@ -54,6 +54,7 @@ export function publishFirstCallers(
     kind: 'mcp-caller-source',
     resource,
     local_policy: authorization.policies.local,
+    gateway_policy: authorization.policies.caller,
     callers: [caller]
   }
   if (previous === undefined) {
@@ -96,6 +97,13 @@ export function mergeSetupCallers(
   >
   if (registry.local_policy.revision !== authorization.policies.local.revision) {
     throw new CliError('configuration_required')
+  }
+  if (registry.gateway_policy && registry.gateway_policy.revision !== authorization.policies.caller.revision) {
+    throw new CliError('configuration_required')
+  }
+  registry.gateway_policy = {
+    revision: authorization.policies.caller.revision,
+    grants: unionGrants(registry.gateway_policy?.grants ?? [], authorization.policies.caller.grants)
   }
   registry.local_policy.grants = unionGrants(registry.local_policy.grants, authorization.policies.local.grants)
   for (const entry of registry.callers) {

@@ -142,11 +142,17 @@ rovloom token rotate --principal owner [--ttl-days 30] [--grace-minutes 10]
 rovloom token revoke --principal worker
 ```
 
-令牌注册表（Gateway 状态目录下的 `managed/mcp-callers.json`）只保存 SHA-256 摘要、主体策略和固定到期；
+令牌注册表（Gateway 状态目录下的 `managed/mcp-callers.json`）保存 SHA-256 摘要、新签发令牌的原文、主体策略和固定到期；
 Gateway 每次认证都重读它，因此创建、续期、轮换和吊销**无需重启**，吊销同时使已建立的 MCP 会话失效。
 `create`/`rotate` 把新令牌原值只写到 stdout 一次（其余信息写 stderr）；新主体的权限克隆自 `--like`，不会扩大。
 `rotate` 默认立即让旧令牌失效，`--grace-minutes` 给客户端一个有界的切换窗口。本机 `mcp-client.json`
 属于同一主体时会同步更新。注册表损坏时拒绝全部认证，修复前一直如此。
+
+管理页令牌（`scope: "gateway"`）保留各自的主体 ID 和结果归属，调用授权跟随独立保存的
+`gateway_policy`。配对和加入设备时更新这份 caller 策略，不能与 `local_policy` 的修订混用。
+旧版单码配对注册表没有此字段时，从 `operator_simple_pairing` 恢复 caller 策略，下一次写入
+注册表时独立保留；两处绑定都缺失时，Gateway 令牌不获得方法授权。吊销原配对令牌不会
+连带吊销另行签发的 Gateway 令牌。
 
 ### 配对
 

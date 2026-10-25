@@ -165,7 +165,7 @@ rovloom token revoke --principal worker
 ```
 
 The token registry (`managed/mcp-callers.json` under the Gateway state directory)
-holds only SHA-256 digests, principal policy and fixed expiry. The Gateway re-reads
+holds SHA-256 digests, recoverable newly issued tokens, principal policies and fixed expiry. The Gateway re-reads
 it on every authentication, so create, renew, rotate and revoke take effect **without a
 restart**, and revoking also invalidates established MCP sessions. `create` and
 `rotate` write the new token to stdout exactly once (everything else goes to stderr);
@@ -173,6 +173,14 @@ a new principal's permissions are cloned from `--like`, never widened. `rotate`
 invalidates the old token immediately unless `--grace-minutes` gives clients a bounded
 switch-over window. A local `mcp-client.json` belonging to the same principal is
 updated too. A corrupt registry denies all authentication until it is repaired.
+
+Management-page tokens (`scope: "gateway"`) retain separate principal IDs and result
+ownership while following the paired caller policy in `gateway_policy`. Pairing and
+joining devices update that policy separately from `local_policy`; their revisions
+must not be interchanged. Existing single-code pairing registries without this field
+use the policy stored on `operator_simple_pairing`, and the next registry write preserves
+it independently. If neither binding exists, Gateway tokens have no method grants.
+Revoking the original pairing token does not revoke separately issued Gateway tokens.
 
 ### Pairing
 

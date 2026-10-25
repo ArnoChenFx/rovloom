@@ -13,7 +13,7 @@ import { backendFixture } from './helpers.js'
 import { privateHerdrTestRoot } from './private-root.js'
 
 /** 安装来源是明确的合成 fixture；真实 Wire、内核 peer、Unix IO 和 SQLite claim 保持原实现。 */
-async function fixture(method: string, enabled?: boolean) {
+async function fixture(method: string, enabled?: boolean, installedEnabled = enabled) {
   const state = backendFixture()
   const root = privateHerdrTestRoot('.herdr-terminal-switch-')
   const endpoint = join(root, 'native.sock')
@@ -58,7 +58,7 @@ async function fixture(method: string, enabled?: boolean) {
   const local = { allow_terminal_execution: enabled }
   // 测试仅替换安装测量这一明确接缝；不声称 fake token 是原生安装证据。
   const installation = Object.assign(Object.create(HerdrInstallation.prototype), {
-    config: local,
+    config: { allow_terminal_execution: installedEnabled },
     assert: /** 真实 IO 仍核对本测试 socket 的路径与归属。 */ () => ({
       address: endpoint,
       stamp: inspectHerdrPath(endpoint, 'socket'),
@@ -153,6 +153,26 @@ test(
     }
   }
 )
+
+for (const enabled of [false, true]) {
+  test(`Herdr role switch ${enabled} overrides the opposite installation snapshot at the native boundary`, async () => {
+    const f = await fixture('pane.send_input', enabled, !enabled)
+    try {
+      if (enabled) {
+        await f.runtime.executeWire(f.raw, new AbortController().signal)
+        assert.equal(JSON.parse(f.received()).params.text, 'printf synthetic')
+      } else {
+        await assert.rejects(f.runtime.executeWire(f.raw, new AbortController().signal), {
+          code: 'terminal_execution_disabled',
+          outcome: 'not_dispatched'
+        })
+        assert.equal(f.received(), '')
+      }
+    } finally {
+      await f.close()
+    }
+  })
+}
 
 test(
   'Herdr revokes after durable claim and retains the tombstone without writing',
