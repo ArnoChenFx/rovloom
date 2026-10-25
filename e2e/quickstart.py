@@ -289,11 +289,10 @@ def main():
                 'revoked device must not become ready'
             print('REVOKE_OK', flush=True)
         if args.repair:
-            def credential_files():
-                return [os.path.join(root, f) for root, _, files in os.walk(home_c) for f in files if f == 'device.json']
-            before = credential_files()
-            assert len(before) == 1, f'expected one device credential file: {before}'
-            old_secret = open(before[0]).read()
+            # 固定读当前生效的凭据文件：退役副本会留在 retired/ 下，不能作为"新凭据"被扫到。
+            device_path = os.path.join(home_c, '.local', 'share', 'rovloom', 'connector', 'managed', 'device.json')
+            assert os.path.exists(device_path), 'expected a device credential file'
+            old_secret = open(device_path).read()
             connector.stop()
             join_value = issue_join()  # 新码：本机重置本地状态后作为新设备重新配对
             connector = Term('connector-repair', [rov, 'connector', '--join', join_value], env_c, home_c); terms.append(connector)
@@ -306,7 +305,7 @@ def main():
                     if term.child.poll() is not None:
                         raise RuntimeError(f'{term.name} exited {term.child.returncode}: {redact(term.text())}')
             assert ready, 'timeout waiting for provider_ready after re-pair'
-            new_secret = open(credential_files()[0]).read()
+            new_secret = open(device_path).read()
             assert new_secret != old_secret, 'device credential was not replaced'
             print('REPAIRED', flush=True)
         if args.second_device:

@@ -14,6 +14,8 @@ export class CliSetup {
 
   // 仅角色命令在读到实际用户文件后调用；join 是唯一的首配路径，普通启动不需要本地终端。
   async prepare(config: RoleConfig, path: string, io: CliIo, options?: CliPrepareOptions): Promise<RoleConfig> {
+    // 两个角色都记录 io：Connector 的 observe（connector_transport/provider_ready）也经它输出。
+    this.#io = io
     if (config.role === 'connector') {
       if (options?.join !== undefined) {
         const joined = await joinConnector(config, path, io, options.join)
@@ -23,7 +25,6 @@ export class CliSetup {
       // 已配对设备的日常启动：配对状态由运行时装配校验，CLI 不再问答。
       return config
     }
-    this.#io = io
     this.#issueCode = options?.issueCode === true
     return config
   }
