@@ -155,8 +155,10 @@ def main():
     env_c = user_env(home_c, [herdr_dir])
     terms = []
     try:
-        first = Term('connector0', [rov, 'connector'], env_c, home_c)
-        first.expect('Gateway address'); first.stop()
+        # 按文档用 config init 生成用户配置文件（新流程没有地址问答）。
+        initialized = subprocess.run([rov, 'config', 'init', 'connector'], env=env_c, cwd=home_c,
+                                     capture_output=True, text=True, timeout=10)
+        assert initialized.returncode == 0 and initialized.stderr == 'config_ready\n', 'connector_init_failed'
         path = os.path.join(home_c, '.config', 'rovloom', 'connector.json')
         cfg = json.load(open(path, encoding='utf-8'))
         if kind == 'herdr':

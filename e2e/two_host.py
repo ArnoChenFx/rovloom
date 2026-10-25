@@ -59,10 +59,12 @@ def main():
                          *common, '-e', 'PATH=/opt/herdr:/usr/local/bin:/usr/bin:/bin', '-v', f'{home_c}:/home/rv',
                          '-v', f'{herdr_dir}:/opt/herdr:ro', args.image, 'rovloom', 'connector']
         env = {**os.environ}
-        # Connector 首次启动自动生成用户文件，再按文档选择 Herdr。
-        first = Term('connector0', connector_cmd, env, home_c); first.expect('Gateway address'); first.stop()
-        docker('rm', '-f', cn_name, check=False)
+        # 按文档用 config init 生成用户配置并选择 Herdr（新流程没有地址问答）。
+        docker('run', '--rm', *common, '-e', 'PATH=/opt/herdr:/usr/local/bin:/usr/bin:/bin',
+               '-v', f'{home_c}:/home/rv', '-v', f'{herdr_dir}:/opt/herdr:ro',
+               args.image, 'rovloom', 'config', 'init', 'connector', '--provider', 'herdr')
         path_c = os.path.join(home_c, '.config', 'rovloom', 'connector.json')
+        assert os.path.exists(path_c), 'connector config not generated'
         cc = json.load(open(path_c)); cc['native'] = {'provider': 'herdr'}
         open(path_c, 'w').write(json.dumps(cc, indent=2) + '\n'); os.chmod(path_c, 0o600)
 

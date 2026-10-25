@@ -159,6 +159,7 @@ def main():
     # Connector 的 PATH 里有 herdr 所在目录：不写 runtime_bin_dirs，验证默认从 PATH 发现程序。
     env_c = {**base, 'HOME': home_c, 'PATH': f'{herdr_dir}:/usr/bin:/bin'}
     terms = []
+    gateway = None
     try:
         # 按 Quick Start 显式生成 provider 配置，不先启动再 Ctrl-C 或手改 provider。
         initialized = subprocess.run([rov, 'config', 'init', 'connector', '--provider',
@@ -190,16 +191,16 @@ def main():
             assert len(existing) == 1, f'pre-existing server not found: {existing}'
             print('PRE_EXISTING', existing, flush=True)
         def issue_join():
-            """重启 Gateway 签发一张一机一码，返回完整 join 命令值（ws://...#m...）。"""
+            """（重）启动 Gateway 签发一张一机一码，返回完整 join 命令值（ws://...#m...）。"""
             nonlocal gateway
-            gateway.stop()  # 码由 Gateway 状态目录签发；先停旧进程再签发，Connector 会自行重连
+            if gateway is not None:
+                gateway.stop()  # 码由 Gateway 状态目录签发；先停旧进程再签发，Connector 会自行重连
             gateway = Term('gateway-issue', [rov, 'gateway', '--issue-code'], env_g, home_g)
             terms.append(gateway)
             printed = gateway.expect('rovloom connector --join ')
             return JOIN.search(printed).group(0)
 
         join_value = issue_join()
-        gateway.expect('gateway_listening')
         connector = Term('connector', [rov, 'connector', '--join', join_value], env_c, home_c); terms.append(connector)
         deadline, ready = time.time() + 180, False
         while time.time() < deadline and not ready:
