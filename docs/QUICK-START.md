@@ -131,6 +131,10 @@ Herdr/Luvus installation, exchanges the code for device credentials in one reque
 running. On the first device it also prints the MCP URL and Bearer once. The device shows up in
 the management page a few seconds later; the Gateway loads the new configuration while running.
 
+If the pairing response is lost, retry the same join command promptly. The Gateway keeps
+recent delivery results in memory for up to 10 minutes, including across its automatic
+configuration reload. Restarting the Gateway clears this cache; use a fresh code then.
+
 Codes are one per device: the first successful exchange consumes the code, and a used, revoked
 or failed code cannot be exchanged again — generate a new one. Running the join command again
 with a fresh code re-pairs this machine as a new device; a join command from a different

@@ -24,7 +24,7 @@ import { prepareSetupHerdr } from './setup-herdr.js'
 import { simpleSetupAuthorization, setupSessionsFor } from './setup-policy.js'
 import { readRuntimeConfig } from './runtime-config.js'
 import { silentConsole } from './setup-console.js'
-import { retirePairingState } from './unpair.js'
+import { hasPairingState, retirePairingState } from './unpair.js'
 import type { CliIo } from './run.js'
 
 export type JoinCode = Readonly<{
@@ -123,28 +123,47 @@ export async function joinConnector(
 ): Promise<ConnectorConfig> {
   const code = parseJoinValue(value)
   const console = silentConsole(io)
-  const stateExists =
-    readRuntimeConfig(config).providers.length > 0 || existsSync(runtimeReference(config.state_dir, 'device'))
-  if (stateExists) {
+  const providers = readRuntimeConfig(config).providers
+  const hasCredential = existsSync(runtimeReference(config.state_dir, 'device'))
+  if (hasPairingState(config.state_dir)) {
     const paired = readSetupJson(runtimeReference(config.state_dir, 'pairing'))
     const current = paired === undefined ? undefined : object(paired)
     const machine = current && 'machine_id' in current ? String(current.machine_id) : undefined
-    if (machine === code.machine && config.gateway_url === code.url) {
+    if (
+      hasCredential &&
+      existsSync(runtimeReference(config.state_dir, 'providers')) &&
+      machine === code.machine &&
+      config.gateway_url === code.url
+    ) {
       // 同一设备对同一 Gateway 的重复 join：状态已完整，直接按已配对启动。
       return config
     }
     // 换码即换设备身份（吊销恢复），换地址即换 Gateway：码本身就是意图证明，旧状态整体退役后重新配对。
     // managed 模式的原生根必须回到空白才能重新初始化，因此退役目录而不是只删文件。
-    const retired = retirePairingState(config, console)
-    if (retired !== undefined) {
-      console.show(
-        formatMessage(
-          cliMessages(io.language)[
-            config.gateway_url === code.url ? 'setup.join.resettingState' : 'setup.join.switchingGateway'
-          ],
-          { retired }
+    const prepared = ['native-setup', 'herdr-setup']
+      .map((reference) => readSetupJson(runtimeReference(config.state_dir, reference), 1_048_576))
+      .filter((entry) => entry !== undefined)
+    const resume =
+      !hasCredential &&
+      providers.length === 0 &&
+      config.gateway_url === code.url &&
+      prepared.length > 0 &&
+      prepared.every((entry) => {
+        const row = object(entry)
+        return row.phase === 'prepared' && row.machine_id === code.machine && row.attempt_id === code.attempt
+      })
+    if (!resume) {
+      const retired = retirePairingState(config, console)
+      if (retired !== undefined) {
+        console.show(
+          formatMessage(
+            cliMessages(io.language)[
+              config.gateway_url === code.url ? 'setup.join.resettingState' : 'setup.join.switchingGateway'
+            ],
+            { retired }
+          )
         )
-      )
+      }
     }
   }
   if (config.gateway_url !== code.url) {

@@ -46,7 +46,20 @@ export async function requestJson(
   let bytes = 0
   try {
     while (true) {
-      const result = await reader.read()
+      let abort!: () => void
+      const cancelled = new Promise<never>((_resolve, reject) => {
+        abort = () => reject(new Error('setup_request_closed'))
+        signal.addEventListener('abort', abort, { once: true })
+      })
+      let result: ReadableStreamReadResult<Uint8Array>
+      try {
+        if (signal.aborted) {
+          throw new Error('setup_request_closed')
+        }
+        result = await Promise.race([reader.read(), cancelled])
+      } finally {
+        signal.removeEventListener('abort', abort)
+      }
       if (result.done) {
         break
       }
@@ -74,11 +87,45 @@ export type PairingApplication = Readonly<{
   mcp?: Readonly<{ url: string; token: string }>
 }>
 
+// 缓存属于 CLI 运行时而非某一轮 listener；重载可重放，真正重启仍需新码。
+// 只保留短期、有界的凭据交付结果，按状态目录、恢复代次和码摘要隔离。
+export class PairingReplayCache {
+  readonly #entries = new Map<string, { application: PairingApplication; expires: number }>()
+  constructor(private readonly now: () => number = Date.now) {}
+
+  private key(directory: string, generation: string, code: string): string {
+    return boundedJson([directory, generation, createHash('sha256').update(code).digest('hex')])
+  }
+
+  private prune(): void {
+    for (const [key, entry] of this.#entries) {
+      if (entry.expires <= this.now()) {
+        this.#entries.delete(key)
+      }
+    }
+  }
+
+  get(directory: string, generation: string, code: string): PairingApplication | undefined {
+    this.prune()
+    return this.#entries.get(this.key(directory, generation, code))?.application
+  }
+
+  set(directory: string, generation: string, code: string, application: PairingApplication): void {
+    this.prune()
+    const key = this.key(directory, generation, code)
+    this.#entries.delete(key)
+    while (this.#entries.size >= 128) {
+      this.#entries.delete(this.#entries.keys().next().value!)
+    }
+    this.#entries.set(key, { application, expires: this.now() + 600_000 })
+  }
+}
+
 /** Gateway 侧单端点配对：账本兑换 + 自动批准 + 凭据交付；与 PairingCodes 共享同一 Store。 */
 export class SimplePairingHttp {
   readonly #codes: PairingCodes
   readonly #requests = new Set<Promise<Response>>()
-  readonly #applied = new Map<string, PairingApplication>()
+  readonly #applying = new Set<string>()
   // defineProvider 的一次性许可：发布前登记，Store 事务内消费，杜绝第二来源复用。
   readonly #permits = new Map<string, { confirmation: string; expires: number; generation: string }>()
   readonly #stop = new AbortController()
@@ -88,7 +135,8 @@ export class SimplePairingHttp {
     readonly state: State,
     readonly config: GatewayConfig,
     // 原生配置发布完成后唤醒宿主重开（新 provider 与 caller 来源下次启动加载）。
-    private readonly reload: () => void = () => {}
+    private readonly reload: () => void = () => {},
+    private readonly replays = new PairingReplayCache()
   ) {
     this.#codes = new PairingCodes(state.store, config.state_dir)
   }
@@ -143,7 +191,7 @@ export class SimplePairingHttp {
 
   // 失败只回固定错误码；崩溃窗口的重试用同一码命中内存缓存，Gateway 重启后需生成新码。
   private async respond(request: Request): Promise<Response> {
-    let code_id = ''
+    let reserved: string | undefined
     try {
       const input = await requestJson(request, 1_048_576, this.#stop.signal)
       fields(input, ['code', 'installation'])
@@ -157,24 +205,39 @@ export class SimplePairingHttp {
       if (typeof secret !== 'string' || !/^[A-Za-z0-9_-]{32,256}$/.test(secret)) {
         throw new Error('pairing_code_invalid')
       }
-      code_id = attempt
       const full = String(input.code)
-      const cached = this.#applied.get(full)
+      const generation = this.state.store.generation()
+      const cached = this.replays.get(this.config.state_dir, generation, full)
       if (cached) {
+        if (
+          this.state.store.credentialDigest(machine) !== createHash('sha256').update(cached.credential).digest('hex')
+        ) {
+          throw new Error('pairing_code_invalid')
+        }
         return setupReply({ state: 'paired', ...cached, replayed: true })
       }
-      const applied = await this.apply(machine, attempt, secret, input.installation, request)
-      this.#applied.set(full, applied)
+      this.#codes.verify(machine, attempt, secret)
+      if (this.#applying.has(attempt)) {
+        return setupReply({ error: 'setup_busy' }, 503)
+      }
+      this.#applying.add(attempt)
+      reserved = attempt
+      const applied = await this.apply(machine, attempt, input.installation, request)
+      this.replays.set(this.config.state_dir, generation, full, applied)
       this.#codes.settle(attempt, true)
       // 下一事件轮才关闭旧listener，先让原响应调用完成其finally。
       setImmediate(() => this.reload())
       return setupReply({ state: 'paired', ...applied })
     } catch (error) {
-      if (code_id) {
-        this.#codes.settle(code_id, false)
+      if (reserved) {
+        this.#codes.settle(reserved, false)
       }
       const code = error instanceof GatewayError ? error.code : 'pairing_failed'
       return setupReply({ error: code }, 409)
+    } finally {
+      if (reserved) {
+        this.#applying.delete(reserved)
+      }
     }
   }
 
@@ -182,11 +245,9 @@ export class SimplePairingHttp {
   private async apply(
     machine: string,
     attempt: string,
-    secret: string,
     installation: unknown,
     request: Request
   ): Promise<PairingApplication> {
-    this.#codes.verify(machine, attempt, secret)
     const signal = AbortSignal.any([request.signal, this.#stop.signal])
     const reviewed = await reviewSetupManifest(
       installation,
@@ -320,6 +381,5 @@ export class SimplePairingHttp {
     this.#closed = true
     this.#stop.abort()
     await Promise.allSettled(this.#requests)
-    this.#applied.clear()
   }
 }

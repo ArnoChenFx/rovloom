@@ -13,6 +13,7 @@ import type { GatewayConfig } from '../../src/cli/config.js'
 import { initializeRoleConfig } from '../../src/cli/config-init.js'
 import { writeAdminFiles } from '../../src/cli/admin-command.js'
 import { createProductionCliRuntime } from '../../src/cli/production.js'
+import { createProductSources } from '../../src/cli/product-sources.js'
 import { readRuntimeJson, runtimeReference } from '../../src/cli/runtime-files.js'
 import { parseRegistry, REGISTRY_MAX_BYTES } from '../../src/cli/token-registry.js'
 import { buildManagementAssets } from './management-assets-fixture.js'
@@ -59,8 +60,9 @@ for (const lan of [false, true]) {
       const origin = 'http://' + host
       const network = 'http://127.0.0.1:' + management
       let active: Awaited<ReturnType<NonNullable<ReturnType<typeof createProductionCliRuntime>['gateway']>>> | undefined
+      const runtime = createProductionCliRuntime(createProductSources())
       try {
-        active = await createProductionCliRuntime().gateway!(config)
+        active = await runtime.gateway!(config)
         const shell = await fetch(network + '/', { headers: { host } })
         assert.equal(shell.status, 200)
         assert(!(await shell.text()).includes('rovloom-management-bootstrap'))
@@ -160,7 +162,18 @@ for (const lan of [false, true]) {
         assert.match(paired.value.credential, /^[A-Za-z0-9_-]{32,256}$/)
         assert.match(paired.value.mcp.token, /^[A-Za-z0-9_-]{43}$/)
         await active.reconfigure
-        // 同码重放：Gateway 进程内幂等缓存返回同一凭据。
+        // 模拟 runCli 真正关闭旧 listener/Store 并以同一进程运行时重开，而非只等待重载通知。
+        await active.close()
+        active = await runtime.gateway!(config)
+        const refreshedPage = await fetch(network + '/', {
+          headers: { host, authorization: 'Basic ' + Buffer.from('admin:' + issued.secret).toString('base64') }
+        })
+        assert.equal(refreshedPage.status, 200)
+        actionHeaders.cookie = refreshedPage.headers.get('set-cookie')!.split(';')[0]!
+        actionHeaders['x-rovloom-csrf'] = /name="rovloom-management-bootstrap" content="([\w-]{43})"/.exec(
+          await refreshedPage.text()
+        )![1]!
+        // 同码重放：真实重载后仍返回同一凭据。
         const replay = await devicePost('/pairing', {
           code: first.code,
           installation: installationFor(machine_id, attempt)
@@ -203,13 +216,22 @@ for (const lan of [false, true]) {
           null
         )
         await resource('devices_delete', { machine_id })
+        assert.notEqual(
+          (
+            await devicePost('/pairing', {
+              code: first.code,
+              installation: installationFor(machine_id, attempt)
+            })
+          ).status,
+          200
+        )
         assert.equal(
           (readRuntimeJson(runtimeReference(root, 'providers'), 1_048_576) as { providers: unknown[] }).providers
             .length,
           0
         )
         await active.close()
-        active = await createProductionCliRuntime().gateway!(config)
+        active = await runtime.gateway!(config)
         const reloaded = await fetch(network + '/', {
           headers: { host, authorization: 'Basic ' + Buffer.from('admin:' + issued.secret).toString('base64') }
         })

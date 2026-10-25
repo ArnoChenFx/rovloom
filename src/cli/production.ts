@@ -19,7 +19,7 @@ import { openCallerSource } from './caller-source.js'
 import { REGISTRY_MAX_BYTES } from './token-registry.js'
 import { readRuntimeJson, runtimeReference } from './runtime-files.js'
 import { createRuntimeCliRuntime } from './runtime.js'
-import { SimplePairingHttp } from './simple-pairing.js'
+import { SimplePairingHttp, PairingReplayCache } from './simple-pairing.js'
 import type { CliSetup } from './setup-runtime.js'
 import { boundedJson, object, fields } from '../wire/index.js'
 import { readRuntimeConfig } from './runtime-config.js'
@@ -195,6 +195,7 @@ function managedCaller(config: GatewayConfig, administrator?: GatewayIdentitySou
 
 // 默认Gateway打开真实双库并可等待首次配对；程序管理的provider仍由固定工厂核验。
 export function createProductionCliRuntime(sources: ProductionCliSources = {}, setup?: CliSetup) {
+  const pairingReplays = new PairingReplayCache()
   const runtime = createRuntimeCliRuntime({
     gateway: /* 常规启动只打开已配置资源，不注册设备、签发enrollment/token或bootstrap管理cookie。 */ async (config) => {
       privateDirectory(config.state_dir)
@@ -308,7 +309,8 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
         simple = new SimplePairingHttp(
           state,
           config,
-          /* 发布落盘后重开以加载新 provider 与 caller 来源。 */ () => resolveActivation?.()
+          /* 发布落盘后重开以加载新 provider 与 caller 来源。 */ () => resolveActivation?.(),
+          pairingReplays
         )
         protectedManagement?.bindResources(
           /* 管理员授权按 Store 当前设备/provider 生成。 */ () => state!.store.resources()

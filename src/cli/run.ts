@@ -144,37 +144,43 @@ export function parseCommand(args: readonly string[], environment?: ConfigPathEn
   }
   const withoutNonInteractive = nonInteractive ? serviceArgs.slice(0, -1) : serviceArgs
   // Connector 用 --join <value> 单命令配对、--unpair 干净重置；Gateway 用 --issue-code 启动时签发一张一机一码。
-  const flag = withoutNonInteractive[1]
-  const join = withoutNonInteractive[0] === 'connector' && flag === '--join' ? withoutNonInteractive[2] : undefined
-  const issueCode = withoutNonInteractive[0] === 'gateway' && flag === '--issue-code'
-  const unpair = withoutNonInteractive[0] === 'connector' && flag === '--unpair'
-  if (join !== undefined) {
-    if (
-      withoutNonInteractive.length !== 3 ||
-      typeof join !== 'string' ||
-      !/^wss?:\/\/[^#\s]+#[A-Za-z0-9_.-]+$/.test(join)
-    ) {
-      throw new CliError('invalid_arguments')
-    }
-  } else if ((issueCode || unpair) && withoutNonInteractive.length !== 2) {
+  const role = withoutNonInteractive[0]
+  if (role !== 'gateway' && role !== 'connector') {
     throw new CliError('invalid_arguments')
   }
-  const roleArgs = join !== undefined || issueCode || unpair ? [withoutNonInteractive[0]!] : withoutNonInteractive
-  if (
-    (roleArgs[0] === 'gateway' || roleArgs[0] === 'connector') &&
-    (roleArgs.length === 1 || (roleArgs.length === 3 && roleArgs[1] === '--config'))
-  ) {
-    return {
-      action: roleArgs[0],
-      path: resolveRoleConfigPath(roleArgs[0], roleArgs[2], environment),
-      ...(nonInteractive ? { nonInteractive: true } : {}),
-      ...(serviceId ? { serviceId } : {}),
-      ...(join !== undefined ? { join } : {}),
-      ...(issueCode ? { issueCode: true as const } : {}),
-      ...(unpair ? { unpair: true as const } : {})
+  let explicit: string | undefined
+  let joinValue: string | undefined
+  let issueCode = false
+  let unpair = false
+  for (let index = 1; index < withoutNonInteractive.length; index++) {
+    const option = withoutNonInteractive[index]
+    if (option === '--config' && explicit === undefined) {
+      explicit = withoutNonInteractive[++index]
+      if (explicit === undefined || explicit.startsWith('--')) {
+        throw new CliError('invalid_arguments')
+      }
+    } else if (option === '--join' && role === 'connector' && joinValue === undefined && !unpair) {
+      joinValue = withoutNonInteractive[++index]
+      if (joinValue === undefined || !/^wss?:\/\/[^#\s]+#[A-Za-z0-9_.-]+$/.test(joinValue)) {
+        throw new CliError('invalid_arguments')
+      }
+    } else if (option === '--issue-code' && role === 'gateway' && !issueCode) {
+      issueCode = true
+    } else if (option === '--unpair' && role === 'connector' && !unpair && joinValue === undefined) {
+      unpair = true
+    } else {
+      throw new CliError('invalid_arguments')
     }
   }
-  throw new CliError('invalid_arguments')
+  return {
+    action: role,
+    path: resolveRoleConfigPath(role, explicit, environment),
+    ...(nonInteractive ? { nonInteractive: true } : {}),
+    ...(serviceId ? { serviceId } : {}),
+    ...(joinValue !== undefined ? { join: joinValue } : {}),
+    ...(issueCode ? { issueCode: true as const } : {}),
+    ...(unpair ? { unpair: true as const } : {})
+  }
 }
 
 // 等待角色结束或本地终止信号，最终释放桥接资源并传播关闭失败。
@@ -306,7 +312,7 @@ export async function runCli(
       const { handleConnectorUnpair } = await import('./unpair.js')
       return await handleConnectorUnpair(command.path, io)
     }
-    if (!command.nonInteractive) {
+    if (!command.nonInteractive || command.join !== undefined || command.issueCode) {
       config =
         (await runtime.prepare?.(config, command.path, io, {
           ...(command.join !== undefined ? { join: command.join } : {}),

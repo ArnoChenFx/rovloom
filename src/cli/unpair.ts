@@ -1,6 +1,6 @@
 // Connector 的干净重置：把本机配对状态连同原生根整体退役到 retired/<时间戳>/（保留证据与 managed 数据），
 // 供 `rovloom connector --unpair` 与 `--join` 换 Gateway/换码时复用；用户自己的 Luvus/Herdr 会话与未知文件一律不动。
-import { lstatSync, readFileSync, renameSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, renameSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { syncParentDirectory } from '../storage/files.js'
 import { ownedFile, recordedProcess } from '../storage/lock-recovery.js'
@@ -22,6 +22,14 @@ const PAIRING_FILES = ['device', 'pairing', 'pairing-claim', 'providers', 'nativ
 const PAIRING_DIRECTORIES = ['control', 'n', 'h', 'w', 'hr'] as const
 // 两个 provider 的 claim 账本锁共用同一格式；锁里记录持有者进程身份，只有能证明它已死才继续。
 const CLAIM_LOCKS = ['control/luvus-claims.db.lock', 'hr/control/claims.db.lock'] as const
+
+/** 任何半成品记录或隔离根都需要参与新 join 的恢复判断。 */
+export function hasPairingState(directory: string): boolean {
+  return (
+    PAIRING_FILES.some((reference) => existsSync(runtimeReference(directory, reference))) ||
+    PAIRING_DIRECTORIES.some((name) => existsSync(join(directory, name)))
+  )
+}
 
 /** 只把普通文件当记录、真实目录当隔离状态根；链接、设备文件或未知形态一律不动。 */
 function entry(path: string): 'file' | 'directory' | undefined {
