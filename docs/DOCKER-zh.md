@@ -19,12 +19,13 @@ mkdir rovloom && cd rovloom
 curl --fail --location --output docker-compose.yaml \
   https://raw.githubusercontent.com/ArnoChenFx/rovloom/main/docker-compose.yaml
 docker compose pull
-docker compose run --rm gateway config init gateway --container
 docker compose up -d
 docker compose ps
 ```
 
-默认镜像为 `ghcr.io/arnochenfx/rovloom:latest`。要固定版本，拉取前在 Compose 目录的 `.env` 写入 `ROVLOOM_VERSION=<版本>`。两个命名卷分别保存配置与数据，`docker compose down` 不会删除它们。显式 init 命令生成 `/home/rovloom/.config/rovloom/gateway.json`，不会启动 Gateway，数据目录为 `/home/rovloom/.local/share/rovloom/gateway`。
+镜像内已设置 `ROVLOOM_CONTAINER=1`：首次启动时默认入口 `rovloom gateway` 自动生成的配置就是把三个监听绑到 `0.0.0.0` 并设置 `management.lan: true`，不再需要先跑 `config init gateway --container`（该命令仍可用，效果相同）。
+
+默认镜像为 `ghcr.io/arnochenfx/rovloom:latest`。要固定版本，拉取前在 Compose 目录的 `.env` 写入 `ROVLOOM_VERSION=<版本>`。两个命名卷分别保存配置与数据，`docker compose down` 不会删除它们。首次启动自动生成 `/home/rovloom/.config/rovloom/gateway.json`，数据目录为 `/home/rovloom/.local/share/rovloom/gateway`。
 
 默认本机入口：
 
@@ -38,6 +39,7 @@ docker compose ps
 
 `config init gateway --container` 把容器内部的三个监听设为 `0.0.0.0`，并默认设置
 `management.lan: true`，允许管理页接受通过宿主机 IP 或 HTTP 代理传入的 Host；登录与同源校验仍然生效。
+镜像内已设置 `ROVLOOM_CONTAINER=1`，默认入口首次自动生成的配置就是这个效果，无需额外子命令。
 已有配置不会覆盖；旧配置的监听或管理页 LAN 设置不一致时返回 `config_exists`，请按下文的配置编辑步骤修改。
 MCP 的 LAN / `public_url` 设置仍需按实际客户端地址单独配置。Compose 的发布范围是：
 

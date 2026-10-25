@@ -113,6 +113,48 @@ test('container initialization selects container listeners explicitly while norm
   }
 })
 
+test('ROVLOOM_CONTAINER=1 makes first-run gateway defaults use container listeners; connector and unset paths stay local', async () => {
+  const f = fixture()
+  const previous = process.env.ROVLOOM_CONTAINER
+  process.env.ROVLOOM_CONTAINER = '1'
+  try {
+    // 环境变量与 --container 等价：镜像默认入口（rovloom gateway）首次生成即容器监听值。
+    // 角色启动路径（gateway 子命令）才会创建首配，这里直接用 gateway 启动前的初始化入口生成。
+    assert.equal((await f.run('config', 'init', 'gateway')).code, 0)
+    const gateway = readConfig(f.path('gateway'))
+    assert(gateway.role === 'gateway')
+    assert.deepEqual(
+      [gateway.mcp_hostname, gateway.device_hostname, gateway.management_hostname],
+      ['0.0.0.0', '0.0.0.0', '0.0.0.0']
+    )
+    assert.equal(gateway.management_lan, true)
+    const document = JSON.parse(readFileSync(f.path('gateway'), 'utf8'))
+    assert.equal(document.management.lan, true)
+    // 已存在文件不重新生成：环境变量只影响首次生成，不改写既有配置。
+    const before = readFileSync(f.path('gateway'))
+    delete process.env.ROVLOOM_CONTAINER
+    assert.equal((await f.run('config', 'init', 'gateway')).code, 0)
+    assert.deepEqual(readFileSync(f.path('gateway')), before)
+    // 未设变量时首次生成仍是回环监听；connector 角色不受容器变量影响。
+    assert.equal((await f.run('config', 'init', 'connector')).code, 0)
+    const connector = readConfig(f.path('connector'))
+    assert.equal(connector.role, 'connector')
+    const plain = join(f.home, 'plain-gateway.json')
+    assert.equal((await f.run('config', 'init', 'gateway', '--config', plain)).code, 0)
+    const local = readConfig(plain)
+    assert(local.role === 'gateway')
+    assert.equal(local.mcp_hostname, '127.0.0.1')
+    assert.equal(local.management_lan, undefined)
+  } finally {
+    if (previous === undefined) {
+      delete process.env.ROVLOOM_CONTAINER
+    } else {
+      process.env.ROVLOOM_CONTAINER = previous
+    }
+    f.close()
+  }
+})
+
 test('invalid initialization flags and corrupt existing files never overwrite configuration', async () => {
   const f = fixture()
   try {

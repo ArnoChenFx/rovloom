@@ -61,10 +61,10 @@ mkdir rovloom && cd rovloom
 curl --fail --location --output docker-compose.yaml \
   https://raw.githubusercontent.com/ArnoChenFx/rovloom/main/docker-compose.yaml
 docker compose pull
-docker compose run --rm gateway config init gateway --container
+docker compose up -d
 ```
 
-9443、9444、9445 端口需要空闲（Compose 从 bridge 网络发布这三个端口），`config init gateway --container` 会在首次配置时准备容器监听。卷、备份和升级见 [Docker 部署](DOCKER-zh.md)。
+9443、9444、9445 端口需要空闲（Compose 从 bridge 网络发布这三个端口）；镜像内已设置 `ROVLOOM_CONTAINER=1`，首次启动会自动生成容器监听配置（`0.0.0.0` + `management.lan: true`）。卷、备份和升级见 [Docker 部署](DOCKER-zh.md)。
 
 ## 2. 准备 Connector 所在机器
 
@@ -153,7 +153,7 @@ Docker 使用 `docker compose run --rm gateway token ...`。
 ### 局域网访问
 
 普通 CLI 初始化默认三个监听都只允许回环访问。同机部署可跳过本节。
-Docker 使用 `config init gateway --container` 时，管理页已默认启用 `management.lan`；
+Docker 镜像内已设置 `ROVLOOM_CONTAINER=1`，其首次生成的配置默认启用 `management.lan`；
 宿主机 IP 能否访问仍取决于 Compose 的端口映射。旧配置迁移及端口映射示例见 [Docker 部署](DOCKER-zh.md)。
 首次在 Gateway 机器上执行 `rovloom config init gateway` 后，编辑
 `~/.config/rovloom/gateway.json`，保留其余字段，按需修改以下监听分组；已有配置直接编辑：

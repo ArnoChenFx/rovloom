@@ -64,10 +64,10 @@ mkdir rovloom && cd rovloom
 curl --fail --location --output docker-compose.yaml \
   https://raw.githubusercontent.com/ArnoChenFx/rovloom/main/docker-compose.yaml
 docker compose pull
-docker compose run --rm gateway config init gateway --container
+docker compose up -d
 ```
 
-Ports 9443, 9444 and 9445 must be free (the Compose file publishes them from a bridge network), and `config init gateway --container` prepares the container listeners on first setup. See
+Ports 9443, 9444 and 9445 must be free (the Compose file publishes them from a bridge network); the image sets `ROVLOOM_CONTAINER=1`, so first startup generates the container listeners (`0.0.0.0` with `management.lan: true`) automatically. See
 [Docker deployment](DOCKER.md) for volumes, backup and upgrades.
 
 ## 2. Prepare the Connector machine
@@ -166,7 +166,7 @@ Dashboard can display them later; include that directory when backing up credent
 ### LAN access
 
 Normal CLI initialization allows only loopback access on all three listeners. Skip this section for a same-machine setup.
-Docker initialization with `config init gateway --container` enables `management.lan` by default;
+The Docker image sets `ROVLOOM_CONTAINER=1`, so its first-startup configuration enables `management.lan` by default;
 access through the host IP still depends on the Compose port mappings. See [Docker deployment](DOCKER.md)
 for older configuration migration and port mapping examples.
 On first setup, run `rovloom config init gateway` on the Gateway machine, then edit

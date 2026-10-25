@@ -19,12 +19,13 @@ mkdir rovloom && cd rovloom
 curl --fail --location --output docker-compose.yaml \
   https://raw.githubusercontent.com/ArnoChenFx/rovloom/main/docker-compose.yaml
 docker compose pull
-docker compose run --rm gateway config init gateway --container
 docker compose up -d
 docker compose ps
 ```
 
-The image defaults to `ghcr.io/arnochenfx/rovloom:latest`. To pin a version, set `ROVLOOM_VERSION=<version>` in the Compose directory's `.env` before pulling. Two named volumes keep configuration and data, and `docker compose down` does not delete them. The explicit init command creates `/home/rovloom/.config/rovloom/gateway.json` without starting Gateway. The data directory is `/home/rovloom/.local/share/rovloom/gateway`.
+The image sets `ROVLOOM_CONTAINER=1`: on first startup the default entrypoint (`rovloom gateway`) automatically generates a configuration that binds all three listeners to `0.0.0.0` with `management.lan: true`, so the separate `config init gateway --container` step is no longer needed (the command still works and is equivalent).
+
+The image defaults to `ghcr.io/arnochenfx/rovloom:latest`. To pin a version, set `ROVLOOM_VERSION=<version>` in the Compose directory's `.env` before pulling. Two named volumes keep configuration and data, and `docker compose down` does not delete them. First startup creates `/home/rovloom/.config/rovloom/gateway.json`. The data directory is `/home/rovloom/.local/share/rovloom/gateway`.
 
 Default local endpoints:
 
@@ -38,6 +39,8 @@ Default local endpoints:
 
 `config init gateway --container` binds the three listeners to `0.0.0.0` inside the container and sets
 `management.lan: true`, accepting management Host values received through the host IP or an HTTP proxy.
+Since the container image sets `ROVLOOM_CONTAINER=1`, this is also what the default entrypoint (`rovloom gateway`)
+generates on first startup automatically — no extra subcommand is needed.
 Authentication and same-origin checks still apply. Existing configuration is preserved; an older configuration
 with different listeners or management LAN settings returns `config_exists`. Use the editing procedure below to update it.
 Configure MCP LAN / `public_url` settings separately for the actual client address. Compose publishes:

@@ -64,6 +64,9 @@ def check_gateway(name):
     parsed = json.loads(config)
     assert parsed['data']['directory'] == '/home/rovloom/.local/share/rovloom/gateway'
     assert 'authentication_ref' not in parsed and 'tls' not in config
+    # 镜像入口未跑任何子命令：首次自动生成的配置就应是容器监听默认值。
+    assert all(parsed[part]['hostname'] == '0.0.0.0' for part in ['mcp', 'devices', 'management'])
+    assert parsed['management']['lan'] is True
     # 无TTY运行不能创建首次初始化计划、身份或provider授权；只检查自有临时卷的程序管理目录。
     managed = '/home/rovloom/.local/share/rovloom/gateway/managed'
     assert command('exec', name, 'find', managed, '-mindepth', '1', '-maxdepth', '1', '-printf', 'x') == ''
@@ -106,9 +109,10 @@ def smoke(image, version):
         assert command('exec', name, 'cat', '/home/rovloom/.local/share/rovloom/.container-smoke-marker') == 'fixture'
         command('stop', '--time', '10', name, timeout=15)
         assert command('inspect', '--format', '{{.State.ExitCode}}:{{.State.OOMKilled}}', name) == '0:false'
-        # 日志不打印或保存，且只接受未配对的固定诊断（含管理页地址公布行），不接受配置/凭据泄漏。
+        # 日志不打印或保存，且只接受未配对的固定诊断（含管理页地址公布行与容器通配监听提示），不接受配置/凭据泄漏。
         logs = subprocess.run(['docker', 'logs', name], capture_output=True, text=True, timeout=5)
-        expected_diagnostic = ('dashboard_listening http://127.0.0.1:9445/\n'
+        expected_diagnostic = ('wildcard_listener\nMCP/management listen on all interfaces over plain HTTP; protect them with a firewall or a TLS reverse proxy.\n'
+                               'dashboard_listening http://127.0.0.1:9445/\n'
                                'gateway_listening http://127.0.0.1:9444/mcp\npairing_required\n'
                                'Gateway is running; pair a Connector (management page or rovloom gateway --issue-code, then run the join command on the device) before using an Agent.\n')
         assert logs.returncode == 0 and logs.stdout == '' and logs.stderr == expected_diagnostic * 2
@@ -149,7 +153,7 @@ def compose_smoke(image, compose_path):
                            '--file', str(override), *arguments, timeout=timeout)
 
         try:
-            compose('run', '--rm', 'gateway', 'config', 'init', 'gateway', '--container', timeout=45)
+            # 镜像默认入口直接启动；容器默认监听值由首次自动生成落地，不再需要手动 config init --container。
             compose('up', '--detach', timeout=45)
             container = compose('ps', '--all', '--quiet', 'gateway')
             assert re.fullmatch(r'[0-9a-f]{64}', container)
