@@ -10,6 +10,7 @@
 | [运维指南](OPERATIONS.md) | 令牌、管理员、重新配对、备份、升级、排错 |
 | [开机服务](SERVICE.md) | 注册、启停与权限 |
 | [管理页](GATEWAY-WEBUI.md) | 页面、操作与管理 API |
+| [Agent skill](../skills/rovloom/SKILL.md) | 交给 AI 客户端的 MCP 使用指南：调用顺序、错误处置、无依赖调用脚本 |
 
 ## 设计与协议
 
