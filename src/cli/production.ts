@@ -3,7 +3,10 @@ import { privateDirectory } from './first-config.js'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { openGatewayState, createManagementSessionAuthority } from '../runtime/index.js'
-import { createManagementSessionPersistence } from '../runtime/management-session-store.js'
+import {
+  createManagementSessionPersistence,
+  MANAGEMENT_SESSIONS_MAX_BYTES
+} from '../runtime/management-session-store.js'
 import { composeConnectorSessions } from '../runtime/provider-sessions.js'
 import type {
   GatewayRuntimeOptions,
@@ -230,10 +233,13 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
         authority = createManagementSessionAuthority(caller.identities, {
           // 管理会话的 cookie 摘要绑定落盘：配对触发的重载与进程重启后，已登录浏览器不必重输密码。
           persist: createManagementSessionPersistence({
-            read: () => readSetupJson(sessionStorePath),
+            // 每个管理员最多并存 8 条绑定，合法文档会超过默认 16 KiB；读写统一使用会话文件的预算，
+            // 否则超限写入被 save() 吞掉，重启后只能恢复前一部分绑定。
+            read: () => readSetupJson(sessionStorePath, MANAGEMENT_SESSIONS_MAX_BYTES),
             // 存在性与内容解析必须分开判断：文件损坏时 readSetupJson 会抛错，
             // 若用它决定是否覆盖，损坏文件将永久阻止后续写入，每次重启都会掉线。
-            write: (value) => writeSetupJson(sessionStorePath, value, existsSync(sessionStorePath))
+            write: (value) =>
+              writeSetupJson(sessionStorePath, value, existsSync(sessionStorePath), MANAGEMENT_SESSIONS_MAX_BYTES)
           })
         })
         protectedManagement?.bindAuthority(authority)

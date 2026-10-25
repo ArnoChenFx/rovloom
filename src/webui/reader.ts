@@ -44,6 +44,11 @@ export interface SnapshotReader<T> {
   state(): ReaderState<T>
   refresh(): Promise<void>
   cancel(): void
+  /**
+   * 清空快照并取消在途读取，但保留 reader 本身可继续使用。
+   * 与 dispose 不同，之后仍可 refresh：认证失败后 cookie 会话恢复时用户能手动重试。
+   */
+  reset(problem: ReaderState<T>['problem']): void
   visible(value: boolean): void
   dispose(): void
 }
@@ -269,6 +274,26 @@ export function createSnapshotReader<T>(
     }
   }
 
+  /**
+   * 清空已展示数据并停在可重试状态：不释放 reader，也不永久停止。
+   * 用于写请求返回认证失败——此时必须立刻擦除旧授权数据，但用户随后点「刷新」应能再读一次。
+   */
+  function reset(next: ReaderState<T>['problem']): void {
+    if (disposed) {
+      return
+    }
+    clearPoll()
+    clock.clear(tick)
+    active?.abort.abort()
+    active?.finish()
+    snapshot = null
+    receivedAt = 0
+    problem = next
+    // 认证类失败后自动轮询停止，等待明确的用户动作或页面重新可见。
+    stopped = next === 'unauthenticated' || next === 'forbidden' || next === 'not_found'
+    publish()
+  }
+
   /** 离开页面立即清空数据、释放任务与在途请求，不允许后退重放任何操作。 */
   function dispose(): void {
     disposed = true
@@ -280,5 +305,5 @@ export function createSnapshotReader<T>(
   }
 
   tick = clock.schedule(updateAge, 1_000)
-  return { state, refresh, cancel, visible: setVisible, dispose }
+  return { state, refresh, cancel, reset, visible: setVisible, dispose }
 }

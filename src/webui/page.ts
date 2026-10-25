@@ -130,9 +130,10 @@ export function mountWebUi(
           if (disposed) {
             return
           }
-          reader.dispose()
+          // 这里不能用 dispose：它会永久封闭 reader，之后「刷新」与重新可见都无法再读取，
+          // 而认证失败正是最需要手动重试的场景。reset 清空旧数据并停在可重试状态。
+          reader.reset(problem)
           actions?.clear()
-          paint({ snapshot: null, pending: false, stale: true, ageMs: 0, problem }, route)
         }
       })
     : undefined
@@ -148,9 +149,12 @@ export function mountWebUi(
           }
         },
         authorizationLost(problem) {
-          reader.dispose()
+          if (disposed) {
+            return
+          }
+          // 与设备操作同一处理：保留 reader，使用户仍可手动刷新重试。
+          reader.reset(problem)
           actions?.clear()
-          paint({ snapshot: null, pending: false, stale: true, ageMs: 0, problem }, route)
         }
       })
     : undefined

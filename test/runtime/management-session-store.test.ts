@@ -1,12 +1,13 @@
 // 会话绑定落盘的解析与写入边界：只存摘要、损坏文件 fail closed 且不阻塞后续持久化。
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   createManagementSessionPersistence,
   MANAGEMENT_SESSIONS_MAX,
+  MANAGEMENT_SESSIONS_MAX_BYTES,
   type PersistedManagementSession
 } from '../../src/runtime/management-session-store.js'
 import { readSetupJson, writeSetupJson } from '../../src/cli/setup-files.js'
@@ -94,6 +95,52 @@ test(
       // 再次覆盖同一文件仍然成功（代次比较使用的是可解析的当前内容）。
       persistence.save([row(digest('1'), other('2'))])
       assert.equal(persistence.load()[0]!.cookie_sha256, digest('1'))
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+)
+
+test(
+  '多管理员多轮交付超过 16 KiB 时仍完整落盘并可全部恢复',
+  /** 16 个管理员各 3 条绑定约 30 KiB；若沿用默认 16 KiB 预算，写入会被静默吞掉，重启只恢复一部分。 */ () => {
+    const root = mkdtempSync(join(tmpdir(), 'rovloom-session-budget-'))
+    const path = join(root, 'management-sessions.json')
+    try {
+      // 每条绑定使用互不相同的合法小写十六进制摘要；直接用索引生成，避免种子周期造成重复。
+      const hex = (value: number, offset: number) => (value * 4 + offset).toString(16).padStart(64, '0').slice(-64)
+      const rows: PersistedManagementSession[] = []
+      for (let admin = 0; admin < 16; admin++) {
+        for (let round = 0; round < 3; round++) {
+          const index = admin * 3 + round
+          rows.push({
+            ...row(hex(index, 0), hex(index, 1)),
+            principal_id: 'admin' + admin,
+            session_ref: 'session' + admin,
+            upstream: {
+              caller: { principal_id: 'admin' + admin },
+              management_session_ref: 'session' + admin,
+              issued_at: 1000,
+              expires_at: 601_000
+            }
+          })
+        }
+      }
+      const persistence = createManagementSessionPersistence({
+        now: /** 固定可信时钟。 */ () => 1000,
+        read: () => readSetupJson(path, MANAGEMENT_SESSIONS_MAX_BYTES),
+        write: (value) => writeSetupJson(path, value, existsSync(path), MANAGEMENT_SESSIONS_MAX_BYTES)
+      })
+      persistence.save(rows)
+      // 真实文件确实超过了默认 16 KiB 预算，否则这个用例不会暴露问题。
+      assert.ok(statSync(path).size > 16_384, `文件应超过 16 KiB，实际 ${statSync(path).size}`)
+      const restored = persistence.load()
+      assert.equal(restored.length, 48, '全部 48 条绑定都能恢复')
+      assert.equal(new Set(restored.map((entry) => entry.cookie_sha256)).size, 48)
+      // 默认预算下同一文件读不出来，正是被复审发现的失败模式。
+      assert.throws(/** 默认 16 KiB 读取无法容纳这份合法文件。 */ () => readSetupJson(path), {
+        code: 'config_unreadable'
+      })
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

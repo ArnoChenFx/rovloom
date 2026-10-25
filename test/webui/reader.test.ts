@@ -205,6 +205,73 @@ for (const problem of ['unauthenticated', 'forbidden', 'not_found'] as const) {
   )
 }
 
+// 写请求发现认证失败时必须清空数据，但保留 reader 以便用户手动刷新重试（dispose 会永久封闭）。
+test(
+  'reset 清空数据并停止轮询，但保留 reader 可手动刷新重试',
+  /** 与 dispose 的区别：刷新和重新可见仍然能发起新的读取。 */ async () => {
+    const timer = fakeClock()
+    let reads = 0
+    const reader = createSnapshotReader(
+      /** 每次读取都返回同一隔离快照。 */
+      async () => {
+        reads++
+        return sample()
+      },
+      /** 直接观察状态。 */
+      () => {},
+      timer.clock
+    )
+    await reader.refresh()
+    assert.equal(reader.state().snapshot?.value, 'machine-a')
+    reader.reset('unauthenticated')
+    // 数据立即清空，旧授权内容不能继续显示。
+    assert.equal(reader.state().snapshot, null)
+    assert.equal(reader.state().problem, 'unauthenticated')
+    // 认证类失败后自动轮询停止。
+    timer.advance(60_000)
+    assert.equal(timer.count(), 0)
+    // 用户主动刷新仍能读到新数据。
+    const before = reads
+    await reader.refresh()
+    assert.equal(reads, before + 1)
+    assert.equal(reader.state().snapshot?.value, 'machine-a')
+    assert.equal(reader.state().problem, null)
+    reader.dispose()
+  }
+)
+
+// 页面隐藏后重新可见也必须能从 reset 状态恢复，而 dispose 过的 reader 不会。
+test(
+  'reset 后重新可见可恢复读取，dispose 后则永久停止',
+  /** 覆盖「用户切回标签页自愈」这条路径。 */ async () => {
+    const timer = fakeClock()
+    let reads = 0
+    const reader = createSnapshotReader(
+      /** 统计读取次数。 */
+      async () => {
+        reads++
+        return sample()
+      },
+      /** 直接观察状态。 */
+      () => {},
+      timer.clock
+    )
+    await reader.refresh()
+    reader.visible(false)
+    reader.reset('forbidden')
+    reader.visible(true)
+    await flush()
+    assert.equal(reads, 2)
+    assert.equal(reader.state().snapshot?.value, 'machine-a')
+    // 对照：dispose 之后同样的可见性变化不会再读。
+    reader.dispose()
+    reader.visible(false)
+    reader.visible(true)
+    await flush()
+    assert.equal(reads, 2)
+  }
+)
+
 // 页面隐藏不消耗轮询，恢复可见后立即检查期限并重新取数据。
 test(
   '隐藏暂停，前台立即刷新，卸载释放所有资源',
