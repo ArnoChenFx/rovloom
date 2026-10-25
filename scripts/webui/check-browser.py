@@ -57,6 +57,9 @@ def main():
         checks.append('侧栏使用官方横版完整字标，favicon 使用独立橙R；两资产原字节可加载')
 
         page.goto(base + '/fixtures/')
+        page.locator('.metric-card').first.wait_for()
+        # 完整设备列表只在设备页；概览只给摘要。
+        page.goto(base + '/fixtures/#view=devices')
         page.locator('.device-card').first.wait_for()
         assert page.locator('.device-card').count() == 2
         assert page.locator('.device-card img').count() == 0
@@ -124,7 +127,8 @@ def main():
         page.get_by_text('连接与认证状态未核实（待配对）', exact=True).wait_for()
         assert page.locator('main .badges .good, .provider-card .good').count() == 0
         assert '已认证' not in page.locator('main .badges').first.inner_text()
-        page.locator('.brand').click()
+        # 概览只给摘要，状态徽标与设备跳转属于设备页。
+        page.goto(base + '/fixtures/#view=devices')
         page.locator('.device-card').first.wait_for()
         assert page.locator('.device-card .good').count() == 0
         assert page.get_by_text('连接与认证状态未核实（待配对）', exact=True).count() == 2
@@ -161,7 +165,8 @@ def main():
         assert 'fixture-wrong-machine' not in page.locator('main').inner_text()
         checks.append('越机器投影失败关闭且不覆盖当前详情')
 
-        page.goto(base + '/fixtures/')
+        # 设备名称是可跳转的链接只在设备页；概览摘要不可点。
+        page.goto(base + '/fixtures/#view=devices')
         page.locator('.device-card').first.wait_for()
         page.evaluate("window.webUiFixture.mode='hold'")
         page.locator('.device-name').first.click()
@@ -173,6 +178,8 @@ def main():
         page.wait_for_timeout(100)
         assert page.locator('.provider-card').count() == 0
         assert page.evaluate('window.webUiFixture.aborted') >= 1
+        page.goto(base + '/fixtures/#view=devices')
+        page.locator('.device-card').first.wait_for()
         page.locator('.device-name').nth(1).click()
         page.get_by_role('heading', name='隔离测试机 B', exact=True).wait_for()
         assert '身份已撤销' in page.locator('main .badges').first.inner_text()
@@ -208,12 +215,13 @@ def main():
             page.get_by_role('button', name='刷新', exact=True).click()
             page.get_by_text(text, exact=False).wait_for()
             assert page.locator('.device-card, .provider-card').count() == 0
-            assert page.get_by_role('button', name='刷新', exact=True).is_disabled()
+            # 认证失败后轮询自行停止，但刷新按钮保持可用：用户可据此重试（cookie 会话恢复后无需整页刷新）。
+            assert page.get_by_role('button', name='刷新', exact=True).is_enabled()
             reads = page.evaluate('window.webUiFixture.reads')
             page.wait_for_timeout(5200)
             assert page.evaluate('window.webUiFixture.reads') == reads
         assert page.evaluate('localStorage.length + sessionStorage.length') == 0
-        checks.append('401/403/期限过期清空页面停止读取，无浏览器持久存储')
+        checks.append('401/403/期限过期清空页面并停止轮询，刷新按钮仍可手动重试，无浏览器持久存储')
 
         page.evaluate('window.webUiFixture.dispose()')
         assert page.locator('#rovloom-management').inner_text() == ''

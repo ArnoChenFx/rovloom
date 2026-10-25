@@ -36,7 +36,7 @@ function fixture() {
             caller: { principal_id: 'fixture_admin' },
             session_ref: f.admin?.session_ref ?? 'fixture_session',
             expires_at: expires,
-            csrf_sha256: createHash('sha256').update(csrf).digest('hex')
+            csrf_sha256: [createHash('sha256').update(csrf).digest('hex')]
           }
         : null
     }

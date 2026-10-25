@@ -44,6 +44,11 @@ export interface SnapshotReader<T> {
   state(): ReaderState<T>
   refresh(): Promise<void>
   cancel(): void
+  /**
+   * 清空快照并取消在途读取，但保留 reader 本身可继续使用。
+   * 与 dispose 不同，之后仍可 refresh：认证失败后 cookie 会话恢复时用户能手动重试。
+   */
+  reset(problem: ReaderState<T>['problem']): void
   visible(value: boolean): void
   dispose(): void
 }
@@ -143,6 +148,10 @@ export function createSnapshotReader<T>(
 
   /** 合并重复点击，并用请求对象身份阻止被取消的旧响应修改当前页面。 */
   function refresh(): Promise<void> {
+    // 认证类失败后用户主动刷新是明确的重新尝试信号，允许再次读取以复用已恢复的 cookie 会话。
+    if (problem === 'unauthenticated' || problem === 'forbidden' || problem === 'not_found') {
+      stopped = false
+    }
     if (disposed || stopped || !visible) {
       return Promise.resolve()
     }
@@ -228,6 +237,8 @@ export function createSnapshotReader<T>(
           }
           if (problem === 'unauthenticated' || problem === 'forbidden' || problem === 'not_found') {
             snapshot = null
+            // 认证类失败先停下轮询，但保留重新建立的机会：页面重新可见或用户主动刷新时再试一次。
+            // 这样 cookie 会话恢复后无需手动重新加载整个页面。
             stopped = true
             clearPoll()
             clock.clear(tick)
@@ -263,6 +274,28 @@ export function createSnapshotReader<T>(
     }
   }
 
+  /**
+   * 清空已展示数据并停在可重试状态：不释放 reader，也不永久停止。
+   * 用于写请求返回认证失败——此时必须立刻擦除旧授权数据，但用户随后点「刷新」应能再读一次。
+   */
+  function reset(next: ReaderState<T>['problem']): void {
+    if (disposed) {
+      return
+    }
+    // 先进入停止状态与清空数据，再结束在途请求：finish() 内部会调用 schedulePoll()，
+    // 若此时 stopped 仍为 false 就会重新排上 5 秒轮询，认证失败后仍会自动重试并恢复数据。
+    // expire() 也用同一顺序。
+    stopped = next === 'unauthenticated' || next === 'forbidden' || next === 'not_found'
+    snapshot = null
+    receivedAt = 0
+    problem = next
+    clearPoll()
+    clock.clear(tick)
+    active?.abort.abort()
+    active?.finish()
+    publish()
+  }
+
   /** 离开页面立即清空数据、释放任务与在途请求，不允许后退重放任何操作。 */
   function dispose(): void {
     disposed = true
@@ -274,5 +307,5 @@ export function createSnapshotReader<T>(
   }
 
   tick = clock.schedule(updateAge, 1_000)
-  return { state, refresh, cancel, visible: setVisible, dispose }
+  return { state, refresh, cancel, reset, visible: setVisible, dispose }
 }

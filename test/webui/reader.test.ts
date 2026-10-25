@@ -171,11 +171,11 @@ test(
   }
 )
 
-// 两类授权失败都立即擦除快照并停止轮询，手动刷新不能复活会话。
+// 授权失败立即擦除快照并停止轮询；用户主动刷新是明确的重新尝试信号，会再读一次以复用已恢复的 cookie 会话。
 for (const problem of ['unauthenticated', 'forbidden', 'not_found'] as const) {
   test(
-    `${problem} 清空内存并停止读取`,
-    /* 验证 `${problem} 清空内存并停止读取` 的读取与展示边界。 */ async () => {
+    `${problem} 清空内存并停止轮询，主动刷新可重新尝试`,
+    /* 验证 `${problem} 清空内存并停止轮询，主动刷新可重新尝试` 的读取与展示边界。 */ async () => {
       const timer = fakeClock()
       let reads = 0
       const reader = createSnapshotReader(
@@ -194,14 +194,128 @@ for (const problem of ['unauthenticated', 'forbidden', 'not_found'] as const) {
       await reader.refresh()
       assert.equal(reader.state().snapshot, null)
       assert.equal(reader.state().problem, problem)
+      // 认证失败后轮询已停止，不会自行重试。
       timer.advance(60_000)
-      await reader.refresh()
-      assert.equal(reads, 2)
       assert.equal(timer.count(), 0)
+      // 用户主动刷新会重新读取一次，不因一次认证失败永久锁死页面。
+      await reader.refresh()
+      assert.equal(reads, 3)
       reader.dispose()
     }
   )
 }
+
+// 写请求发现认证失败时必须清空数据，但保留 reader 以便用户手动刷新重试（dispose 会永久封闭）。
+test(
+  'reset 清空数据并停止轮询，但保留 reader 可手动刷新重试',
+  /** 与 dispose 的区别：刷新和重新可见仍然能发起新的读取。 */ async () => {
+    const timer = fakeClock()
+    let reads = 0
+    const reader = createSnapshotReader(
+      /** 每次读取都返回同一隔离快照。 */
+      async () => {
+        reads++
+        return sample()
+      },
+      /** 直接观察状态。 */
+      () => {},
+      timer.clock
+    )
+    await reader.refresh()
+    assert.equal(reader.state().snapshot?.value, 'machine-a')
+    reader.reset('unauthenticated')
+    // 数据立即清空，旧授权内容不能继续显示。
+    assert.equal(reader.state().snapshot, null)
+    assert.equal(reader.state().problem, 'unauthenticated')
+    // 认证类失败后自动轮询停止。
+    timer.advance(60_000)
+    assert.equal(timer.count(), 0)
+    // 用户主动刷新仍能读到新数据。
+    const before = reads
+    await reader.refresh()
+    assert.equal(reads, before + 1)
+    assert.equal(reader.state().snapshot?.value, 'machine-a')
+    assert.equal(reader.state().problem, null)
+    reader.dispose()
+  }
+)
+
+// 读取在途时 reset 是最容易漏的顺序：finish() 内部会重新安排轮询，stopped 必须先置位。
+test(
+  '读取在途时 reset 不留下自动轮询，推进时钟也不新增读取',
+  /** 写请求认证失败时通常仍有在途读取；此时 reset 后必须等用户明确重试。 */ async () => {
+    const timer = fakeClock()
+    const pending = deferred<TimedSnapshot<string>>()
+    let reads = 0
+    const reader = createSnapshotReader(
+      /** 首次读取保持挂起，模拟 reset 发生时仍有在途请求。 */
+      () => {
+        reads++
+        return pending.promise
+      },
+      /** 直接观察状态。 */
+      () => {},
+      timer.clock
+    )
+    const first = reader.refresh()
+    await flush()
+    assert.equal(reads, 1)
+    assert.equal(reader.state().pending, true)
+    reader.reset('forbidden')
+    // 在途请求被取消，状态立即进入认证失败且无数据。
+    assert.equal(reader.state().snapshot, null)
+    assert.equal(reader.state().problem, 'forbidden')
+    assert.equal(reader.state().pending, false)
+    pending.resolve(sample())
+    await first
+    await flush()
+    // 关键断言：reset 后没有任何定时器，推进时钟也不会自动重读或恢复数据。
+    assert.equal(timer.count(), 0)
+    timer.advance(60_000)
+    await flush()
+    assert.equal(reads, 1)
+    assert.equal(reader.state().snapshot, null)
+    assert.equal(reader.state().problem, 'forbidden')
+    // 用户明确刷新仍然可以恢复。
+    const before = reads
+    await reader.refresh()
+    assert.equal(reads, before + 1)
+    assert.equal(reader.state().snapshot?.value, 'machine-a')
+    reader.dispose()
+  }
+)
+
+// 页面隐藏后重新可见也必须能从 reset 状态恢复，而 dispose 过的 reader 不会。
+test(
+  'reset 后重新可见可恢复读取，dispose 后则永久停止',
+  /** 覆盖「用户切回标签页自愈」这条路径。 */ async () => {
+    const timer = fakeClock()
+    let reads = 0
+    const reader = createSnapshotReader(
+      /** 统计读取次数。 */
+      async () => {
+        reads++
+        return sample()
+      },
+      /** 直接观察状态。 */
+      () => {},
+      timer.clock
+    )
+    await reader.refresh()
+    reader.visible(false)
+    reader.reset('forbidden')
+    reader.visible(true)
+    await flush()
+    assert.equal(reads, 2)
+    assert.equal(reader.state().snapshot?.value, 'machine-a')
+    // 对照：dispose 之后同样的可见性变化不会再读。
+    reader.dispose()
+    reader.visible(false)
+    reader.visible(true)
+    await flush()
+    assert.equal(reads, 2)
+  }
+)
 
 // 页面隐藏不消耗轮询，恢复可见后立即检查期限并重新取数据。
 test(

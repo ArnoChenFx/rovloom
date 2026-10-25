@@ -7,8 +7,11 @@ export type ManagementSessionBinding = Readonly<{
   caller: CallerIdentity
   session_ref: string
   expires_at: number
-  /** 既有会话后端保存的CSRF摘要；原值只由其受保护bootstrap交给浏览器。 */
-  csrf_sha256: string
+  /**
+   * 既有会话后端保存的 CSRF 摘要。同一租期可能已交付给多个页面（重启后新开标签页会追加一条），
+   * 因此是集合：任一摘要匹配即接受，撤销时整个租期被清除。
+   */
+  csrf_sha256: readonly string[]
 }>
 export type ManagementSessionSource = Readonly<{
   /** 必须与运行宿主和StoreManagementWriteService使用完全相同的来源对象。 */
@@ -190,8 +193,13 @@ export function createManagementSessionAdapter(options: ManagementSessionAdapter
         typeof expires !== 'number' ||
         !Number.isSafeInteger(expires) ||
         expires <= at ||
-        typeof csrf !== 'string' ||
-        !/^[a-f0-9]{64}$/.test(csrf)
+        !Array.isArray(csrf) ||
+        csrf.length === 0 ||
+        csrf.length > 16 ||
+        !csrf.every(
+          /** 每条摘要都必须是完整 SHA-256 十六进制，不接受前缀或通配。 */ (value) =>
+            typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
+        )
       ) {
         return null
       }
@@ -213,7 +221,7 @@ export function createManagementSessionAdapter(options: ManagementSessionAdapter
       ) {
         return null
       }
-      return { caller: identity, session_ref: session, expires_at: expires, csrf_sha256: csrf }
+      return { caller: identity, session_ref: session, expires_at: expires, csrf_sha256: Object.freeze([...csrf]) }
     } catch {
       return null
     }
@@ -249,7 +257,11 @@ export function createManagementSessionAdapter(options: ManagementSessionAdapter
       ) {
         return false
       }
-      return timingSafeEqual(createHash('sha256').update(candidate).digest(), Buffer.from(current.csrf_sha256, 'hex'))
+      const digest = createHash('sha256').update(candidate).digest()
+      // 逐条恒定时间比较：同一租期可能已向多个页面交付过不同 CSRF，任一匹配即接受。
+      return current.csrf_sha256.some(
+        /** 固定长度摘要的常数时间比较，不接受前缀匹配。 */ (csrf) => timingSafeEqual(digest, Buffer.from(csrf, 'hex'))
+      )
     }
   })
 }

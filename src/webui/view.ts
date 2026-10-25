@@ -397,18 +397,13 @@ function guidePage(section: 'pairing' | 'connect', i18n: Localizer, management: 
   return { heading, body }
 }
 
-/** 列表只展示后端返回的授权页，不将页长宣称为设备总数。 */
-function deviceList(page: PageView, freshness: Freshness, route: PageRoute, filter: DeviceFilter): PageSection {
-  const { i18n } = freshness
-  const { t } = i18n
+/** 概览只汇总当前授权页并给出设备页入口，不复用设备列表，避免两页内容重复。 */
+function overviewPage(page: PageView, freshness: Freshness): PageSection {
+  const { t } = freshness.i18n
   const heading = node('header', '', 'page-heading')
-  const overview = route.section !== 'devices'
   const copy = node('div', '', 'heading-copy')
   copy.append(node('p', t('overview.eyebrow'), 'eyebrow'))
-  copy.append(
-    node('h1', t(overview ? 'overview.title' : 'devices.heading')),
-    node('p', t(overview ? 'overview.description' : 'devices.description'), 'muted')
-  )
+  copy.append(node('h1', t('overview.title')), node('p', t('overview.description'), 'muted'))
   heading.append(copy)
   const add = node('a', '', 'primary-button')
   add.href = '#view=pairing'
@@ -417,17 +412,50 @@ function deviceList(page: PageView, freshness: Freshness, route: PageRoute, filt
   const section = node('section', '', 'devices-section')
   const sectionHeader = node('div', '', 'section-heading')
   const sectionCopy = node('div')
-  sectionCopy.append(
-    node('h2', t(overview ? 'overview.deviceSection' : 'devices.heading')),
-    node('p', t('overview.deviceSubtitle'), 'muted')
-  )
+  sectionCopy.append(node('h2', t('overview.deviceSection')), node('p', t('overview.deviceSubtitle'), 'muted'))
   sectionHeader.append(sectionCopy)
-  if (overview) {
-    const all = node('a', '', 'text-link')
-    all.href = '#view=devices'
-    all.append(node('span', t('overview.manage')), uiIcon('arrow'))
-    sectionHeader.append(all)
+  const all = node('a', '', 'text-link')
+  all.href = '#view=devices'
+  all.append(node('span', t('overview.manage')), uiIcon('arrow'))
+  sectionHeader.append(all)
+  section.append(sectionHeader)
+  if (page.devices.items.length === 0) {
+    const empty = node('div', '', 'empty')
+    empty.append(uiIcon('devices'), node('h2', t('devices.emptyTitle')), node('p', t('devices.emptyHint'), 'muted'))
+    section.append(empty)
+  } else {
+    // 概览只列出最近几条摘要，完整检索、筛选和分页留在设备页。
+    const list = node('ul', '', 'device-list overview-device-list')
+    for (const device of page.devices.items.slice(0, 3)) {
+      const item = node('li', '', 'device-card')
+      const name = node('div', '', 'device-name')
+      name.append(node('strong', device.name), node('p', device.machine_id, 'mono muted'))
+      item.append(name)
+      list.append(item)
+    }
+    section.append(list)
   }
+  return { heading, body: section }
+}
+
+/** 列表只展示后端返回的授权页，不将页长宣称为设备总数。 */
+function deviceList(page: PageView, freshness: Freshness, route: PageRoute, filter: DeviceFilter): PageSection {
+  const { i18n } = freshness
+  const { t } = i18n
+  const heading = node('header', '', 'page-heading')
+  const copy = node('div', '', 'heading-copy')
+  copy.append(node('p', t('devices.eyebrow'), 'eyebrow'))
+  copy.append(node('h1', t('devices.heading')), node('p', t('devices.description'), 'muted'))
+  heading.append(copy)
+  const add = node('a', '', 'primary-button')
+  add.href = '#view=pairing'
+  add.append(uiIcon('plus'), node('span', t('nav.pairing')))
+  heading.append(add)
+  const section = node('section', '', 'devices-section')
+  const sectionHeader = node('div', '', 'section-heading')
+  const sectionCopy = node('div')
+  sectionCopy.append(node('h2', t('devices.heading')), node('p', t('devices.subtitle'), 'muted'))
+  sectionHeader.append(sectionCopy)
   section.append(sectionHeader)
   if (page.devices.items.length) {
     const tools = node('div', '', 'device-tools')
@@ -893,13 +921,16 @@ export function renderPage(
         ? deviceDetail(page, freshness, management && status.mode === 'active' && !state.stale)
         : route.section === 'pairing' || route.section === 'connect'
           ? guidePage(route.section, i18n, management)
-          : deviceList(page, freshness, route, filter)
+          : route.section === 'devices'
+            ? deviceList(page, freshness, route, filter)
+            : overviewPage(page, freshness)
     view.append(section.heading)
     if (route.section === 'pairing' && (state.stale || status.mode !== 'active')) {
       view.append(node('p', t(state.stale ? 'reader.stale' : 'gateway.degradedNote'), 'notice warning'))
     }
     if (route.machineId !== null || !['pairing', 'connect'].includes(route.section ?? '')) {
-      if (route.machineId === null) {
+      // 指标卡只属于概览；设备页与详情页各自展示自己的数据。
+      if (route.machineId === null && route.section !== 'devices') {
         view.append(overviewMetrics(page, freshness))
       }
       view.append(gateway)

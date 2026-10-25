@@ -1,7 +1,12 @@
 // 唯一产品入口按固定role/ref加载真实资源；JSON不能重建opaque native来源或执行任意模块。
 import { privateDirectory } from './first-config.js'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { openGatewayState, createManagementSessionAuthority } from '../runtime/index.js'
+import {
+  createManagementSessionPersistence,
+  MANAGEMENT_SESSIONS_MAX_BYTES
+} from '../runtime/management-session-store.js'
 import { composeConnectorSessions } from '../runtime/provider-sessions.js'
 import type {
   GatewayRuntimeOptions,
@@ -14,7 +19,7 @@ import type { ManagementWriteHttpOptions } from '../admin/index.js'
 import { loadCredential } from '../transport/index.js'
 import { GatewayError } from '../contracts.js'
 import { CliError, selectedNativeProviders, type ConnectorConfig, type GatewayConfig } from './config.js'
-import { readSetupJson } from './setup-files.js'
+import { readSetupJson, writeSetupJson } from './setup-files.js'
 import { openCallerSource } from './caller-source.js'
 import { REGISTRY_MAX_BYTES } from './token-registry.js'
 import { readRuntimeJson, runtimeReference } from './runtime-files.js'
@@ -200,6 +205,8 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
     gateway: /* 常规启动只打开已配置资源，不注册设备、签发enrollment/token或bootstrap管理cookie。 */ async (config) => {
       privateDirectory(config.state_dir)
       privateDirectory(join(config.state_dir, 'managed'))
+      // 会话绑定与管理员记录分开放置：前者只含摘要，后者含凭据摘要与租期。
+      const sessionStorePath = runtimeReference(config.state_dir, 'management-sessions')
       const settings = readRuntimeConfig(config)
       if (settings.provider_config_refs.length && !sources.gateway) {
         throw new CliError('backend_unavailable', 3)
@@ -223,7 +230,18 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
             throw new CliError('invalid_config')
           }
         }
-        authority = createManagementSessionAuthority(caller.identities)
+        authority = createManagementSessionAuthority(caller.identities, {
+          // 管理会话的 cookie 摘要绑定落盘：配对触发的重载与进程重启后，已登录浏览器不必重输密码。
+          persist: createManagementSessionPersistence({
+            // 每个管理员最多并存 8 条绑定，合法文档会超过默认 16 KiB；读写统一使用会话文件的预算，
+            // 否则超限写入被 save() 吞掉，重启后只能恢复前一部分绑定。
+            read: () => readSetupJson(sessionStorePath, MANAGEMENT_SESSIONS_MAX_BYTES),
+            // 存在性与内容解析必须分开判断：文件损坏时 readSetupJson 会抛错，
+            // 若用它决定是否覆盖，损坏文件将永久阻止后续写入，每次重启都会掉线。
+            write: (value) =>
+              writeSetupJson(sessionStorePath, value, existsSync(sessionStorePath), MANAGEMENT_SESSIONS_MAX_BYTES)
+          })
+        })
         protectedManagement?.bindAuthority(authority)
       } catch (error) {
         protectedManagement?.close()

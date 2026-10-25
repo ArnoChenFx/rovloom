@@ -7,6 +7,7 @@ import type { ManagementAssets } from '../admin/read-http.js'
 import { boundedJson, fields, object } from '../wire/index.js'
 import { CliError, type GatewayConfig } from './config.js'
 import { loadProductManagementAssets } from './management-assets.js'
+import { MANAGEMENT_COOKIE_NAME } from './management-page.js'
 import { readRuntimeJson, runtimeReference } from './runtime-files.js'
 import type { ProductionManagementHost } from './production.js'
 import { REGISTRY_MAX_BYTES } from './token-registry.js'
@@ -158,6 +159,31 @@ function proof(request: Request): { principal_id: string; sha256: Buffer } | nul
   } finally {
     bytes.fill(0)
   }
+}
+
+/** 只取出受保护的单一管理 cookie 原值；形状交给 authority 的会话查询复核，不在此推断身份。 */
+function managementCookie(request: Request): string | null {
+  const raw = request.headers.get('cookie')
+  if (!raw || Buffer.byteLength(raw) > 4096) {
+    return null
+  }
+  let result: string | null = null
+  for (const entry of raw.split(';')) {
+    const delimiter = entry.indexOf('=')
+    if (delimiter < 1) {
+      return null
+    }
+    if (entry.slice(0, delimiter).trim() !== MANAGEMENT_COOKIE_NAME) {
+      continue
+    }
+    const value = entry.slice(delimiter + 1).trim()
+    // 同名 cookie 出现多次时不挑选其中一个，避免歧义被当成身份。
+    if (result !== null || !/^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]{16,2048}$/.test(value)) {
+      return null
+    }
+    result = value
+  }
+  return result
 }
 
 /** 从角色私有ref读取独立管理来源；正常启动只验证配置，不bootstrap cookie或消费任何批准。 */
@@ -345,7 +371,28 @@ export function openProtectedManagementSource(
         const at = current()
         const supplied = proof(request)
         if (!supplied) {
-          return null
+          // 已登录浏览器的根页面请求不带 Basic；用现有管理 cookie 换取同一租期，避免刷新/重启后重复输密码。
+          // 该路径只交付只读页面壳，写操作仍要求 CSRF 且逐动作授权。
+          const cookie = managementCookie(request)
+          if (!cookie || !authority) {
+            return null
+          }
+          const binding = await authority.sessions.resolveCookie(cookie, signal)
+          if (signal.aborted || !binding) {
+            return null
+          }
+          const found = source.sessions.find(
+            /* 复用与 Basic 路径相同的租期、摘要与管理员记录复验。 */ (entry) =>
+              entry.lease.caller.principal_id === binding.caller.principal_id &&
+              entry.lease.management_session_ref === binding.session_ref &&
+              at >= entry.lease.issued_at &&
+              at < entry.lease.expires_at
+          )
+          if (!found || signal.aborted || current() >= found.lease.expires_at) {
+            return null
+          }
+          issued.set(key(found.lease.caller.principal_id, found.lease.management_session_ref), fingerprint(found))
+          return structuredClone(found.lease)
         }
         try {
           const found = source.sessions.find(

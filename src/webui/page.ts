@@ -130,9 +130,10 @@ export function mountWebUi(
           if (disposed) {
             return
           }
-          reader.dispose()
+          // 这里不能用 dispose：它会永久封闭 reader，之后「刷新」与重新可见都无法再读取，
+          // 而认证失败正是最需要手动重试的场景。reset 清空旧数据并停在可重试状态。
+          reader.reset(problem)
           actions?.clear()
-          paint({ snapshot: null, pending: false, stale: true, ageMs: 0, problem }, route)
         }
       })
     : undefined
@@ -148,9 +149,12 @@ export function mountWebUi(
           }
         },
         authorizationLost(problem) {
-          reader.dispose()
+          if (disposed) {
+            return
+          }
+          // 与设备操作同一处理：保留 reader，使用户仍可手动刷新重试。
+          reader.reset(problem)
           actions?.clear()
-          paint({ snapshot: null, pending: false, stale: true, ageMs: 0, problem }, route)
         }
       })
     : undefined
@@ -160,7 +164,9 @@ export function mountWebUi(
 
   /** 稳定工具栏与当前快照重新本地化；不替换 reader、路由、等待信号或时间锚点。 */
   function paint(state: ReaderState<PageView>, current: PageRoute): void {
-    refresh.disabled = state.pending || ['unauthenticated', 'forbidden', 'not_found'].includes(state.problem ?? '')
+    // 认证类失败后 reader 允许重试（cookie 会话恢复后无需整页刷新），按钮必须同步可用，
+    // 否则用户停在当前页面时没有触发那条恢复路径的入口。
+    refresh.disabled = state.pending
     cancel.disabled = !state.pending
     indicator.textContent = i18n.t(
       state.pending

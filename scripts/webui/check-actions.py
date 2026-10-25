@@ -249,6 +249,31 @@ def main():
         checks.append('system language/theme changes preserve focused name input without writes')
         page.close()
 
+        # 写请求认证失败后必须仍能手动刷新：reader 只被 reset，不被 dispose。
+        page, devices = open_page(context, base)
+        # 页面已用正常会话打开；此后让会话失效，使写请求返回 401。
+        control(context, base, mode='401')
+        page.locator('[data-device-action="device_rename"]').click()
+        page.locator('input[name="device-name"]').fill('owned_after_auth_loss')
+        page.locator('.operation-form button').click()
+        # 认证失败会清空操作流并关闭对话框，不进入 failed 相位。
+        expect(page.locator('dialog')).not_to_be_visible()
+        assert writes(context, base) == []
+        # 旧授权数据已清空（写入口全部禁用），但刷新按钮可用。
+        assert page.locator('[data-device-action]:enabled').count() == 0
+        expect(page.get_by_role('button', name='Refresh', exact=True)).to_be_enabled()
+        # 恢复会话后点击刷新：必须真的重新读取（此前 dispose 会让 refresh 直接返回）。
+        control(context, base, mode='normal')
+        reads_before = len([c for c in metadata(context, base)['calls'] if c in ('status', 'device_get', 'devices_get')])
+        page.get_by_role('button', name='Refresh', exact=True).click()
+        page.locator('.provider-card').first.wait_for()
+        reads_after = len([c for c in metadata(context, base)['calls'] if c in ('status', 'device_get', 'devices_get')])
+        assert reads_after > reads_before, f'expected a new read after refresh, {reads_before} -> {reads_after}'
+        checks.append('write-time auth loss clears data but keeps refresh able to re-read')
+        page.close()
+        checks.append('write-time auth loss clears data but keeps refresh able to re-read')
+        page.close()
+
         page, devices = open_page(context, base)
         prepare(page, 'device_revoke')
         control(context, base, advance=121000)

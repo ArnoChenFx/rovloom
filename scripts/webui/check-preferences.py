@@ -224,7 +224,8 @@ def main():
                 assert 'unsafe-inline' not in csp and 'unsafe-eval' not in csp
                 checks.append(f'{language}/{theme}: browser/system defaults, localized metadata and protected unavailable entry')
 
-                page.goto(base + '/fixtures/')
+                # 设备名称是设备页的可跳转链接；概览摘要不可点击。
+                page.goto(base + '/fixtures/#view=devices')
                 page.locator('.device-card').first.wait_for()
                 device_name = page.locator('.device-name').first.inner_text()
                 page.locator('.device-name').first.click()
@@ -295,7 +296,8 @@ def main():
                     theme_control.choose('dark' if theme == 'light' else 'light')
                     page.get_by_text(WORDS[other][error], exact=False).wait_for()
                     assert page.locator('.device-card,.provider-card').count() == 0
-                    assert page.get_by_role('button', name=WORDS[other]['refresh'], exact=True).is_disabled()
+                    # 轮询已停止，但刷新按钮仍可手动重试。
+                    assert page.get_by_role('button', name=WORDS[other]['refresh'], exact=True).is_enabled()
                     assert page.evaluate('window.webUiFixture.reads') == count
                 checks.append(f'{language}/{theme}: 401/403/session expiry remain cleared and stopped across language/theme changes')
 
