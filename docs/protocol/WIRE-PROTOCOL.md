@@ -211,7 +211,7 @@ Connector 不依赖 Gateway 额外交付的 TTL 或上下文。受保护配置�
 - `code` 目前允许 `terminal_execution_disabled` 与 `policy_revision_stale`，不承载原生响应、异常正文或任意字符串。
 - 它只接受真实的本机 adapter 明确报告 `not_dispatched` 的终端最终门禁拒绝，或准入层在写出任何原生字节前即确定的策略 revision 漂移（网关盖章的 `caller/local_policy_revision` 与 Connector 受保护快照不一致）。`accepted` 之后仍可确证未写出。普通异常、原生 error、超时和 `outcome_unknown` 都不能生成此证明。
 - Gateway 先在账本事务中核对原 tuple、当前 provider 与 epoch、固定 deadline，提交拒绝和必要审计，之后才清理该 call 的在途与读取上下文。
-- 只有尚未到期的 `dispatching` 可被任意 code 拒绝；`connector_accepted` 只接受 `terminal_execution_disabled`（执行器自身在 accepted 之后的未写出证明），不接受 `policy_revision_stale`（准入拒绝只存在于首帧被接受前）。已 unknown、已响应或已拒绝的状态保持不变，不续期，不重派。合法的拒绝不关闭连接，不取消其它在途调用。
+- 只有尚未到期的 `dispatching` / `connector_accepted` 可变为 `not_dispatched`（执行器可能在 accepted 后、原生写入前才复核策略并报告真实未写出）。重放帧的防御在 Connector 的 running/seen 守卫：已进入执行的 attempt 重发不生成拒绝证明。已 unknown、已响应或已拒绝的状态保持不变，不续期，不重派。合法的拒绝不关闭连接，不取消其它在途调用。
 - 未协商、认证或锚点错误、存储提交失败都保守拒绝，不发布虚假终态。
 - Store 须提供 `commitDispatchRefusal(binding, code)`，否则 Gateway 不广告该能力。若配置要求此能力，则以 `dispatch_refusal_backend_unavailable` 拒绝启动。该事务只在真正提交 `not_dispatched` 时返回 true。对 unknown、responded 或已拒绝的状态返回 false，此时 Gateway 不释放上下文，response 之后到达的拒绝不会驱逐仍有效的结果读取许可。
 
