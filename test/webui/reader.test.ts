@@ -171,11 +171,11 @@ test(
   }
 )
 
-// 两类授权失败都立即擦除快照并停止轮询，手动刷新不能复活会话。
+// 授权失败立即擦除快照并停止轮询；用户主动刷新是明确的重新尝试信号，会再读一次以复用已恢复的 cookie 会话。
 for (const problem of ['unauthenticated', 'forbidden', 'not_found'] as const) {
   test(
-    `${problem} 清空内存并停止读取`,
-    /* 验证 `${problem} 清空内存并停止读取` 的读取与展示边界。 */ async () => {
+    `${problem} 清空内存并停止轮询，主动刷新可重新尝试`,
+    /* 验证 `${problem} 清空内存并停止轮询，主动刷新可重新尝试` 的读取与展示边界。 */ async () => {
       const timer = fakeClock()
       let reads = 0
       const reader = createSnapshotReader(
@@ -194,10 +194,12 @@ for (const problem of ['unauthenticated', 'forbidden', 'not_found'] as const) {
       await reader.refresh()
       assert.equal(reader.state().snapshot, null)
       assert.equal(reader.state().problem, problem)
+      // 认证失败后轮询已停止，不会自行重试。
       timer.advance(60_000)
-      await reader.refresh()
-      assert.equal(reads, 2)
       assert.equal(timer.count(), 0)
+      // 用户主动刷新会重新读取一次，不因一次认证失败永久锁死页面。
+      await reader.refresh()
+      assert.equal(reads, 3)
       reader.dispose()
     }
   )

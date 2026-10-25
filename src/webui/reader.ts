@@ -143,6 +143,10 @@ export function createSnapshotReader<T>(
 
   /** 合并重复点击，并用请求对象身份阻止被取消的旧响应修改当前页面。 */
   function refresh(): Promise<void> {
+    // 认证类失败后用户主动刷新是明确的重新尝试信号，允许再次读取以复用已恢复的 cookie 会话。
+    if (problem === 'unauthenticated' || problem === 'forbidden' || problem === 'not_found') {
+      stopped = false
+    }
     if (disposed || stopped || !visible) {
       return Promise.resolve()
     }
@@ -228,6 +232,8 @@ export function createSnapshotReader<T>(
           }
           if (problem === 'unauthenticated' || problem === 'forbidden' || problem === 'not_found') {
             snapshot = null
+            // 认证类失败先停下轮询，但保留重新建立的机会：页面重新可见或用户主动刷新时再试一次。
+            // 这样 cookie 会话恢复后无需手动重新加载整个页面。
             stopped = true
             clearPoll()
             clock.clear(tick)

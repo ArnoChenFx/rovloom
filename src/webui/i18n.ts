@@ -244,7 +244,11 @@ export const chinese = Object.freeze({
   'actions.effect':
     '断开仅关闭指定连接，保留设备授权，Connector 可以主动重连。撤销将持久拒绝旧身份，并影响全部 providers。在途工作可能仍执行，结果保持未确认。',
   'devices.heading': '设备',
+  'devices.eyebrow': '设备清单',
+  'devices.subtitle': '检索、筛选并查看每台设备的连接与认证观测。',
   'devices.description': '设备身份、连接与 runtime providers 分开观测。',
+  'devices.emptyTitle': '还没有设备',
+  'devices.emptyHint': '配对一台设备后，它会出现在这里。',
   'devices.identity': '设备 / 标识',
   'devices.health': '连接与认证',
   'devices.activity': '最近心跳',
@@ -562,7 +566,11 @@ export const english = Object.freeze({
   'actions.effect':
     'Disconnect closes only the selected connection and preserves device authorization; the Connector may reconnect. Revocation persistently rejects the old identity and affects all providers. In-flight work may continue; its outcome remains unconfirmed.',
   'devices.heading': 'Devices',
+  'devices.eyebrow': 'DEVICE INVENTORY',
+  'devices.subtitle': 'Search, filter and inspect connection and authentication observations per device.',
   'devices.description': 'Device identity, connections and runtime providers are observed independently.',
+  'devices.emptyTitle': 'No devices yet',
+  'devices.emptyHint': 'Pair a device and it will appear here.',
   'devices.identity': 'Device / identifier',
   'devices.health': 'Connection & authentication',
   'devices.activity': 'Last heartbeat',

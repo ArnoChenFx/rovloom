@@ -10,6 +10,7 @@
 - 管理页使用 HTTP Basic 登录。用户名是管理员 ID，默认 `admin`。
 - 首次配对经 Gateway 终端完成时，会自动创建管理员 `admin` 并只显示一次密码。也可以在任何配对之前运行 `rovloom admin create` 手动创建，然后从管理页完成首台设备的在线配对（见下文「在线配对」与 [配置参考](CONFIGURATION-zh.md#管理页管理员)）。之后用 `rovloom admin create|list|revoke` 管理，创建与修改都不需要重启。
 - Gateway 只保存密码的 SHA-256 摘要。创建、重新签发和撤销都不需要重启。管理员被撤销或密码被替换后，对应浏览器会话在下一次请求时失效。
+- **登录状态会保持。** 首次用 Basic 登录后，浏览器收到 `Path=/`、`HttpOnly`、`SameSite=Strict` 的会话 cookie。此后刷新页面、Gateway 因配对重载、以及 Gateway 进程重启都不再要求重输密码：cookie 与租期的绑定以 SHA-256 摘要形式保存在 `<state.dir>/managed/management-sessions.json`，重启后重新加载并逐次复验原管理员记录。撤销管理员、重新签发密码或租期到期仍会立即让旧 cookie 失效。该文件不含 cookie 或 CSRF 原值；文件损坏或超限时按「没有可恢复会话」处理，不阻塞启动。
 - 没有任何管理员时，页面只交付没有数据的空壳。存在管理员后，没有有效凭据的请求一律返回 401。
 - 管理员可以查看和管理 Gateway 已知的全部设备和 provider，包括之后才配对的。
 - 管理员不能调用 MCP。MCP Bearer、设备凭据和一次性配对码也不能登录管理页，三者互不替代。

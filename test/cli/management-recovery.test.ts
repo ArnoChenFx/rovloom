@@ -87,15 +87,16 @@ test(
       // 未接收首响应的浏览器没有cookie；独立证明仍可恢复同一交付。
       const recovered = await delivery(await h.handler.fetch(h.f.request()))
       assert.ok(recovered.cookie === first.cookie && recovered.csrf === first.csrf)
-      assert.equal(
-        await h.source.management.resolveLease(
-          new Request(h.f.origin, {
-            headers: { host: new URL(h.f.origin).host, cookie: 'rovloom_management=' + first.cookie }
-          }),
-          new AbortController().signal
-        ),
-        null
+      // 已登录浏览器的根页面请求只带 cookie 也恢复同一租期，刷新与重启后不必重输密码。
+      const byCookie = await h.source.management.resolveLease(
+        new Request(h.f.origin, {
+          headers: { host: new URL(h.f.origin).host, cookie: 'rovloom_management=' + first.cookie }
+        }),
+        new AbortController().signal
       )
+      assert.equal(byCookie?.caller.principal_id, h.f.lease.caller.principal_id)
+      assert.equal(byCookie?.management_session_ref, h.f.lease.management_session_ref)
+      assert.equal(byCookie?.expires_at, first.expires)
     } finally {
       h.close()
     }

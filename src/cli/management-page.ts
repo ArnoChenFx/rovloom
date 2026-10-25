@@ -104,7 +104,8 @@ export function createManagementPageInitializer(
       headers.set('cache-control', 'no-store')
       headers.set(
         'set-cookie',
-        `${MANAGEMENT_COOKIE_NAME}=${bootstrap.cookie}; Path=/admin/v1; HttpOnly; SameSite=Strict; Expires=${new Date(bootstrap.expires_at).toUTCString()}`
+        // Path=/ 让根页面也能带上该 cookie，刷新与重启后不必重输密码；HttpOnly 与 SameSite=Strict 不变。
+        `${MANAGEMENT_COOKIE_NAME}=${bootstrap.cookie}; Path=/; HttpOnly; SameSite=Strict; Expires=${new Date(bootstrap.expires_at).toUTCString()}`
       )
       return new Response(html.replace('</head>', metadata + '</head>'), { status: page.status, headers })
     } catch (error) {

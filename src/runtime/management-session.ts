@@ -6,6 +6,7 @@ import type { ManagementSessionSource } from '../admin/session-adapter.js'
 import type { Administrator, CallerIdentity, GatewayIdentitySource } from '../mcp/management.js'
 import type { Principal } from '../router.js'
 import { boundedJson, validatePolicies } from '../wire/index.js'
+import type { ManagementSessionPersistence, PersistedManagementSession } from './management-session-store.js'
 
 export type ManagementSessionLease = Readonly<{
   caller: CallerIdentity
@@ -40,6 +41,8 @@ type LeaseRecord = {
   revoked: boolean
   expiry_only: boolean
   upstream: ManagementSessionLease
+  // 本进程是否已向页面交付过该租期；从磁盘恢复的记录为 false，允许首次页面交付重新签发。
+  delivered: boolean
 }
 type Proof = { lease: LeaseRecord; cookie_sha256: string; signal: AbortSignal }
 const identifier = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/
@@ -82,7 +85,7 @@ function key(caller: CallerIdentity, sessionRef: string): string {
 /** 交付 PR69 的正式消费来源；构造不创建秘密，首次租期和撤销墓碑直到宿主关闭都不遗忘。 */
 export function createManagementSessionAuthority(
   source: GatewayIdentitySource,
-  options: Readonly<{ now?: () => number; max_sessions?: number }> = {}
+  options: Readonly<{ now?: () => number; max_sessions?: number; persist?: ManagementSessionPersistence }> = {}
 ): ManagementSessionAuthority {
   if (typeof source?.principal !== 'function' || typeof source.administrator !== 'function') {
     throw new GatewayError('management_session_source_required')
@@ -107,6 +110,71 @@ export function createManagementSessionAuthority(
     lease.csrf_sha256 = undefined
     lease.revoked = true
     lease.expiry_only = expiryOnly
+    persist()
+  }
+
+  /** 只把当前可恢复绑定写回；撤销墓碑与到期记录不落盘，重启后也不会复活。 */
+  function persist(): void {
+    if (!options.persist) {
+      return
+    }
+    const rows: PersistedManagementSession[] = []
+    for (const lease of leases.values()) {
+      if (lease.revoked || !lease.cookie_sha256 || !lease.csrf_sha256) {
+        continue
+      }
+      rows.push({
+        principal_id: lease.session.caller.principal_id,
+        session_ref: lease.session.management_session_ref,
+        issued_at: lease.session.issued_at,
+        expires_at: lease.session.expires_at,
+        cookie_sha256: lease.cookie_sha256,
+        csrf_sha256: lease.csrf_sha256,
+        policy: lease.policy,
+        upstream: lease.upstream
+      })
+    }
+    options.persist.save(rows)
+  }
+
+  /** 恢复只重建内存映射；每个请求仍走 resolve() 逐次复验原管理员记录、政策与期限。 */
+  function restore(): void {
+    if (!options.persist) {
+      return
+    }
+    for (const row of options.persist.load()) {
+      if (leases.size >= capacity) {
+        break
+      }
+      const name = key({ principal_id: row.principal_id }, row.session_ref)
+      if (leases.has(name) || cookies.has(row.cookie_sha256)) {
+        continue
+      }
+      const lease: LeaseRecord = {
+        name,
+        session: Object.freeze({
+          caller: Object.freeze({ principal_id: row.principal_id }),
+          management_session_ref: row.session_ref,
+          issued_at: row.issued_at,
+          expires_at: row.expires_at
+        }),
+        policy: row.policy,
+        cookie_sha256: row.cookie_sha256,
+        csrf_sha256: row.csrf_sha256,
+        revoked: false,
+        expiry_only: false,
+        // 从磁盘恢复的绑定尚未在本进程交付过，允许首次页面交付重新签发同一租期。
+        delivered: false,
+        upstream: Object.freeze({
+          caller: Object.freeze({ principal_id: row.upstream.caller.principal_id }),
+          management_session_ref: row.upstream.management_session_ref,
+          issued_at: row.upstream.issued_at,
+          expires_at: row.upstream.expires_at
+        })
+      }
+      leases.set(name, lease)
+      cookies.set(row.cookie_sha256, lease)
+    }
   }
 
   /** 停止来源并使全部异步后代失去当前作用域，不修改原身份后端。 */
@@ -215,6 +283,9 @@ export function createManagementSessionAuthority(
     return { lease, cookie_sha256: cookieDigest, signal }
   }
 
+  // 构造时恢复上次进程留下的绑定；恢复失败或文件损坏只得到空会话集。
+  restore()
+
   const identities: GatewayIdentitySource = Object.freeze({
     /** 普通 principal 仍来自原身份服务，管理 cookie 不赋予 MCP 或设备权限。 */
     principal(caller: CallerIdentity): Principal | null {
@@ -305,8 +376,9 @@ export function createManagementSessionAuthority(
           }
           lease = { ...lease, session, revoked: false, expiry_only: false }
         } else if (lease) {
-          // 页面首次交付仍拒绝隐式旋转；恢复由已认证页面交付缓存负责。
-          if (rotate === false) {
+          // 本进程已交付过的租期拒绝隐式旋转，恢复由已认证页面交付缓存负责；
+          // 从磁盘恢复但本进程尚未交付的绑定允许重新签发，使重启后首次打开页面即可复用会话。
+          if (rotate === false && lease.delivered) {
             throw new GatewayError('unauthenticated')
           }
           resolve(lease)
@@ -333,6 +405,7 @@ export function createManagementSessionAuthority(
             csrf_sha256: undefined,
             revoked: false,
             expiry_only: false,
+            delivered: false,
             upstream: Object.freeze({
               caller,
               management_session_ref: sessionRef,
@@ -362,8 +435,12 @@ export function createManagementSessionAuthority(
         }
         lease.cookie_sha256 = digest(cookie)
         lease.csrf_sha256 = digest(csrf)
+        // 标记本进程已交付，后续重复页面交付不再隐式旋转同一租期。
+        lease.delivered = true
         leases.set(name, lease)
         cookies.set(lease.cookie_sha256, lease)
+        // 新绑定落盘后，重启或 Gateway 重载都能恢复同一会话。
+        persist()
         return Object.freeze({ ...lease.session, cookie, csrf })
       } catch {
         throw new GatewayError('unauthenticated')

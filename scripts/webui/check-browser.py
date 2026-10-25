@@ -57,6 +57,9 @@ def main():
         checks.append('侧栏使用官方横版完整字标，favicon 使用独立橙R；两资产原字节可加载')
 
         page.goto(base + '/fixtures/')
+        page.locator('.metric-card').first.wait_for()
+        # 完整设备列表只在设备页；概览只给摘要。
+        page.goto(base + '/fixtures/#view=devices')
         page.locator('.device-card').first.wait_for()
         assert page.locator('.device-card').count() == 2
         assert page.locator('.device-card img').count() == 0

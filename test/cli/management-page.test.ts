@@ -92,7 +92,7 @@ test(
       const cookieHeader = response.headers.get('set-cookie')!
       const cookie = /^rovloom_management=([\w-]{43});/.exec(cookieHeader)![1]!
       const csrf = /content="([\w-]{43})"/.exec(body)![1]!
-      assert.match(cookieHeader, /; Path=\/admin\/v1; HttpOnly; SameSite=Strict; Expires=/)
+      assert.match(cookieHeader, /; Path=\/; HttpOnly; SameSite=Strict; Expires=/)
       assert(!cookieHeader.includes('Domain='))
       assert.equal(response.headers.get('cache-control'), 'no-store')
       assert(body.includes(`data-expires-at="${f.lease.expires_at}"`))

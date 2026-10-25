@@ -78,13 +78,16 @@ def main():
                 page = context.new_page()
                 page.on('pageerror', page_error)
                 page.goto(base + '/fixtures/')
-                page.locator('.device-card').first.wait_for()
+                page.locator('.metric-card').first.wait_for()
                 language_control, theme_control = controls(page)
                 language_control.choose(language)
                 theme_control.choose(theme)
+                # 概览页检查标题在网关卡之上；列对齐与行高属于设备页。
                 heading = bounds(page, '.page-heading')
                 gateway = bounds(page, '.gateway')
                 assert heading['y'] + heading['height'] <= gateway['y']
+                page.goto(base + '/fixtures/#view=devices')
+                page.locator('.device-card').first.wait_for()
                 columns = page.evaluate('''/* 同步采样两行坐标，避免年龄重绘使跨调用节点失效。 */ () => {
                     /** 提取同一帧内所有列的横坐标。 */
                     function positions(selector) { return [...document.querySelectorAll(selector)].map(

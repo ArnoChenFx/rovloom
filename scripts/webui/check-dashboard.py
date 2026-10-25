@@ -41,14 +41,18 @@ def main():
                 page = context.new_page()
                 page.on('pageerror', lambda error: errors.append(str(error)))
                 page.goto(base + '/fixtures/')
-                page.locator('.device-card').first.wait_for()
+                page.locator('.metric-card').first.wait_for()
                 page.evaluate("window.webUiFixture.mode='showcase'")
                 page.locator('.toolbar button').first.click()
-                expect(page.locator('.device-card')).to_have_count(4)
+                # 概览只显示指标与摘要，完整设备列表和检索属于设备页。
                 expect(page.locator('.metric-value')).to_have_text(['4', '2', '2'])
+                expect(page.locator('.overview-device-list .device-card')).to_have_count(3)
+                expect(page.locator('.device-tools')).to_have_count(0)
                 assert page.locator('.brand-logo').get_attribute('src') == './rovloom-logo.png'
                 page.screenshot(path=str(output / f'overview-{language}-{theme}.png'), full_page=True)
                 navigate(page, 'devices')
+                expect(page.locator('.device-card')).to_have_count(4)
+                expect(page.locator('.metric-card')).to_have_count(0)
                 search = page.locator('[name="device-search"]')
                 before = page.evaluate('window.webUiFixture.reads')
                 search.fill('macbook')
@@ -70,7 +74,6 @@ def main():
                 search.fill('no-such-device')
                 expect(page.locator('.device-card')).to_have_count(0)
                 expect(page.locator('.search-empty')).to_be_visible()
-                expect(page.locator('.metric-value')).to_have_text(['4', '2', '2'])
                 assert page.evaluate('window.webUiFixture.reads') == before
                 search.fill('')
                 disclosure = page.locator('.device-record').first
@@ -95,7 +98,8 @@ def main():
                 navigate(page, 'devices')
                 page.evaluate("window.webUiFixture.mode='stale'")
                 page.locator('.toolbar button').first.click()
-                expect(page.locator('.metric-value')).to_have_text(['2', '—', '—'])
+                # 设备页不渲染指标卡；过期状态直接体现在设备卡片上。
+                expect(page.locator('.metric-card')).to_have_count(0)
                 assert page.locator('.device-card .good').count() == 0
                 page.evaluate("window.webUiFixture.mode='401'")
                 page.locator('.toolbar button').first.click()

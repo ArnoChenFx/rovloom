@@ -185,6 +185,9 @@ summary { cursor: pointer; }
 .inspect-device:hover { background: var(--subtle); }
 .list-count { padding: 12px 24px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; }
 .devices-section > .button-link { margin: 0 24px 16px; }
+/* 概览摘要只列名称与 ID，完整检索和分页留在设备页。 */
+.overview-device-list .device-card { grid-template-columns: minmax(0,1fr); padding: 14px 24px; }
+.overview-device-list .device-name { margin-bottom: 0; }
 /* 分组设备详情与明确确认的管理操作。 */
 .back-link { display: block; margin-bottom: 16px; color: var(--muted); font-size: 12px; text-decoration: none; }
 .page-heading:has(.back-link) { display: block; }

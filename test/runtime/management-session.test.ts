@@ -4,6 +4,10 @@ import { createHash } from 'node:crypto'
 import { test } from 'node:test'
 import { createManagementSessionAuthority } from '../../src/runtime/management-session.js'
 import type { ManagementSessionBootstrap, ManagementSessionLease } from '../../src/runtime/management-session.js'
+import type {
+  ManagementSessionPersistence,
+  PersistedManagementSession
+} from '../../src/runtime/management-session-store.js'
 import { createManagementSessionAdapter } from '../../src/admin/session-adapter.js'
 import { createManagementHandler } from '../../src/admin/write-http.js'
 import { StoreManagementWriteService } from '../../src/admin/write-service.js'
@@ -343,6 +347,61 @@ test(
       stream.enqueue(new TextEncoder().encode('{}'))
       stream.close()
       assert.equal((await response).status, 401)
+    } finally {
+      f.close()
+    }
+  }
+)
+
+test(
+  '持久化绑定让重启后的既有 cookie 继续生效，撤销与到期仍立即拒绝',
+  /** 新进程只恢复摘要绑定，每个请求仍复验原管理员记录，所以恢复不等于放行未验证会话。 */ async () => {
+    const f = fixture()
+    try {
+      // 模拟落盘内容：只保留摘要，原 cookie/CSRF 从不写入。
+      const saved: PersistedManagementSession[] = []
+      const persist: ManagementSessionPersistence = {
+        load: () => saved,
+        save: (rows: readonly PersistedManagementSession[]) => {
+          saved.length = 0
+          saved.push(...rows)
+        }
+      }
+      const first = createManagementSessionAuthority(f.source, {
+        now: () => f.state.now,
+        persist
+      })
+      let delivery: ManagementSessionBootstrap
+      try {
+        delivery = first.bootstrap({
+          caller,
+          management_session_ref: sessionRef,
+          issued_at: 1000,
+          expires_at: 601_000
+        })
+        assert.equal(saved.length, 1)
+        const record = saved[0] as Record<string, unknown>
+        // 落盘内容不含任何原值，只有摘要。
+        assert.equal((record.cookie_sha256 as string).length, 64)
+        assert.equal(JSON.stringify(record).includes(delivery.cookie), false)
+        assert.equal(JSON.stringify(record).includes(delivery.csrf), false)
+      } finally {
+        first.close()
+      }
+      // 新 authority 只靠持久化恢复，旧 cookie 仍能解析出同一会话。
+      const restarted = createManagementSessionAuthority(f.source, {
+        now: () => f.state.now,
+        persist
+      })
+      try {
+        const restored = await restarted.sessions.resolveCookie(delivery.cookie, signal())
+        assert.equal(restored?.session_ref, sessionRef)
+        // 到期后同一绑定不再生效。
+        f.state.now = 601_000
+        assert.equal(await restarted.sessions.resolveCookie(delivery.cookie, signal()), null)
+      } finally {
+        restarted.close()
+      }
     } finally {
       f.close()
     }

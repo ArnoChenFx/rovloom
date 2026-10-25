@@ -2,6 +2,7 @@
 import { privateDirectory } from './first-config.js'
 import { join } from 'node:path'
 import { openGatewayState, createManagementSessionAuthority } from '../runtime/index.js'
+import { createManagementSessionPersistence } from '../runtime/management-session-store.js'
 import { composeConnectorSessions } from '../runtime/provider-sessions.js'
 import type {
   GatewayRuntimeOptions,
@@ -14,7 +15,7 @@ import type { ManagementWriteHttpOptions } from '../admin/index.js'
 import { loadCredential } from '../transport/index.js'
 import { GatewayError } from '../contracts.js'
 import { CliError, selectedNativeProviders, type ConnectorConfig, type GatewayConfig } from './config.js'
-import { readSetupJson } from './setup-files.js'
+import { readSetupJson, writeSetupJson } from './setup-files.js'
 import { openCallerSource } from './caller-source.js'
 import { REGISTRY_MAX_BYTES } from './token-registry.js'
 import { readRuntimeJson, runtimeReference } from './runtime-files.js'
@@ -200,6 +201,8 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
     gateway: /* 常规启动只打开已配置资源，不注册设备、签发enrollment/token或bootstrap管理cookie。 */ async (config) => {
       privateDirectory(config.state_dir)
       privateDirectory(join(config.state_dir, 'managed'))
+      // 会话绑定与管理员记录分开放置：前者只含摘要，后者含凭据摘要与租期。
+      const sessionStorePath = runtimeReference(config.state_dir, 'management-sessions')
       const settings = readRuntimeConfig(config)
       if (settings.provider_config_refs.length && !sources.gateway) {
         throw new CliError('backend_unavailable', 3)
@@ -223,7 +226,14 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
             throw new CliError('invalid_config')
           }
         }
-        authority = createManagementSessionAuthority(caller.identities)
+        authority = createManagementSessionAuthority(caller.identities, {
+          // 管理会话的 cookie 摘要绑定落盘：配对触发的重载与进程重启后，已登录浏览器不必重输密码。
+          persist: createManagementSessionPersistence({
+            read: () => readSetupJson(sessionStorePath),
+            // 首次写入时文件尚不存在，走排他创建；之后按当前内容代次覆盖。
+            write: (value) => writeSetupJson(sessionStorePath, value, readSetupJson(sessionStorePath) !== undefined)
+          })
+        })
         protectedManagement?.bindAuthority(authority)
       } catch (error) {
         protectedManagement?.close()
