@@ -204,7 +204,8 @@ def main():
         info = {'url': re.search(r'MCP URL: (\S+)', log).group(1),
                 'token': re.search(r'Bearer \(private\): (\S+)', log).group(1),
                 'targets': [{'machine_id': join_value.split('#')[1].split('.')[0],
-                             'provider_id': 'herdr' if kind == 'herdr' else 'luvus'}]}
+                             'provider_id': 'herdr' if kind == 'herdr' else 'luvus',
+                             'profile': 'session', 'session': 'default'}]}
         out = os.path.join(work, 'mcp.json')
         open(out, 'w').write(json.dumps(info))
         print('READY', json.dumps({'mcp_url': info['url'], 'targets': info['targets'], 'config': out}), flush=True)

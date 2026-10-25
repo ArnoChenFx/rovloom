@@ -216,7 +216,9 @@ def main():
         info = {'url': re.search(r'MCP URL: (\S+)', log).group(1),
                 'token': re.search(r'Bearer \(private\): (\S+)', log).group(1),
                 'targets': [{'machine_id': join_value.split('#')[1].split('.')[0],
-                             'provider_id': 'herdr' if args.herdr else 'luvus'}]}
+                             'provider_id': 'herdr' if args.herdr else 'luvus',
+                             'profile': 'session',
+                             'session': 'rovloom' if args.luvus and args.luvus_mode == 'managed' else 'default'}]}
         # 管理页口令不再由配对流程打印：另起进程 admin create（Gateway 热加载），写进 mcp.json 供后续页面登录检查，不打印。
         created = subprocess.run([rov, 'admin', 'create'], env=env_g, cwd=home_g, capture_output=True, text=True, timeout=10)
         if created.returncode == 0:
@@ -307,6 +309,8 @@ def main():
             assert ready, 'timeout waiting for provider_ready after re-pair'
             new_secret = open(device_path).read()
             assert new_secret != old_secret, 'device credential was not replaced'
+            info['targets'][0]['machine_id'] = join_value.split('#')[1].split('.')[0]
+            open(out, 'w').write(json.dumps(info)); os.chmod(out, 0o600)
             print('REPAIRED', flush=True)
         if args.second_device:
             home_c2 = os.path.join(work, 'c2'); os.makedirs(home_c2, mode=0o700, exist_ok=True)
@@ -325,6 +329,11 @@ def main():
                     if term.child.poll() is not None:
                         raise RuntimeError(f'{term.name} exited {term.child.returncode}: {redact(term.text())}')
             assert ready, 'timeout waiting for both connectors'
+            info['targets'].append({**info['targets'][0], 'machine_id': join2.split('#')[1].split('.')[0]})
+            open(out, 'w').write(json.dumps(info)); os.chmod(out, 0o600)
+            subprocess.run(['bun', '--no-env-file', os.path.join(os.path.dirname(__file__), 'two-devices-check.mjs')],
+                           env={**os.environ, 'MCP_CONFIG': out, 'MCP_TARGETS': json.dumps(info['targets'])},
+                           check=True, timeout=180)
             print('SECOND_DEVICE', flush=True)
         if args.service:
             account = getpass.getuser()
@@ -336,6 +345,7 @@ def main():
                 print('SERVICE', step[0], done.returncode, (done.stdout + done.stderr).strip()[:400], flush=True)
                 assert done.returncode == 0, f'service {step[0]} failed'
             print('SERVICE_STARTED', flush=True)
+        status = 0
         if args.then:
             status = 1
             for attempt in range(8 if args.service else 1):

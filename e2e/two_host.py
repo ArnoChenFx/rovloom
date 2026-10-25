@@ -41,6 +41,7 @@ def main():
     # 容器内固定英文输出，宿主 locale 不影响这些脚本的提示标记。
     common = ['--user', uid_gid, '-e', 'HOME=/home/rv', '-e', 'LANG=C.UTF-8', '-e', 'TERM=xterm',
               '-e', 'ROVLOOM_LANG=en',
+              '-e', 'NO_PROXY=' + ','.join(filter(None, [os.environ.get('NO_PROXY', ''), '127.0.0.1', 'localhost', gw_name, cn_name])),
               '-v', '/etc/passwd:/etc/passwd:ro', '-v', f'{rov}:/usr/local/bin/rovloom:ro']
     # 两个容器的 HOME 是各自独立的宿主目录；Gateway 看不到 Connector 的目录，反之亦然。
     gateway_cfg = os.path.join(home_g, '.config', 'rovloom'); os.makedirs(gateway_cfg, mode=0o700, exist_ok=True)
@@ -74,6 +75,8 @@ def main():
         gateway_cmd = gateway_cmd + ['--issue-code']
         gateway = Term('gateway', gateway_cmd, env, home_g); terms.append(gateway)
         join_value = JOIN.search(gateway.expect('rovloom connector --join ')).group(0)
+        # 容器内监听地址是通配地址；Connector 必须使用 Docker DNS 的 Gateway 名称。
+        join_value = 'ws://' + gw_name + ':9443#' + join_value.split('#', 1)[1]
         connector_cmd = connector_cmd + ['--join', join_value]
         connector = Term('connector', connector_cmd, env, home_c); terms.append(connector)
         deadline, ready = time.time() + 240, False
@@ -95,7 +98,7 @@ def main():
         log = ANSI.sub(b'', connector.log).decode('utf8', 'replace')
         info = {'url': re.search(r'MCP URL: (\S+)', log).group(1),
                 'token': re.search(r'Bearer \(private\): (\S+)', log).group(1),
-                'targets': [{'machine_id': join_value.split('#')[1].split('.')[0], 'provider_id': 'herdr'}]}
+                'targets': [{'machine_id': join_value.split('#')[1].split('.')[0], 'provider_id': 'herdr', 'profile': 'session', 'session': 'default'}]}
         out = os.path.join(work, 'mcp.json')
         open(out, 'w').write(json.dumps(info)); os.chmod(out, 0o600)
         print('READY', json.dumps({'mcp_url': info['url'], 'targets': info['targets']}), flush=True)
