@@ -5,6 +5,8 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
+import { createServer } from 'node:http'
+import { once } from 'node:events'
 import { openGatewayState } from '../../src/runtime/index.js'
 import {
   configTemplate,
@@ -188,22 +190,28 @@ for (const legacyEndpoint of [false, true]) {
     const root = mkdtempSync(join(tmpdir(), 'rovloom-join-errors-'))
     mkdirSync(join(root, 'managed'), { mode: 0o700 })
     let reason = 'pairing_conflict'
-    const server = Bun.serve({
-      hostname: '127.0.0.1',
-      port: 0,
-      fetch(request) {
-        if (new URL(request.url).pathname === '/pairing/context') {
-          return legacyEndpoint
-            ? new Response(null, { status: 403 })
-            : Response.json({ state: 'pairing_context', actor: 'operator_simple_pairing', lineage: 'simple' })
-        }
-        return Response.json({ error: reason }, { status: 409 })
+    const server = createServer((request, response) => {
+      response.setHeader('content-type', 'application/json')
+      if (request.url === '/pairing/context') {
+        response.statusCode = legacyEndpoint ? 403 : 200
+        response.end(
+          legacyEndpoint
+            ? undefined
+            : JSON.stringify({ state: 'pairing_context', actor: 'operator_simple_pairing', lineage: 'simple' })
+        )
+      } else {
+        response.statusCode = 409
+        response.end(JSON.stringify({ error: reason }))
       }
     })
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    assert(address && typeof address === 'object')
     const config = {
       ...configTemplate('connector'),
       state_dir: root,
-      gateway_url: `ws://127.0.0.1:${server.port}`,
+      gateway_url: `ws://127.0.0.1:${address.port}`,
       native: { provider: 'herdr' }
     } as ConnectorConfig
     const path = join(root, 'connector.json')
@@ -241,7 +249,8 @@ for (const legacyEndpoint of [false, true]) {
         assert.equal(existsSync(runtimeReference(root, 'device')), false)
       }
     } finally {
-      server.stop(true)
+      server.closeAllConnections()
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
       rmSync(root, { recursive: true, force: true })
     }
   })
