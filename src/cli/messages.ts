@@ -137,8 +137,9 @@ Windows uses the explicitly selected existing user with S4U, without storing a p
   'mcp.instructions':
     'Tool availability does not imply a ready backend; execution, authorization, confirmation, deduplication and result retention are owned by the trusted service.',
   'mcp.tool.machines_list':
-    'List the devices visible to the current caller; paging and counts must pass the current ACL.',
-  'mcp.tool.machines_get': 'Read a visible device by stable ID or exact name.',
+    'List the devices visible to the current caller; paging and counts must pass the current ACL. Each item carries the exact authorized targets that runtime_* tools accept as their target argument.',
+  'mcp.tool.machines_get':
+    'Read a visible device by stable ID or exact name, including the exact authorized targets runtime_* tools accept.',
   'mcp.tool.providers_list':
     'List the configured providers visible to the current caller under a device; local machine configuration is not returned.',
   'mcp.tool.providers_get': 'Read the kind, revision and readiness of an explicit provider.',
@@ -277,8 +278,9 @@ Windows 使用显式选择的既有用户与 S4U，不保存密码、不要求�
   'token.permissions': '已设置 {principal} 的权限 discard_response={discard}\n',
   'token.revoked': '已撤销 {principal}\n',
   'mcp.instructions': '工具存在不表示后端可用；执行、授权、确认、去重与结果保留由受信服务负责。',
-  'mcp.tool.machines_list': '列出当前 caller 可见的设备；分页和计数须经过当前 ACL。',
-  'mcp.tool.machines_get': '按稳定 ID 或精确名称读取可见设备。',
+  'mcp.tool.machines_list':
+    '列出当前 caller 可见的设备；分页和计数须经过当前 ACL。每条记录同时给出 runtime_* 可直接用作 target 的完整授权目标。',
+  'mcp.tool.machines_get': '按稳定 ID 或精确名称读取可见设备，含 runtime_* 可直接用作 target 的完整授权目标。',
   'mcp.tool.providers_list': '列出指定设备下当前 caller 可见的已配置 provider；不返回本机配置。',
   'mcp.tool.providers_get': '读取显式 provider 的 kind、revision 和 readiness。',
   'mcp.tool.runtime_discover': '发现显式 Target/revision 的有效能力及来源；不授予执行权限。',

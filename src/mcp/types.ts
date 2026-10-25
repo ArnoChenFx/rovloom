@@ -32,7 +32,11 @@ export type MachineView = {
   name: string
   status: 'pending' | 'active' | 'revoked'
   link: 'offline' | 'unverified' | 'connected' | 'ready'
+  // 当前调用方在该设备上被授权的完整 target；runtime_* 工具必须原样回传其中之一。
+  targets: TargetView[]
 }
+// 只描述调用方已获授权的完整 tuple，让 runtime_* 的 target 参数可以原样回传，不必猜 session 名。
+export type TargetView = V2Target
 export type CallView = JsonObject & {
   call_id: string
   target: V2Target

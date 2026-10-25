@@ -57,7 +57,9 @@
 
 - **Target**：`{machine_id, provider_id, profile: "session", session}` 或 `{machine_id, provider_id, profile: "host"}`。host 形态不得带 `session`。
 - 调用方不能提交 principal、admin、`discard_response`，也不能在 `native_request` 中填写 `id` 或 `auth`。
-- 设备与 provider 的公开视图只含固定字段。设备：`machine_id`、`name`、`status`、`link`。provider：`machine_id`、`provider_id`、`kind`、`binding_revision`、`enabled`、`readiness`。
+- 设备与 provider 的公开视图只含固定字段。设备：`machine_id`、`name`、`status`、`link`、`targets`。provider：`machine_id`、`provider_id`、`kind`、`binding_revision`、`enabled`、`readiness`。
+- `targets` 列出调用方在该设备上当前获授权的完整 tuple，逐字段与 `runtime_*` 的 `target` 相同，因此可直接回传；`runtime_*` 的可见性检查按完整 tuple 相等判定，改动其中任一字段（含 `session`）都会得到 `not_found`。
+- `link` 与 `readiness` 来自 Gateway 的真实传输观测，不再恒为 `unverified`：`link` 只有在同一取样中有可信在线证据时才为 `connected`；`readiness` 只有在观测的 `binding_revision` 与当前绑定一致且派发就绪时才为 `ready`。没有观测来源、观测过期或缺少该设备/provider 时，两者保持 `unverified`，不从持久状态推断。
 - 所有列表、计数和描述按调用方的授权过滤。`runtime_discover` 与 `runtime_describe` 只描述能力，不授予执行权限。
 
 ### runtime_call
