@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { canonical, digest, GatewayError, validateRequest } from './contracts.js'
 import type { NativeRequest } from './contracts.js'
+import { NativeRequestPreflightError } from './runtime/request-preflight.js'
 import {
   assertBinding,
   boundedJson,
@@ -855,7 +856,8 @@ export class Store {
       ...(supplied.validation === undefined ? {} : { validation: supplied.validation }),
       ...(supplied.client_request_key === undefined ? {} : { client_request_key: supplied.client_request_key })
     }
-    return this.transaction(
+    try {
+      return this.transaction(
       /* 在同一 writer 事务复验授权、查询去重并登记；预算和审计提交后才返回 created 判定。 */ (now) => {
         const authorized: unknown = authorize?.()
         if (authorized !== undefined) {
@@ -984,7 +986,23 @@ export class Store {
         this.audit('created', principal, now, row)
         return { call: publicCall(row, now), created: true }
       }
-    )
+      )
+    } catch (error) {
+      // 预检拒绝回滚后不留任何调用痕迹；补一条只含固定错误码的审计，生产可区分客户端参数错与请求未到达。
+      if (error instanceof NativeRequestPreflightError) {
+        try {
+          this.transaction(
+            /* 独立小事务只写预检拒绝事件，不带参数、目标或原始 schema 细节。 */ (now) => {
+              this.audit('native_preflight_rejected', principal, now, undefined, { code: error.code })
+            },
+            false
+          )
+        } catch {
+          /* 审计失败不改变原拒绝语义。 */
+        }
+      }
+      throw error
+    }
   }
   // 核对当前连接、期限及可选的宿主策略 revision，提交完整 attempt 锚点与完成预留后才允许发送。
   // 返回绑定只证明账本派发锚点已持久化，真实原生执行许可仍由适配器独立校验。

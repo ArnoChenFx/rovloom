@@ -2,6 +2,7 @@
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs'
 import { dirname, isAbsolute, normalize } from 'node:path'
 import { GatewayError } from '../../contracts.js'
+import { NativeRequestPreflightError } from '../../runtime/request-preflight.js'
 import { privateFile, readPrivateBytes } from '../../storage/files.js'
 import {
   ConnectorAttemptBook,
@@ -29,7 +30,8 @@ import {
   validateContractSource,
   validatePolicies,
   validateTarget,
-  assertBinding
+  assertBinding,
+  WireError
 } from '../../wire/index.js'
 import type { ContractSource, JsonObject, ProviderBinding, ProviderPolicies, V2Target } from '../../wire/types.js'
 import { compileHerdrSchemas } from './compiler-api.js'
@@ -444,7 +446,16 @@ export async function createHerdrGatewayResources(
           request: JsonObject
         ) => {
           assertCurrent()
-          codec.encode(request)
+          try {
+            codec.encode(request)
+          } catch (error) {
+            // 预检拒绝发生在登记前，是确定未派发的客户端参数错误；与 Luvus 预检同一投影，
+            // 不把原生 schema 细节进 MCP 诊断（不含参数、路径或字段指针）。
+            if (error instanceof WireError && error.code === 'herdr_native_request_invalid') {
+              throw new NativeRequestPreflightError()
+            }
+            throw error
+          }
           assertCurrent()
         },
         ready: /** 仅本地契约先决条件；认证 peer 的 readiness 仍由原 transport 计算。 */ () => {
