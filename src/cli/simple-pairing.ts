@@ -1,4 +1,4 @@
-// 单码直连配对面：设备 listener 上的唯一 HTTP 端点 POST /pairing。
+// 单码直连配对面：设备 listener 的 POST /pairing/context 查询谱系，POST /pairing 完成配对。
 // 一机一码兑换 → 签发设备凭据 → 自动批准原生清单（编译核验、发布 schema/provider/调用方）→ 同一响应返回凭据与 MCP Bearer。
 // 子部署取舍：没有人工批准、核对码或两阶段交付；失败用新码重试，崩溃窗口的幂等由本进程内存缓存兜底。
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
@@ -12,7 +12,8 @@ import { canonicalLoopbackHost } from '../mcp/listen.js'
 import { PairingCodes } from './pairing-codes.js'
 import { publishSetupSchemas, reviewSetupManifest } from './setup-manifest.js'
 import { mergeSetupCallers, mergeSetupProviders, publish, publishFirstCallers } from './setup-publish.js'
-import { SIMPLE_SETUP_ACTOR, SIMPLE_SETUP_LINEAGE } from './setup-policy.js'
+import { SIMPLE_SETUP_ACTOR } from './setup-policy.js'
+import { gatewayPairingContext, type PairingContext } from './pairing-context.js'
 import { readSetupJson } from './setup-files.js'
 import { runtimeReference } from './runtime-files.js'
 import { readRuntimeConfig } from './runtime-config.js'
@@ -162,7 +163,7 @@ export class SimplePairingHttp {
   // 明确拒绝浏览器Origin、URL凭据和非JSON请求。
   handle(request: Request): Promise<Response> | undefined {
     const url = new URL(request.url)
-    if (url.pathname !== '/pairing') {
+    if (url.pathname !== '/pairing' && url.pathname !== '/pairing/context') {
       return undefined
     }
     if (
@@ -180,7 +181,7 @@ export class SimplePairingHttp {
     if (this.#requests.size >= 16) {
       return Promise.resolve(setupReply({ error: 'setup_busy' }, 503))
     }
-    const task = this.respond(request)
+    const task = this.respond(request, url.pathname === '/pairing/context')
     this.#requests.add(task)
     void task.then(
       /* 同一请求实际收尾后才释放额度。 */ () => this.#requests.delete(task),
@@ -190,11 +191,11 @@ export class SimplePairingHttp {
   }
 
   // 失败只回固定错误码；崩溃窗口的重试用同一码命中内存缓存，Gateway 重启后需生成新码。
-  private async respond(request: Request): Promise<Response> {
+  private async respond(request: Request, contextOnly: boolean): Promise<Response> {
     let reserved: string | undefined
     try {
       const input = await requestJson(request, 1_048_576, this.#stop.signal)
-      fields(input, ['code', 'installation'])
+      fields(input, contextOnly ? ['code'] : ['code', 'installation'])
       const parts = String(input.code).split('.')
       if (parts.length !== 3) {
         throw new Error('pairing_code_invalid')
@@ -214,15 +215,21 @@ export class SimplePairingHttp {
         ) {
           throw new Error('pairing_code_invalid')
         }
-        return setupReply({ state: 'paired', ...cached, replayed: true })
+        return contextOnly
+          ? setupReply({ state: 'pairing_context', ...gatewayPairingContext(this.config) })
+          : setupReply({ state: 'paired', ...cached, replayed: true })
       }
       this.#codes.verify(machine, attempt, secret)
+      const context = gatewayPairingContext(this.config)
+      if (contextOnly) {
+        return setupReply({ state: 'pairing_context', ...context })
+      }
       if (this.#applying.has(attempt)) {
         return setupReply({ error: 'setup_busy' }, 503)
       }
       this.#applying.add(attempt)
       reserved = attempt
-      const applied = await this.apply(machine, attempt, input.installation, request)
+      const applied = await this.apply(machine, attempt, input.installation, request, context)
       this.replays.set(this.config.state_dir, generation, full, applied)
       this.#codes.settle(attempt, true)
       // 下一事件轮才关闭旧listener，先让原响应调用完成其finally。
@@ -246,12 +253,13 @@ export class SimplePairingHttp {
     machine: string,
     attempt: string,
     installation: unknown,
-    request: Request
+    request: Request,
+    context: PairingContext
   ): Promise<PairingApplication> {
     const signal = AbortSignal.any([request.signal, this.#stop.signal])
     const reviewed = await reviewSetupManifest(
       installation,
-      { attempt_id: attempt, actor: SIMPLE_SETUP_ACTOR, lineage: SIMPLE_SETUP_LINEAGE },
+      { attempt_id: attempt, ...context },
       machine,
       this.config.state_dir,
       signal

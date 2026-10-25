@@ -18,7 +18,7 @@ import { parseCommand, runCli, type CliPrepareOptions, type CliRuntime } from '.
 import { joinConnector } from '../../src/cli/join-connector.js'
 import { runtimeReference } from '../../src/cli/runtime-files.js'
 import { writeSetupJson } from '../../src/cli/setup-files.js'
-import { setupReference, setupTarget } from '../../src/cli/setup-policy.js'
+import { setupReference, setupTarget, simpleSetupAuthorization } from '../../src/cli/setup-policy.js'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
 import { hash } from '../../src/wire/index.js'
 
@@ -36,6 +36,7 @@ function fixture() {
   http = new SimplePairingHttp(state, config, () => {}, replays)
   return {
     state,
+    config,
     get http() {
       return http
     },
@@ -49,6 +50,92 @@ function fixture() {
     }
   }
 }
+
+test('旧 Gateway 的配对沿用原主体和谱系，保留旧设备与原 MCP 令牌', { timeout: 20_000 }, async () => {
+  const f = fixture()
+  try {
+    const first = f.http.codes.create()
+    assert.equal((await f.http.handle(post(first.code))!).status, 200)
+    const lineage = first.entry.code_id
+    const actor = 'operator_' + lineage
+    const clientPath = runtimeReference(f.config.state_dir, 'mcp-client')
+    const callersPath = runtimeReference(f.config.state_dir, 'mcp-callers')
+    const providersPath = runtimeReference(f.config.state_dir, 'providers')
+    const client = JSON.parse(readFileSync(clientPath, 'utf8'))
+    const callers = JSON.parse(readFileSync(callersPath, 'utf8'))
+    const providers = JSON.parse(readFileSync(providersPath, 'utf8'))
+    // 0.6.0 的受保护记录形状：首台设备的 attempt 是后续设备共用的谱系，主体不是 simple 常量。
+    client.principal_id = actor
+    callers.local_policy.revision = 'setup_local_' + lineage
+    callers.callers[0].principal.id = actor
+    callers.callers[0].principal.policy.revision = 'setup_caller_' + lineage
+    providers.providers[0].value.config.peer_policy_revision = 'setup_local_' + lineage
+    for (const [path, value] of [
+      [clientPath, client],
+      [callersPath, callers],
+      [providersPath, providers]
+    ] as const) {
+      writeSetupJson(path, value, true, 1_048_576)
+    }
+    const oldProvider = structuredClone(providers.providers[0])
+    const oldCredential = f.state.store.credentialDigest(first.entry.machine_id)
+    const oldToken = callers.callers[0].token_sha256
+    const second = f.http.codes.create()
+    const request = new Request('http://127.0.0.1/pairing/context', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: second.code })
+    })
+    const context = (await (await f.http.handle(request)!).json()) as { actor: string; lineage: string; state: string }
+    assert.deepEqual(context, { state: 'pairing_context', actor, lineage })
+    assert.equal(f.http.codes.list().find((entry) => entry.code_id === second.entry.code_id)?.status, 'unused')
+    assert.equal(f.state.store.machine(second.entry.machine_id).status, 'pending')
+    const manifest = installation(second.code)
+    manifest.installations[0]!.value.config.peer_policy_revision = 'setup_local_' + context.lineage
+    const response = await f.http.handle(post(second.code, manifest))!
+    assert.equal(response.status, 200, JSON.stringify(await response.clone().json()))
+    assert.equal(Object.hasOwn(await response.json(), 'mcp'), false)
+    assert.deepEqual(JSON.parse(readFileSync(clientPath, 'utf8')), client)
+    const updated = JSON.parse(readFileSync(callersPath, 'utf8'))
+    assert.equal(updated.callers[0].token_sha256, oldToken)
+    assert.equal(updated.callers[0].principal.id, actor)
+    assert.equal(updated.local_policy.revision, 'setup_local_' + lineage)
+    assert.equal(updated.callers[0].principal.policy.grants.length, 2)
+    assert.deepEqual(JSON.parse(readFileSync(providersPath, 'utf8')).providers[0], oldProvider)
+    assert.equal(f.state.store.credentialDigest(first.entry.machine_id), oldCredential)
+  } finally {
+    await f.close()
+  }
+})
+
+test('配对上下文须验证秘密，查询不消费配对码，也不返回任何凭据', async () => {
+  const f = fixture()
+  try {
+    const issued = f.http.codes.create()
+    const parts = issued.code.split('.')
+    parts[2] = 'x'.repeat(43)
+    const request = (code: string) =>
+      new Request('http://127.0.0.1/pairing/context', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code })
+      })
+    assert.equal((await f.http.handle(request(parts.join('.')))!).status, 409)
+    assert.equal(f.http.codes.list()[0]!.status, 'unused')
+    const response = await f.http.handle(request(issued.code))!
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), {
+      state: 'pairing_context',
+      actor: 'operator_simple_pairing',
+      lineage: 'simple'
+    })
+    assert.equal(f.http.codes.list()[0]!.status, 'unused')
+    assert.equal((await f.http.handle(post(issued.code))!).status, 200)
+    assert.equal((await f.http.handle(request(issued.code))!).status, 200)
+  } finally {
+    await f.close()
+  }
+})
 
 function installation(code: string) {
   const [machine, attempt] = code.split('.') as [string, string, string]
@@ -94,6 +181,70 @@ function io() {
     stderr: new PassThrough(),
     signal: new AbortController().signal
   }
+}
+
+for (const legacyEndpoint of [false, true]) {
+  test(`join 显示有界 HTTP 原因且不反射秘密，${legacyEndpoint ? '兼容旧服务端无上下文端点' : '先验证上下文'}`, async () => {
+    const root = mkdtempSync(join(tmpdir(), 'rovloom-join-errors-'))
+    mkdirSync(join(root, 'managed'), { mode: 0o700 })
+    let reason = 'pairing_conflict'
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(request) {
+        if (new URL(request.url).pathname === '/pairing/context') {
+          return legacyEndpoint
+            ? new Response(null, { status: 403 })
+            : Response.json({ state: 'pairing_context', actor: 'operator_simple_pairing', lineage: 'simple' })
+        }
+        return Response.json({ error: reason }, { status: 409 })
+      }
+    })
+    const config = {
+      ...configTemplate('connector'),
+      state_dir: root,
+      gateway_url: `ws://127.0.0.1:${server.port}`,
+      native: { provider: 'herdr' }
+    } as ConnectorConfig
+    const path = join(root, 'connector.json')
+    writeFileSync(path, JSON.stringify(configDocument(config)), { mode: 0o600 })
+    writeSetupJson(runtimeReference(root, 'herdr-setup'), {
+      schema_version: 1,
+      attempt_id: 'a_test',
+      machine_id: 'm_test',
+      phase: 'prepared',
+      settings: config.native,
+      reference: setupReference('a_test', 'herdr'),
+      local: { policies: simpleSetupAuthorization('m_test', ['herdr']).policies },
+      remote: {}
+    })
+    try {
+      for (const supplied of ['pairing_conflict', 'secret-value\nBearer test-secret']) {
+        reason = supplied
+        const streams = io()
+        let output = ''
+        streams.stderr.on('data', (chunk) => {
+          output += chunk.toString()
+        })
+        await assert.rejects(
+          joinConnector(config, path, streams, config.gateway_url + '#m_test.a_test.' + 's'.repeat(43)),
+          { code: 'configuration_required' }
+        )
+        assert(
+          output.includes(
+            'pairing_http_error status=409 reason=' +
+              (supplied === 'pairing_conflict' ? 'pairing_conflict' : 'unavailable')
+          )
+        )
+        assert(!output.includes('test-secret'))
+        assert(!output.includes('secret-value'))
+        assert.equal(existsSync(runtimeReference(root, 'device')), false)
+      }
+    } finally {
+      server.stop(true)
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 }
 
 test('错误秘密不推进码状态，正确秘密随后仍可配对', async () => {

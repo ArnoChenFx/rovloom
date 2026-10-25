@@ -21,11 +21,30 @@ import { readSetupJson, setupFileStamp, writeSetupFile, writeSetupJson } from '.
 import { runtimeReference } from './runtime-files.js'
 import { assertSetupNativePath, prepareSetupNative } from './setup-native.js'
 import { prepareSetupHerdr } from './setup-herdr.js'
-import { simpleSetupAuthorization, setupSessionsFor } from './setup-policy.js'
+import { selectedSetupPolicies, setupSessionsFor, SIMPLE_SETUP_ACTOR, SIMPLE_SETUP_LINEAGE } from './setup-policy.js'
+import type { PairingContext } from './pairing-context.js'
 import { readRuntimeConfig } from './runtime-config.js'
 import { silentConsole } from './setup-console.js'
 import { hasPairingState, retirePairingState } from './unpair.js'
 import type { CliIo } from './run.js'
+import type { SetupConsole } from './setup-console.js'
+
+const PAIRING_ERRORS = new Set(['pairing_conflict', 'pairing_failed', 'setup_busy', 'setup_request_refused'])
+
+class PairingReplyError extends CliError {
+  constructor(
+    readonly status: number,
+    readonly reason: string
+  ) {
+    super('configuration_required')
+  }
+}
+
+function reportPairingFailure(error: unknown, console: SetupConsole): void {
+  if (error instanceof PairingReplyError) {
+    console.show(`pairing_http_error status=${error.status} reason=${error.reason}\n`)
+  }
+}
 
 export type JoinCode = Readonly<{
   url: string
@@ -69,9 +88,8 @@ export function parseJoinValue(value: string): JoinCode {
 
 // 有界、严格地读取配对响应；非 200 先释放未锁定的响应体再拒绝。
 async function responseJson(response: Response): Promise<Record<string, unknown>> {
-  if (!response.body || response.status !== 200) {
-    await response.body?.cancel().catch(/* 只释放响应流，不输出远端文本。 */ () => {})
-    throw new CliError('configuration_required')
+  if (!response.body) {
+    throw new PairingReplyError(response.status, 'unavailable')
   }
   const reader = response.body.getReader()
   const chunks: Uint8Array[] = []
@@ -84,11 +102,21 @@ async function responseJson(response: Response): Promise<Record<string, unknown>
       }
       bytes += value.value.length
       if (bytes > 262_144) {
-        throw new CliError('configuration_required')
+        throw new PairingReplyError(response.status, 'unreadable_reply')
       }
       chunks.push(value.value)
     }
     const parsed = parseNativeJson(Buffer.concat(chunks, bytes), { object_bytes: 262_144 })
+    if (response.status !== 200) {
+      const reason =
+        parsed.ok && parsed.value && typeof parsed.value === 'object' && !Array.isArray(parsed.value)
+          ? (parsed.value as Record<string, unknown>).error
+          : undefined
+      throw new PairingReplyError(
+        response.status,
+        typeof reason === 'string' && PAIRING_ERRORS.has(reason) ? reason : 'unavailable'
+      )
+    }
     if (!parsed.ok) {
       throw new CliError('configuration_required')
     }
@@ -100,8 +128,8 @@ async function responseJson(response: Response): Promise<Record<string, unknown>
 }
 
 // URL只由严格角色origin解析；系统TLS验证和fetch重定向拒绝保持开启。
-async function post(config: ConnectorConfig, path: string, value: unknown, signal: AbortSignal, timeout = 300_000) {
-  const origin = new URL(config.gateway_url)
+async function post(gatewayUrl: string, path: string, value: unknown, signal: AbortSignal, timeout = 300_000) {
+  const origin = new URL(gatewayUrl)
   origin.protocol = origin.protocol === 'wss:' ? 'https:' : 'http:'
   return await responseJson(
     await fetch(new URL(path, origin), {
@@ -112,6 +140,26 @@ async function post(config: ConnectorConfig, path: string, value: unknown, signa
       signal: AbortSignal.any([signal, AbortSignal.timeout(timeout)])
     })
   )
+}
+
+// 有效码只读取 Gateway 已有主体与谱系，不兑换设备或交付凭据；0.6.1 无此端点时沿用其固定上下文。
+async function pairingContext(code: JoinCode, console: SetupConsole): Promise<PairingContext> {
+  try {
+    const reply = await post(code.url, '/pairing/context', { code: code.value }, console.io.signal)
+    fields(reply, ['state', 'actor', 'lineage'])
+    if (reply.state !== 'pairing_context') {
+      throw new CliError('configuration_required')
+    }
+    id(reply.actor)
+    id(reply.lineage)
+    return { actor: reply.actor, lineage: reply.lineage }
+  } catch (error) {
+    if (error instanceof PairingReplyError && [403, 404].includes(error.status) && error.reason === 'unavailable') {
+      return { actor: SIMPLE_SETUP_ACTOR, lineage: SIMPLE_SETUP_LINEAGE }
+    }
+    reportPairingFailure(error, console)
+    throw error
+  }
 }
 
 /** join 主流程：返回更新后的配置；失败保持固定错误码，不回显码原文。 */
@@ -177,11 +225,23 @@ export async function joinConnector(
   privateDirectory(config.state_dir)
   privateDirectory(join(config.state_dir, 'managed'))
   assertSetupNativePath(config, console)
-  const authorization = simpleSetupAuthorization(
+  const context = await pairingContext(code, console)
+  const authorization = selectedSetupPolicies(
+    { attempt_id: code.attempt, ...context },
     code.machine,
     selectedNativeProviders(config),
     setupSessionsFor(config)
   )
+  // 旧客户端可能已按 simple 谱系完成准备；没有凭据的半成品只退役到自己的目录，再按 Gateway 谱系准备。
+  const existing = ['native-setup', 'herdr-setup']
+    .map((reference) => readSetupJson(runtimeReference(config.state_dir, reference), 1_048_576))
+    .filter((entry) => entry !== undefined)
+  if (
+    !hasCredential &&
+    existing.some((entry) => boundedJson(object(object(entry).local).policies) !== boundedJson(authorization.policies))
+  ) {
+    retirePairingState(config, console)
+  }
   const prepared = []
   for (const kind of selectedNativeProviders(config)) {
     prepared.push(
@@ -202,7 +262,13 @@ export async function joinConnector(
   )
   const installation =
     installations.length === 1 && selectedNativeProviders(config)[0] === 'luvus' ? installations[0]! : { installations }
-  const applied = await post(config, '/pairing', { code: code.value, installation }, io.signal)
+  let applied: Record<string, unknown>
+  try {
+    applied = await post(config.gateway_url, '/pairing', { code: code.value, installation }, io.signal)
+  } catch (error) {
+    reportPairingFailure(error, console)
+    throw error
+  }
   fields(applied, ['state', 'machine_id', 'recovery_generation', 'credential'], ['mcp', 'replayed'])
   id(applied.machine_id)
   id(applied.recovery_generation)

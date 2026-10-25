@@ -120,12 +120,16 @@ Docker 使用 `docker compose run --rm gateway admin create`。再次 `create` �
 rovloom connector --join ws://127.0.0.1:9443#机器.码ID.秘密
 ```
 
-配对到此完成：Connector 写入 Gateway 地址、扫描本地 Herdr/Luvus 安装、一次请求用码
+配对到此完成：Connector 写入 Gateway 地址、扫描本地 Herdr/Luvus 安装、用码
 换取设备凭据并直接启动运行。首台设备会额外打印一次 MCP 地址和 Bearer。几秒后设备
 出现在管理页中；Gateway 运行中自动加载新配置。
 
 配对响应丢失时，可及时重试同一加入命令。Gateway 在同一进程中最多缓存最近 10 分钟的
 交付结果，自动加载新配置不会清除；真正重启 Gateway 后需生成新码。
+
+已有 Gateway 升级后，Connector 也应更新。新配对沿用 Gateway 原有的调用方身份和策略谱系，
+保留旧设备与 MCP Token。若此前尝试已把配对码标为失败，生成新码后执行加入命令即可，
+无需重置 Gateway 数据目录。
 
 一机一码：第一次成功兑换即消费该码，已用/作废/失败的码不能再次兑换——重新生成即可。
 用新码再次执行加入命令会把本机作为新设备重新配对；换成另一台 Gateway 的加入命令则直接
