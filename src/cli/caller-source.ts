@@ -6,7 +6,7 @@ import type { Principal } from '../router.js'
 import { CliError } from './config.js'
 import { readRuntimeFile } from './runtime-files.js'
 import { parseNativeJson } from '../native-contract/json.js'
-import { parseRegistry, REGISTRY_MAX_BYTES } from './token-registry.js'
+import { gatewayCallerPolicy, parseRegistry, REGISTRY_MAX_BYTES } from './token-registry.js'
 import type { CallerEntry, CallerRegistry } from './token-registry.js'
 
 // 固定资源的只读 adapter；文件缺失、损坏或时钟回拨使该次读取失败（拒绝），文件恢复后下一次读取自动恢复。
@@ -94,7 +94,7 @@ export function openCallerSource(
         const principal = found
           ? structuredClone({
               ...found.principal,
-              policy: found.scope === 'gateway' ? registry.local_policy : found.principal.policy
+              policy: found.scope === 'gateway' ? gatewayCallerPolicy(registry) : found.principal.policy
             })
           : null
         return found && time() < found.expires_at ? principal : null

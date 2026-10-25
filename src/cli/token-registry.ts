@@ -4,6 +4,7 @@ import type { Principal } from '../router.js'
 import type { ProviderPolicy } from '../wire/types.js'
 import { fields, id, object, validatePolicies } from '../wire/index.js'
 import { CliError } from './config.js'
+import { SIMPLE_SETUP_ACTOR } from './setup-policy.js'
 
 export const REGISTRY_MAX_BYTES = 262_144
 export const MAX_CALLERS = 64
@@ -25,6 +26,7 @@ export type CallerRegistry = {
   kind: 'mcp-caller-source'
   resource: string
   local_policy: ProviderPolicy
+  gateway_policy?: ProviderPolicy
   callers: CallerEntry[]
 }
 
@@ -49,7 +51,7 @@ function invalid(): never {
 export function parseRegistry(value: unknown, resource?: string): CallerRegistry {
   try {
     const source = object(value)
-    fields(source, ['schema_version', 'kind', 'resource', 'local_policy', 'callers'])
+    fields(source, ['schema_version', 'kind', 'resource', 'local_policy', 'callers'], ['gateway_policy'])
     if (
       source.schema_version !== 1 ||
       source.kind !== 'mcp-caller-source' ||
@@ -61,6 +63,9 @@ export function parseRegistry(value: unknown, resource?: string): CallerRegistry
       invalid()
     }
     const local = source.local_policy as ProviderPolicy
+    if (source.gateway_policy !== undefined) {
+      validatePolicies({ caller: source.gateway_policy as ProviderPolicy, local })
+    }
     const principals = new Set<string>()
     const digests = new Set<string>()
     for (const input of source.callers) {
@@ -116,7 +121,15 @@ export function parseRegistry(value: unknown, resource?: string): CallerRegistry
       principals.add(principal.id as string)
       digests.add(caller.token_sha256)
     }
-    return source as unknown as CallerRegistry
+    const registry = source as unknown as CallerRegistry
+    // Older simple-pairing registries keep the authoritative caller policy on the pairing actor.
+    // Persist it independently on the next registry write so revoking that token does not revoke other tokens.
+    const paired = registry.callers.find(
+      (entry) => entry.scope === undefined && entry.principal.id === SIMPLE_SETUP_ACTOR
+    )
+    return registry.gateway_policy === undefined && paired
+      ? { ...registry, gateway_policy: structuredClone(paired.principal.policy) }
+      : registry
   } catch {
     throw new CliError('invalid_config')
   }
@@ -262,7 +275,11 @@ export function summarize(registry: CallerRegistry, now: number): CallerSummary[
   )
 }
 
-/** Full Gateway tokens follow the local policy as devices are paired. */
+/** Full Gateway tokens follow the paired caller policy, independently of the local policy and token identity. */
+export function gatewayCallerPolicy(registry: CallerRegistry): ProviderPolicy {
+  return registry.gateway_policy ?? { revision: 'rovloom_unpaired', grants: [] }
+}
+
 export function createGatewayCaller(registry: CallerRegistry, principal: string, now: number, days = 365) {
   if (
     !PRINCIPAL.test(principal) ||
@@ -274,7 +291,7 @@ export function createGatewayCaller(registry: CallerRegistry, principal: string,
   const token = newToken()
   const expires_at = now + ttl(days)
   const entry: CallerEntry = {
-    principal: { id: principal, policy: structuredClone(registry.local_policy) },
+    principal: { id: principal, policy: structuredClone(gatewayCallerPolicy(registry)) },
     scope: 'gateway',
     token,
     token_sha256: digestToken(token),
