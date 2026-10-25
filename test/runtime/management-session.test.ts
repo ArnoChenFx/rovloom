@@ -135,7 +135,7 @@ test(
         caller,
         session_ref: sessionRef,
         expires_at: delivery.expires_at,
-        csrf_sha256: createHash('sha256').update(delivery.csrf).digest('hex')
+        csrf_sha256: [createHash('sha256').update(delivery.csrf).digest('hex')]
       })
       assert.equal(JSON.stringify(binding).includes(delivery.cookie), false)
       assert.equal(JSON.stringify(binding).includes(delivery.csrf), false)
@@ -399,6 +399,56 @@ test(
         // 到期后同一绑定不再生效。
         f.state.now = 601_000
         assert.equal(await restarted.sessions.resolveCookie(delivery.cookie, signal()), null)
+      } finally {
+        restarted.close()
+      }
+    } finally {
+      f.close()
+    }
+  }
+)
+
+test(
+  '重启后首次页面交付不破坏其它浏览器与已打开标签页的既有绑定',
+  /** 恢复的记录尚未交付过，重启后新页面可追加一条；但旧 cookie 与旧 CSRF 必须同时继续有效。 */ async () => {
+    const f = fixture()
+    try {
+      const saved: PersistedManagementSession[] = []
+      const persist: ManagementSessionPersistence = {
+        load: () => saved,
+        save: (rows: readonly PersistedManagementSession[]) => {
+          saved.length = 0
+          saved.push(...rows)
+        }
+      }
+      const lease = { caller, management_session_ref: sessionRef, issued_at: 1000, expires_at: 601_000 }
+      let browserA: ManagementSessionBootstrap
+      const first = createManagementSessionAuthority(f.source, { now: () => f.state.now, persist })
+      try {
+        // 浏览器 A 在重启前登录。
+        browserA = first.bootstrap(lease)
+      } finally {
+        first.close()
+      }
+      const restarted = createManagementSessionAuthority(f.source, { now: () => f.state.now, persist })
+      try {
+        // 重启后浏览器 B 首次打开页面：交付必须成功，且不得让 A 失效。
+        const browserB = restarted.bootstrap(lease, { rotate: false })
+        assert.notEqual(browserB.cookie, browserA.cookie)
+        assert(await restarted.sessions.resolveCookie(browserA.cookie, signal()), '浏览器 A 的 cookie 仍有效')
+        assert(await restarted.sessions.resolveCookie(browserB.cookie, signal()), '浏览器 B 的 cookie 有效')
+        // 已打开标签页持有旧 CSRF：重启后的新交付不能让它 403。
+        const a = (await restarted.sessions.resolveCookie(browserA.cookie, signal()))!
+        const b = (await restarted.sessions.resolveCookie(browserB.cookie, signal()))!
+        assert.ok(a.csrf_sha256.includes(createHash('sha256').update(browserA.csrf).digest('hex')))
+        assert.ok(b.csrf_sha256.includes(createHash('sha256').update(browserB.csrf).digest('hex')))
+        assert.ok(b.csrf_sha256.includes(createHash('sha256').update(browserA.csrf).digest('hex')))
+        // 两条绑定都落盘，下一次重启仍可恢复。
+        assert.equal(saved.length, 2)
+        // 撤销仍立即清空全部绑定。
+        restarted.revoke(caller, sessionRef)
+        assert.equal(await restarted.sessions.resolveCookie(browserA.cookie, signal()), null)
+        assert.equal(await restarted.sessions.resolveCookie(browserB.cookie, signal()), null)
       } finally {
         restarted.close()
       }

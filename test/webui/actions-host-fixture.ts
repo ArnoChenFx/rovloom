@@ -108,7 +108,7 @@ export function createActionsHostFixture(origin: string) {
               caller: { principal_id: 'fixture_admin' },
               session_ref: 'fixture_session',
               expires_at: expiry,
-              csrf_sha256: createHash('sha256').update(actionFixtureCsrf).digest('hex')
+              csrf_sha256: [createHash('sha256').update(actionFixtureCsrf).digest('hex')]
             }
           : null
       }

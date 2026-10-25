@@ -123,7 +123,7 @@ test(
                                 caller: { principal_id: 'cli_fixture' },
                                 session_ref: 'admin_fixture',
                                 expires_at: Date.now() + 60_000,
-                                csrf_sha256: createHash('sha256').update('a'.repeat(64)).digest('hex')
+                                csrf_sha256: [createHash('sha256').update('a'.repeat(64)).digest('hex')]
                               }
                             : null
                       }

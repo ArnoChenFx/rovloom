@@ -143,10 +143,14 @@ def main():
         page.get_by_text(WORDS['en']['unavailable'], exact=False).wait_for()
         assert page.evaluate('typeof window.webUiFixture') == 'undefined'
         snapshot(page, output, 'production-unavailable')
+        # 概览只给摘要；状态徽标、空态与列表都迁到设备页验证。
         for mode, selector in [('empty', '.empty h2'), ('unverified', '.device-card .warning'),
                                ('stale_children', '.device-card .warning'), ('pending', '.device-card .warning'),
                                ('401', '.state-panel')]:
-            page.goto(base + '/fixtures/')
+            page.goto(base + '/fixtures/#view=devices')
+            # 仅改 hash 不会重载页面，上一轮的 fixture 情景仍会留在内存里，先复位再断言。
+            page.evaluate("window.webUiFixture.mode='normal'")
+            page.get_by_role('button', name='Refresh', exact=True).click()
             page.locator('.device-card').first.wait_for()
             page.evaluate('/* 切换明确标注的合成展示情景。 */ mode => { window.webUiFixture.mode = mode }', mode)
             page.get_by_role('button', name='Refresh', exact=True).click()

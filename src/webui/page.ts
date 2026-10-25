@@ -160,7 +160,9 @@ export function mountWebUi(
 
   /** 稳定工具栏与当前快照重新本地化；不替换 reader、路由、等待信号或时间锚点。 */
   function paint(state: ReaderState<PageView>, current: PageRoute): void {
-    refresh.disabled = state.pending || ['unauthenticated', 'forbidden', 'not_found'].includes(state.problem ?? '')
+    // 认证类失败后 reader 允许重试（cookie 会话恢复后无需整页刷新），按钮必须同步可用，
+    // 否则用户停在当前页面时没有触发那条恢复路径的入口。
+    refresh.disabled = state.pending
     cancel.disabled = !state.pending
     indicator.textContent = i18n.t(
       state.pending

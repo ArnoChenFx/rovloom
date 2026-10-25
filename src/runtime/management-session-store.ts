@@ -137,12 +137,11 @@ function parse(value: unknown, at: number, maximum: number): PersistedManagement
     if (!row) {
       continue
     }
-    // 同一 cookie 摘要或同一 (principal, session_ref) 只保留首次出现，避免歧义寻址。
-    const name = row.principal_id + '\u0000' + row.session_ref
-    if (seen.has(name) || seen.has(row.cookie_sha256)) {
+    // 同一 (principal, session_ref) 可以有多条绑定：重启前多个浏览器各持有一条。
+    // 只按 cookie 摘要去重，避免把同一租期的其它浏览器会话误判成重复而丢弃。
+    if (seen.has(row.cookie_sha256)) {
       continue
     }
-    seen.add(name)
     seen.add(row.cookie_sha256)
     result.push(row)
   }

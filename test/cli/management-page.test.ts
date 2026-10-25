@@ -89,11 +89,17 @@ test(
       const response = await f.handler.fetch(f.request())
       assert.equal(response.status, 200)
       const body = await response.text()
-      const cookieHeader = response.headers.get('set-cookie')!
+      const cookies = response.headers.getSetCookie()
+      assert.equal(cookies.length, 2)
+      const cookieHeader = cookies[0]!
       const cookie = /^rovloom_management=([\w-]{43});/.exec(cookieHeader)![1]!
       const csrf = /content="([\w-]{43})"/.exec(body)![1]!
       assert.match(cookieHeader, /; Path=\/; HttpOnly; SameSite=Strict; Expires=/)
       assert(!cookieHeader.includes('Domain='))
+      // 升级前写入的是 Path=/admin/v1：必须同时过期，否则它会与新 cookie 同时出现在 API 请求上，
+      // 而 adapter 对同名重复 cookie 一律拒绝，用户重新登录也清不掉。
+      assert.match(cookies[1]!, /^rovloom_management=; Path=\/admin\/v1;/)
+      assert.match(cookies[1]!, /; Max-Age=0;/)
       assert.equal(response.headers.get('cache-control'), 'no-store')
       assert(body.includes(`data-expires-at="${f.lease.expires_at}"`))
       for (const secret of [cookie, f.lease.caller.principal_id, f.lease.management_session_ref]) {

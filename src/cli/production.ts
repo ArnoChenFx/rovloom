@@ -1,5 +1,6 @@
 // 唯一产品入口按固定role/ref加载真实资源；JSON不能重建opaque native来源或执行任意模块。
 import { privateDirectory } from './first-config.js'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { openGatewayState, createManagementSessionAuthority } from '../runtime/index.js'
 import { createManagementSessionPersistence } from '../runtime/management-session-store.js'
@@ -230,8 +231,9 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
           // 管理会话的 cookie 摘要绑定落盘：配对触发的重载与进程重启后，已登录浏览器不必重输密码。
           persist: createManagementSessionPersistence({
             read: () => readSetupJson(sessionStorePath),
-            // 首次写入时文件尚不存在，走排他创建；之后按当前内容代次覆盖。
-            write: (value) => writeSetupJson(sessionStorePath, value, readSetupJson(sessionStorePath) !== undefined)
+            // 存在性与内容解析必须分开判断：文件损坏时 readSetupJson 会抛错，
+            // 若用它决定是否覆盖，损坏文件将永久阻止后续写入，每次重启都会掉线。
+            write: (value) => writeSetupJson(sessionStorePath, value, existsSync(sessionStorePath))
           })
         })
         protectedManagement?.bindAuthority(authority)
