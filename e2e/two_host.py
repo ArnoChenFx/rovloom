@@ -41,7 +41,6 @@ def main():
     # 容器内固定英文输出，宿主 locale 不影响这些脚本的提示标记。
     common = ['--user', uid_gid, '-e', 'HOME=/home/rv', '-e', 'LANG=C.UTF-8', '-e', 'TERM=xterm',
               '-e', 'ROVLOOM_LANG=en',
-              '-e', 'NO_PROXY=' + ','.join(filter(None, [os.environ.get('NO_PROXY', ''), '127.0.0.1', 'localhost', gw_name, cn_name])),
               '-v', '/etc/passwd:/etc/passwd:ro', '-v', f'{rov}:/usr/local/bin/rovloom:ro']
     # 两个容器的 HOME 是各自独立的宿主目录；Gateway 看不到 Connector 的目录，反之亦然。
     gateway_cfg = os.path.join(home_g, '.config', 'rovloom'); os.makedirs(gateway_cfg, mode=0o700, exist_ok=True)
