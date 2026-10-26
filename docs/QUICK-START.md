@@ -37,7 +37,7 @@ rovloom --version
 Binaries are also on the [releases page](https://github.com/ArnoChenFx/rovloom/releases/latest);
 installer options are in [Distribution](DISTRIBUTION.md).
 
-**Already have Bun (1.4.3 or newer)?** Rovloom is on the npm registry; install it globally, or run it
+**Already have Bun (1.4.4 or newer)?** Rovloom is on the npm registry; install it globally, or run it
 once without installing:
 
 ```sh

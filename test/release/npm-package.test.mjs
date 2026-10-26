@@ -32,7 +32,7 @@ const source = {
   license: 'Apache-2.0',
   private: true,
   type: 'module',
-  engines: { bun: '>=1.4.3' },
+  engines: { bun: '>=1.4.4' },
   bin: { rovloom: 'dist/src/cli/main.js' },
   files: ['dist/src', 'LICENSE', 'README.md'],
   scripts: { build: 'x' },

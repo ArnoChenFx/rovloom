@@ -36,7 +36,7 @@ rovloom --version
 也可以从 [Release 页面](https://github.com/ArnoChenFx/rovloom/releases/latest)下载二进制；
 安装器选项见[分发说明](DISTRIBUTION.md)。
 
-**已经装了 Bun（1.4.3 及以上）？** Rovloom 发布在 npm 注册表上，可以全局安装，也可以不安装直接运行一次：
+**已经装了 Bun（1.4.4 及以上）？** Rovloom 发布在 npm 注册表上，可以全局安装，也可以不安装直接运行一次：
 
 ```sh
 bun add -g rovloom
