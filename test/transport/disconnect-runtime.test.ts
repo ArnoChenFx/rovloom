@@ -242,8 +242,10 @@ type Handlers = {
  * 用属性描述符接管 onclose/onerror：Object.assign 只复制取值，会把访问器拍平成数据属性，
  * 必须用 defineProperties 才能截获 connector 的赋值。真实 socket 行为与字段全部保留。
  */
-function capture(socket: Socket, slot: Handlers): Socket {
+function capture(socket: Socket, slot: Handlers, { keepOpen = false } = {}): Socket {
   const real = { onclose: socket.onclose, onerror: socket.onerror }
+  /** 只取原值的副本，避免重定义后自我递归。 */
+  const terminate = socket.terminate.bind(socket)
   return Object.defineProperties(socket, {
     /** 记录 connector 安装的关闭处理器，供测试稍后触发。 */
     onclose: {
@@ -260,6 +262,12 @@ function capture(socket: Socket, slot: Handlers): Socket {
         real.onerror = value as never
         slot.error = value ?? undefined
       }
+    },
+    /** keepOpen 固定「本机关闭帧回声先于 terminate 到达」的时序；否则保留原终止行为。 */
+    terminate: {
+      value: keepOpen ? /** 故意不真正拿断，让关闭帧的回声有机会到达。 */ () => {} : terminate,
+      configurable: true,
+      writable: true
     }
   })
 }
@@ -453,5 +461,82 @@ test('晚到 onclose 不把已重连后的新 epoch 观测覆盖成旧值', asyn
     assert.equal(client.status().disconnects, 1)
   } finally {
     client.stop()
+  }
+})
+
+test('已断开时重复 disconnect/stop 不新增断开记录，也不推迟重连', async () => {
+  // 生产里 session_replaced 直接接 transport.disconnect()，来源反复重建会重复调用它；
+  // 已没有活跃 socket 时那是重复请求，不能凭空记一次断开或再抬一档退避。
+  const s = server({ kind: 'stay' })
+  const client = connectorTo(s.url)
+  try {
+    await untilDisconnect(client)
+    const settled = client.status()
+    assert.equal(settled.disconnects, 1)
+    client.disconnect()
+    client.disconnect()
+    client.disconnect()
+    const current = client.status()
+    assert.equal(current.disconnects, settled.disconnects)
+    assert.equal(current.reconnects, settled.reconnects)
+    assert.equal(current.disconnect_recent.length, settled.disconnect_recent.length)
+    // 唯一例外是停止：这是全局生命周期的真实状态变化，仍如实交付一条。
+    client.stop()
+    assert.equal(client.status().disconnects, settled.disconnects + 1)
+    assert.deepEqual(latest(client), { reason: 'connector_stopped' })
+    assert.equal(client.status().phase, 'stopped')
+  } finally {
+    client.stop()
+    s.stop()
+  }
+})
+
+test('本机主动关闭帧的回声不被当成对端关闭，本机原因保持原样', async () => {
+  // close() 先 close(1000, '') 再 terminate；某些运行时上关闭帧的回声可能先到。
+  // terminate 换成 no-op 固定这一时序：本机原因不得被改写，也不得伪造成 Gateway 主动关闭。
+  const s = server({ kind: 'stay' })
+  const slot: Handlers = {}
+  const client = createConnector({
+    url: s.url,
+    developmentLoopback: true,
+    credential: () => ({
+      machine_id: 'mock_local_echo',
+      recovery_generation: 'mock_generation',
+      credential: 'SYNTHETIC_CREDENTIAL_NOT_REAL'
+    }),
+    session: () => {
+      throw new Error('fixture_must_not_open_session')
+    },
+    nativeInput: () => {
+      throw new Error('fixture_must_not_call_native')
+    },
+    execute: async () => {
+      throw new Error('fixture_must_not_execute')
+    },
+    limits: {
+      heartbeat_ms: 10_000,
+      idle_ms: 10_000,
+      handshake_ms: 10_000,
+      reconnect_ms: 60_000,
+      reconnect_max_ms: 60_000
+    },
+    random: () => 1,
+    now: () => 1000,
+    /** 固定「关闭帧回声先于 terminate 到达」的时序，其余行为仍是原 socket。 */
+    socketFactory: (socket) => capture(socket, slot, { keepOpen: true })
+  })
+  try {
+    // 底层网络错误先收敛为本机原因。
+    slot.error?.({ type: 'error' })
+    await untilCount(client, 1)
+    assert.deepEqual(latest(client), { reason: 'transport_unavailable' })
+    // 本机 close() 已发出 1000 关闭帧；其回声不得把原因改写成对端关闭。
+    slot.close?.({ code: 1000, reason: '' })
+    await new Promise(/** 让被忽略的回声充分执行。 */ (resolve) => setTimeout(resolve, 30))
+    assert.deepEqual(latest(client), { reason: 'transport_unavailable' })
+    assert.equal(client.status().disconnects, 1)
+  } finally {
+    client.stop()
+    s.stop()
   }
 })

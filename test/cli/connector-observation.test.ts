@@ -354,3 +354,35 @@ test('非整数或缺失事件序号不被采信，也不推进基线', async ()
       'connector_disconnect code=1006 close_reason=transport_abnormal\n'
   )
 })
+
+test('订阅时首次取样失败不弃掉整个观察：后续窗口仍打印相位与断开', async () => {
+  // 降级宿主（例如 provider 健康度超额）确实会让 status() 抛固定错误码；
+  // 首次取样失败只意味着暂无基线，不能整个进程再无任何诊断输出。
+  let calls = 0
+  let current = ready(0)
+  const connector = lifecycle(() => {
+    if (calls++ === 0) {
+      throw new Error('provider_limit')
+    }
+    return current
+  })
+  const stderr = new PassThrough()
+  const setup = new CliSetup()
+  const io = { stdin: new PassThrough(), stdout: new PassThrough(), stderr, signal: new AbortController().signal }
+  let text = ''
+  try {
+    await setup.prepare({ ...configTemplate('connector'), state_dir: '/nonexistent' } as ConnectorConfig, '', io)
+    setup.observe(connector)
+    await sample()
+    current = ready(1, { disconnect_recent: [{ code: 1008, reason: 'transport_closed' }] })
+    await sample()
+    text = drain(stderr)
+  } finally {
+    setup.close()
+  }
+  // 首次失败不建立基线，因此下一次成功取样的第 1 条事件仍算新事件。
+  assert.equal(
+    text,
+    'connector_transport ready provider_ready=true\n' + 'connector_disconnect code=1008 close_reason=transport_closed\n'
+  )
+})

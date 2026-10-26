@@ -3,6 +3,7 @@
 // 并验证网关重启后 connector 回到 ready。
 // 用法（先 bun run build）：
 //   LUVUS_TEST_ROOT=<非世界可写的父目录> bun --no-env-file scripts/e2e/connector-disconnect.mjs
+// 已有固定 pin 的 herdr 时可用 ROVLOOM_HERDR_BIN=<路径> 免下载；未提供则按 fixture 的官方 pin 下载。
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { setTimeout as pause } from 'node:timers/promises'
@@ -54,7 +55,7 @@ function start(executable, args, name, configPath, cwd, env) {
   }
 }
 
-const f = await createDualRoleFixture({ herdrBinary: '/opt/minibox/tools/bin/herdr' })
+const f = await createDualRoleFixture({ herdrBinary: process.env.ROVLOOM_HERDR_BIN })
 let gateway
 let connector
 try {

@@ -99,3 +99,5 @@ Connector 发送墓碑保留至首次登记的执行 deadline（最长 10 分钟
 Connector 新断开的诊断行是 `connector_disconnect`，有对端关闭码时字段为 `code=<4位> close_reason=<原因词>`，本机原因没有关闭码时只有 `close_reason=<原因词>`。晚到的关闭码使用 `connector_disconnect_update` 补报订正，不代表再次断连。相位行 `connector_transport <phase> provider_ready=<bool>` 只说明当前相位，两者可以同时出现。
 
 观察器启动时同步建立基线，订阅后首个 250 毫秒窗口里的断开照常补报。断开和订正按独立事件序号交付，共用最多 16 条的事件日志；同一窗口里的事件按时间顺序打印，超出容量只保留最新事件。累计断连次数只在新断开时增加。原因词与白名单见[通道文档](TRANSPORT.md#断线与重连)。
+
+已断开的 Connector 上重复调用断开（例如来源重建）不会再记一次断开，也不会推迟重连；只有停止进程会额外交付一条 `connector_stopped`。

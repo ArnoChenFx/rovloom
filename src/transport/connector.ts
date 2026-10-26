@@ -93,6 +93,11 @@ export type WireConnectorOptions = ConnectorBaseOptions & {
   execute?: never
 }
 export type ConnectorOptions = NativeConnectorOptions | WireConnectorOptions
+/**
+ * 本机主动关闭的连接用 1000/空原因：Gateway 真实关闭是 1008/transport_closed，
+ * 二者不重叠，本机关闭帧的回声因此不会被归为对端事件。
+ */
+const LOCAL_CLOSE_CODE = 1000
 /** 初次发布前核对整个快照为不可变纯数据；后续 tick 可只比引用，不反复遍历大 capabilities。 */
 function frozenSnapshot(value: unknown): void {
   if (value && typeof value === 'object') {
@@ -137,7 +142,7 @@ export function createConnector(options: ConnectorOptions) {
   /** 累计断开记录与有界队列；只增计数让快速重连不被采样窗口吞掉，队列避免同窗口多次断开被覆盖。 */
   const disconnects = new DisconnectLog()
   /** 本机刚收敛的 socket：其远端关闭事件若早于下一个 epoch 到达，可纠正为实际观察值。 */
-  let settled: { socket: Socket; local: DisconnectReason } | undefined
+  let settled: Socket | undefined
   let capacity: ConnectorCapacity | undefined
   let next = 0
   let retries = 0
@@ -388,17 +393,25 @@ export function createConnector(options: ConnectorOptions) {
     providerFences.clear()
     received = new ReceiveWindow()
   }
-  /** 移除当前 socket 并清理会话，按有界抖动退避安排重连；关闭码只接受已观察到的有界值。 */
+  /**
+   * 移除当前 socket 并清理会话，按有界抖动退避安排重连；关闭码只接受已观察到的有界值。
+   * 已无活跃 socket 时本机的重复断开请求不凭空记断开、也不推迟重连；
+   * 唯一例外是进程停止：这是对全局生命周期的一次状态变化，仍如实交付。
+   */
   function close(reason: DisconnectReason = stopped ? 'connector_stopped' : 'connector_failure', code?: number): void {
     const previous = ws
     ws = undefined
     /**
-     * 只把「本机仅因底层网络错误而收敛」的 socket 留作晚到远端事件的纠正目标：
-     * 1.4.3 上 terminate 先触发 onerror 再触发 onclose(1006)，那时本机原因只是未知错误。
-     * 本机主动 close（握手超时、空闲、停止）是已定性的诊断，不能被自己的关闭事件改写。
+     * 只把「本机因底层网络错误而收敛」的 socket 留作晚到远端事件的纠正目标：
+     * 上一种运行时先触发 onerror 再触发 onclose(1006)，那时本机原因只是未知错误。
+     * 本机主动 close（握手超时、空闲、停止、操作者断开）是已定性的诊断，不能被自己的关闭事件改写。
      */
-    settled =
-      previous === undefined || reason !== 'transport_unavailable' ? undefined : { socket: previous, local: reason }
+    settled = previous === undefined || reason !== 'transport_unavailable' ? undefined : previous
+    if (previous === undefined && reason !== 'connector_stopped') {
+      // 从未连上或已收敛：相位仍按本机意图更新，但不计新断开、不推进退避。
+      phase = stopped ? 'stopped' : 'disconnected'
+      return
+    }
     clearSession()
     phase = stopped ? 'stopped' : 'disconnected'
     // 本机收敛的断开不带对端关闭码；对端事件定性时只附带实际观察到的有界码。
@@ -410,7 +423,11 @@ export function createConnector(options: ConnectorOptions) {
         performance.now() +
         Math.max(1, jitter * Math.min(limits.reconnect_max_ms, limits.reconnect_ms * 2 ** Math.min(retries++, 16)))
     }
-    previous?.close(1000, 'transport_closed')
+    /**
+     * 本机主动关闭用 1000：Gateway 真实关闭是 1008/transport_closed，
+     * 所以这条帧的回声（码 1000）不会被当对端事件，也不会被当成网关主动关闭。
+     */
+    previous?.close(LOCAL_CLOSE_CODE, '')
     previous?.terminate()
   }
   /** 用当前认证上下文编码并写出单帧，预算或背压异常交给调用者收敛关闭。 */
@@ -846,9 +863,13 @@ export function createConnector(options: ConnectorOptions) {
           return
         }
         // 远端关闭晚于本机收敛且新 epoch 尚未建立：纠正最近一次观测，不重复计数。
-        if (settled?.socket === current) {
+        if (settled === current) {
           settled = undefined
-          disconnects.refine(remoteDisconnect(event))
+          const observed = remoteDisconnect(event)
+          // 本机自己发出的关闭帧回声（码 1000）不是对端事件：保留已定性的本机原因。
+          if (observed.code !== LOCAL_CLOSE_CODE) {
+            disconnects.refine(observed)
+          }
         }
       }
     current.onerror =

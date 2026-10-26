@@ -71,7 +71,10 @@ export class CliSetup {
       const initial = running.transport.status()
       observedChanges = observationCount(initial.disconnect_change_sequence)
     } catch {
-      return
+      //
+      // 首次状态取样失败（降级宿主可能抛 provider limit 等）不能静默废掉整个观察：
+      // 继续采样，改由首个成功的取样建立基线并输出首条相位行。
+      observedChanges = undefined
     }
     this.#observation = setInterval(
       /* 状态变化才输出固定阶段、布尔值与已知容量；断开与订正按独立事件序号补报，不输出凭据、epoch或原生正文。 */ () => {
