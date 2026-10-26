@@ -21,7 +21,7 @@ export const chinese = Object.freeze({
   'resources.tokenNote': '为 AI 客户端创建 Token，可随时查看、复制和删除。支持当前和之后配对的设备。',
   'resources.endpoint': 'MCP 地址',
   'resources.endpointNote':
-    '远程连接时，将 127.0.0.1 换成 Gateway 的地址。在 AI 客户端的 Authorization 中填写 Bearer 加 Token。',
+    '远程连接时，使用 Gateway 的可达地址或反向代理的 HTTPS /mcp 地址。在 AI 客户端的 Authorization 中填写 Bearer 加 Token。',
   'resources.expiresAt': '有效至 {time}',
   'resources.active': '有效',
   'resources.expired': '已过期',
@@ -376,7 +376,7 @@ export const english = Object.freeze({
     'Create tokens for your AI clients. View, copy or delete them anytime. They work with current and future paired devices.',
   'resources.endpoint': 'MCP endpoint',
   'resources.endpointNote':
-    'For remote access, replace 127.0.0.1 with your Gateway address. Set Authorization to Bearer followed by the token in your AI client.',
+    'For remote access, use the reachable Gateway address or the proxy HTTPS /mcp URL. Set Authorization to Bearer followed by the token in your AI client.',
   'resources.expiresAt': 'Expires {time}',
   'resources.active': 'Active',
   'resources.expired': 'Expired',

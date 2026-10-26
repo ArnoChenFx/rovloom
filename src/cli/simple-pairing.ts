@@ -292,7 +292,7 @@ export class SimplePairingHttp {
       original === undefined
         ? (() => {
             const token = randomBytes(32).toString('base64url')
-            minted = { url: this.config.mcp_public_url ?? resource, token }
+            minted = { url: resource, token }
             return {
               schema_version: 1,
               kind: 'mcp-client-credential',

@@ -5,7 +5,7 @@ services:
     networks: [rovloom]
     ports:
       - "9443:9443" # Connector 设备通道（远程 Connector 经此连接；公网请前置 TLS 反代）
-      - "127.0.0.1:9444:9444" # MCP：只发布到宿主机回环，远程客户端经宿主机反代 + public_url
+      - "127.0.0.1:9444:9444" # MCP：只发布到宿主机回环，远程客户端经宿主机 HTTPS 反代，无需公网 URL 配置
       - "127.0.0.1:9445:9445" # 管理页：只发布到宿主机回环
     init: true # Bun 作为 PID 1 时补一个 init 收割 schema Worker 等子进程僵尸
     user: "10001:10001"

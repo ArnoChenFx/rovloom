@@ -1,4 +1,4 @@
-// 通配绑定只改变监听范围；Host 校验仍按回环规范地址，其它 Host 在到达认证与服务之前被拒绝。
+// 通配绑定只改变监听范围；代理域名与回环 Host 都必须通过同一 Bearer 认证。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { startHttpFacade } from '../../src/mcp/http.js'
@@ -19,8 +19,8 @@ test('canonicalLoopbackHost 把监听地址换算为规范回环主机', () => {
 })
 
 test(
-  '通配监听的 MCP 端点拒绝非回环 Host，回环 Host 仍需认证',
-  /** 伪造 Host 的请求不能借通配绑定通过校验；通过校验后仍然是 401。 */ async () => {
+  '通配监听的 MCP 端点接受代理 Host，所有 Host 仍需认证',
+  /** 监听地址不是域名白名单，任意 Host 都到达认证门禁并返回 401。 */ async () => {
     const running = startHttpFacade({
       service: { execute: async () => Promise.reject(new Error('unused')) } as unknown as GatewayService,
       authentication: { authenticate: () => null },
@@ -32,7 +32,7 @@ test(
       assert.match(running.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/u)
       for (const host of ['example.com', `example.com:${port}`, `192.0.2.10:${port}`]) {
         const status = await statusWithHost(port, host, '/mcp')
-        assert(status >= 400 && status !== 401, `${host} -> ${status}`)
+        assert.equal(status, 401, `${host} -> ${status}`)
       }
       assert.equal(await statusWithHost(port, `127.0.0.1:${port}`, '/mcp'), 401)
     } finally {

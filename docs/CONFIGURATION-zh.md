@@ -15,7 +15,7 @@ rovloom config init connector --provider herdr
 rovloom config init gateway --container
 ```
 
-`--provider` 只适用于 Connector，可选 `luvus`、`herdr`、`mixed`。`--container` 只适用于 Gateway，显式将 MCP、设备和管理监听设为 `0.0.0.0`；维护的 Compose 文件仍把 MCP / 管理端口只发布到宿主回环。`public_url` 需单独配置。不带该参数时，Gateway 保持普通默认值（MCP 与设备通道通配，管理页回环）。`--config` 只选择配置文件，默认状态路径仍属于当前用户 home。
+`--provider` 只适用于 Connector，可选 `luvus`、`herdr`、`mixed`。`--container` 只适用于 Gateway，显式将 MCP、设备和管理监听设为 `0.0.0.0`；维护的 Compose 文件仍把 MCP / 管理端口只发布到宿主回环。MCP、管理页与管理 API 均无需公网 URL 配置即可使用反向代理。不带该参数时，Gateway 保持普通默认值（MCP 与设备通道通配，管理页回环）。`--config` 只选择配置文件，默认状态路径仍属于当前用户 home。
 
 初始化不启动服务、不创建设备身份、不批准 native 访问，沿用角色首次启动的独占文件发布机制。已有文件不覆盖；显式 provider / 监听请求与已有内容冲突时返回 `config_exists`。已有部署应先核对配置和配对状态，编辑后用 `config check` 校验再重启。
 
@@ -60,16 +60,15 @@ Connector，通常为 `~/.config/rovloom/connector.json`：
 | `data` | object，必填 | 仅含 `directory`。 |
 | `data.directory` | 规范绝对路径 string，≤4096 字符，必填 | `<home>/.local/share/rovloom/<role>`；各角色独立私有数据。 |
 | Gateway `mcp` | object，必填 | 含 `hostname`、`port`；Streamable HTTP `/mcp`。 |
-| `mcp.hostname` | string，必填 | `127.0.0.1`，也接受 `::1`、`0.0.0.0`、`::`。通配绑定监听所有网卡且为明文 HTTP，接受任意 Host 的固定 `/mcp` 请求（仍需 Bearer）；回环绑定只接受回环寻址。通配监听请用防火墙或 TLS 反向代理收口；其它 Host 需配 `public_url`。 |
+| `mcp.hostname` | string，必填 | 接受 `127.0.0.1`、`::1`、`0.0.0.0`、`::`。仅决定监听网卡，不限定代理域名。MCP 接受 HTTP/HTTPS 代理地址、保留或改写 Host 的 `/mcp` 请求，每次仍需 Bearer。 |
 | `mcp.port` | integer 1–65535，必填 | `9444`。 |
-| `mcp.public_url` | 字符串，可选 | 反向代理 / TLS 终止后的受信对外地址，必须恰为 `https://host[:port]/mcp`（无凭据、查询或其它路径）。配置后 Gateway 额外接受 `Host` 为该主机的请求（及其 CORS 来源），其余 `Host` 仍被拒绝，也从不信任转发头；监听仍只在回环，仍需 Bearer。 |
 | Gateway `devices` | object，必填 | 含 `hostname`、`port`；WS `/connector`。 |
 | `devices.hostname` | string，必填 | `127.0.0.1`，也接受 `::1`、`0.0.0.0`、`::`；通配绑定接受远程设备。 |
 | `devices.port` | integer 1–65535，必填 | `9443`。 |
 | Gateway `management` | object，必填 | 含 `enabled`、`hostname` 与 `port`；本地 HTTP 管理页。 |
 | `management.enabled` | boolean，必填 | `true`；`false` 关闭该监听。启用不授予管理员身份。 |
 | `management.port` | integer 1–65535，关闭时也必填 | `9445`。 |
-| `management.hostname` | string，可选，默认写出 | `127.0.0.1`，也接受 `0.0.0.0`（局域网访问）。通配绑定接受任意 Host 的明文 HTTP 访问（Cookie 仍为 `HttpOnly`/`SameSite=Strict`，但不是 `Secure`；跨站请求仍被同源检查拒绝）；回环绑定只接受回环寻址。页面离开受信局域网时请用 TLS 反向代理收口。 |
+| `management.hostname` | string，可选 | `127.0.0.1`，也接受 `0.0.0.0`。仅决定监听网卡，不限定反向代理域名。管理页支持 HTTP/HTTPS、保留或改写 Host 的代理，无需公网 URL 配置。登录、会话与 CSRF 校验仍生效。 |
 | Connector `gateway` | object，必填 | 仅含 `url`。 |
 | `gateway.url` | string，必填 | 初始化前为 `""`；其余为 ≤2048 字符的 WS/WSS origin，如 `ws://192.0.2.10:9443` 或 `wss://gateway.example`。不带凭据/查询/片段/路径，可带末尾 `/`；产品固定使用 `/connector`。 |
 | Connector `allow_terminal_execution` | boolean，可选 | `false`；省略也关闭。只有字面量 `true` 开启直接终端输入及自定义启动/恢复命令。修改这一份用户文件并重启 Connector，不改变安装设置或 caller/local grants。 |
@@ -180,6 +179,13 @@ caller 配置并热重载，全程不停机。原生初始化不会登录模型�
 
 Gateway 在本机/可信网络使用普通 HTTP/WS，公网 TLS 由外部标准 HTTPS/WSS 反向代理
 终止。Connector WSS 始终使用系统证书验证，没有自定义 CA 或跳过验证选项。
+
+MCP、管理页与管理 API 均支持保留或改写 Host、外部 HTTPS / 内部 HTTP 的反向代理，
+无需公网 URL、域名白名单或可信代理配置。**升级前必须删除旧配置中的 `mcp.public_url` 字段；
+保留该字段会被作为未知配置拒绝，导致 `config check` 和 Gateway 启动报 `invalid_config`，不会忽略旧值。**
+在 AI 客户端直接填写代理的 HTTPS `/mcp` 地址；Gateway 显示的本机地址仍供本机客户端使用。
+代理保留 `/mcp`、`/admin/v1/…`、Authorization 与 MCP 会话头，MCP 的 SSE 响应不要缓冲。
+管理 API 继续核验管理员 Cookie 和写操作 CSRF，MCP 每次请求仍核验当前 Bearer。
 
 无代理的局域网客户端：把 `mcp.hostname` / `management.hostname` 设为通配地址。这些监听随后接受局域网 Host 的明文 HTTP——MCP 仍需 Bearer，
 管理页保留 Cookie、CSRF 与同源检查，但两者都没有传输加密和网络层隔离。请用防火墙收口局域网，并在任何离开局域网的路径前加 TLS 反向代理。

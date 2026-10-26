@@ -155,7 +155,11 @@ test(
     const release = gate()
     try {
       assert.equal(
-        (await f.handler.fetch(f.request('/', { headers: { origin: 'http://untrusted.invalid' } }))).status,
+        (
+          await f.handler.fetch(
+            f.request('/', { headers: { origin: 'http://untrusted.invalid', 'sec-fetch-site': 'cross-site' } })
+          )
+        ).status,
         403
       )
       assert.equal((await f.handler.fetch(f.request('/?secret=synthetic'))).status, 404)

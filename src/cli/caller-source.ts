@@ -13,11 +13,8 @@ import type { CallerEntry, CallerRegistry } from './token-registry.js'
 export function openCallerSource(
   path: string,
   resource: string,
-  administrator?: GatewayIdentitySource['administrator'],
-  publicUrl?: string,
-  lan = false
+  administrator?: GatewayIdentitySource['administrator']
 ) {
-  const publicHost = publicUrl === undefined ? undefined : new URL(publicUrl).host
   let closed = false
   let observed = 0
   let cached: { text: string; registry: CallerRegistry } | undefined
@@ -63,22 +60,6 @@ export function openCallerSource(
       throw new CliError('backend_unavailable', 3)
     }
   }
-  // 经受信反向代理到达时 request.url 的 scheme 是 http，只比较 Host 与固定路径。
-  // 显式 LAN 明文监听时接受任意 Host 的固定路径；Bearer 摘要与来源无关。
-  const publicRequest = (value: string): boolean => {
-    try {
-      const url = new URL(value)
-      if (url.pathname !== '/mcp' || url.search || url.hash) {
-        return false
-      }
-      if (lan) {
-        return publicHost === undefined ? true : url.host !== new URL(resource).host
-      }
-      return publicHost !== undefined && url.host === publicHost
-    } catch {
-      return false
-    }
-  }
   const active = (entry: CallerEntry, now: number) => now >= entry.issued_at && now < entry.expires_at
   // 打开时必须得到一份有效且资源匹配的注册表；之后文件变化按下一次读取生效。
   load()
@@ -113,9 +94,18 @@ export function openCallerSource(
     }
   })
   const authentication: HttpAuthenticationProvider = Object.freeze({
-    // 固定资源的bearer只比较既有摘要；信号、当前源和精确到期都必须仍有效。
+    // 注册表仍绑定本机资源；实际 HTTP 地址允许反代，身份只来自当前有效的 Bearer。
     authenticate(request, signal) {
-      if (signal.aborted || !(request.url === resource || publicRequest(request.url))) {
+      const url = new URL(request.url)
+      if (
+        signal.aborted ||
+        !['http:', 'https:'].includes(url.protocol) ||
+        url.username ||
+        url.password ||
+        url.pathname !== '/mcp' ||
+        url.search ||
+        url.hash
+      ) {
         return null
       }
       const authorization = request.headers.get('authorization')

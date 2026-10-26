@@ -127,7 +127,7 @@ export const copy = {
       'Gateway 提供 Linux、macOS、Windows 的 x64 / ARM64 二进制。Connector 支持 Linux、Windows 和 macOS。Docker Gateway 支持原生 Linux AMD64 / ARM64。架构与安装要求见快速开始。',
     'faq.q4': '可以直接暴露到公网吗？',
     'faq.a4':
-      '默认监听本机回环地址。跨设备部署应按配置文档设置可达的设备监听、HTTPS / WSS 反向代理与受信 MCP public_url，并保管好设备凭据和调用方 Bearer。',
+      '跨设备部署应按配置文档设置可达的设备监听和 HTTPS / WSS 反向代理；MCP、管理页与 API 无需公网地址配置，并保管好设备凭据和调用方 Bearer。',
     'end.title': '让你的下一次调用，走得更远',
     'end.body': '从一台 Gateway 开始，把自己的机器连接起来。',
     'end.action': '开始连接',
@@ -290,7 +290,7 @@ export const copy = {
       'Gateway has Linux, macOS and Windows binaries for x64 / ARM64. Connector supports Linux, Windows and macOS. Docker Gateway targets native Linux AMD64 / ARM64. See the Quick Start for architecture and setup requirements.',
     'faq.q4': 'Can I expose it directly to the Internet?',
     'faq.a4':
-      'Listeners bind to loopback by default. For cross-device access, follow the configuration guide for reachable device listeners, HTTPS / WSS reverse proxies and the trusted MCP public_url. Protect device credentials and caller Bearers.',
+      'For cross-device access, follow the configuration guide for reachable listeners and HTTPS / WSS reverse proxies. MCP, management and APIs need no public URL setting. Protect device credentials and caller Bearers.',
     'end.title': 'Let your next call go further',
     'end.body': 'Start with one Gateway. Connect your own machines.',
     'end.action': 'Make the connection',
