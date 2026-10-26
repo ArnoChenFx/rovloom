@@ -167,6 +167,16 @@ test('Connector release smoke accepts transport diagnostics and rejects unknown 
   assertConnectorDiagnostics(
     'connector_transport connecting provider_ready=false\nconnector_transport ready provider_ready=true\n'
   )
+  /* 断开观测只接受有界关闭码与固定原因词；发布验收不能放宽到任意对端文本。 */
+  assertConnectorDiagnostics(
+    'connector_transport disconnected provider_ready=false code=1008 close_reason=transport_closed\n' +
+      'connector_transport disconnected provider_ready=false close_reason=handshake_timeout\n'
+  )
   assert.throws(() => assertConnectorDiagnostics('runtime_failed\n'))
   assert.throws(() => assertConnectorDiagnostics('Bearer (private): synthetic-secret\n'))
+  assert.throws(() =>
+    assertConnectorDiagnostics(
+      'connector_transport disconnected provider_ready=false code=1008 close_reason=synthetic-secret\n'
+    )
+  )
 })

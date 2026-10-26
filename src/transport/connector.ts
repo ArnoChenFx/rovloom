@@ -46,6 +46,8 @@ import {
   socket
 } from './common.js'
 import type { Connection, Session, Socket } from './common.js'
+import { boundedDisconnect, remoteDisconnect } from './disconnect.js'
+import type { DisconnectObservation, DisconnectReason } from './disconnect.js'
 
 export type WireExecutionResult = Readonly<{ binding: AttemptBinding; native_response: JsonObject }>
 export type ConnectorWireSession = Session & {
@@ -130,6 +132,8 @@ export function createConnector(options: ConnectorOptions) {
   let stopped = false
   let phase = 'disconnected'
   let failure: string | undefined
+  /** 最近一次断开的固定原因；本机主动断开由调用点直接给定，不让对端文本参与定性。 */
+  let disconnect: DisconnectObservation | undefined
   let capacity: ConnectorCapacity | undefined
   let next = 0
   let retries = 0
@@ -380,12 +384,14 @@ export function createConnector(options: ConnectorOptions) {
     providerFences.clear()
     received = new ReceiveWindow()
   }
-  /** 移除当前 socket 并清理会话，按有界抖动退避安排重连；停止状态不再重连。 */
-  function close(): void {
+  /** 移除当前 socket 并清理会话，按有界抖动退避安排重连；关闭码只接受已观察到的有界值。 */
+  function close(reason: DisconnectReason = stopped ? 'connector_stopped' : 'connector_failure', code?: number): void {
     const previous = ws
     ws = undefined
     clearSession()
     phase = stopped ? 'stopped' : 'disconnected'
+    // 本机收敛的断开不带对端关闭码；对端事件定性时只附带实际观察到的有界码。
+    disconnect = Object.freeze(code === undefined ? { reason } : { code, reason })
     if (!stopped) {
       const random = (options.random ?? Math.random)()
       const jitter = Number.isFinite(random) ? Math.max(0, Math.min(1, random)) : 1
@@ -605,7 +611,7 @@ export function createConnector(options: ConnectorOptions) {
     try {
       credential = structuredClone(options.credential())
     } catch {
-      close()
+      close('connector_failure')
       return
     }
     const messageId = randomUUID()
@@ -613,7 +619,7 @@ export function createConnector(options: ConnectorOptions) {
     try {
       current = socket(url)
     } catch {
-      close()
+      close('transport_unavailable')
       return
     }
     ws = current
@@ -648,7 +654,7 @@ export function createConnector(options: ConnectorOptions) {
         } catch (error) {
           failure =
             error instanceof GatewayError && /^[a-z_]{1,80}$/.test(error.code) ? error.code : 'connection_failed'
-          close()
+          close('connector_failure')
         }
       }
     current.onmessage =
@@ -817,17 +823,18 @@ export function createConnector(options: ConnectorOptions) {
         }
       }
     current.onclose =
-      /** 将当前 socket 的关闭事件收敛到清理和重连；过期 socket 的事件被忽略。 */
-      () => {
+      /** 只把对端关闭事件归一化为白名单原因与有界关闭码，再走统一清理和重连。 */
+      (event) => {
         if (ws === current) {
-          close()
+          const observed = remoteDisconnect(event)
+          close(observed.reason, observed.code)
         }
       }
     current.onerror =
       /** 隐藏底层网络错误原文，并让当前连接按统一关闭路径回收资源。 */
       () => {
         if (ws === current) {
-          close()
+          close('transport_unavailable')
         }
       }
   }
@@ -847,12 +854,12 @@ export function createConnector(options: ConnectorOptions) {
       try {
         if (!connection) {
           if (now - opened >= limits.handshake_ms) {
-            close()
+            close('handshake_timeout')
           }
           return
         }
         if (!session || now - last >= limits.idle_ms) {
-          close()
+          close('transport_idle')
           return
         }
         reconcileProviders(connection, session)
@@ -880,7 +887,7 @@ export function createConnector(options: ConnectorOptions) {
           phase = 'authenticated'
         }
       } catch {
-        close()
+        close('connector_failure')
       }
     },
     Math.min(100, limits.heartbeat_ms, limits.handshake_ms, limits.reconnect_ms)
@@ -889,9 +896,12 @@ export function createConnector(options: ConnectorOptions) {
   return {
     /** 返回有界连接与 provider 健康观测，不包含凭据或原生内容。 */
     status() {
+      // 断开观测只在 disconnected/stopped 阶段交付，连上后不残留上一 epoch 的关闭码。
+      const observed = phase === 'disconnected' || phase === 'stopped' ? boundedDisconnect(disconnect) : undefined
       return {
         ...(failure ? { failure } : {}),
         ...(capacity ? { capacity } : {}),
+        ...(observed ? { disconnect: observed } : {}),
         phase,
         running: running.size,
         reconnects: retries,
@@ -900,7 +910,8 @@ export function createConnector(options: ConnectorOptions) {
         providers: connection && session ? providerHealth(connection, session.readiness()) : []
       }
     },
-    disconnect: close,
+    /** 操作者主动断开当前连接；不宣称原生动作已回滚，也不伪造对端关闭码。 */
+    disconnect: () => close('connector_disconnected'),
     /** 幂等停止 timer、socket 和观察资源；不会据此宣称原生动作已回滚。 */
     stop(): void {
       if (stopped) {
@@ -908,7 +919,7 @@ export function createConnector(options: ConnectorOptions) {
       }
       stopped = true
       clearInterval(timer)
-      close()
+      close('connector_stopped')
     }
   }
 }

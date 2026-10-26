@@ -43,6 +43,12 @@ Connector 主动出站连接 Gateway，Gateway 不连接设备。通道上的帧
 - Connector 断线后按指数退避重连，间隔从 250 毫秒起，上限 30 秒，带随机抖动。重连使用稳定的设备 ID 和新的 epoch。
 - 重连不会迁入或重放任何旧请求。断线时旧 epoch 上未完成的调用由 Gateway 记为 `outcome_unknown`。
 - 旧 epoch 的响应、过期的 provider 绑定或策略修订的响应一律拒绝。
+- Connector 的 `connector_transport` 观测在 `disconnected` / `stopped` 阶段附带断开定性：`code=` 是有界 WebSocket 关闭码，`close_reason=` 是固定原因词。
+  - `transport_closed`：对端（Gateway）主动关闭。
+  - `transport_abnormal`：未收到关闭帧，例如 TCP 被掐或连接被强制终止；此时通常同时给出 `code=1006`。
+  - `transport_unclassified`：收到了关闭码，但原因不在固定白名单内。
+  - `handshake_timeout`、`transport_idle`、`connector_failure`、`transport_unavailable`、`connector_disconnected`、`connector_stopped`：Connector 本机收敛的原因，不带对端关闭码。
+- 断开观测只输出白名单原因和数值关闭码。对端给出的任意关闭正文、凭据和路径一律不进入日志；越界或未知值整条丢弃。
 
 ## 派发
 

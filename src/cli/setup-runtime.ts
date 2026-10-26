@@ -5,6 +5,7 @@ import { joinConnector } from './join-connector.js'
 import { cliMessages, formatMessage } from './messages.js'
 import { LuvusAdapterError } from '../connector/luvus/types.js'
 import { HerdrLocalError } from '../connector/herdr/local.js'
+import { boundedDisconnect } from '../transport/disconnect.js'
 
 export class CliSetup {
   #io: CliIo | undefined
@@ -60,13 +61,22 @@ export class CliSetup {
     }
     let previous = ''
     this.#observation = setInterval(
-      /* 状态变化才输出固定阶段和布尔值，不输出设备凭据、epoch或原生正文。 */ () => {
+      /* 状态变化才输出固定阶段、布尔值、有界关闭码/原因与已知容量，不输出设备凭据、epoch或原生正文。 */ () => {
         try {
           const status = running.transport!.status()
           const ready = status.providers.some(
             /* 采用原transport已经核验的当前provider就绪值。 */ (provider) => provider.ready
           )
-          const current = status.phase + ':' + ready + ':' + (status.failure ?? '')
+          // 断开观测经同一白名单二次复核；异常或未知值整条丢弃，不退化为原文输出。
+          const disconnect = boundedDisconnect(status.disconnect)
+          const current =
+            status.phase +
+            ':' +
+            ready +
+            ':' +
+            (status.failure ?? '') +
+            ':' +
+            (disconnect ? String(disconnect.code ?? '') + ':' + disconnect.reason : '')
           if (current !== previous) {
             previous = current
             this.#io?.stderr.write(
@@ -78,6 +88,11 @@ export class CliSetup {
                   ? ' capacity=' + status.capacity.resource + ' reclaim_at=' + String(status.capacity.reclaim_at)
                   : '') +
                 (status.failure ? ' reason=' + status.failure : '') +
+                (disconnect
+                  ? (disconnect.code === undefined ? '' : ' code=' + String(disconnect.code)) +
+                    ' close_reason=' +
+                    disconnect.reason
+                  : '') +
                 '\n'
             )
           }

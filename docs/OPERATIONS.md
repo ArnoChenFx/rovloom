@@ -74,7 +74,7 @@ rovloom storage resume --role gateway --json
 
 | 现象 | 先看 |
 |---|---|
-| Connector 一直 `disconnected` | Gateway 的 `devices.hostname` 是否允许远端；地址 / 防火墙；Gateway 判断线约 20 秒（空闲超时） |
+| Connector 一直 `disconnected` | 断连行的 `close_reason`：`transport_closed` 是 Gateway 主动关，`transport_abnormal` / `code=1006` 是网络被掐或对端无关闭帧，`handshake_timeout` 是握手无回应；再看 Gateway 的 `devices.hostname` 是否允许远端；地址 / 防火墙；Gateway 判断线约 20 秒（空闲超时） |
 | MCP 401 | Bearer 是否过期（默认 30 天，`rovloom token renew`）；`/mcp` URL 是否与 `mcp.public_url` 一致 |
 | 调用停在 `dispatching` 很久 | 设备可能刚断网（Gateway 20 秒内发现后立即 `not_dispatched`）；已写出的调用是 `outcome_unknown`，**不会自动重发**，先核对再决定 |
 | `invalid_device_credential` | 凭据被撤销或重配：生成新码重新 join |
