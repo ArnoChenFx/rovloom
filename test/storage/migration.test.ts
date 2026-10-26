@@ -547,3 +547,65 @@ function describe(db: DatabaseSync) {
     .map(/** 只保留触发器归属，正文由 usage 校验单独核对。 */ (row) => `${row.tbl_name}:${row.name}`)
   return { tables, indexes, triggers }
 }
+
+test('迁移事务内失败时 backups 登记行一并回滚，不占用备份配额', () => {
+  const f = fixture()
+  try {
+    legacy(f.path)
+    // 删掉 audit 表让迁移事务里的 database_migrated 审计写入抛错：
+    // 此时副本已写入、迁移已执行，失败点落在 COMMIT 之前。
+    const broken = new DatabaseSync(f.path)
+    try {
+      broken.exec('DROP TABLE audit')
+    } finally {
+      broken.close()
+    }
+    assert.throws(
+      /** 审计写入失败必须让整个迁移事务回滚。 */ () =>
+        new Store(f.path, () => 5_000, {
+          backupDirectory: f.backups
+        })
+    )
+    const check = new DatabaseSync(f.path, { readOnly: true })
+    try {
+      // 版本与结构都回到 v9：没有 platform_json 列。
+      assert.equal(storedVersion(check), MIGRATION_FROM_VERSION)
+      assert.equal(
+        check.prepare("SELECT COUNT(*) n FROM pragma_table_info('machines') WHERE name='platform_json'").get()!.n,
+        0
+      )
+      // 登记行随事务回滚消失，不会永久占用备份数量配额。
+      assert.equal(check.prepare('SELECT COUNT(*) n FROM backups').get()!.n, 0)
+    } finally {
+      check.close()
+    }
+    // 本次产物已被清理，目录里没有残留副本。
+    assert.deepEqual(existsSync(f.backups) ? readdirSync(f.backups) : [], [])
+    // 修好触发失败的条件后，同一文件仍能正常打开并完成迁移。
+    const repaired = new DatabaseSync(f.path)
+    try {
+      repaired.exec(
+        'CREATE TABLE audit (event_id TEXT PRIMARY KEY, action TEXT NOT NULL, actor TEXT NOT NULL, call_id TEXT, at INTEGER NOT NULL, expires INTEGER NOT NULL, details TEXT NOT NULL)'
+      )
+      repaired.exec('CREATE INDEX audit_expiry ON audit(expires)')
+    } finally {
+      repaired.close()
+    }
+    const store = new Store(f.path, () => 5_000, { backupDirectory: f.backups })
+    try {
+      assert.equal(store.generation(), 'legacy_generation')
+      assert.equal(store.machine('machine_legacy').name, 'legacy')
+    } finally {
+      store.close()
+    }
+    const upgraded = new DatabaseSync(f.path, { readOnly: true })
+    try {
+      assert.equal(storedVersion(upgraded), SCHEMA_VERSION)
+      assert.equal(upgraded.prepare('SELECT COUNT(*) n FROM backups').get()!.n, 1)
+    } finally {
+      upgraded.close()
+    }
+  } finally {
+    f.close()
+  }
+})

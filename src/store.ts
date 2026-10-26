@@ -289,6 +289,10 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE')
     try {
       applyMigration(this.db)
+      // 副本登记与版本推进同一事务：失败时登记行随回滚消失，不会永久占用备份数量配额。
+      if (evidence !== undefined) {
+        this.db.prepare('INSERT INTO backups VALUES(?,?,?)').run(evidence, now, now + this.limits.backup_ttl)
+      }
       // 平台列未上报的旧设备保持 NULL；不给它们编造任何平台。
       this.audit('database_migrated', 'system', now, undefined, {
         from,

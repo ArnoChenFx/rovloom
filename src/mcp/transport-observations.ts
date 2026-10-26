@@ -109,18 +109,19 @@ function authentication(
 }
 
 /**
- * 平台是"最近一次上报"的历史观测：已核实就原样复制，未记录就保持未记录。
+ * 平台是设备属性，不随时效观测变化：形状合法就原样透传，非法形状按"从未上报"处理（null）。
  * 它不因连接或认证过期而降级，也不会被升级成当前在线事实。
  */
 function platform(value: DeviceSnapshot['platform']): DeviceSnapshot['platform'] {
-  if (value.verification !== 'verified' || value.source !== 'store') {
-    return unknown('not_recorded')
+  if (value === null) {
+    return null
   }
-  const platform = value.value
-  const distribution = platform.distribution
+  const distribution = value.distribution
   if (
-    !['linux', 'darwin', 'win32'].includes(platform.os) ||
-    !['x64', 'arm64'].includes(platform.arch) ||
+    !['linux', 'darwin', 'win32'].includes(value.os) ||
+    !['x64', 'arm64'].includes(value.arch) ||
+    // Linux 允许未读到发行版（null）；非 Linux 携带发行版属于不一致形状。
+    (value.os !== 'linux' && distribution !== null) ||
     (distribution !== null &&
       (typeof distribution.id !== 'string' ||
         !/^[a-z0-9][a-z0-9._-]{0,31}$/u.test(distribution.id) ||
@@ -128,17 +129,12 @@ function platform(value: DeviceSnapshot['platform']): DeviceSnapshot['platform']
           (typeof distribution.version_id !== 'string' ||
             !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,31}$/u.test(distribution.version_id)))))
   ) {
-    return unknown('not_recorded')
+    return null
   }
   return {
-    verification: 'verified',
-    observed_at: value.observed_at,
-    source: 'store',
-    value: {
-      os: platform.os,
-      arch: platform.arch,
-      distribution: distribution === null ? null : { id: distribution.id, version_id: distribution.version_id ?? null }
-    }
+    os: value.os,
+    arch: value.arch,
+    distribution: distribution === null ? null : { id: distribution.id, version_id: distribution.version_id ?? null }
   }
 }
 

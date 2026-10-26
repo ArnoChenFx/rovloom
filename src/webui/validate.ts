@@ -155,32 +155,31 @@ function device(value: DeviceSnapshot): void {
       }
     }
   )
-  observed(
-    value.platform,
-    /** 平台只接收契约枚举与受限发行版标识；不接收路径、版本探针输出或自由文本。 */
-    (platform) => {
-      record(platform, ['os', 'arch', 'distribution'])
-      choice(platform.os, ['linux', 'darwin', 'win32'])
-      choice(platform.arch, ['x64', 'arm64'])
-      if (platform.distribution !== null) {
-        record(platform.distribution, ['id', 'version_id'])
-        // 与 Wire 侧同一字符集；不合规内容不进入页面。
-        if (
-          typeof platform.distribution.id !== 'string' ||
-          !/^[a-z0-9][a-z0-9._-]{0,31}$/u.test(platform.distribution.id)
-        ) {
-          invalid()
-        }
-        if (
-          platform.distribution.version_id !== null &&
-          (typeof platform.distribution.version_id !== 'string' ||
-            !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,31}$/u.test(platform.distribution.version_id))
-        ) {
-          invalid()
-        }
+  // 平台是设备属性：要么是 null（从未上报），要么是形状合法的平台对象。
+  if (value.platform !== null) {
+    record(value.platform, ['os', 'arch', 'distribution'])
+    choice(value.platform.os, ['linux', 'darwin', 'win32'])
+    choice(value.platform.arch, ['x64', 'arm64'])
+    const distribution = value.platform.distribution
+    // Linux 允许 distribution 为 null（未读到发行版标识）；只有非 Linux 不允许携带。
+    if (value.platform.os !== 'linux' && distribution !== null) {
+      invalid()
+    }
+    if (distribution !== null) {
+      record(distribution, ['id', 'version_id'])
+      // 与 Wire 侧同一字符集；不合规内容不进入页面。
+      if (typeof distribution.id !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,31}$/u.test(distribution.id)) {
+        invalid()
+      }
+      if (
+        distribution.version_id !== null &&
+        (typeof distribution.version_id !== 'string' ||
+          !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,31}$/u.test(distribution.version_id))
+      ) {
+        invalid()
       }
     }
-  )
+  }
   observed(
     value.authentication,
     /** 认证失败只接收契约定义的脱敏原因枚举与发生时间。 */

@@ -121,8 +121,8 @@ def main():
                     assert abs(columns['headers'][index] - columns['cells'][index]) <= 1
                 last_row = bounds(page, '.device-card:last-child')
                 assert last_row['y'] + last_row['height'] < 1024
-                # 平台徽标在两语下都在列表中出现，且不超出所在列宽。
-                assert page.locator('.device-card [data-platform]').count() == 2
+                # 平台徽标只出现在确有平台的设备上，且不超出所在列宽。
+                assert page.locator('.device-card [data-platform]').count() == 1
                 assert page.locator('.device-card [data-platform]').first.evaluate('''el => {
                     /* 徽标不得横向溢出所在列，长文本必须换行。 */
                     const cell = el.closest('.device-health');
@@ -227,10 +227,12 @@ def main():
                 assert abs(connection['y'] - registration['y']) <= 1
                 assert observations['y'] >= connection['y'] + connection['height']
                 assert page.locator('.actions button:enabled').count() == 0
-                # 详情把平台放在登记分组里，并在观测分组给出上报时间。
+                # 详情登记分组只有一行平台（标签、资源 revision、平台共三项），没有上报时间。
                 registration_text = page.locator('.detail-registration').inner_text()
                 assert 'x64' in registration_text and 'ubuntu 24.04' in registration_text
-                assert page.locator('.detail-registration .facts .fact').count() == 5
+                assert page.locator('.detail-registration .facts .fact').count() == 3
+                for removed in ['平台未记录', '最近一次上报', '历史观测', '平台上报时间']:
+                    assert removed not in page.locator('main').inner_text(), removed
                 snapshot(page, output, f'{language}-{theme}-detail-desktop')
 
                 page.set_viewport_size({'width': 320, 'height': 900})

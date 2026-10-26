@@ -26,7 +26,7 @@ import { readRuntimeJson, runtimeReference } from './runtime-files.js'
 import { createRuntimeCliRuntime } from './runtime.js'
 import { SimplePairingHttp, PairingReplayCache } from './simple-pairing.js'
 import type { CliSetup } from './setup-runtime.js'
-import { boundedJson, object, fields } from '../wire/index.js'
+import { boundedJson, object, fields, WIRE_MAJOR, WIRE_MINOR } from '../wire/index.js'
 import { readRuntimeConfig } from './runtime-config.js'
 import { migrateSetupLuvusGrant } from './setup-luvus-grant.js'
 import { canonicalLoopbackHost, isWildcardHostname } from '../mcp/listen.js'
@@ -94,10 +94,11 @@ export type ProductionCliSources = {
 }
 
 // 只组合已有Wire协商声明。
-function offer(): VersionOffer {
+export function productionOffer(): VersionOffer {
   return {
-    major: 2,
-    minor: 0,
+    major: WIRE_MAJOR,
+    // 跟随当前实现支持的 minor：写死旧值会让较新能力（如 device_platform）永远协商不到。
+    minor: WIRE_MINOR,
     capabilities: ['rpc', 'provider_fence', 'terminal_execution_state', 'dispatch_refusal', 'device_platform'],
     required: ['rpc']
   }
@@ -390,7 +391,7 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
           listener: {
             hostname: settings.device_listener.hostname,
             port: settings.device_listener.port,
-            offer: offer(),
+            offer: productionOffer(),
             setupRequest:
               /* 固定同一设备listener的专用配对handler，不替换WebSocket认证；已配对网关也保持可用以加入新设备。 */ (
                 request: Request
@@ -550,7 +551,7 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
         credential()
         const transport = {
           credential,
-          offer: offer()
+          offer: productionOffer()
         }
         if (resource.kind === 'provider') {
           return {

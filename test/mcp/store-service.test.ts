@@ -922,13 +922,13 @@ test(
 )
 
 test(
-  'devices_get 把账本最近一次平台上报投影为 store 来源的历史观测，未上报时明确未记录',
+  'devices_get 把平台作为设备属性原样返回，未上报时为 null',
   /** 平台只来自真实列；本用例不连真实传输，连接与认证仍保持未知。 */ async () => {
     const f = storeFixture()
     try {
-      // 未上报平台的设备：明确未记录，不从 os 或其它字段推断。
+      // 未上报平台的设备：直接为 null，不构造 verification 或占位说明。
       const absent = await f.service.management.execute('devices_get', { machine_id: 'machine_a' }, adminContext())
-      assert.deepEqual(absent.platform, { verification: 'unverified', reason_code: 'not_recorded' })
+      assert.equal(absent.platform, null)
 
       // 写入一条与真实 Wire 校验同形的平台记录后重新读取。
       const f2 = storeFixture('active', (db) => {
@@ -939,10 +939,7 @@ test(
       })
       try {
         const device = await f2.service.management.execute('devices_get', { machine_id: 'machine_a' }, adminContext())
-        assert.equal(device.platform.verification, 'verified')
-        assert(device.platform.verification === 'verified')
-        assert.equal(device.platform.source, 'store')
-        assert.deepEqual(device.platform.value, { os: 'darwin', arch: 'arm64', distribution: null })
+        assert.deepEqual(device.platform, { os: 'darwin', arch: 'arm64', distribution: null })
         // 列表投影与详情一致，且同一设备不会因列表/详情不同而改变平台。
         const list = await f2.service.management.execute('devices_list', { limit: 10 }, adminContext())
         const listed = list.items.find(/** 只取本用例的目标设备。 */ (item) => item.machine_id === 'machine_a')

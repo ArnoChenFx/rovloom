@@ -178,8 +178,9 @@ export function validateDevicePlatform(value: unknown): asserts value is DeviceP
       fail('invalid_device_platform')
     }
   }
-  // 发行版只存在于 Linux；其它平台带发行版或 Linux 缺发行版都按不一致拒绝，不静默补造。
-  if ((p.os === 'linux') !== (p.distribution !== null)) {
+  // 只有非 Linux 不允许带发行版。Linux 允许 distribution 为 null（/etc/os-release 读不到），
+  // 此时表示"未读到"，既不编造也不因此断连。
+  if (p.os !== 'linux' && p.distribution !== null) {
     fail('invalid_device_platform')
   }
 }

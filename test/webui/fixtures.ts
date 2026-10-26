@@ -39,16 +39,9 @@ export function fixtureDevice(id: string): DeviceSnapshot {
         last_failure: null
       }
     },
-    /** 平台是账本里的历史上报：A 有真实 Linux 发行版标识，B 从未上报。 */
+    /** 平台是设备属性：A 有真实 Linux 发行版标识，B 从未上报。 */
     platform:
-      id === 'fixture-a'
-        ? {
-            verification: 'verified',
-            observed_at: fixtureTime,
-            source: 'store',
-            value: { os: 'linux', arch: 'x64', distribution: { id: 'ubuntu', version_id: '24.04' } }
-          }
-        : { verification: 'unverified', reason_code: 'not_recorded' }
+      id === 'fixture-a' ? { os: 'linux', arch: 'x64', distribution: { id: 'ubuntu', version_id: '24.04' } } : null
   }
 }
 

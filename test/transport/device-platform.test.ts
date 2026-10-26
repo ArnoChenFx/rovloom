@@ -9,7 +9,7 @@ import { fixture, rawConnect, until } from '../transport/helpers.js'
 import { checkManagementReadReply } from '../../src/webui/validate.js'
 import { createManagementTransportProjection } from '../../src/mcp/transport-observations.js'
 import type { DeviceSnapshot } from '../../src/mcp/management.js'
-import { negotiate, WIRE_MINOR } from '../../src/wire/index.js'
+import { negotiate, validateDevicePlatform, WIRE_MINOR } from '../../src/wire/index.js'
 
 test('平台采集只取真实 os/arch 与 Linux 发行版，未知架构或非 Linux 不编造发行版', () => {
   const linux = probePlatform({ platform: 'linux', arch: 'x64' })
@@ -92,7 +92,7 @@ test(
       // 平台写入不推进 resource_revision，也不改变在线状态。
       const machine = f.store.machine(a.machine_id)
       assert.equal(machine.status, 'online')
-      // 管理面投影把账本里的上报原样交付，并标注为 store 来源的历史观测。
+      // 管理面把账本里的上报当作设备属性原样交付。
       const device: DeviceSnapshot = {
         machine_id: a.machine_id,
         name: machine.name,
@@ -102,12 +102,7 @@ test(
         observed_at: f.now,
         connection: { verification: 'unverified', reason_code: 'backend_unavailable' },
         authentication: { verification: 'unverified', reason_code: 'backend_unavailable' },
-        platform: {
-          verification: 'verified',
-          observed_at: f.now,
-          source: 'store',
-          value: f.store.devicePlatform(a.machine_id)!
-        }
+        platform: f.store.devicePlatform(a.machine_id)
       }
       const projected = createManagementTransportProjection(null, {
         mode: 'active',
@@ -116,9 +111,7 @@ test(
         stale_after_ms: 15000
       }).device(device)
       const checked = checkManagementReadReply('devices_get', projected, { machine_id: a.machine_id })
-      assert.equal(checked.platform.verification, 'verified')
-      assert(checked.platform.verification === 'verified')
-      assert.deepEqual(checked.platform.value, {
+      assert.deepEqual(checked.platform, {
         os: 'linux',
         arch: 'x64',
         distribution: { id: 'ubuntu', version_id: '24.04' }
@@ -193,6 +186,62 @@ test('未协商该能力时手工发送平台帧被 codec 拒绝，库内不留�
     } finally {
       raw.ws.close()
     }
+  } finally {
+    f.stop()
+  }
+})
+
+test('codec 接受 Linux 且无发行版（未读到 os-release），拒绝非 Linux 携带发行版', () => {
+  // Linux 读不到 /etc/os-release 时 distribution 为 null：必须合法，否则该帧发不出去。
+  assert.doesNotThrow(
+    /** 未读到发行版不是非法形状。 */ () => validateDevicePlatform({ os: 'linux', arch: 'x64', distribution: null })
+  )
+  // macOS / Windows 没有发行版概念，携带即不一致。
+  for (const os of ['darwin', 'win32'] as const) {
+    assert.throws(
+      /** 非 Linux 带发行版必须拒绝。 */ () =>
+        validateDevicePlatform({ os, arch: 'x64', distribution: { id: 'ubuntu', version_id: '24.04' } }),
+      /invalid_device_platform/
+    )
+  }
+  // Linux 带发行版仍合法。
+  assert.doesNotThrow(
+    /** Linux 读到发行版时照常接受。 */ () =>
+      validateDevicePlatform({ os: 'linux', arch: 'arm64', distribution: { id: 'debian', version_id: '12' } })
+  )
+  // 非法字符集与未知枚举仍拒绝。
+  assert.throws(
+    /** 发行版标识必须是小写受限字符集。 */ () =>
+      validateDevicePlatform({ os: 'linux', arch: 'x64', distribution: { id: '/etc/passwd', version_id: null } }),
+    /invalid_device_platform/
+  )
+  assert.throws(
+    /** 未知 os 仍拒绝。 */ () => validateDevicePlatform({ os: 'freebsd', arch: 'x64', distribution: null }),
+    /invalid_enum/
+  )
+})
+
+test('Connector 上报 Linux 且无发行版时连接保持 ready 并成功落库', { timeout: 20_000 }, async () => {
+  const f = fixture({
+    offer: { major: 2, minor: 1, capabilities: ['rpc', 'device_platform'], required: ['rpc'] }
+  })
+  try {
+    const a = f.pair('mock_platform_no_distro')
+    const client = f.connector(/** 只交付本次 fixture 凭据。 */ () => a.credential, {
+      offer: { major: 2, minor: 1, capabilities: ['rpc', 'device_platform'], required: ['rpc'] },
+      // 模拟 /etc/os-release 读不到：Linux 但无发行版标识。
+      platform: () => ({ os: 'linux', arch: 'x64', distribution: null })
+    })
+    await until(/** 连接必须保持 ready，不能因为平台帧非法而断连。 */ () => client.status().phase === 'ready')
+    // 帧确实发出且被接受：落库的是 Linux + null 发行版。
+    await until(/** 等待平台写入账本。 */ () => f.store.devicePlatform(a.machine_id) !== null)
+    assert.deepEqual(f.store.devicePlatform(a.machine_id), { os: 'linux', arch: 'x64', distribution: null })
+    // 连接没有因 invalid_device_platform 失败。
+    assert.equal(client.status().failure, undefined)
+    assert.equal(
+      f.encoded.some((frame) => frame.includes('device_platform')),
+      true
+    )
   } finally {
     f.stop()
   }

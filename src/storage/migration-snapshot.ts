@@ -46,9 +46,11 @@ export function writeMigrationSnapshot(source: DatabaseSync, destination: string
 }
 
 /**
- * 迁移前把整库副本写入固定备份目录，并按既有配额与登记表记账；任何一步失败都让迁移整体不开始。
+ * 迁移前把整库副本写入固定备份目录，并按既有配额预检；任何一步失败都让迁移整体不开始。
  * 配额判断复用运行时的 assertBudget：整库副本与目录内既有快照一起计入原备份预算。
- * 返回登记后的绝对路径，供审计与运维定位；不含库内容。
+ * 这里**不**写 backups 登记行：调用方必须在自己的迁移事务内登记，失败时才能随事务回滚，
+ * 否则失败迁移会留下永久占用备份数量配额的孤儿行。
+ * 返回副本的绝对路径，供审计与登记使用；不含库内容。
  */
 export function recordMigrationSnapshot(
   db: DatabaseSync,
@@ -74,8 +76,6 @@ export function recordMigrationSnapshot(
     65_536
   assertBudget(db, databasePath, limits, backupDirectory, false, estimate)
   writeMigrationSnapshot(db, destination)
-  // 与普通快照共用同一张登记表和同一份期限/数量清理规则，不新造一套落盘逻辑。
-  db.prepare('INSERT INTO backups VALUES(?,?,?)').run(destination, now, now + limits.backup_ttl)
   return destination
 }
 

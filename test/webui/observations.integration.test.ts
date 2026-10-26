@@ -32,8 +32,8 @@ function row(f: ReturnType<typeof realFixture>['f'], id: string): DeviceSnapshot
             value: { state, last_failure: null }
           }
         : { verification: 'unverified', reason_code: 'backend_unavailable' },
-    /** 平台只来自账本最近一次上报；测试行从不伪造它。 */
-    platform: { verification: 'unverified', reason_code: 'not_recorded' }
+    /** 平台只来自账本；测试行从不伪造它。 */
+    platform: null
   }
 }
 
