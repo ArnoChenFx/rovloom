@@ -167,12 +167,14 @@ export type CallWindow = {
   truncated: boolean
 }
 export type CallListReply = Page<CallSummary> & {
+  /** Absent on the first page; null returns to the first page; otherwise a signed cursor. */
+  previous_cursor?: string | null
   observed_at: number
   aggregate: CallAggregate
   window: CallWindow
 }
 export type CallListArguments = AdminPage & {
-  /** 可选设备范围；缺省覆盖当前管理员全部 devices_read 授权。 */
+  /** 可选设备范围；缺省覆盖当前管理员全部 calls_read 授权。 */
   machine_id?: string
   states?: readonly CallState[]
 }

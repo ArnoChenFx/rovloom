@@ -47,16 +47,66 @@ test('browser accepts first and last call pages when the aggregate covers more t
     const checked = checkPage(first, route)
     assert.equal(checked.value.calls!.items.length, 50)
     assert.equal(checked.value.calls!.aggregate.total, 61)
+    assert.equal(checked.value.calls!.previous_cursor, undefined)
     const nextRoute = { ...route, callsCursor: checked.value.calls!.next_cursor! }
     const second = checkPage(await read(nextRoute, new AbortController().signal), nextRoute)
     assert.equal(second.value.calls!.items.length, 11)
     assert.equal(second.value.calls!.aggregate.total, 61)
     assert.equal(second.value.calls!.window.sampled, 61)
     assert.equal(second.value.calls!.next_cursor, undefined)
+    assert.equal(second.value.calls!.previous_cursor, null)
+    const backRoute = { ...route, callsCursor: second.value.calls!.previous_cursor }
+    const back = checkPage(await read(backRoute, new AbortController().signal), backRoute)
+    assert.deepEqual(
+      back.value.calls!.items.map((item) => item.call_id),
+      checked.value.calls!.items.map((item) => item.call_id)
+    )
     assert.equal(
       new Set([...checked.value.calls!.items, ...second.value.calls!.items].map((item) => item.call_id)).size,
       61
     )
+  } finally {
+    f.close()
+  }
+})
+
+test('previous cursors navigate multiple call pages and retain authorization and query scope', async () => {
+  const f = storeFixture('active', (db) => {
+    for (let i = 0; i < 6; i++) {
+      addCall(db, 'call_back_' + i)
+    }
+  })
+  try {
+    const first = await f.service.management.execute('calls_list', { limit: 2 }, context())
+    const second = await f.service.management.execute('calls_list', { limit: 2, cursor: first.next_cursor }, context())
+    const third = await f.service.management.execute('calls_list', { limit: 2, cursor: second.next_cursor }, context())
+    assert.equal(second.previous_cursor, null)
+    assert.equal(typeof third.previous_cursor, 'string')
+    const cursor = third.previous_cursor!
+    const back = checkManagementReadReply(
+      'calls_list',
+      await f.service.management.execute(
+        'calls_list',
+        {
+          limit: 2,
+          cursor
+        },
+        context()
+      ),
+      { limit: 2, cursor }
+    )
+    assert.deepEqual(
+      back.items.map((item) => item.call_id),
+      second.items.map((item) => item.call_id)
+    )
+    await assert.rejects(
+      f.service.management.execute('calls_list', { limit: 2, cursor, machine_id: 'machine_a' }, context()),
+      { code: 'invalid_cursor' }
+    )
+    f.setAdmin(null)
+    await assert.rejects(f.service.management.execute('calls_list', { limit: 2, cursor }, context()), {
+      code: 'unauthenticated'
+    })
   } finally {
     f.close()
   }

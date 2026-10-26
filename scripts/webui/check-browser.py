@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 
 def main():
@@ -58,9 +58,11 @@ def main():
 
         page.goto(base + '/fixtures/')
         page.locator('.metric-card').first.wait_for()
+        expect(page.locator('.gateway').get_by_text('快照有效', exact=True)).to_have_count(1)
         # 完整设备列表只在设备页；概览只给摘要。
         page.goto(base + '/fixtures/#view=devices')
         page.locator('.device-card').first.wait_for()
+        expect(page.locator('.gateway')).to_have_count(0)
         assert page.locator('.device-card').count() == 2
         assert page.locator('.device-card img').count() == 0
         assert page.get_by_role('img', name='Rovloom', exact=True).evaluate(
@@ -76,7 +78,7 @@ def main():
         page.evaluate("window.webUiFixture.mode='stale_children'")
         page.get_by_role('button', name='刷新', exact=True).click()
         page.get_by_text('设备观测已过期', exact=True).first.wait_for()
-        assert page.get_by_text('快照有效', exact=True).count() == 1
+        expect(page.locator('.read-indicator')).to_have_attribute('data-state', 'current')
         assert page.locator('.device-card .good').count() == 0
         assert '连接观测已过期' in page.locator('.device-card').first.inner_text()
         assert '认证观测已过期' in page.locator('.device-card').first.inner_text()
@@ -87,6 +89,7 @@ def main():
 
         page.locator('.device-name').first.click()
         page.get_by_role('heading', name='Runtime providers').wait_for()
+        expect(page.locator('.gateway')).to_have_count(0)
         assert page.locator('.provider-card').count() == 3
         assert '管理 readiness：不可用' in page.locator('.provider-card').nth(1).inner_text()
         assert '未核实' in page.locator('.provider-card').nth(2).inner_text()
@@ -105,7 +108,7 @@ def main():
             page.evaluate('(mode) => { window.webUiFixture.mode=mode }', mode)
             page.get_by_role('button', name='刷新', exact=True).click()
             page.get_by_text(text, exact=False).filter(visible=True).first.wait_for()
-            assert page.get_by_text('快照有效', exact=True).count() == 1
+            expect(page.locator('.read-indicator')).to_have_attribute('data-state', 'current')
             assert page.locator('.provider-card .good').count() == 0
             if mode in ('stale_device', 'stale_connection', 'stale_auth', 'stale_children'):
                 assert page.locator('main .badges .good').count() == 0
@@ -118,7 +121,7 @@ def main():
         page.get_by_role('button', name='刷新', exact=True).click()
         page.get_by_text('管理 readiness：就绪 (ready)', exact=True).wait_for()
         page.get_by_text('连接观测已过期', exact=False).first.wait_for()
-        assert page.get_by_text('快照有效', exact=True).count() == 1
+        expect(page.locator('.read-indicator')).to_have_attribute('data-state', 'current')
         assert page.locator('.provider-card .good, main .badges .good').count() == 0
         checks.append('子观测按单调经过时间独立跨过十五秒过期边界')
 
@@ -139,7 +142,7 @@ def main():
         page.evaluate("window.webUiFixture.mode='stale_permissions'")
         page.get_by_role('button', name='刷新', exact=True).click()
         page.get_by_text('权限提示已过期，等待刷新；它不授予后端权限。', exact=True).wait_for()
-        assert page.get_by_text('快照有效', exact=True).count() == 1
+        expect(page.locator('.read-indicator')).to_have_attribute('data-state', 'current')
         assert page.get_by_text('管理 readiness：就绪 (ready)', exact=True).count() == 1
         checks.append('权限自身观测过期即失效，未到 TTL 也不能被 status 续期')
 
@@ -197,14 +200,18 @@ def main():
         page.get_by_text('已取消本次读取', exact=False).wait_for()
         page.evaluate("window.webUiFixture.mode='normal'; window.webUiFixture.release()")
         page.get_by_role('button', name='刷新', exact=True).click()
-        page.get_by_text('快照有效', exact=True).wait_for()
+        expect(page.locator('.read-indicator')).to_have_attribute('data-state', 'current')
+        expect(page.locator('.device-card .good').first).to_be_visible()
         checks.append('重复点击有界、取消后可刷新且旧响应不生效')
 
-        for mode, text in [('stale', '快照已过期'), ('empty', '你的第一台设备'), ('503', '管理读取尚不可用'),
-                           ('degraded', '存储降级')]:
+        for mode, text in [('stale', '设备观测已过期'), ('empty', '你的第一台设备'), ('503', '管理读取尚不可用'),
+                           ('degraded', '当前禁止管理写入')]:
             page.evaluate('(mode) => { window.webUiFixture.mode=mode }', mode)
             page.get_by_role('button', name='刷新', exact=True).click()
             page.get_by_text(text, exact=False).filter(visible=True).first.wait_for()
+            if mode == 'stale':
+                expect(page.locator('.read-indicator')).to_have_attribute('data-state', 'stale')
+                expect(page.locator('.device-card .good')).to_have_count(0)
             assert 'fixture-secret-never-render-this' not in page.content()
         checks.append('过期、空态、503与存储降级')
 
