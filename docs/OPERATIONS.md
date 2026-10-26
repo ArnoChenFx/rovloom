@@ -75,7 +75,7 @@ rovloom storage resume --role gateway --json
 
 | 现象 | 先看 |
 |---|---|
-| Connector 一直 `disconnected` | Gateway 的 `devices.hostname` 是否允许远端；地址 / 防火墙；Gateway 判断线约 20 秒（空闲超时） |
+| Connector 一直 `disconnected` | `connector_disconnect` 行的 `close_reason`：`transport_closed` 是 Gateway 主动关，`transport_abnormal` / `code=1006` 是网络被掐或对端无关闭帧，`handshake_timeout` 是握手无回应；再看 Gateway 的 `devices.hostname` 是否允许远端；地址 / 防火墙；Gateway 判断线约 20 秒（空闲超时） |
 | MCP 401 | Bearer 是否过期（默认 30 天，`rovloom token renew`）；代理是否保留 Authorization、MCP 会话头和 `/mcp` 路径 |
 | 调用停在 `dispatching` 很久 | 设备可能刚断网（Gateway 20 秒内发现后立即 `not_dispatched`）；已写出的调用是 `outcome_unknown`，**不会自动重发**，先核对再决定 |
 | `invalid_device_credential` | 凭据被撤销或重配：生成新码重新 join |
@@ -120,3 +120,13 @@ devices.example.com {
 AI 客户端填写 `https://mcp.example.com/mcp`；Connector 使用 `wss://devices.example.com`，管理页使用 `https://manage.example.com`。代理须保留 Authorization、MCP 会话头与原路径，并逐块转发 MCP SSE 响应；MCP 的 Bearer 与管理 API 的 Cookie / CSRF 分别核验。
 
 管理页不把浏览器 Origin 与代理内部地址强行比较。浏览器跨站元数据仍会被拒绝；读取和写入继续验证独立管理员会话，写入额外验证 CSRF，响应不开放跨站 CORS。代理头不提供管理员身份。HTTPS 请求、HTTPS Origin 或代理常用的 `X-Forwarded-Proto: https` / `Forwarded: proto=https` 会使登录 Cookie 带上 Secure；协议头仅影响 Cookie 属性，不是认证条件。
+
+### Connector 断连诊断
+
+Connector 新断开的诊断行是 `connector_disconnect`，有对端关闭码时字段为 `code=<4位> close_reason=<原因词>`，本机原因没有关闭码时只有 `close_reason=<原因词>`。晚到的关闭码使用 `connector_disconnect_update` 补报订正，不代表再次断连。相位行 `connector_transport <phase> provider_ready=<bool>` 只说明当前相位，两者可以同时出现。
+
+观察器启动时同步建立基线，订阅后首个 250 毫秒窗口里的断开照常补报。断开和订正按独立事件序号交付，共用最多 16 条的事件日志；同一窗口里的事件按时间顺序打印，超出容量只保留最新事件。累计断连次数只在新断开时增加。原因词与白名单见[通道文档](TRANSPORT.md#断线与重连)。
+
+已断开的 Connector 上重复调用断开（例如来源重建）不会再记一次断开，也不会推迟重连。停止已经没有 socket 的进程也不会虚增断连。
+
+`connector_observation unavailable` 表示状态取样暂时失败，不能据此推断设备断开；观察器会继续取样并在恢复后重新报告相位。
