@@ -111,7 +111,10 @@ export function toolDefinition(name: ToolName, language: CliLanguage = 'en'): To
       type: 'object',
       properties: {
         data: { type: 'object' },
-        gateway_error: object({ code: { type: 'string' }, outcome: { const: 'not_dispatched' } }, ['code']),
+        gateway_error: object(
+          { code: { type: 'string' }, outcome: { const: 'not_dispatched' }, details: { type: 'object' } },
+          ['code']
+        ),
         delivery: { type: 'object' }
       },
       additionalProperties: false,

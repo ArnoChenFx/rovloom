@@ -29,7 +29,10 @@ export type LuvusLocalLimits = Readonly<{
   response_bytes: number
   stderr_bytes: number
   discovery_bytes: number
+  // endpoint 发现和 schema 读取的准备预算；旧显式值仍同时收紧 RPC。
   timeout_ms: number
+  // 整个 RPC 的本机上限；实际等待还受原登记 deadline 与取消约束。
+  rpc_timeout_ms: number
   attempts: number
 }>
 export type EndpointIdentity = Readonly<{

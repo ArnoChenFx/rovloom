@@ -2,14 +2,18 @@
 import { GatewayError } from '../contracts.js'
 import { createNativeValidator } from '../native-contract/index.js'
 import type { CompiledContract } from '../native-contract/index.js'
-import { luvusOperationDescriptor, luvusOperationValidation } from './luvus-operations.js'
+import { luvusOperationDescriptor, luvusOperationValidation, validateLuvusOperationParams } from './luvus-operations.js'
+import { luvusParameterDiagnostic } from './luvus-parameter-help.js'
+import { LuvusAdapterError } from '../connector/luvus/types.js'
 
 export class NativeRequestPreflightError extends GatewayError {
   readonly outcome = 'not_dispatched' as const
+  readonly parameterDiagnostic: ReturnType<typeof luvusParameterDiagnostic>
 
-  /** 仅由登记前 schema 拒绝产生固定错误，不携带参数、路径或原生输出。 */
-  constructor() {
+  /** 仅由登记前参数拒绝产生固定错误，不携带参数值、本机路径或原生输出。 */
+  constructor(request?: unknown) {
     super('native_request_invalid')
+    this.parameterDiagnostic = luvusParameterDiagnostic(request)
   }
 }
 
@@ -20,9 +24,21 @@ export function createLuvusRequestPreflight(contract: CompiledContract): (reques
     const checked = validator.checkRequestShape(request)
     if (!checked.ok) {
       if (checked.error.code === 'native_request_invalid') {
-        throw new NativeRequestPreflightError()
+        throw new NativeRequestPreflightError(request)
       }
       throw new GatewayError(checked.error.code)
+    }
+    // generic 原生 schema 之后仍检查 Rovloom 已审核子集，错误在登记前返回相同的安全字段诊断。
+    const native = request as { method: string; params?: unknown }
+    if (luvusOperationDescriptor(native.method)) {
+      try {
+        validateLuvusOperationParams(native.method, native.params)
+      } catch (error) {
+        if (error instanceof LuvusAdapterError && error.code === 'luvus_operation_params_invalid') {
+          throw new NativeRequestPreflightError(request)
+        }
+        throw error
+      }
     }
   }
 }

@@ -57,6 +57,7 @@ Gateway 会收到 Connector 报告的开关状态，在开关关闭或未知时�
 ## Luvus `pane.run`
 
 `pane.run` 接受 `{pane, command}`，必须显式指定目标 pane，不接受 `cwd`、`env` 或 `argv`。命令写入该 pane，输出用 `pane.read` 读取。
+它不是结构化进程执行接口：`{"type":"ok"}` 只确认输入提交，不包含命令 stdout、stderr 或退出码，不能据此判断命令完成。
 
 ## 结果语义
 
