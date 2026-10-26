@@ -1,4 +1,4 @@
-// 通配绑定即明文局域网放行：lan 字段已删除，hostname 是唯一开关；回环绑定只接纳回环 Host。
+// 用户配置没有 lan 字段；hostname 决定监听网卡，管理页不以监听地址限制代理域名。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { configDocument, configTemplate, parseConfig } from '../../src/cli/config.js'

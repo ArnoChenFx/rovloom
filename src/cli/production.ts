@@ -29,7 +29,7 @@ import type { CliSetup } from './setup-runtime.js'
 import { boundedJson, object, fields, WIRE_MAJOR, WIRE_MINOR } from '../wire/index.js'
 import { readRuntimeConfig } from './runtime-config.js'
 import { migrateSetupLuvusGrant } from './setup-luvus-grant.js'
-import { canonicalLoopbackHost, isWildcardHostname } from '../mcp/listen.js'
+import { canonicalLoopbackHost } from '../mcp/listen.js'
 import { createManagementResources } from './management-resources.js'
 import { loadProductManagementAssets } from './management-assets.js'
 import { openProtectedManagementSource } from './management-source.js'
@@ -189,13 +189,7 @@ function managedCaller(config: GatewayConfig, administrator?: GatewayIdentitySou
   // 本机 caller 的资源地址用规范回环地址，不写通配绑定地址。
   const hostname = canonicalLoopbackHost(config.mcp_hostname)
   return {
-    ...openCallerSource(
-      path,
-      new URL(`http://${hostname}:${config.mcp_port}/mcp`).href,
-      administrator,
-      config.mcp_public_url,
-      isWildcardHostname(config.mcp_hostname)
-    ),
+    ...openCallerSource(path, new URL(`http://${hostname}:${config.mcp_port}/mcp`).href, administrator),
     setupRequired: false
   }
 }
@@ -352,7 +346,6 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
           ? {
               port: managementHost.port,
               hostname: config.management_hostname,
-              lan: config.management_hostname === '0.0.0.0',
               listening: managementHost.listening?.bind(managementHost),
               pairingPolicy: managementHost.pairingPolicy?.bind(managementHost),
               providerEnable: managementHost.providerEnable?.bind(managementHost),

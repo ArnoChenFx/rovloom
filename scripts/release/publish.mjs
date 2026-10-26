@@ -7,9 +7,9 @@ import { assemble, checksumsName, manifestName, releaseContext, repository } fro
 import { publishNpm } from './registry.mjs'
 import { findRelease, githubClient, verifyRemoteTag } from './github.mjs'
 
-/** 只生成公开版本和提交说明，固定标记用于阻止借用不属于此契约的已有 Release。 */
+/** 生成公开版本、升级提示和提交说明，固定标记用于阻止借用不属于此契约的已有 Release。 */
 function releaseBody(context) {
-  return `Rovloom ${context.version}\n\nCommit: ${context.commit}\n\nBinaries are not publisher-signed or notarized. Verify release-manifest.json and SHA256SUMS.\n\nWith Bun installed you can also run the npm package from this release: \`bunx --package <url of rovloom-${context.version}.tgz> rovloom --version\`.\n\n<!-- rovloom-release:1 ${context.tag} ${context.commit} -->`
+  return `Rovloom ${context.version}\n\nCommit: ${context.commit}\n\n**Upgrade note:** Remove \`mcp.public_url\` from existing Gateway configuration before upgrading. Keeping this removed field causes \`config check\` and Gateway startup to fail with \`invalid_config\`; the old value is not ignored. Set the proxy HTTPS \`/mcp\` address in the AI client.\n\nBinaries are not publisher-signed or notarized. Verify release-manifest.json and SHA256SUMS.\n\nWith Bun installed you can also run the npm package from this release: \`bunx --package <url of rovloom-${context.version}.tgz> rovloom --version\`.\n\n<!-- rovloom-release:1 ${context.tag} ${context.commit} -->`
 }
 
 /** 在每次恢复和公开前核对资产集合、长度和 GitHub 存储端摘要；不允许同名覆盖。 */

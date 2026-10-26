@@ -16,7 +16,7 @@ rovloom config init connector --provider herdr
 rovloom config init gateway --container
 ```
 
-`--provider` accepts `luvus`, `herdr` or `mixed` for Connector only. `--container` applies to Gateway only and explicitly binds MCP, devices and management to `0.0.0.0`; keep the maintained Compose MCP / management mappings on host loopback. Configure `public_url` separately for proxied clients. Without this flag, Gateway keeps the normal defaults (wildcard MCP and device listeners, loopback management). `--config` chooses the configuration file, while the default state path still belongs to the current user's home.
+`--provider` accepts `luvus`, `herdr` or `mixed` for Connector only. `--container` applies to Gateway only and explicitly binds MCP, devices and management to `0.0.0.0`; keep the maintained Compose MCP / management mappings on host loopback. MCP, the management UI and its APIs support reverse proxies without an external URL setting. Without this flag, Gateway keeps the normal defaults (wildcard MCP and device listeners, loopback management). `--config` chooses the configuration file, while the default state path still belongs to the current user's home.
 
 Initialization does not start services, create device identities or authorize native access. It uses the same exclusive first-file publication as role startup. Existing files are never overwritten; an explicit provider / listener request that conflicts with them returns `config_exists`. To edit an existing deployment, first review its configuration and pairing state, then use `config check` before restarting.
 
@@ -63,16 +63,15 @@ Setting an address does not pair the device or install a native provider.
 | `data` | Object, required | Contains only `directory`. |
 | `data.directory` | Normalized absolute path string, ≤4096 characters, required | `<home>/.local/share/rovloom/<role>`; separate private data for each role. |
 | Gateway `mcp` | Object, required | Contains `hostname`, `port`; Streamable HTTP `/mcp`. |
-| `mcp.hostname` | String, required | `127.0.0.1`; also accepts `::1`, `0.0.0.0`, `::`. A wildcard bind listens on every interface over plain HTTP and accepts any `Host` on the fixed `/mcp` path (Bearer still required); a loopback bind accepts only loopback addressing. Keep a firewall or TLS reverse proxy in front of wildcard listeners; any other Host needs `public_url`. |
+| `mcp.hostname` | String, required | Accepts `127.0.0.1`, `::1`, `0.0.0.0`, `::`. It selects the listening interface, not allowed proxy domains. MCP accepts HTTP/HTTPS proxy addresses and preserved or rewritten Host headers on `/mcp`; every request still requires its Bearer. |
 | `mcp.port` | Integer 1–65535, required | `9444`. |
-| `mcp.public_url` | String, optional | Trusted external address behind a reverse proxy / TLS terminator, exactly `https://host[:port]/mcp` (no credentials, query or other path). When set, the Gateway also accepts requests whose `Host` is that host (and its CORS origin); every other `Host` is still rejected, and forwarded headers are never trusted. The listener itself stays on loopback; the Bearer is still required. |
 | Gateway `devices` | Object, required | Contains `hostname`, `port`; WS `/connector`. |
 | `devices.hostname` | String, required | `127.0.0.1`; also `::1`, `0.0.0.0`, `::`. A wildcard bind accepts remote devices. |
 | `devices.port` | Integer 1–65535, required | `9443`. |
 | Gateway `management` | Object, required | Contains `enabled`, `hostname` and `port`; local HTTP management page. |
 | `management.enabled` | Boolean, required | `true`; `false` disables this listener. Enabling it grants no administrator identity. |
 | `management.port` | Integer 1–65535, required even when disabled | `9445`. |
-| `management.hostname` | String, optional, written by default | `127.0.0.1`; also accepts `0.0.0.0` for LAN access. A wildcard bind accepts any `Host` over plain HTTP (cookies are `HttpOnly`/`SameSite=Strict` but not `Secure`; cross-site requests are still refused by the same-origin checks); a loopback bind only accepts loopback addressing. Serve the page over a TLS reverse proxy if it leaves a trusted LAN. |
+| `management.hostname` | String, optional, written by default | `127.0.0.1`; also accepts `0.0.0.0` for LAN access. The bind controls the listening interface, not a domain whitelist. Management supports HTTP/HTTPS reverse proxies that preserve or rewrite `Host`, without an external URL setting. Login, session cookies and CSRF remain required; browser cross-site requests are refused. HTTPS is detected from the request, browser Origin, `X-Forwarded-Proto` or `Forwarded` to add `Secure` to cookies. |
 | Connector `gateway` | Object, required | Contains only `url`. |
 | `gateway.url` | String, required | `""` while setup is pending; otherwise WS/WSS origin, ≤2048 characters, e.g. `ws://192.0.2.10:9443` or `wss://gateway.example`. No credentials/query/fragment/path except optional trailing `/`. Product selects `/connector`. |
 | Connector `allow_terminal_execution` | Boolean, optional | `false`, also when omitted. Only literal `true` enables direct terminal input and custom launch/restore commands through the existing local guard. Edit this single user file and restart Connector; it does not change installation settings or caller/local grants. |
@@ -221,6 +220,17 @@ check caller credentials, TLS trust, native binaries or a model connection.
 Gateway uses ordinary HTTP/WS for local/trusted-network access. Public TLS belongs
 to an external standard HTTPS/WSS reverse proxy. Connector WSS always uses system
 certificate validation. There is no custom CA or skip-verification option.
+
+MCP, the management UI and management APIs accept reverse proxies that preserve or
+rewrite Host, with HTTPS outside and HTTP upstream. No public URL, allowed-domain
+or trusted-proxy configuration is required. **Before upgrading, remove the retired
+`mcp.public_url` field from older configuration files. Leaving it present causes
+`config check` and Gateway startup to fail with `invalid_config`; it is not ignored.**
+Configure the external HTTPS `/mcp` URL in
+the AI client; the local endpoint printed by Gateway remains useful for local clients.
+Preserve `/mcp`, `/admin/v1/…`, Authorization and MCP session headers. Forward MCP
+SSE responses without buffering. Management requests still require administrator
+cookies and write CSRF; every MCP request still requires its current Bearer.
 
 For LAN clients without a proxy, set `mcp.hostname` / `management.hostname` to a
 wildcard address. Those listeners then accept LAN hosts over plain HTTP — the

@@ -31,7 +31,7 @@ test(
           'Basic ' +
             Buffer.from(f.lease.caller.principal_id + ':SYNTHETIC_WRONG_PROOF_'.padEnd(64, 'w')).toString('base64')
         ),
-        f.request(undefined, { headers: { origin: 'http://untrusted.invalid' } }),
+        f.request(undefined, { headers: { origin: 'http://untrusted.invalid', 'sec-fetch-site': 'cross-site' } }),
         f.request(undefined, { headers: { host: 'untrusted.invalid' } }),
         f.request(undefined, { headers: { 'sec-fetch-site': 'cross-site' } }),
         new Request(f.origin + '/?proof=SYNTHETIC_PRIVATE', { headers: { host: new URL(f.origin).host } })
@@ -287,17 +287,14 @@ test(
 )
 
 test(
-  '通配管理页绑定接受局域网 Host 的同源登录，跨站 Origin 与回环绑定时不变',
+  '回环与通配绑定都接受代理域名登录，跨站浏览器请求仍拒绝',
   /** resolveLease 的 Origin/Host 核对按管理页绑定逐请求放宽，其余边界保持。 */ async () => {
     if (process.platform !== 'linux') {
       return
     }
     const f = await managementSourceFixture()
     const lanConfig = { ...f.config, management_hostname: '0.0.0.0' as const } as typeof f.config
-    for (const [config, lan] of [
-      [f.config, false],
-      [lanConfig, true]
-    ] as const) {
+    for (const config of [f.config, lanConfig]) {
       const source = openProtectedManagementSource(config, 'management', {
         assets: f.assets
       })
@@ -309,14 +306,15 @@ test(
         })
         assert.deepEqual(
           await source.management.resolveLease(lanRequest, signal),
-          lan ? f.lease : null,
-          lan ? 'LAN 选择下局域网 Host 登录成功' : '未选择时局域网 Host 仍拒绝'
+          f.lease,
+          '监听地址不限制反向代理使用的 Host'
         )
         assert.deepEqual(await source.management.resolveLease(f.request(), signal), f.lease, '回环登录不变')
         const cross = new Request(`http://${lanHost}/`, {
           headers: {
             host: lanHost,
             origin: 'http://evil.example',
+            'sec-fetch-site': 'cross-site',
             authorization: f.request().headers.get('authorization')!
           }
         })

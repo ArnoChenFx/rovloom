@@ -6,7 +6,7 @@
 
 | 角色 | 默认监听 | 说明 |
 |---|---|---|
-| Gateway · MCP | `127.0.0.1:9444`（`/mcp`） | 只在回环；远程客户端经反向代理 / 隧道（`mcp.public_url`，https） |
+| Gateway · MCP | `127.0.0.1:9444`（`/mcp`） | 远程客户端经 HTTPS 反向代理 / 隧道，无需公网地址配置 |
 | Gateway · 设备通道 | `127.0.0.1:9443`（WS `/connector`） | 要接受别的机器的 Connector 就改 `devices.hostname`（`0.0.0.0` / `::`），公网用 WSS 代理 |
 | Gateway · 管理页 | `127.0.0.1:9445` | 固定回环，HTTP Basic 登录（见 §4） |
 | Connector | 无监听 | 只主动出站连 Gateway；Luvus / Herdr 留在本机 |
@@ -29,6 +29,7 @@ Luvus raw 授权与 Gateway readiness 的修复可先只升级 Gateway，沿用�
 
 - 安装：`install.sh` / `install.ps1` 只安装单文件二进制并核对 `SHA256SUMS`，不建配置、不起服务（[快速开始](QUICK-START-zh.md)）。Docker 只用于 Linux Gateway（[Docker 部署](DOCKER-zh.md)）。
 - 升级：先正常停 Connector 再停 Gateway，替换二进制（重新运行安装脚本，或 `docker compose pull && docker compose up -d`），再按原样启动。配置与数据沿用。脚本只安装官方 latest 稳定版；预发布版本从 Release 页面手动下载。
+- **反向代理配置变更：升级前删除 Gateway 配置中的 `mcp.public_url`。保留该字段会导致 `config check` 和 Gateway 启动报 `invalid_config`，不会继续兼容或忽略旧值。** AI 客户端仍直接填写代理的 HTTPS `/mcp` 地址。
 - 没有自更新。启动时 v9 库会自动升级到 v10：先在真实状态目录同级的 `<state>.backups` 里写一份整库迁移前副本（按原备份期限与两份上限过期），再在单个事务内加列并推进版本，失败整体回滚并保持 v9。高于当前版本的库仍拒绝启动（`unsupported_database_version`）并保持库文件字节不变；比 v9 更旧的库（v1-v8）不在迁移范围内，同样拒绝。详见[存储与数据保留](STORAGE.md#数据库与文件)。
 
 ## 3. 开机服务
@@ -75,7 +76,7 @@ rovloom storage resume --role gateway --json
 | 现象 | 先看 |
 |---|---|
 | Connector 一直 `disconnected` | `connector_disconnect` 行的 `close_reason`：`transport_closed` 是 Gateway 主动关，`transport_abnormal` / `code=1006` 是网络被掐或对端无关闭帧，`handshake_timeout` 是握手无回应；再看 Gateway 的 `devices.hostname` 是否允许远端；地址 / 防火墙；Gateway 判断线约 20 秒（空闲超时） |
-| MCP 401 | Bearer 是否过期（默认 30 天，`rovloom token renew`）；`/mcp` URL 是否与 `mcp.public_url` 一致 |
+| MCP 401 | Bearer 是否过期（默认 30 天，`rovloom token renew`）；代理是否保留 Authorization、MCP 会话头和 `/mcp` 路径 |
 | 调用停在 `dispatching` 很久 | 设备可能刚断网（Gateway 20 秒内发现后立即 `not_dispatched`）；已写出的调用是 `outcome_unknown`，**不会自动重发**，先核对再决定 |
 | `invalid_device_credential` | 凭据被撤销或重配：生成新码重新 join |
 | `configuration_required` | 需要真实本地终端完成配对 / 批准；不要删数据后重登记，结果不确定时保留原状态 |
@@ -93,6 +94,32 @@ rovloom storage resume --role gateway --json
 Connector 发送墓碑保留至首次登记的执行 deadline（最长 10 分钟），到期后随下一次 claim 在事务内回收。当前发送账本 schema v2 仅保存 ID、32 字节绑定摘要和固定 deadline，旧 schema 拒绝打开，不自动清空或转换。Gateway 的 30 天调用 key 去重窗口不变。
 
 本地 `connector_transport` 观测中 `reason=claim_capacity` / `connector_attempt_capacity` 的 `capacity` 区分 `claim_entries`、`claim_bytes`、`attempt_entries`、`attempt_bytes`。`reclaim_at` 是已知最早回收时间（Unix 毫秒），不是重试授权。字节满额报告 `null`，需检查磁盘和配置预算。不要删除账本、回调系统时间、重发旧 attempt 或自动换 key 重做写入；已接收后断连的调用可能保持 `outcome_unknown`，应先核对原生结果。
+
+### MCP、管理页与 API 反向代理
+
+MCP 的 `/mcp` 反向代理到 9444，管理站点与 `/admin/v1/…` API 反向代理到 9445，设备 WebSocket 与配对入口反向代理到 9443。无需公网 URL、域名白名单或可信代理 IP 配置。支持 Nginx、Caddy、Traefik 等代理，外部 HTTPS 与内部 HTTP、任意域名和端口、保留或改写 Host 均可。
+
+Caddy 示例：
+
+```caddyfile
+mcp.example.com {
+    reverse_proxy 127.0.0.1:9444 {
+        flush_interval -1
+    }
+}
+
+manage.example.com {
+    reverse_proxy 127.0.0.1:9445
+}
+
+devices.example.com {
+    reverse_proxy 127.0.0.1:9443
+}
+```
+
+AI 客户端填写 `https://mcp.example.com/mcp`；Connector 使用 `wss://devices.example.com`，管理页使用 `https://manage.example.com`。代理须保留 Authorization、MCP 会话头与原路径，并逐块转发 MCP SSE 响应；MCP 的 Bearer 与管理 API 的 Cookie / CSRF 分别核验。
+
+管理页不把浏览器 Origin 与代理内部地址强行比较。浏览器跨站元数据仍会被拒绝；读取和写入继续验证独立管理员会话，写入额外验证 CSRF，响应不开放跨站 CORS。代理头不提供管理员身份。HTTPS 请求、HTTPS Origin 或代理常用的 `X-Forwarded-Proto: https` / `Forwarded: proto=https` 会使登录 Cookie 带上 Secure；协议头仅影响 Cookie 属性，不是认证条件。
 
 ### Connector 断连诊断
 

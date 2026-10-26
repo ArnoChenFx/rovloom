@@ -12,8 +12,6 @@ export type GatewayConfig = Readonly<{
   mcp: 'http'
   mcp_hostname: '127.0.0.1' | '::1' | '0.0.0.0' | '::'
   mcp_port: number
-  // 反向代理 / TLS 终止后的对外 MCP 地址（https://host[:port]/mcp）；缺省只接受回环地址。
-  mcp_public_url?: string
   authentication_ref: string
   device_hostname: '127.0.0.1' | '::1' | '0.0.0.0' | '::'
   device_port: number
@@ -138,32 +136,6 @@ function gatewayUrl(value: unknown): value is string {
   }
 }
 
-// 受信 public_url：https 无凭据 origin + 固定 /mcp 路径，不接受查询、片段或其它路径。
-export function publicMcpUrl(value: unknown): value is string {
-  if (
-    typeof value !== 'string' ||
-    value.length > 2048 ||
-    Array.from(value).some(/* 拒绝空白和控制字符。 */ (char) => char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127)
-  ) {
-    return false
-  }
-  try {
-    const url = new URL(value)
-    return (
-      url.protocol === 'https:' &&
-      !!url.hostname &&
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      !url.hash &&
-      url.pathname === '/mcp' &&
-      value === url.origin + '/mcp'
-    )
-  } catch {
-    return false
-  }
-}
-
 // 严格核对单份用户配置的功能分组；旧扁平字段、ref、TLS/CA路径及运行时来源均不作为用户输入。
 export function parseConfig(value: unknown, platform: NodeJS.Platform = process.platform): RoleConfig {
   let input: Record<string, unknown>
@@ -192,19 +164,15 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
       }
       return raw as number
     }
-    const listener = /* 监听地址只接纳回环与通配地址；通配绑定即接受任意 Host 的明文同源访问，回环仅回环寻址。 */ (
-      raw: unknown,
-      optional: string[] = []
-    ) => {
-      const row = exact(raw, ['hostname', 'port'], optional)
+    const listener = /* hostname 仅决定监听网卡；HTTP 代理域名无需额外配置。 */ (raw: unknown) => {
+      const row = exact(raw, ['hostname', 'port'])
       const hosts = ['127.0.0.1', '::1', '0.0.0.0', '::']
       if (!hosts.includes(row.hostname as string)) {
         return fail()
       }
       return {
         hostname: row.hostname as GatewayConfig['device_hostname'],
-        port: port(row.port),
-        public_url: row.public_url as string | undefined
+        port: port(row.port)
       }
     }
     if (input.schema_version !== 1 || !['gateway', 'connector'].includes(input.role as string)) {
@@ -216,10 +184,7 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
     }
     if (input.role === 'gateway') {
       exact(input, ['schema_version', 'role', 'data', 'mcp', 'devices', 'management'])
-      const mcp = listener(input.mcp, ['public_url'])
-      if (mcp.public_url !== undefined && !publicMcpUrl(mcp.public_url)) {
-        return fail()
-      }
+      const mcp = listener(input.mcp)
       const devices = listener(input.devices)
       const management = exact(input.management, ['enabled', 'port'], ['hostname'])
       if (typeof management.enabled !== 'boolean') {
@@ -243,7 +208,6 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
         mcp: 'http',
         mcp_hostname: mcp.hostname as GatewayConfig['mcp_hostname'],
         mcp_port: mcp.port,
-        ...(mcp.public_url !== undefined ? { mcp_public_url: mcp.public_url as string } : {}),
         device_hostname: devices.hostname,
         device_port: devices.port,
         management_enabled: management.enabled,
@@ -328,8 +292,7 @@ export function configDocument(config: RoleConfig): Record<string, unknown> {
         ...common,
         mcp: {
           hostname: config.mcp_hostname,
-          port: config.mcp_port,
-          ...(config.mcp_public_url !== undefined ? { public_url: config.mcp_public_url } : {})
+          port: config.mcp_port
         },
         devices: { hostname: config.device_hostname, port: config.device_port },
         management: {

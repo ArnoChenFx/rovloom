@@ -318,25 +318,33 @@ test('token CLI manages the registry file and the local client credential end to
   }
 })
 
-test('caller source authenticates requests that arrive through the trusted public host only', () => {
-  const root = mkdtempSync(join(tmpdir(), 'rovloom-public-auth-'))
+test('caller source accepts proxy URLs without external address settings; Bearer and local registry binding remain required', () => {
+  const root = mkdtempSync(join(tmpdir(), 'rovloom-proxy-auth-'))
   try {
     const path = join(root, 'callers.json')
     const token = 'c'.repeat(43)
-    writeFileSync(path, JSON.stringify(registry(token, Date.now() - 1000)), { mode: 0o600 })
-    const bearer = { authorization: `Bearer ${token}` }
-    const call = (source: ReturnType<typeof openCallerSource>, url: string) =>
-      source.authentication.authenticate(new Request(url, { headers: bearer }), new AbortController().signal)
-    const plain = openCallerSource(path, resource)
-    const proxied = openCallerSource(path, resource, undefined, 'https://rovloom.example.com/mcp')
-    assert.equal(call(plain, 'http://rovloom.example.com/mcp'), null)
-    assert.deepEqual(call(proxied, 'http://rovloom.example.com/mcp'), { principal_id: 'owner' })
-    assert.deepEqual(call(proxied, resource), { principal_id: 'owner' })
-    assert.equal(call(proxied, 'http://evil.example.com/mcp'), null)
-    assert.equal(call(proxied, 'http://rovloom.example.com/other'), null)
-    assert.equal(call(proxied, 'http://rovloom.example.com/mcp?x=1'), null)
-    plain.close()
-    proxied.close()
+    const base = registry(token, Date.now() - 1000)
+    writeFileSync(path, JSON.stringify(base), { mode: 0o600 })
+    const source = openCallerSource(path, resource)
+    const call = (url: string, proof = token) =>
+      source.authentication.authenticate(
+        new Request(url, { headers: { authorization: `Bearer ${proof}` } }),
+        new AbortController().signal
+      )
+    try {
+      for (const url of [resource, 'http://public.example/mcp', 'https://other.example:8443/mcp']) {
+        assert.deepEqual(call(url), { principal_id: 'owner' })
+        assert.equal(call(url, 'wrong'.repeat(9)), null)
+      }
+      for (const url of ['http://public.example/other', 'http://public.example/mcp?x=1']) {
+        assert.equal(call(url), null)
+      }
+      writeFileSync(path, JSON.stringify(revokeCaller(base, 'owner')))
+      assert.equal(call('https://public.example/mcp'), null)
+      assert.throws(() => openCallerSource(path, resource + '/other'))
+    } finally {
+      source.close()
+    }
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

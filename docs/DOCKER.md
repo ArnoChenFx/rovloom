@@ -43,10 +43,10 @@ Since the container image sets `ROVLOOM_CONTAINER=1`, this is also what the defa
 generates on first startup automatically — no extra subcommand is needed.
 Authentication and same-origin checks still apply. Existing configuration is preserved; an older configuration
 with different listeners or management LAN settings returns `config_exists`. Use the editing procedure below to update it.
-Configure MCP LAN / `public_url` settings separately for the actual client address. Compose publishes:
+MCP and management APIs support reverse proxies without an external URL setting. Compose publishes:
 
 - `9443` (Connector device channel) on all host interfaces, so Connectors on other machines can reach it. Put a TLS reverse proxy in front of anything outside a trusted network, and restrict it with the host firewall.
-- `9444` (MCP) and `9445` (management page) **only on the host's loopback** (`127.0.0.1`). Remote MCP clients go through a reverse proxy on the host that forwards to `127.0.0.1:9444`, with `mcp.public_url` set (see [Network access](CONFIGURATION.md#network-access)). Use the SSH tunnel below for remote management access.
+- `9444` (MCP) and `9445` (management page) **only on the host's loopback** (`127.0.0.1`). Remote MCP clients go through a reverse proxy on the host that forwards to `127.0.0.1:9444`, without additional address configuration (see [Network access](CONFIGURATION.md#network-access)). Use the SSH tunnel below for remote management access.
 
 To open the management page directly through the host IP on a trusted LAN, change its Compose port mapping to,
 for example, `"192.168.11.200:9445:9445"` (replace the IP with the host's LAN address), then run `docker compose up -d`.

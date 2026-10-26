@@ -10,7 +10,6 @@ import { cliMessages, formatMessage, type CliLanguage } from './messages.js'
 import { serviceDiagnostic } from './service-output.js'
 import { readOrCreateRoleConfig } from './first-config.js'
 import { readRuntimeConfig } from './runtime-config.js'
-import { isWildcardHostname } from '../mcp/listen.js'
 import {
   CLI_ERROR_CODES,
   CliCancelled,
@@ -348,8 +347,6 @@ export async function runCli(
           authentication: gateway.authentication,
           hostname: config.mcp_hostname,
           port: config.mcp_port,
-          ...(config.mcp_public_url ? { publicUrl: config.mcp_public_url } : {}),
-          lan: isWildcardHostname(config.mcp_hostname),
           ...(io.language ? { language: io.language } : {}),
           diagnostic: /* 只把受限诊断码写入stderr，不输出凭据、URL或协议正文。 */ (code) => io.stderr.write(code + '\n')
         })

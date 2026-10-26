@@ -1,12 +1,8 @@
 // 在既有管理读桥旁组合受信写 handler；不启动 listener、不建立登录或会话产品。
+import { managementRequestOrigin } from './http-origin.js'
 import { parseJson } from '../wire/index.js'
 import type { ManagementArguments, ManagementOperation, AdminContext } from '../mcp/management.js'
-import {
-  createManagementReadHandler,
-  lanAwareOrigin,
-  type ManagementHttpOptions,
-  type ManagementHttpIdentity
-} from './read-http.js'
+import { createManagementReadHandler, type ManagementHttpOptions, type ManagementHttpIdentity } from './read-http.js'
 import { ManagementServiceError } from './write-service.js'
 
 export type ManagementWriteHttpOptions = ManagementHttpOptions & {
@@ -73,8 +69,6 @@ export function createManagementHandler(options: ManagementWriteHttpOptions) {
     throw new Error('management_csrf_required')
   }
   const reads = createManagementReadHandler(options)
-  /** 回环始终按固定来源；显式 LAN 时按本次请求的 Host 推导同源来源，跨站 Origin 仍被拒绝。 */
-  const expected = (request: Request): string | null => lanAwareOrigin(request, options.origin, options.lan === true)
   const pending = new Set<AbortController>()
   let stopped = false
   let tokens = 16
@@ -179,8 +173,8 @@ export function createManagementHandler(options: ManagementWriteHttpOptions) {
         request.url.length > 2048 ||
         size > 16_384 ||
         count > 48 ||
-        url.origin !== expected(request) ||
-        request.headers.get('origin') !== url.origin ||
+        managementRequestOrigin(request) === null ||
+        !request.headers.has('origin') ||
         url.username ||
         url.password ||
         url.search ||
