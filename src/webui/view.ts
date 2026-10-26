@@ -446,14 +446,13 @@ function callStateTone(state: keyof typeof callStateNames): string {
 /** 水平条只按本页最大计数归一；数值始终以文本给出，不依赖颜色读数。 */
 function distributionRows(
   title: MessageKey,
-  note: MessageKey,
   rows: readonly { label: string; count: number; tone?: string }[],
   freshness: Freshness
 ): HTMLElement {
   const { t } = freshness.i18n
   const section = node('section', '', 'call-distribution')
   const header = node('div', '', 'distribution-heading')
-  header.append(node('h3', t(title)), node('span', t(note), 'muted'))
+  header.append(node('h3', t(title)))
   section.append(header)
   const max = Math.max(1, ...rows.map((row) => row.count))
   if (!rows.length) {
@@ -483,7 +482,7 @@ function stateDistribution(aggregate: CallAggregate, freshness: Freshness): HTML
   const { t } = freshness.i18n
   const section = node('section', '', 'call-distribution call-states')
   const header = node('div', '', 'distribution-heading')
-  header.append(node('h3', t('calls.distribution')), node('span', t('calls.distributionNote'), 'muted'))
+  header.append(node('h3', t('calls.distribution')))
   section.append(header)
   if (!aggregate.total) {
     section.append(node('p', t('calls.noData'), 'muted'))
@@ -526,16 +525,41 @@ function stateDistribution(aggregate: CallAggregate, freshness: Freshness): HTML
   return section
 }
 
+/** Backward links remain available even if the current live page has become empty. */
+function callPagination(calls: ManagementReply['calls_list'], i18n: Localizer): HTMLElement | null {
+  const { t } = i18n
+  const pagination = node('nav', '', 'call-pagination')
+  pagination.setAttribute('aria-label', t('calls.pagination'))
+  for (const [cursor, label, rel] of [
+    [calls.previous_cursor, 'calls.previous', 'prev'],
+    [calls.next_cursor, 'calls.next', 'next']
+  ] as const) {
+    if (cursor === undefined) {
+      continue
+    }
+    const link = node('a', t(label), 'button-link')
+    link.rel = rel
+    link.href = routeHref({
+      machineId: null,
+      cursor: null,
+      providerCursor: null,
+      callsCursor: cursor,
+      section: 'calls'
+    })
+    pagination.append(link)
+  }
+  return pagination.childNodes.length ? pagination : null
+}
+
 /** 调用页只使用共享调用窗口 DTO；正文、凭据与未授权设备不在此构造。 */
 function callsPage(page: PageView, freshness: Freshness, route: PageRoute, filter: CallFilter): PageSection {
   const { i18n } = freshness
   const { t } = i18n
   const heading = node('header', '', 'page-heading')
   const copy = node('div', '', 'heading-copy')
-  copy.append(node('p', t('calls.eyebrow'), 'eyebrow'))
-  copy.append(node('h1', t('calls.title')), node('p', t('calls.description'), 'muted'))
+  copy.append(node('h1', t('calls.title')))
   heading.append(copy)
-  const section = node('section', '', 'devices-section calls-section')
+  const section = node('section', '', 'calls-section')
   if (page.callsProblem !== null) {
     section.append(
       node('p', page.callsProblem === 'forbidden' ? t('calls.forbidden') : t('calls.unavailable'), 'notice warning')
@@ -557,34 +581,22 @@ function callsPage(page: PageView, freshness: Freshness, route: PageRoute, filte
     .reduce((sum, row) => sum + row.count, 0)
   const metrics = node('section', '', 'overview-metrics call-metrics')
   metrics.setAttribute('aria-label', t('calls.title'))
-  for (const [label, note, value, icon] of [
-    ['calls.total', 'calls.totalNote', String(aggregate.total), 'calls'],
-    ['calls.responded', 'calls.respondedNote', String(responded?.count ?? 0), 'check'],
-    ['calls.pending', 'calls.pendingNote', String(pending), 'activity']
+  for (const [label, value, icon] of [
+    ['calls.total', String(aggregate.total), 'calls'],
+    ['calls.responded', String(responded?.count ?? 0), 'check'],
+    ['calls.pending', String(pending), 'activity']
   ] as const) {
     const card = node('article', '', 'metric-card')
     const top = node('div', '', 'metric-heading')
     top.append(node('span', t(label)), uiIcon(icon))
-    card.append(top, node('strong', value, 'metric-value'), node('p', t(note), 'muted'))
+    card.append(top, node('strong', value, 'metric-value'))
     metrics.append(card)
   }
-  metrics.append(
-    node(
-      'p',
-      t('calls.window', {
-        since: i18n.timestamp(calls.window.since),
-        sampled: String(calls.window.sampled),
-        truncated: calls.window.truncated ? t('calls.truncated') : ''
-      }),
-      'metric-scope'
-    )
-  )
   const charts = node('section', '', 'call-charts')
   charts.append(
     stateDistribution(aggregate, freshness),
     distributionRows(
       'calls.bySource',
-      'calls.bySourceNote',
       aggregate.by_principal.map(
         /* 来源使用 principal 标识，不展开凭据。 */ (row) => ({
           label: row.principal,
@@ -595,7 +607,6 @@ function callsPage(page: PageView, freshness: Freshness, route: PageRoute, filte
     ),
     distributionRows(
       'calls.byTarget',
-      'calls.byTargetNote',
       aggregate.by_provider.map(
         /* 目标使用 provider 实例标识与类型。 */ (row) => ({
           label: `${row.machine_id} · ${row.kind === 'luvus' ? 'Luvus' : 'Herdr'} · ${row.provider_id}`,
@@ -606,14 +617,16 @@ function callsPage(page: PageView, freshness: Freshness, route: PageRoute, filte
     ),
     distributionRows(
       'calls.byMethod',
-      'calls.byMethodNote',
       aggregate.by_method.map(/* 命令只展示已提交方法名。 */ (row) => ({ label: row.method, count: row.count })),
       freshness
     )
   )
   const listHeader = node('div', '', 'section-heading')
   const listCopy = node('div')
-  listCopy.append(node('h2', t('calls.listHeading')), node('p', t('calls.listSubtitle'), 'muted'))
+  listCopy.append(node('h2', t('calls.listHeading')))
+  if (calls.window.truncated) {
+    listCopy.append(badge(t('calls.truncated'), 'warning'))
+  }
   listHeader.append(listCopy)
   if (calls.items.length) {
     const filters = node('div', '', 'device-filters call-filters')
@@ -633,11 +646,17 @@ function callsPage(page: PageView, freshness: Freshness, route: PageRoute, filte
     }
     listHeader.append(filters)
   }
-  section.append(metrics, charts, listHeader)
+  const details = node('section', '', 'call-details')
+  details.append(listHeader)
+  section.append(metrics, charts, details)
+  const pagination = callPagination(calls, i18n)
   if (!calls.items.length) {
     const empty = node('div', '', 'empty')
     empty.append(uiIcon('calls'), node('h2', t('calls.emptyTitle')), node('p', t('calls.emptyHint'), 'muted'))
-    section.append(empty)
+    details.append(empty)
+    if (pagination) {
+      details.append(pagination)
+    }
     return { heading, body: section }
   }
   const columns = node('div', '', 'call-columns')
@@ -694,25 +713,15 @@ function callsPage(page: PageView, freshness: Freshness, route: PageRoute, filte
     row.append(identity, source, state, when)
     list.append(row)
   }
-  section.append(columns, list)
+  details.append(columns, list)
   if (!visible.length) {
     const empty = node('div', '', 'empty search-empty')
     empty.append(uiIcon('search'), node('h3', t('devices.noMatches')), node('p', t('calls.emptyHint'), 'muted'))
-    section.append(empty)
+    details.append(empty)
   }
-  section.append(node('p', t('calls.results', { shown: visible.length }), 'list-count'))
-  if (calls.next_cursor !== undefined) {
-    const next = node('a', t('calls.next'), 'button-link')
-    next.href = routeHref({
-      machineId: null,
-      cursor: null,
-      providerCursor: null,
-      callsCursor: calls.next_cursor,
-      section: 'calls'
-    })
-    section.append(next)
+  if (pagination) {
+    details.append(pagination)
   }
-  section.append(node('p', t('calls.scope'), 'metric-scope'))
   return { heading, body: section }
 }
 
@@ -1250,12 +1259,10 @@ export function renderPage(
     if (route.section === 'pairing' && (state.stale || status.mode !== 'active')) {
       view.append(node('p', t(state.stale ? 'reader.stale' : 'gateway.degradedNote'), 'notice warning'))
     }
-    if (route.machineId !== null || !['pairing', 'connect'].includes(route.section ?? '')) {
-      // 指标卡只属于概览与调用页；设备页与详情页各自展示自己的数据。
-      if (route.machineId === null && route.section !== 'devices' && route.section !== 'calls') {
-        view.append(overviewMetrics(page, freshness))
-      }
-      view.append(gateway)
+    if (route.machineId === null && route.section === undefined) {
+      view.append(overviewMetrics(page, freshness), gateway)
+    } else if (status.mode !== 'active' && route.section !== 'pairing') {
+      view.append(node('p', t('gateway.degradedNote'), 'notice warning'))
     }
     view.append(section.body)
   }

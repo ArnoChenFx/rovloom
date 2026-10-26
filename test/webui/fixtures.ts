@@ -160,7 +160,10 @@ export function fixtureReply<K extends ManagementReadOperation>(
         recovery_generation: 'fixture-recovery',
         observed_at: fixtureTime,
         expires_at: fixtureTime + 30_000,
-        decisions: [{ action: 'devices_read', allowed: true, reason_code: 'allowed' }]
+        decisions: [
+          { action: 'devices_read', allowed: true, reason_code: 'allowed' },
+          { action: 'calls_read', allowed: true, reason_code: 'allowed' }
+        ]
       }
       break
     case 'calls_list':

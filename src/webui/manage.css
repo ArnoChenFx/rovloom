@@ -189,7 +189,12 @@ summary { cursor: pointer; }
 .overview-device-list .device-card { grid-template-columns: minmax(0,1fr); padding: 14px 24px; }
 .overview-device-list .device-name { margin-bottom: 0; }
 /* 调用页：状态环形图、分类条与明细列表，全部来自共享采样窗口。 */
-.call-charts { display: grid; grid-template-columns: minmax(0,1.4fr) repeat(3,minmax(0,1fr)); gap: 16px; margin-bottom: 24px; }
+.calls-section { display: grid; gap: 24px; min-width: 0; }
+.call-metrics { margin: 0; }
+.call-details { display: grid; gap: 12px; min-width: 0; }
+.call-details > .section-heading { padding: 0; }
+.call-pagination { display: flex; flex-wrap: wrap; gap: 12px; }
+.call-charts { display: grid; grid-template-columns: minmax(0,1.4fr) repeat(3,minmax(0,1fr)); gap: 16px; }
 .call-distribution { min-width: 0; padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
 .distribution-heading { display: flex; flex-direction: column; gap: 3px; margin-bottom: 14px; }
 .distribution-heading h3 { font-size: 13px; }
@@ -216,10 +221,9 @@ summary { cursor: pointer; }
 .state-count { font-variant-numeric: tabular-nums; }
 .call-filters { flex-wrap: wrap; }
 .call-columns, .call-card { display: grid; grid-template-columns: minmax(0,1.25fr) minmax(0,1.2fr) minmax(0,.95fr) minmax(0,.85fr); gap: 20px; }
-.call-columns { padding: 10px 24px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--subtle); color: var(--muted); font-size: 11px; }
-.call-list { margin: 0; padding: 0; list-style: none; }
-.call-card { align-items: start; padding: 16px 24px; border-bottom: 1px solid var(--border); }
-.call-card:last-child { border-bottom: 0; }
+.call-columns { padding: 10px 24px; color: var(--muted); font-size: 12px; }
+.call-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.call-card { align-items: start; padding: 16px 24px; background: var(--surface); border-radius: 12px; box-shadow: var(--shadow); }
 .call-card:hover { background: color-mix(in srgb,var(--subtle) 60%,transparent); }
 .call-card > div { min-width: 0; }
 .call-method { display: block; font-size: 13px; overflow-wrap: anywhere; }

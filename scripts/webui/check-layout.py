@@ -26,7 +26,11 @@ def visible_layout(page, narrow=False):
     """检查真实排版边界、正文尺寸及窄屏触控尺寸，不依赖截图像素相等。"""
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
     assert page.locator('main h1').count() == 1
-    assert bounds(page, 'main h1')['width'] > 100
+    assert page.locator('main h1').evaluate('''el => {
+        const size = parseFloat(getComputedStyle(el).fontSize);
+        const box = el.getBoundingClientRect();
+        return el.textContent.trim().length > 0 && size >= 24 && box.width >= size && box.height >= size;
+    }''')
     assert bounds(page, '.topbar')['y'] < bounds(page, '.commandbar')['y']
     assert bounds(page, '.commandbar')['y'] < bounds(page, 'main')['y']
     assert page.locator('.brand-logo').evaluate(
@@ -86,8 +90,26 @@ def main():
                 heading = bounds(page, '.page-heading')
                 gateway = bounds(page, '.gateway')
                 assert heading['y'] + heading['height'] <= gateway['y']
+                summary = page.locator('.gateway-metadata > summary')
+                summary.focus()
+                page.keyboard.press('Enter')
+                expect(page.locator('.gateway-metadata')).to_have_attribute('open', '')
+                page.wait_for_timeout(1200)
+                assert summary.evaluate('el => el === document.activeElement')
+                reads = page.evaluate('window.webUiFixture.reads')
+                language_control.choose('en' if language == 'zh-CN' else 'zh-CN')
+                expect(page.locator('.gateway-metadata')).to_have_attribute('open', '')
+                expect(language_control.trigger).to_be_focused()
+                assert page.evaluate('window.webUiFixture.reads') == reads
+                summary.focus()
+                page.keyboard.press('Enter')
+                expect(page.locator('.gateway-metadata')).not_to_have_attribute('open', '')
+                language_control.choose(language)
+                snapshot(page, output, f'{language}-{theme}-overview-desktop')
+                checks.append(f'{language}/{theme}: overview alone keeps Gateway status and keyboard metadata disclosure')
                 page.goto(base + '/fixtures/#view=devices')
                 page.locator('.device-card').first.wait_for()
+                expect(page.locator('main .gateway')).to_have_count(0)
                 columns = page.evaluate('''/* 同步采样两行坐标，避免年龄重绘使跨调用节点失效。 */ () => {
                     /** 提取同一帧内所有列的横坐标。 */
                     function positions(selector) { return [...document.querySelectorAll(selector)].map(
@@ -107,6 +129,11 @@ def main():
                 page.set_viewport_size({'width': 1440, 'height': 1024})
                 page.goto(base + '/fixtures/#view=calls')
                 expect(page.locator('.call-card')).to_have_count(3)
+                expect(page.locator('main .gateway')).to_have_count(0)
+                expect(page.locator('.calls-section .metric-scope, .call-metrics p, .distribution-heading .muted')).to_have_count(0)
+                assert page.locator('.calls-section').evaluate('el => getComputedStyle(el).borderLeftWidth === "0px"')
+                assert page.locator('.call-columns').evaluate('el => getComputedStyle(el).borderTopWidth === "0px" && getComputedStyle(el).borderBottomWidth === "0px"')
+                assert page.locator('.call-card').first.evaluate('el => getComputedStyle(el).borderBottomWidth === "0px"')
                 labels = page.locator('.distribution-label').all_text_contents()
                 assert any('fixture-a' in label for label in labels)
                 assert any('fixture-b' in label for label in labels)
@@ -116,15 +143,40 @@ def main():
                 assert page.locator('.call-metrics .metric-value').first.inner_text() == '3'
                 page.locator('[data-call-filter="all"]').click()
                 expect(page.locator('.call-card')).to_have_count(3)
+                # Explicit presentation fixtures exercise both previous-link forms, including a now-empty page.
+                for number, previous in [(2, None), (3, 'fixture-page-2')]:
+                    page.goto(base + f'/fixtures/#view=calls&calls=fixture-page-{number}')
+                    expect(page.locator('.call-card')).to_have_count(3)
+                    page.evaluate("window.webUiFixture.mode='hold'")
+                    page.get_by_role('button', name=WORDS[language]['refresh'], exact=True).click()
+                    page.wait_for_function('window.webUiFixture.pending.length > 0')
+                    page.evaluate('''previous => {
+                        const fixture = window.webUiFixture;
+                        const calls = fixture.pending.at(-1).snapshot.value.calls;
+                        calls.previous_cursor = previous;
+                        delete calls.next_cursor;
+                        if (previous !== null) calls.items = [];
+                        fixture.release();
+                    }''', previous)
+                    previous_link = page.locator('.call-pagination a[rel="prev"]')
+                    expect(previous_link).to_have_count(1)
+                    href = previous_link.get_attribute('href')
+                    assert ('calls=' not in href) if previous is None else ('calls=fixture-page-2' in href)
+                    page.evaluate("window.webUiFixture.mode='normal'")
+                    previous_link.click()
+                    expect(page.locator('.call-card')).to_have_count(3)
+                page.goto(base + '/fixtures/#view=calls')
+                expect(page.locator('.call-card')).to_have_count(3)
                 page.set_viewport_size({'width': 320, 'height': 900})
                 snapshot(page, output, f'{language}-{theme}-calls-320', narrow=True)
-                checks.append(f'{language}/{theme}: calls retain machine-scoped provider labels, page filters preserve aggregates, readable states and 320px layout')
+                checks.append(f'{language}/{theme}: clean call cards, machine-scoped labels, stable filter counts, previous links on full/empty pages and 320px layout')
 
                 page.goto(base + '/fixtures/#view=devices')
                 page.locator('.device-card').first.wait_for()
                 page.set_viewport_size({'width': 1440, 'height': 1024})
                 page.locator('.device-name').first.click()
                 page.locator('.provider-card').first.wait_for()
+                expect(page.locator('main .gateway')).to_have_count(0)
                 connection = bounds(page, '.detail-connection')
                 registration = bounds(page, '.detail-registration')
                 observations = bounds(page, '.detail-observation')
@@ -133,25 +185,13 @@ def main():
                 assert page.locator('.actions button:enabled').count() == 0
                 snapshot(page, output, f'{language}-{theme}-detail-desktop')
 
-                summary = page.locator('.gateway-metadata > summary')
-                summary.focus()
-                page.keyboard.press('Enter')
-                expect(page.locator('.gateway-metadata')).to_have_attribute('open', '')
-                page.wait_for_timeout(1200)
-                assert summary.evaluate('/* 年龄重绘不能夺走原生折叠控件焦点。 */ el => el === document.activeElement')
-                expect(page.locator('.gateway-metadata')).to_have_attribute('open', '')
-                reads = page.evaluate('window.webUiFixture.reads')
-                language_control.choose('en' if language == 'zh-CN' else 'zh-CN')
-                expect(page.locator('.gateway-metadata')).to_have_attribute('open', '')
-                expect(language_control.trigger).to_be_focused()
-                assert page.evaluate('window.webUiFixture.reads') == reads
-                summary.focus()
-                page.keyboard.press('Enter')
-                expect(page.locator('.gateway-metadata')).not_to_have_attribute('open', '')
-                language_control.choose(language)
                 page.set_viewport_size({'width': 320, 'height': 900})
                 snapshot(page, output, f'{language}-{theme}-detail-320', narrow=True)
-                checks.append(f'{language}/{theme}: grouped detail, disabled writes, keyboard disclosure survives age/localization without reads and 320px detail')
+                checks.append(f'{language}/{theme}: grouped detail, disabled writes, no repeated Gateway card and 320px detail')
+                for section in ['pairing', 'connect']:
+                    page.goto(base + '/fixtures/#view=' + section)
+                    page.locator('main h1').wait_for()
+                    expect(page.locator('main .gateway')).to_have_count(0)
                 context.close()
 
         context = browser.new_context(locale='en', color_scheme='light', viewport={'width': 1280, 'height': 960})

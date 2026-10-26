@@ -394,8 +394,9 @@ export class StoreGatewayService implements GatewayService {
     args: { cursor?: string; limit?: number },
     scope: unknown,
     now: number,
-    expiresAt?: number
-  ): Page<T> {
+    expiresAt?: number,
+    includePrevious = false
+  ): Page<T> & { previous_cursor?: string | null } {
     const fingerprint = digest(canonical(scope))
     let offset = 0
     let expires = Math.min(now + 30_000, expiresAt ?? Infinity)
@@ -419,11 +420,20 @@ export class StoreGatewayService implements GatewayService {
     }
     const limit = args.limit ?? 50
     const next = offset + limit
+    const previous =
+      includePrevious && offset > 0
+        ? {
+            previous_cursor:
+              offset <= limit
+                ? null
+                : `page_v1.${offset - limit}.${expires}.${this.cursorTag(fingerprint, offset - limit, expires)}`
+          }
+        : {}
     if (next >= items.length) {
-      return { items: items.slice(offset, next) }
+      return { ...previous, items: items.slice(offset, next) }
     }
     const token = `page_v1.${next}.${expires}.${this.cursorTag(fingerprint, next, expires)}`
-    return { items: items.slice(offset, next), next_cursor: token }
+    return { ...previous, items: items.slice(offset, next), next_cursor: token }
   }
 
   // 有界短等只轮询原调用，每轮重读当前身份/双方政策；终止等待不调用取消、派发或原生操作。
@@ -833,7 +843,7 @@ export class StoreGatewayService implements GatewayService {
       name: 'calls_list',
       args: queryArguments(args)
     }
-    const page = this.page(items, args, scope, now)
+    const page = this.page(items, args, scope, now, undefined, true)
     return {
       ...page,
       observed_at: now,

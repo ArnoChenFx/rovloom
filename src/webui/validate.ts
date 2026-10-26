@@ -9,7 +9,8 @@ import type {
   PermissionSnapshot,
   ProviderSnapshot,
   ManagementArguments,
-  ManagementReply
+  ManagementReply,
+  ManagementPermission
 } from '../mcp/management.js'
 import { ReadError, type TimedSnapshot } from './reader.js'
 import type { PageRoute, PageView } from './view.js'
@@ -257,6 +258,20 @@ function status(value: ManagementStatus): void {
   }
 }
 
+// Record exhaustiveness makes new backend permissions a compile-time obligation for the browser boundary.
+const managementActions = Object.keys({
+  gateway_read: true,
+  devices_read: true,
+  devices_register: true,
+  devices_rename: true,
+  devices_disconnect: true,
+  devices_revoke: true,
+  providers_read: true,
+  providers_manage: true,
+  permissions_read: true,
+  calls_read: true
+} satisfies Record<ManagementPermission, true>)
+
 /** 权限快照只作短期提示，必须绑定当前目标/代次/策略；不授予动作权限。 */
 function permissionShape(value: PermissionSnapshot): void {
   record(value, [
@@ -282,20 +297,10 @@ function permissionShape(value: PermissionSnapshot): void {
   text(value.recovery_generation)
   time(value.observed_at)
   time(value.expires_at)
-  bounded(value.decisions, 9)
+  bounded(value.decisions, managementActions.length)
   for (const decision of value.decisions) {
     record(decision, ['action', 'allowed', 'reason_code'])
-    choice(decision.action, [
-      'gateway_read',
-      'devices_read',
-      'devices_register',
-      'devices_rename',
-      'devices_disconnect',
-      'devices_revoke',
-      'providers_read',
-      'providers_manage',
-      'permissions_read'
-    ])
+    choice(decision.action, managementActions)
     choice(decision.allowed, [true, false])
     choice(decision.reason_code, ['allowed', 'forbidden', 'backend_unavailable', 'storage_degraded'])
   }
@@ -428,7 +433,7 @@ function callAggregate(value: CallAggregate, pageItems: number): void {
 function callList(value: CallListReply, serverTime: number | null): void {
   record(
     value,
-    ['items', 'next_cursor', 'observed_at', 'aggregate', 'window'],
+    ['items', 'next_cursor', 'previous_cursor', 'observed_at', 'aggregate', 'window'],
     ['items', 'observed_at', 'aggregate', 'window']
   )
   time(value.observed_at)
@@ -438,6 +443,9 @@ function callList(value: CallListReply, serverTime: number | null): void {
   bounded(value.items, 200)
   if (value.next_cursor !== undefined) {
     text(value.next_cursor)
+  }
+  if (value.previous_cursor !== undefined && value.previous_cursor !== null) {
+    text(value.previous_cursor)
   }
   const seen = new Set<string>()
   for (const item of value.items) {
