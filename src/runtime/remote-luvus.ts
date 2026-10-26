@@ -39,8 +39,15 @@ export type LuvusProductionRemoteConfig = Readonly<{
     schema_bundle: string
   }>
   peer_policy_revision: string
-  // raw 权限须独立显式配置；仅固定主体与精确方法，本次原 Wire 仍核对完整来源和截止。
-  raw_grant?: Readonly<{ principal_id: string; methods: readonly string[] }>
+  // raw 显式绑定主体或 caller 策略修订；两者互斥，本次原 Wire 仍复验双端策略、完整来源和截止。
+  raw_grant?: Readonly<
+    (
+      | { principal_id: string; caller_policy_revision?: never }
+      | { caller_policy_revision: string; principal_id?: never }
+    ) & {
+      methods: readonly string[]
+    }
+  >
 }>
 
 /** 所有静态配置先有界复制和完整核验；调用方仍负责受保护配置文件的来源及读取。 */
@@ -81,8 +88,9 @@ export function checkedRemoteLuvusConfig(reference: string, input: unknown): Luv
   }
   if (config.raw_grant !== undefined) {
     const grant = object(config.raw_grant)
-    fields(grant, ['principal_id', 'methods'])
-    id(grant.principal_id)
+    const subject = Object.hasOwn(grant, 'principal_id') ? 'principal_id' : 'caller_policy_revision'
+    fields(grant, [subject, 'methods'])
+    id(grant[subject])
     if (
       !Array.isArray(grant.methods) ||
       grant.methods.length > LUVUS_OPERATION_METHODS.length ||
@@ -317,10 +325,17 @@ export async function createPinnedRemoteLuvus(config: LuvusProductionRemoteConfi
             authority: createLuvusOperationsAuthority(
               record,
               sourceFor,
-              /** 只有受保护配置中的精确主体与方法获 raw 授权；当前 ACL 与 deadline 仍由原 gate 独立核验。 */
-              (attempt) =>
-                config.raw_grant?.principal_id === attempt.principal_id &&
-                config.raw_grant.methods.includes(attempt.method)
+              /** 策略授权服务于共享策略的 caller；签出的 grant 始终绑定真实调用主体，而非配对主体。 */
+              (attempt) => {
+                const grant = config.raw_grant
+                return (
+                  !!grant &&
+                  grant.methods.includes(attempt.method) &&
+                  (grant.principal_id !== undefined
+                    ? grant.principal_id === attempt.principal_id
+                    : grant.caller_policy_revision === attempt.binding.registration.caller_policy_revision)
+                )
+              }
             ),
             /** 旧 live 对象即使仍被原句柄引用，也只能检查其原 epoch。 */
             ready() {

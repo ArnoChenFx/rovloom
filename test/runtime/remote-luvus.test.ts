@@ -8,7 +8,13 @@ import type { TrustedAttempt } from '../../src/integration/luvus-wire.js'
 import type { Connection } from '../../src/transport/index.js'
 import { boundedJson, contractRef, hash } from '../../src/wire/index.js'
 import type { AttemptBinding, ContractSource } from '../../src/wire/types.js'
-import { checkedRemoteLuvusConfig, createPinnedRemoteLuvus } from '../../src/runtime/remote-luvus.js'
+import {
+  checkedRemoteLuvusConfig,
+  createPinnedRemoteLuvus,
+  type LuvusProductionRemoteConfig
+} from '../../src/runtime/remote-luvus.js'
+import { migrateSetupLuvusGrant } from '../../src/cli/setup-luvus-grant.js'
+import { simpleSetupAuthorization, setupReference } from '../../src/cli/setup-policy.js'
 import { FIXED_LUVUS_SCHEMA_SHA256, FIXED_LUVUS_SHA256 } from '../../src/runtime/native-control.js'
 import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/runtime/native-source.js'
 import type { RuntimeProvider } from '../../src/runtime/types.js'
@@ -21,7 +27,7 @@ const capabilitiesBytes = readFileSync(
 const reference = 'remote_config'
 
 /** 原始 schema 字符串保持原字节；配置中的所有身份仅属于此离线测试。 */
-function input(rawGrant?: { principal_id: string; methods: string[] }) {
+function input(rawGrant?: LuvusProductionRemoteConfig['raw_grant']) {
   return {
     kind: 'luvus',
     authentication: 'remote_connector',
@@ -129,7 +135,7 @@ function attempt(
 }
 
 /** 运行真正的候选和 checkDispatch，避免只比较 authority 字段而漏掉原 raw gate。 */
-function dispatch(provider: RuntimeProvider, request: TrustedAttempt, now = 100) {
+function dispatch(provider: RuntimeProvider, request: TrustedAttempt, now = 100, allowed = true) {
   const source = provider.source(request.binding)
   assert(source)
   const validator = createNativeValidator(provider.contract.compiled)
@@ -140,7 +146,12 @@ function dispatch(provider: RuntimeProvider, request: TrustedAttempt, now = 100)
     ...request.native_request
   })
   assert(candidate.ok)
-  const policy = { machines: ['remote_machine'], sessions: ['synthetic'], methods: [request.method], host: false }
+  const policy = {
+    machines: ['remote_machine'],
+    sessions: [request.binding.target.session!],
+    methods: allowed ? [request.method] : [],
+    host: false
+  }
   const authority: DispatchAuthorization = {
     ...provider.authority(request, source.binding),
     source,
@@ -160,7 +171,8 @@ test(
     const checked = checkedRemoteLuvusConfig(reference, original)
     assert.equal(checked.contract.schema_bundle, schema)
     assert.equal(hash(checked.contract.schema_bundle), FIXED_LUVUS_SCHEMA_SHA256)
-    original.raw_grant!.methods.push('workspace.close')
+    const methods = original.raw_grant!.methods as string[]
+    methods.push('workspace.close')
     original.binding.config_ref = 'changed'
     assert.deepEqual(checked.raw_grant!.methods, ['workspace.rename'])
     assert.equal(checked.binding.config_ref, reference)
@@ -542,6 +554,90 @@ test(
     }
   }
 )
+
+test('remote 策略 raw grant 保留真实 caller、方法、双端策略和固定截止约束', async () => {
+  const factory = await createPinnedRemoteLuvus(
+    checkedRemoteLuvusConfig(reference, input({ caller_policy_revision: 'caller1', methods: ['workspace.rename'] }))
+  )
+  try {
+    const live = factory.provider.open(connection(), () => {}).accept(snapshot())
+    for (const principal of ['operator_simple_pairing', 'test', 'admin']) {
+      const request = attempt(live, 'epoch1', 'workspace.rename', principal)
+      const checked = dispatch(live, request)
+      assert.equal(checked.result.ok, true)
+      assert.equal(checked.authority.raw_grant!.principal_id, principal)
+      assert.equal(checked.authority.raw_grant!.expires_at, request.binding.registration.deadline)
+      const revoked = dispatch(live, request, 100, false)
+      assert(!revoked.result.ok)
+      assert.equal(revoked.result.error.code, 'forbidden')
+    }
+    const stale = attempt(live)
+    stale.binding.registration.caller_policy_revision = 'other_policy'
+    for (const request of [stale, attempt(live, 'epoch1', 'workspace.get')]) {
+      const checked = dispatch(live, request)
+      assert(!checked.result.ok)
+      assert.equal(checked.result.error.code, 'raw_contract_not_authorized')
+    }
+  } finally {
+    factory.close()
+  }
+  for (const grant of [
+    { caller_policy_revision: '', methods: ['workspace.rename'] },
+    { principal_id: 'alice', caller_policy_revision: 'caller1', methods: ['workspace.rename'] },
+    { methods: ['workspace.rename'] },
+    { caller_policy_revision: 'caller1', methods: ['workspace.rename'], expires_at: null }
+  ]) {
+    assert.throws(() => checkedRemoteLuvusConfig(reference, { ...input(), raw_grant: grant }))
+  }
+})
+
+test('旧单码配对 raw grant 只在完整程序形状下迁移，配置原文及自定义授权保持不变', async () => {
+  const authorization = simpleSetupAuthorization('remote_machine', ['luvus'], { luvus: 'default' })
+  const configured = input({
+    principal_id: authorization.principal_id,
+    methods: authorization.policies.caller.grants[0]!.methods
+  })
+  const name = setupReference('synthetic_pairing')
+  configured.binding.config_ref = name
+  configured.target = { ...authorization.policies.caller.grants[0]!.target } as typeof configured.target
+  configured.binding.provider_id = configured.target.provider_id
+  configured.peer_policy_revision = authorization.policies.local.revision
+  const entry = { reference: name, value: configured }
+  const before = boundedJson(entry)
+  const migrated = migrateSetupLuvusGrant(entry)
+  const checked = checkedRemoteLuvusConfig(name, migrated.value)
+  assert.deepEqual(checked.raw_grant, {
+    caller_policy_revision: authorization.policies.caller.revision,
+    methods: authorization.policies.caller.grants[0]!.methods
+  })
+  assert.equal(boundedJson(entry), before)
+  assert.equal(migrateSetupLuvusGrant(migrated), migrated)
+  for (const change of [
+    { raw_grant: { principal_id: 'explicit_operator', methods: authorization.policies.caller.grants[0]!.methods } },
+    { raw_grant: { principal_id: authorization.principal_id, methods: ['workspace.rename'] } },
+    { peer_policy_revision: 'custom_local' },
+    { target: { ...configured.target, session: 'custom' } },
+    { binding: { ...configured.binding, binding_revision: 2 } }
+  ]) {
+    const custom = { reference: name, value: { ...configured, ...change } }
+    assert.equal(migrateSetupLuvusGrant(custom), custom)
+  }
+  const factory = await createPinnedRemoteLuvus(checked)
+  try {
+    const snap = snapshot()
+    snap.binding = checked.binding
+    snap.target = checked.target
+    snap.capabilities.result.session = 'default'
+    snap.capability_revision = hash(boundedJson(snap.capabilities.result))
+    const live = factory.provider.open(connection(), () => {}).accept(snap)
+    const request = attempt(live, 'epoch1', 'workspace.rename', 'test')
+    request.binding.registration.caller_policy_revision = authorization.policies.caller.revision
+    request.binding.registration.local_policy_revision = authorization.policies.local.revision
+    assert.equal(dispatch(live, request).result.ok, true)
+  } finally {
+    factory.close()
+  }
+})
 
 test(
   'remote 显式 raw grant 仅匹配 principal 与精确方法，截止仍为原 attempt deadline',

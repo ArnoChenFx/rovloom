@@ -562,7 +562,7 @@ export class StoreGatewayService implements GatewayService {
       ...new Set(visible.map(/* 提取授权目标中的稳定设备 ID，不建立第二份注册表。 */ (row) => row.target.machine_id))
     ].sort()
     // 连接与 provider 就绪来自同一实际传输的只读观测；没有来源时各层保持未核实。
-    const observed = this.observe(now, this.options.store.health())
+    const { projection: observed } = this.observe()
     const scope = {
       principal: principal.id,
       policy: principal.policy,
@@ -674,13 +674,18 @@ export class StoreGatewayService implements GatewayService {
   }
 
   // 构建真实持久设备状态与明确未核实的现场状态，避免从数据库状态推断心跳、认证或设备 revision。
-  private observe(now: number, health: { mode: string; generation: string }) {
-    return createManagementTransportProjection(sampleManagementTransport(this.options.transportObservations), {
+  private observe() {
+    // 先取样再读取 Store 时钟：取样中的观测不能因为晚于请求入口一毫秒而被误判为未来。
+    const sample = sampleManagementTransport(this.options.transportObservations)
+    const health = this.options.store.health()
+    const now = this.options.store.clock()
+    const projection = createManagementTransportProjection(sample, {
       mode: health.mode as ManagementStatus['mode'],
       server_time: now,
       recovery_generation: health.generation,
       stale_after_ms: 15000
     })
+    return { projection, now, health }
   }
 
   private deviceSnapshot(machine: string, now: number, observed: ManagementTransportProjection): DeviceSnapshot {
@@ -916,10 +921,8 @@ export class StoreGatewayService implements GatewayService {
   ): Promise<ManagementReply[K]> {
     try {
       const { principal, admin } = this.administrator(context)
-      const now = this.options.store.clock()
-      const health = this.options.store.health()
       // 每次管理读取取一次传输观测，同一回复里的设备、provider 与状态汇总来自同一取样。
-      const observed = this.observe(now, health)
+      const { projection: observed, now, health } = this.observe()
       if (name === 'status') {
         adminArguments(value, [])
         if (!this.allowed(admin, 'gateway_read')) {

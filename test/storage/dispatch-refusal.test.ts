@@ -33,6 +33,45 @@ function fixture(run: (store: Store, db: DatabaseSync, state: { now: number; fai
   }
 }
 
+test('Gateway 未写出拒绝单独记为 gateway 审计，不能覆盖 accepted、unknown 或已到期调用', () =>
+  fixture((store, db, state) => {
+    const device = connected(store)
+    for (const phase of ['dispatching', 'accepted', 'cancelled', 'expired']) {
+      const call = store.createCall('alice', device.target, { method: 'ping' }, options({ timeoutMs: 1000 }))
+      const binding = store.dispatch('alice', call.call_id, device.epoch)
+      if (phase === 'accepted') {
+        store.accepted(binding)
+      }
+      if (phase === 'cancelled') {
+        store.stop('alice', call.call_id)
+      }
+      if (phase === 'expired') {
+        state.now = call.deadline
+      }
+      assert.equal(store.commitGatewayDispatchRefusal(binding, 'raw_contract_not_authorized'), phase === 'dispatching')
+      assert.equal(
+        store.call('alice', call.call_id).state,
+        phase === 'dispatching' ? 'not_dispatched' : phase === 'accepted' ? 'connector_accepted' : 'outcome_unknown'
+      )
+    }
+    const rows = db.prepare("SELECT actor, details FROM audit WHERE action='dispatch_refused'").all()
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0]!.actor, 'gateway')
+    assert.equal(JSON.parse(String(rows[0]!.details)).code, 'raw_contract_not_authorized')
+  }))
+
+test('Gateway 拒绝证据提交失败时不发布确定未派发或伪造审计', () =>
+  fixture((store, db, state) => {
+    const device = connected(store)
+    const call = store.createCall('alice', device.target, { method: 'ping' }, options({ timeoutMs: 1000 }))
+    const binding = store.dispatch('alice', call.call_id, device.epoch)
+    state.fail = true
+    assert.throws(() => store.commitGatewayDispatchRefusal(binding, 'raw_contract_not_authorized'))
+    assert.equal(db.prepare('SELECT state FROM calls WHERE call_id=?').get(call.call_id)!.state, 'dispatching')
+    assert.equal(db.prepare("SELECT count(*) n FROM audit WHERE action='dispatch_refused'").get()!.n, 0)
+    assert.equal(store.health().mode, 'storage_degraded')
+  }))
+
 test(
   '确定拒绝只终结原 accepted call，审计幂等且保留固定期限和邻近 attempt',
   /** 与独立只读连接核对实际已提交状态及预约释放，不使用服务 stub 伪造成功。 */ () =>

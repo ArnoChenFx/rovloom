@@ -176,7 +176,7 @@ export async function prepareSetupNative(
       home,
       cwd: work,
       transport: 'ipc',
-      allow_terminal_execution: false,
+      allow_terminal_execution: config.allow_terminal_execution === true,
       ...(attach ? { attach: true as const, user_home: homedir() } : {}),
       ...setupAgentDirectories(config)
     },
@@ -215,7 +215,7 @@ export async function prepareSetupNative(
     },
     peer_policy_revision: authorization.policies.local.revision,
     raw_grant: {
-      principal_id: authorization.principal_id,
+      caller_policy_revision: authorization.policies.caller.revision,
       methods: [...authorization.policies.caller.grants[0]!.methods]
     }
   }

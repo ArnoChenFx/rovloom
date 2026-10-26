@@ -15,6 +15,67 @@ import { responseFrame } from '../storage/helpers.js'
 import type { AttemptBinding, AuthenticatedEnvelope } from '../../src/wire/types.js'
 
 test(
+  'Gateway raw 编码拒绝未写 socket，释放逐调用资源且不打断同通道的在途调用',
+  /** 真实 Store/Router/原生 raw gate 与 loopback；执行器只返回合成 task，不启动 native。 */ async () => {
+    const f = fixture({ limits: { inflight: 2, read_contexts: 2 }, retainOriginalRead: true })
+    const device = f.pair('synthetic_gateway_raw_refusal')
+    let finish: (() => void) | undefined
+    let executions = 0
+    const client = f.connector(() => device.credential, {
+      execute(raw) {
+        executions++
+        const result = { id: JSON.parse(raw).id, result: { id: 'synthetic_task' } }
+        return executions === 1
+          ? new Promise((resolve) => {
+              finish = () => resolve(result)
+            })
+          : Promise.resolve(result)
+      }
+    })
+    try {
+      await until(() => client.status().phase === 'ready')
+      const epoch = client.status().connection_epoch
+      const pending = f.call(device.target)
+      const pendingBinding = f.gateway.dispatch(pending.call_id)
+      await until(
+        () => finish !== undefined && f.store.call(f.principal.id, pending.call_id).state === 'connector_accepted'
+      )
+      for (let index = 0; index < 4; index++) {
+        const denied = f.router.create(
+          f.principal,
+          device.target,
+          { method: 'task.add', params: { title: 'synthetic' } },
+          {
+            binding_revision: 1,
+            contract_ref: pendingBinding.contract_ref,
+            validation: 'raw-contract',
+            timeoutMs: 1000
+          }
+        )
+        f.gateway.dispatch(denied.call_id)
+        assert.equal(f.store.call(f.principal.id, denied.call_id).state, 'not_dispatched')
+        assert.equal(f.gateway.resolveOriginalRead(denied.call_id), undefined)
+        assert.equal(f.gateway.status().connections, 1)
+        assert.equal(client.status().connection_epoch, epoch)
+        assert.equal(executions, 1)
+      }
+      assert.equal(f.encoded.map((raw) => JSON.parse(raw)).filter((frame) => frame.type === 'request').length, 1)
+      assert.equal(f.store.call(f.principal.id, pending.call_id).state, 'connector_accepted')
+      finish!()
+      await until(() => f.store.call(f.principal.id, pending.call_id).state === 'responded')
+      const healthy = f.call(device.target)
+      f.gateway.dispatch(healthy.call_id)
+      await until(() => f.store.call(f.principal.id, healthy.call_id).state === 'responded')
+      assert.equal(executions, 2)
+      assert.equal(client.status().connection_epoch, epoch)
+      assert.equal(f.sessions.closed, 0)
+    } finally {
+      f.stop()
+    }
+  }
+)
+
+test(
   '已 responded 后原 tuple 的新拒绝帧不能驱逐原结果读取上下文',
   /** 原生客户端为明确的合成回包 stub；原 Gateway codec、Store 和活 Wire 读取检查均为真实实现。 */
   async () => {
