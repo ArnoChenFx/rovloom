@@ -16,7 +16,8 @@ const help = {
     optional: ['status', 'statuses', 'timeout_s'],
     rules: [
       'Select a pane, not an agent target. Supply exactly one of status or statuses.',
-      'statuses matches any listed state. timeout_s is seconds (0..3600). No wait flag is used here.'
+      'statuses matches any listed state. timeout_s is seconds (0..3600). No wait flag is used here.',
+      'This matches current state, including an old idle state. A state_source of no_positive_state_evidence is not evidence that a new prompt completed.'
     ],
     examples: [{ pane: '2', status: 'idle', timeout_s: 35 }]
   },
@@ -26,9 +27,15 @@ const help = {
     rules: [
       'Select an agent target. until or timeout_s requires wait:true.',
       'timeout_s is seconds (0..3600). The runtime_call deadline must cover the requested wait and RPC overhead.',
+      'wait:true requires a new working or blocked transition before matching until. A fast reply or missing positive state evidence can leave the wait unmatched.',
+      'evidence:timeout with observed_state:null means no qualifying transition was observed; with observed_state:working or blocked it means the requested until state was not matched before the deadline. Neither proves the agent failed to reply.',
+      'Prefer submitting without wait, then observing agent.read and pane.status. Use wait.output for an explicitly authorized literal output sentinel; old output and prompt echo can match, so verify the reply separately. Do not resend a submitted prompt on an observation timeout.',
       'submitted/queued does not prove the agent consumed the prompt or finished replying.'
     ],
-    examples: [{ target: 'selected-agent', text: 'Hello', strict: true, wait: true, until: ['idle'], timeout_s: 120 }]
+    examples: [
+      { target: 'selected-agent', text: 'Hello', strict: true },
+      { target: 'selected-agent', text: 'Hello', strict: true, wait: true, until: ['idle'], timeout_s: 120 }
+    ]
   },
   'pane.run': {
     required: ['pane', 'command'],

@@ -126,7 +126,7 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 - `schema_annotations`：原生 request/response 文档根的 `$comment`、`description` 原文，附 `document_uri` 与 JSON Pointer。根注释属于整个文档，不应当作当前方法独有的约束。
 - 安装 schema 只有通用参数时，`schema_status` 仍为 `generic_params_only`，不会补造原生 `params_schema`；无法准确投影的额外条件也保持缺失。执行校验始终使用完整原始 schema。
 
-例如 `agent.prompt` 的原生根注释明确说明：等待模式须先观察到新的 working/blocked 转换，再匹配 `until`；`agent.wait` 则只是当前状态匹配器。MCP 现在可直接读到这段原文。
+例如 `agent.prompt` 的原生根注释明确说明：等待模式须先观察到新的 working/blocked 转换，再匹配 `until`；`agent.wait` 则只是当前状态匹配器。快速回复或缺少正向状态证据时，前者可能一直未匹配，即使 Agent 实际已答完。MCP 可直接读到原生注释和下面的审核提示。
 
 `runtime_describe` 对 `agent.wait`、`agent.prompt`、`pane.run`、`wait.output` 附带
 `parameter_help`：必填/可选字段、依赖规则和示例，来源标记为
@@ -148,11 +148,41 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 
 - `pane.read` 接受 `pane` 和 `lines`。`agent.read` 接受 `target`、`lines` 和 `source`。`lines` 最大为 1000，只取末尾行。返回的 `text`、`content_revision`、`terminal_id` 来自 Luvus。
 - `agent.prompt` 的 `until` 和 `timeout_s` 必须与 `wait:true` 一起使用。
-- `submitted`、`queued`、`ready=true` 和 `observed_state` 只表示输入已提交或识别就绪，不表示 prompt 已被消费或模型已回复。需要继续读取真实状态和输出。
+- `submitted`、`queued` 和 `ready=true` 表示提交或识别就绪；`observed_state` 记录 prompt 等待中首次观察到的新 working/blocked 跃迁。这些都不证明 prompt 已被消费或模型已回复，需要继续读取真实状态和输出。
 - 界面应同时展示 `status` 和 `authority`/`state_source`。缺少正面状态证据时按 unknown 处理，不能把 idle、queued 或 TUI 文本当作完成。
 - 上游模型失败不会触发重发，也不会切换到收费模型。
 - 两轮对话应保持相同的完整 Target、选定的 pane 或别名、`terminal_id` 和已知的 Agent `session`。验证第二轮时，检查回复是否记得第一轮的随机内容，不能用终端回显代替。
 - Connector 的 `allow_terminal_execution` 默认关闭。此时文本 `agent.send` 和 `agent.prompt` 需要请求中显式带 `strict:true`，`agent.keys` 和自定义启动参数仍需要开启开关。该开关不隔离 Agent 自己的工具。详见 [终端执行](TERMINAL-EXECUTION.md)。
+
+### 推荐两段式：提交后独立观察
+
+1. 从 `agent.get` / `pane.get` 确认选定 Agent、pane、`terminal_id` 和 session，并读取一次输出作为基线。
+2. 调用 `agent.prompt`，省略 `wait`、`until` 和 `timeout_s`，带上已观察的 `terminal_id` 与 `strict:true`。保留返回的提交证据和同一 `call_id`，不要因观察超时重发 prompt。
+3. 用短调用轮询 `agent.read` / `pane.status`，核对终端与 session 仍相同。输出或 `content_revision` 变化只证明活动；状态为 `idle` 且 `state_source:"no_positive_state_evidence"` 时按未知处理。读到与本轮请求相关的真实 Agent 回复后再向用户交付结果，不能用终端输入回显替代。
+4. 如果任务约定了可验证的输出标记，可调用上文的 `wait.output`，随后读取并核对内容。已有 recent 输出或本次 prompt 的输入回显都可能命中；不要把原样写在 prompt 中的标记当作回复完成证据。没有约定可验证标记时，继续有界轮询输出，不制造通用完成保证。
+
+无等待提交示例（使用实际观察到的选择器）：
+
+```json
+{"method":"agent.prompt","params":{"target":"selected-agent","terminal_id":"observed_terminal_id","text":"13*7=?","strict":true}}
+{"method":"agent.read","params":{"target":"selected-agent","lines":100,"source":"recent"}}
+{"method":"pane.status","params":{"pane":"2"}}
+```
+
+外层 `wait_ms:0` 只结束 HTTP 短等，仍须查询原 `call_id` 得到提交回包。`agent.wait` 也可以立即匹配旧 idle，不能替代上述回复核对。观察期限到了且证据不足时报告“未确认”，允许稍后继续读取，不推断 Agent 没有回复或再次提交。
+
+### 如何判读 prompt 等待超时
+
+下面只解释原生字段组合，不新增或改写 `native_response.evidence`：
+
+| 原生结果 | 可确认的事实 |
+|---|---|
+| `evidence:"timeout"`、`observed_state:null` | 等待期间未观察到所需的新 working/blocked 跃迁；不能推断没有回复 |
+| `evidence:"timeout"`、`observed_state:"working"` 或 `"blocked"` | 已观察到跃迁，但截止前等待未匹配 `until`；不能推断执行失败 |
+| `evidence:"state_transition"`、`matched:true` | 原生状态等待已匹配；仍需读取并核对本轮回复 |
+| 旧响应缺少 `observed_state` | 信息不足，不能当成显式 `null` 分类 |
+
+例如 `status:"idle", matched:false, evidence:"timeout", observed_state:null` 与 Agent 已经输出答案并不矛盾。该回包仍是正常收到的原生响应，Rovloom 调用可为 `responded`；它不同于 Gateway 派发失败或未获得回包。Rovloom 不凭当前 idle 改成 `matched:true`。原生 evidence 的改进跟踪在 [#301](https://github.com/ArnoChenFx/rovloom/issues/301)。
 
 ## 验证
 

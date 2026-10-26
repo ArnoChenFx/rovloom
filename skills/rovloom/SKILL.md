@@ -198,10 +198,12 @@ Most Luvus methods (such as `workspace.list` and `pane.list`) have the validatio
 ### Getting an Agent to reply
 
 1. `agent.list` / `agent.get` to find the Agent and pane actually observed.
-2. `agent.prompt` (Luvus) with `target`, `text`, the observed `terminal_id`, and `strict: true`.
-3. `agent.get` / `agent.wait` / `agent.read` for the real reply. `submitted`, `queued` and `ready=true` **do not mean the model answered**.
+2. `agent.prompt` (Luvus) with `target`, `text`, the observed `terminal_id`, and `strict: true`. Prefer omitting `wait`, `until` and `timeout_s`; obtain the submission result through the original call.
+3. Poll `agent.read` / `pane.status` with short calls for the real reply. Check the same terminal and session; status or output changes alone do not prove this turn completed. `submitted`, `queued` and `ready=true` **do not mean the model answered**.
 
 For Luvus, `agent.prompt` selects an Agent **`target`**; `agent.wait` selects a **`pane`**. A blocking prompt uses `wait:true`, `until:["idle"]` and `timeout_s`; `until` or `timeout_s` without `wait:true` is invalid. Prompt waiting first requires a new working/blocked transition before matching `until`. In contrast, `agent.wait` matches the current state, uses exactly one of `status` or `statuses`, and has no `wait` flag. Multiple states mean **any** listed state, not a sequence. Read the native notes before interpreting an immediate idle match as a reply.
+
+`evidence:"timeout"` with explicit `observed_state:null` means no qualifying transition was observed; with `observed_state:"working"` or `"blocked"` it means the wait did not match before its deadline. Neither proves the Agent failed to reply; a fast answer can already be visible in `agent.read`. Missing `observed_state` in an older response is not explicit null. Treat `state_source:"no_positive_state_evidence"` as unknown even when status says idle; do not turn it into success or resend a submitted prompt. For authorized output sentinels use `wait.output`, but recent text and prompt echo can match, so verify the actual reply separately.
 
 A two-turn conversation must keep the same complete target, the same pane or alias, the same `terminal_id`, and the known Agent `session`. When checking turn two, verify it recalls turn one's content; terminal echo is not a reply.
 
