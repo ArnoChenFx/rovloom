@@ -60,7 +60,6 @@ export const chinese = Object.freeze({
   'overview.onlineNote': '连接与身份认证均有效',
   'overview.attention': '需要关注',
   'overview.attentionNote': '本页尚未验证连接的设备',
-  'overview.scope': '设备统计仅覆盖当前页；过期观测不代表当前状态。',
   'overview.store': '数据存储',
   'overview.transport': '设备通道',
   'overview.native': '原生运行环境',
@@ -208,12 +207,12 @@ export const chinese = Object.freeze({
   'manage.epoch': '连接代次',
   'manage.revision': '资源版本',
   'manage.reason': '原因',
-  'manage.expires': '确认截止（UTC）',
+  'manage.expires': '确认截止',
   'manage.providers': '受影响的实例',
   'manage.request': '请求关联',
   'manage.authorization': '持久身份效果',
   'manage.channel': '物理通道效果',
-  'manage.observed': '回执时间（UTC）',
+  'manage.observed': '回执时间',
   'manage.audit': '审计事件',
   'manage.enabled': '启用',
   'manage.disabled': '禁用',
@@ -272,10 +271,6 @@ export const chinese = Object.freeze({
   'component.degraded': '降级 (degraded)',
   'component.unavailable': '不可用 (unavailable)',
   'component.unverified': '未核实 (unverified)',
-  'persisted.pending': '待配对 (pending)',
-  'persisted.offline': '离线登记 (offline)',
-  'persisted.online': '在线登记 (online)',
-  'persisted.revoked': '身份已撤销 (revoked)',
   'device.expired': '设备观测已过期',
   'device.revokedHistory': '上次持久登记：身份已撤销（已过期）',
   'device.oldRecords': '旧连接与认证记录不能恢复授权',
@@ -290,19 +285,14 @@ export const chinese = Object.freeze({
   'device.lastState': '{label} · 上次：{state}',
   'device.connectionUnknown': '连接未核实 · {reason}',
   'device.authUnknown': '认证未核实 · {reason}',
-  'device.readyUnknown': '设备 ready 尚无独立观测',
-  'actions.available': '可用操作需查看后台摘要并明确确认；后端逐次核对权限。',
   'actions.unavailable': '以下操作尚未接入，当前不可用。',
   'actions.provider': '禁用 / 重新启用 provider',
   'actions.rename': '改名',
   'actions.disconnect': '断开当前连接',
   'actions.revoke': '撤销设备身份',
-  'actions.effect':
-    '断开仅关闭指定连接，保留设备授权，Connector 可以主动重连。撤销将持久拒绝旧身份，并影响全部 providers。在途工作可能仍执行，结果保持未确认。',
   'devices.heading': '设备',
   'devices.eyebrow': '设备清单',
   'devices.subtitle': '检索、筛选并查看每台设备的连接与认证观测。',
-  'devices.description': '设备身份、连接与 runtime providers 分开观测。',
   'devices.emptyTitle': '还没有设备',
   'devices.emptyHint': '配对一台设备后，它会出现在这里。',
   'devices.identity': '设备 / 标识',
@@ -314,7 +304,6 @@ export const chinese = Object.freeze({
   'devices.authObserved': '认证观测：{time}',
   'devices.next': '下一页设备',
   'providers.heading': '运行实例（Runtime providers）',
-  'providers.description': '仅展示此设备当前获授权的已配置实例；实例故障不等于整机离线。',
   'providers.forbidden': '没有 provider 查看权限。',
   'providers.unavailable': 'Provider 读取暂不可用，设备观测仍单独展示。',
   'providers.empty': '此范围没有可展示的 provider。',
@@ -334,7 +323,6 @@ export const chinese = Object.freeze({
   'detail.observationHeading': '观测与来源',
   'detail.unavailable': '设备详情不可用',
   'detail.invisible': '目标不存在或当前范围不可见。',
-  'detail.persisted': '持久登记状态（非实时依据）',
   'detail.labels': '标签',
   'detail.revision': '资源 revision',
   'detail.epoch': 'Connection epoch 安全引用',
@@ -345,10 +333,6 @@ export const chinese = Object.freeze({
   'detail.connectionSource': '连接观测来源',
   'detail.authSource': '认证观测来源',
   'detail.failure': '最近失败代码',
-  'detail.missing':
-    '当前共享读取未提供设备 ready 证明、重连时间或 OS/version；不从历史状态推测。Enrollment 和设备凭据仅通过受保护本机渠道交付及安全输入。',
-  'detail.permissionExpired': '权限提示已过期，等待刷新；它不授予后端权限。',
-  'detail.permissionUntil': '短期权限提示有效至 {time}；每次操作仍须后端重新验证。',
   'gateway.pending': '正在读取管理状态…',
   'gateway.unavailable': '管理状态不可用',
   'gateway.authorization': '管理员身份与管理权限由独立的受保护后端验证。登录入口尚未接入时，设备数据不可用。',
@@ -432,7 +416,6 @@ export const english = Object.freeze({
   'overview.onlineNote': 'Connection and identity are current',
   'overview.attention': 'Needs attention',
   'overview.attentionNote': 'Devices without a verified connection',
-  'overview.scope': 'Device counts cover this page only. Expired observations do not establish current state.',
   'overview.store': 'Storage',
   'overview.transport': 'Device transport',
   'overview.native': 'Native runtime',
@@ -586,12 +569,12 @@ export const english = Object.freeze({
   'manage.epoch': 'Connection epoch',
   'manage.revision': 'Resource revision',
   'manage.reason': 'Reason',
-  'manage.expires': 'Confirmation deadline (UTC)',
+  'manage.expires': 'Confirmation deadline',
   'manage.providers': 'Affected providers',
   'manage.request': 'Request reference',
   'manage.authorization': 'Persistent authorization effect',
   'manage.channel': 'Channel effect',
-  'manage.observed': 'Receipt time (UTC)',
+  'manage.observed': 'Receipt time',
   'manage.audit': 'Audit events',
   'manage.enabled': 'Enabled',
   'manage.disabled': 'Disabled',
@@ -651,10 +634,6 @@ export const english = Object.freeze({
   'component.degraded': 'Degraded (degraded)',
   'component.unavailable': 'Unavailable (unavailable)',
   'component.unverified': 'Unverified (unverified)',
-  'persisted.pending': 'Pairing pending (pending)',
-  'persisted.offline': 'Registered offline (offline)',
-  'persisted.online': 'Registered online (online)',
-  'persisted.revoked': 'Identity revoked (revoked)',
   'device.expired': 'Device observation expired',
   'device.revokedHistory': 'Last stored registration: identity revoked (expired)',
   'device.oldRecords': 'Old connection and authentication records cannot restore authorization',
@@ -669,20 +648,14 @@ export const english = Object.freeze({
   'device.lastState': '{label} · last: {state}',
   'device.connectionUnknown': 'Connection unverified · {reason}',
   'device.authUnknown': 'Authentication unverified · {reason}',
-  'device.readyUnknown': 'Device readiness has no independent observation',
-  'actions.available':
-    'Review and confirm the server summary for available actions. Permissions are checked on every request.',
   'actions.unavailable': 'The following actions are not connected and are unavailable.',
   'actions.provider': 'Disable / re-enable provider',
   'actions.rename': 'Rename',
   'actions.disconnect': 'Disconnect current connection',
   'actions.revoke': 'Revoke device identity',
-  'actions.effect':
-    'Disconnect closes only the selected connection and preserves device authorization; the Connector may reconnect. Revocation persistently rejects the old identity and affects all providers. In-flight work may continue; its outcome remains unconfirmed.',
   'devices.heading': 'Devices',
   'devices.eyebrow': 'DEVICE INVENTORY',
   'devices.subtitle': 'Search, filter and inspect connection and authentication observations per device.',
-  'devices.description': 'Device identity, connections and runtime providers are observed independently.',
   'devices.emptyTitle': 'No devices yet',
   'devices.emptyHint': 'Pair a device and it will appear here.',
   'devices.identity': 'Device / identifier',
@@ -694,8 +667,6 @@ export const english = Object.freeze({
   'devices.authObserved': 'Authentication observed: {time}',
   'devices.next': 'Next devices',
   'providers.heading': 'Runtime providers',
-  'providers.description':
-    'Only currently authorized configured instances are shown. An instance failure does not mean the device is offline.',
   'providers.forbidden': 'You do not have permission to view providers.',
   'providers.unavailable':
     'Provider reads are temporarily unavailable. Device observations are still shown independently.',
@@ -716,7 +687,6 @@ export const english = Object.freeze({
   'detail.observationHeading': 'Observations & sources',
   'detail.unavailable': 'Device details unavailable',
   'detail.invisible': 'The target does not exist or is not visible in this scope.',
-  'detail.persisted': 'Stored registration state (not live evidence)',
   'detail.labels': 'Labels',
   'detail.revision': 'Resource revision',
   'detail.epoch': 'Safe connection epoch reference',
@@ -727,11 +697,6 @@ export const english = Object.freeze({
   'detail.connectionSource': 'Connection observation source',
   'detail.authSource': 'Authentication observation source',
   'detail.failure': 'Last failure code',
-  'detail.missing':
-    'Shared reads do not provide proof of device readiness, reconnection times or OS/version. Historical state cannot establish them. Enrollment and device credentials use protected local delivery and input only.',
-  'detail.permissionExpired':
-    'The permission hint expired. Refresh is required; the hint does not grant backend permission.',
-  'detail.permissionUntil': 'Permission hint valid until {time}; the backend must reauthorize every operation.',
   'gateway.pending': 'Reading management state…',
   'gateway.unavailable': 'Management state unavailable',
   'gateway.authorization':
@@ -760,9 +725,9 @@ export interface Localizer {
   readonly language: UiLanguage
   /** 插值只写入文本节点；设备名和协议值始终保留原文。 */
   t(key: MessageKey, values?: Readonly<Record<string, string | number>>): string
-  /** 按显示语言格式化可信服务时间，明确保留 UTC，不用浏览器时间补造观测。 */
+  /** 按显示语言格式化可信服务时间，使用浏览器本地时区并自带偏移标识，不用浏览器时间补造观测。 */
   timestamp(value: number | null): string
-  /** 仅把现有单调年龄本地化，不重置快照新鲜度。 */
+  /** 仅把现有单调年龄本地化并按量级进位，不重置快照新鲜度。 */
   age(value: number | null, serverNow: number): string
   /** 固定公开失败说明附带未经翻译的原始协议码。 */
   reason(code: PublicReason): string
@@ -779,8 +744,13 @@ export type PublicReason =
   | 'binding_mismatch'
 
 /** 创建每个页面自己的格式器；切换语言只替换此对象，不影响读取状态。 */
-export function createLocalizer(language: UiLanguage): Localizer {
+export function createLocalizer(
+  language: UiLanguage,
+  /** 仅供测试固定展示时区；生产调用不传，始终跟随浏览器所在时区。 */
+  displayTimeZone?: string
+): Localizer {
   const dictionary = messages[language]
+  // 不指定 timeZone：时刻按浏览器所在时区显示，并用 GMT 偏移标识当前时区，避免再次出现写死的 UTC。
   const dates = new Intl.DateTimeFormat(language, {
     year: 'numeric',
     month: 'short',
@@ -788,11 +758,32 @@ export function createLocalizer(language: UiLanguage): Localizer {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    timeZone: 'UTC',
-    timeZoneName: 'short',
+    timeZone: displayTimeZone,
+    timeZoneName: 'shortOffset',
     hourCycle: 'h23'
   })
   const relative = new Intl.RelativeTimeFormat(language, { numeric: 'always' })
+  /** 相对年龄按量级进位到秒/分/时/天/月/年，避免长期观测累加成几千秒。 */
+  function relativeAge(seconds: number): { value: number; unit: Intl.RelativeTimeFormatUnit } {
+    if (seconds < 60) {
+      return { value: seconds, unit: 'second' }
+    }
+    if (seconds < 3_600) {
+      return { value: Math.floor(seconds / 60), unit: 'minute' }
+    }
+    if (seconds < 86_400) {
+      return { value: Math.floor(seconds / 3_600), unit: 'hour' }
+    }
+    const days = Math.floor(seconds / 86_400)
+    if (days < 30) {
+      return { value: days, unit: 'day' }
+    }
+    if (days < 365) {
+      // 上限保留 11 个月，满 365 天后直接进位到年，避免出现“12 个月”或“0 年”。
+      return { value: Math.min(Math.floor(days / 30), 11), unit: 'month' }
+    }
+    return { value: Math.floor(days / 365), unit: 'year' }
+  }
   /** 固定词典插值不得遗漏参数，开发期与浏览器回归会核对两语占位符。 */
   function t(key: MessageKey, values: Readonly<Record<string, string | number>> = {}): string {
     return dictionary[key].replace(
@@ -811,11 +802,14 @@ export function createLocalizer(language: UiLanguage): Localizer {
     t,
     /** 未提供服务时间时明确未知，不读取当前浏览器墙钟。 */
     timestamp: (value) => (value === null ? t('time.noObservation') : dates.format(value)),
-    /** 秒数来自服务时点及单调经过时间，未来时点不会变成负年龄。 */
-    age: (value, serverNow) =>
-      value === null
-        ? t('time.noHeartbeat')
-        : relative.format(-Math.max(0, Math.floor((serverNow - value) / 1000)), 'second'),
+    /** 秒数来自服务时点及单调经过时间，未来时点不会变成负年龄；单位只按该秒数进位。 */
+    age: (value, serverNow) => {
+      if (value === null) {
+        return t('time.noHeartbeat')
+      }
+      const { value: amount, unit } = relativeAge(Math.max(0, Math.floor((serverNow - value) / 1000)))
+      return relative.format(-amount, unit)
+    },
     /** 人类说明可翻译，原协议码仍可精确识别。 */
     reason: (code) => `${t(`reason.${code}`)} (${code})`
   }

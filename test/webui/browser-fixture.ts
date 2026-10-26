@@ -27,6 +27,7 @@ type FixtureMode =
   | 'stale_runtime'
   | 'stale_children'
   | 'stale_permissions'
+  | 'old_calls'
   | 'near_stale'
 
 declare global {
@@ -38,6 +39,7 @@ declare global {
       pending: { resolve: (value: TimedSnapshot<PageView>) => void; snapshot: TimedSnapshot<PageView> }[]
       dispose: () => void
       release: () => void
+      lastServerTime: number
     }
   }
 }
@@ -46,6 +48,8 @@ const fixture = {
   mode: 'normal' as FixtureMode,
   reads: 0,
   aborted: 0,
+  /** 最近一次交付投影的可信服务时点，供验收脚本按浏览器时区重新计算期望文本。 */
+  lastServerTime: 0,
   pending: [] as { resolve: (value: TimedSnapshot<PageView>) => void; snapshot: TimedSnapshot<PageView> }[],
   /** 初始占位，挂载后替换为真实资源清理函数。 */
   dispose: () => {},
@@ -86,6 +90,7 @@ const read: PageRead = async (route, signal) => {
     throw new Error('fixture-secret-never-render-this')
   }
   const result = await baseRead(route, signal)
+  fixture.lastServerTime = result.serverTime
   if (fixture.mode === 'showcase') {
     const samples = ['studio-workstation', 'macbook-pro', 'home-server', 'build-runner'].map((name, index) => {
       const device = fixtureDevice('fixture-a')
@@ -197,6 +202,17 @@ const read: PageRead = async (route, signal) => {
   }
   if (fixture.mode === 'stale_permissions' && result.value.permissions) {
     result.value.permissions.observed_at = result.serverTime - 60_000
+  }
+  if (fixture.mode === 'old_calls' && result.value.calls) {
+    // 复现用户报告的病态累加：调用记录创建于 3,665 秒前，应收敛显示为“1 小时前”。
+    const linked = result.serverTime - 3_665 * 1_000
+    for (const call of result.value.calls.items) {
+      call.created_at = linked
+      call.deadline = linked + 30_000
+    }
+    // 采样窗口的首末时点必须仍落在同一窗口内，否则共享校验会拒收整页投影。
+    result.value.calls.window.first_at = linked
+    result.value.calls.window.last_at = linked
   }
   return result
 }

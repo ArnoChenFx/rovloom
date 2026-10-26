@@ -61,12 +61,6 @@ const componentNames = {
   unavailable: 'component.unavailable',
   unverified: 'component.unverified'
 } as const satisfies Record<string, MessageKey>
-const persistedNames = {
-  pending: 'persisted.pending',
-  offline: 'persisted.offline',
-  online: 'persisted.online',
-  revoked: 'persisted.revoked'
-} as const satisfies Record<string, MessageKey>
 const problemNames: Record<NonNullable<ReaderState<PageView>['problem']>, MessageKey> = {
   unauthenticated: 'error.unauthenticated',
   forbidden: 'error.forbidden',
@@ -208,7 +202,7 @@ function currentDeviceLink(device: DeviceSnapshot, freshness: Freshness): boolea
 }
 
 /** 分开显示持久状态、连接与认证；过期的已验证来源仅可作为历史，不呈绿色在线。 */
-function deviceBadges(device: DeviceSnapshot, freshness: Freshness, compact = false): HTMLElement {
+function deviceBadges(device: DeviceSnapshot, freshness: Freshness): HTMLElement {
   const { i18n } = freshness
   const { t } = i18n
   const result = node('div', '', 'badges')
@@ -276,13 +270,10 @@ function deviceBadges(device: DeviceSnapshot, freshness: Freshness, compact = fa
   } else {
     result.append(badge(t('device.authUnknown', { reason: i18n.reason(authentication.reason_code) }), 'warning'))
   }
-  if (!compact) {
-    result.append(badge(t('device.readyUnknown')))
-  }
   return result
 }
 
-/** 只展示未接后端操作的含义，不提交确认或变更。 */
+/** 未接后端时说明入口不可用的原因；已连接时该说明会被隐藏，不留在可用按钮上方。 */
 function unavailableActions(kind: 'device' | 'provider', i18n: Localizer): HTMLElement {
   const { t } = i18n
   const section = node('section', '', 'actions')
@@ -299,9 +290,6 @@ function unavailableActions(kind: 'device' | 'provider', i18n: Localizer): HTMLE
     button.setAttribute('aria-describedby', noteId)
     section.append(button)
   }
-  if (kind === 'device') {
-    section.append(node('p', t('actions.effect'), 'muted'))
-  }
   return section
 }
 
@@ -311,7 +299,15 @@ function deviceActions(page: PageView, freshness: Freshness, connected: boolean)
   if (!connected) {
     return section
   }
-  section.querySelector('p')!.textContent = freshness.i18n.t('actions.available')
+  // 已连接时不再显示“尚未接入”说明：隐藏而不删除节点，避免每次重绘重建按钮并丢焦。
+  const note = section.querySelector('p')
+  if (note) {
+    note.hidden = true
+    note.removeAttribute('id')
+  }
+  for (const button of section.querySelectorAll('button')) {
+    button.removeAttribute('aria-describedby')
+  }
   const permission = page.permissions
   const allowed =
     permission &&
@@ -359,7 +355,6 @@ function overviewMetrics(page: PageView, freshness: Freshness): HTMLElement {
     card.append(top, node('strong', value, 'metric-value'), node('p', t(description), 'muted'))
     section.append(card)
   }
-  section.append(node('p', t('overview.scope'), 'metric-scope'))
   return section
 }
 
@@ -713,8 +708,12 @@ function callsPage(page: PageView, freshness: Freshness, route: PageRoute, filte
     row.append(identity, source, state, when)
     list.append(row)
   }
-  details.append(columns, list)
-  if (!visible.length) {
+  // 表头与行包在同一个边框容器内，与设备列表一致；无匹配行时不渲染空表框，只留提示。
+  if (visible.length) {
+    const table = node('div', '', 'call-table')
+    table.append(columns, list)
+    details.append(table)
+  } else {
     const empty = node('div', '', 'empty search-empty')
     empty.append(uiIcon('search'), node('h3', t('devices.noMatches')), node('p', t('calls.emptyHint'), 'muted'))
     details.append(empty)
@@ -773,7 +772,7 @@ function deviceList(page: PageView, freshness: Freshness, route: PageRoute, filt
   const heading = node('header', '', 'page-heading')
   const copy = node('div', '', 'heading-copy')
   copy.append(node('p', t('devices.eyebrow'), 'eyebrow'))
-  copy.append(node('h1', t('devices.heading')), node('p', t('devices.description'), 'muted'))
+  copy.append(node('h1', t('devices.heading')))
   heading.append(copy)
   const add = node('a', '', 'primary-button')
   add.href = '#view=pairing'
@@ -867,7 +866,7 @@ function deviceList(page: PageView, freshness: Freshness, route: PageRoute, filt
       )
     )
     const health = node('div', '', 'device-health')
-    health.append(node('span', t('devices.health'), 'cell-label'), deviceBadges(device, freshness, true))
+    health.append(node('span', t('devices.health'), 'cell-label'), deviceBadges(device, freshness))
     const heartbeat = device.connection.verification === 'verified' ? device.connection.value.last_heartbeat_at : null
     const activity = node('div', '', 'device-activity')
     activity.append(node('span', t('devices.activity'), 'cell-label'))
@@ -895,7 +894,6 @@ function deviceList(page: PageView, freshness: Freshness, route: PageRoute, filt
         freshness
       )
     )
-    record.append(node('p', t('device.readyUnknown'), 'muted'))
     const inspect = node('a', '', 'inspect-device')
     inspect.href = link.href
     inspect.setAttribute('aria-label', t('devices.open', { name: device.name }))
@@ -933,7 +931,7 @@ function providerList(page: PageView, device: DeviceSnapshot, freshness: Freshne
   const { i18n } = freshness
   const { t } = i18n
   const section = node('section', '', 'providers-section')
-  section.append(node('h2', t('providers.heading')), node('p', t('providers.description'), 'muted'))
+  section.append(node('h2', t('providers.heading')))
   if (page.providersProblem) {
     section.append(
       node(
@@ -1028,7 +1026,6 @@ function deviceDetail(page: PageView, freshness: Freshness, management = false):
   registration.append(node('h2', t('detail.identityHeading')))
   registration.append(
     facts([
-      [t('detail.persisted'), t(persistedNames[device.persisted_state])],
       [
         t('detail.labels'),
         device.labels === null ? t('value.notRecorded') : device.labels.join(' · ') || t('value.noLabels')
@@ -1068,19 +1065,7 @@ function deviceDetail(page: PageView, freshness: Freshness, management = false):
     ])
   )
   layout.append(connectionSection, registration, observations)
-  section.append(layout, node('p', t('detail.missing'), 'context-note'))
-  if (page.permissions) {
-    const expired = !current(page.permissions.observed_at, freshness) || freshness.now >= page.permissions.expires_at
-    section.append(
-      node(
-        'p',
-        expired
-          ? t('detail.permissionExpired')
-          : t('detail.permissionUntil', { time: i18n.timestamp(page.permissions.expires_at) }),
-        'muted'
-      )
-    )
-  }
+  section.append(layout)
   section.append(providerList(page, device, freshness, management), deviceActions(page, freshness, management))
   return { heading, body: section }
 }
