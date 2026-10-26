@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { canonical, digest, GatewayError, validateRequest } from './contracts.js'
 import type { NativeRequest } from './contracts.js'
+import { NativeRequestPreflightError } from './runtime/request-preflight.js'
 import {
   assertBinding,
   boundedJson,
@@ -378,7 +379,7 @@ export class Store {
     }
   }
   // 在单一 writer 事务内固定时钟和预算，成功提交才发布回收通知，存储失败锁存降级。
-  private transaction<T>(fn: (now: number) => T, admission = true): T {
+  private transaction<T>(fn: (now: number) => T, admission: boolean | 'optional' = true): T {
     if (this.transactionTime !== undefined) {
       throw new GatewayError('transaction_in_progress')
     }
@@ -417,6 +418,10 @@ export class Store {
       } catch {
         /* 不在错误中暴露 SQL/内容。 */
       }
+      // 可选诊断遵守普通准入预算；容量不足只撤去本条诊断，真实写入/提交故障仍锁存降级。
+      if (admission === 'optional' && error instanceof GatewayError && error.code === 'storage_exhausted') {
+        throw error
+      }
       if (
         error instanceof GatewayError &&
         !['storage_exhausted', 'audit_quota', 'metadata_quota', 'security_quota'].includes(error.code)
@@ -438,8 +443,13 @@ export class Store {
     }
   }
   // 结合逻辑子额、物理文件与备份检查预算，为准入保留在途完成空间。
-  private budget(admission: boolean): void {
-    assertBudget(this.db, this.path, this.limits, this.options.backupDirectory, admission)
+  private budget(admission: boolean | 'optional'): void {
+    // 可选诊断额外留出一份普通业务余量；既不能动收尾预留，也不能将正常准入额度全部占满。
+    const limits =
+      admission === 'optional'
+        ? { ...this.limits, storage_total_bytes: this.limits.storage_total_bytes - this.limits.storage_reserve_bytes }
+        : this.limits
+    assertBudget(this.db, this.path, limits, this.options.backupDirectory, admission !== false)
   }
   // 按固定白名单构造脱敏审计记录，并与对应业务变化在同一事务写入。
   private audit(
@@ -855,136 +865,153 @@ export class Store {
       ...(supplied.validation === undefined ? {} : { validation: supplied.validation }),
       ...(supplied.client_request_key === undefined ? {} : { client_request_key: supplied.client_request_key })
     }
-    return this.transaction(
-      /* 在同一 writer 事务复验授权、查询去重并登记；预算和审计提交后才返回 created 判定。 */ (now) => {
-        const authorized: unknown = authorize?.()
-        if (authorized !== undefined) {
-          if (authorized instanceof Promise) {
-            void authorized.catch(/* 观察违规异步授权的拒绝；准入仍同步失败，不把后续结果当作许可。 */ () => {})
-          }
-          throw new GatewayError('synchronous_authorization_required')
-        }
-        const provider = this.provider(target.machine_id, target.provider_id)
-        if (!provider || !provider.enabled || provider.binding_revision !== options.binding_revision) {
-          throw new GatewayError('provider_binding_mismatch')
-        }
-        // Herdr 在此只登记已评审 RPC 意图；契约引用由 Gateway 对照配对批准的实测来源复验，实际发送前仍须完整安装 schema 和当前权限检查。
-        if (
-          provider.kind === 'herdr' &&
-          (target.profile !== 'session' ||
-            (options.validation ?? 'strict') !== 'strict' ||
-            !reviewedHerdrRequest(request))
-        ) {
-          throw new GatewayError('provider_support_candidate')
-        }
-        const identity: AttemptIdentity = {
-          call_id: id('call'),
-          attempt_id: id('attempt'),
-          native_request_id: id('native'),
-          target,
-          provider_kind: provider.kind,
-          binding_revision: provider.binding_revision,
-          contract_ref: options.contract_ref,
-          registration: {
-            deadline: 'deadline' in timing ? timing.deadline : now + timing.timeoutMs,
-            caller_policy_revision: options.caller_policy_revision,
-            local_policy_revision: options.local_policy_revision
-          }
-        }
-        validateAttempt(identity)
-        let hash = registeredRequestDigest(
-          {
-            attempt: identity,
-            expected_binding_revision: provider.binding_revision,
-            native_request: request,
-            validation: options.validation ?? 'strict'
-          },
-          principal
-        )
-        const expires = now + this.limits.metadata_ttl
-        if (options.client_request_key !== undefined) {
-          const keyDigest = digest(options.client_request_key)
-          const old = this.db
-            .prepare('SELECT * FROM calls WHERE principal=? AND key_digest=?')
-            .get(principal, keyDigest) as Row | undefined
-          if (old && old.dedup_expires > now) {
-            // deadline 是初次登记的绝对值，重送不能以当前时刻刷新；其余条件仍逐项摘要核对。
-            const prior = JSON.parse(old.identity_json) as AttemptIdentity
-            if ('timeoutMs' in timing) {
-              identity.registration.deadline = prior.registration.deadline
+    try {
+      return this.transaction(
+        /* 在同一 writer 事务复验授权、查询去重并登记；预算和审计提交后才返回 created 判定。 */ (now) => {
+          const authorized: unknown = authorize?.()
+          if (authorized !== undefined) {
+            if (authorized instanceof Promise) {
+              void authorized.catch(/* 观察违规异步授权的拒绝；准入仍同步失败，不把后续结果当作许可。 */ () => {})
             }
-            hash = registeredRequestDigest(
-              {
-                attempt: identity,
-                expected_binding_revision: provider.binding_revision,
-                native_request: request,
-                validation: options.validation ?? 'strict'
-              },
-              principal
-            )
-            if (
-              old.request_hash !== hash ||
-              ('timeoutMs' in timing && prior.registration.deadline - old.created !== timing.timeoutMs)
-            ) {
-              throw new GatewayError('request_key_conflict')
+            throw new GatewayError('synchronous_authorization_required')
+          }
+          const provider = this.provider(target.machine_id, target.provider_id)
+          if (!provider || !provider.enabled || provider.binding_revision !== options.binding_revision) {
+            throw new GatewayError('provider_binding_mismatch')
+          }
+          // Herdr 在此只登记已评审 RPC 意图；契约引用由 Gateway 对照配对批准的实测来源复验，实际发送前仍须完整安装 schema 和当前权限检查。
+          if (
+            provider.kind === 'herdr' &&
+            (target.profile !== 'session' ||
+              (options.validation ?? 'strict') !== 'strict' ||
+              !reviewedHerdrRequest(request))
+          ) {
+            throw new GatewayError('provider_support_candidate')
+          }
+          const identity: AttemptIdentity = {
+            call_id: id('call'),
+            attempt_id: id('attempt'),
+            native_request_id: id('native'),
+            target,
+            provider_kind: provider.kind,
+            binding_revision: provider.binding_revision,
+            contract_ref: options.contract_ref,
+            registration: {
+              deadline: 'deadline' in timing ? timing.deadline : now + timing.timeoutMs,
+              caller_policy_revision: options.caller_policy_revision,
+              local_policy_revision: options.local_policy_revision
             }
-            return { call: publicCall(this.owned(principal, old.call_id, now), now), created: false }
           }
-          if (old) {
-            // 过期墓碑让位给同 key 的新登记，唯一约束不再占用旧行。
-            this.db.prepare('DELETE FROM calls WHERE call_id=?').run(old.call_id)
+          validateAttempt(identity)
+          let hash = registeredRequestDigest(
+            {
+              attempt: identity,
+              expected_binding_revision: provider.binding_revision,
+              native_request: request,
+              validation: options.validation ?? 'strict'
+            },
+            principal
+          )
+          const expires = now + this.limits.metadata_ttl
+          if (options.client_request_key !== undefined) {
+            const keyDigest = digest(options.client_request_key)
+            const old = this.db
+              .prepare('SELECT * FROM calls WHERE principal=? AND key_digest=?')
+              .get(principal, keyDigest) as Row | undefined
+            if (old && old.dedup_expires > now) {
+              // deadline 是初次登记的绝对值，重送不能以当前时刻刷新；其余条件仍逐项摘要核对。
+              const prior = JSON.parse(old.identity_json) as AttemptIdentity
+              if ('timeoutMs' in timing) {
+                identity.registration.deadline = prior.registration.deadline
+              }
+              hash = registeredRequestDigest(
+                {
+                  attempt: identity,
+                  expected_binding_revision: provider.binding_revision,
+                  native_request: request,
+                  validation: options.validation ?? 'strict'
+                },
+                principal
+              )
+              if (
+                old.request_hash !== hash ||
+                ('timeoutMs' in timing && prior.registration.deadline - old.created !== timing.timeoutMs)
+              ) {
+                throw new GatewayError('request_key_conflict')
+              }
+              return { call: publicCall(this.owned(principal, old.call_id, now), now), created: false }
+            }
+            if (old) {
+              // 过期墓碑让位给同 key 的新登记，唯一约束不再占用旧行。
+              this.db.prepare('DELETE FROM calls WHERE call_id=?').run(old.call_id)
+            }
           }
-        }
-        // 有效墓碑命中只返回旧意图；只有首次登记才要求绝对截止时间仍在未来且不超过十分钟。
-        if ('deadline' in timing) {
-          if (timing.deadline <= now) {
-            throw new GatewayError('deadline_exceeded')
+          // 有效墓碑命中只返回旧意图；只有首次登记才要求绝对截止时间仍在未来且不超过十分钟。
+          if ('deadline' in timing) {
+            if (timing.deadline <= now) {
+              throw new GatewayError('deadline_exceeded')
+            }
+            if (timing.deadline - now > 600_000) {
+              throw new GatewayError('invalid_deadline')
+            }
           }
-          if (timing.deadline - now > 600_000) {
-            throw new GatewayError('invalid_deadline')
+          if (this.machine(target.machine_id).status !== 'online') {
+            throw new GatewayError('machine_offline')
           }
-        }
-        if (this.machine(target.machine_id).status !== 'online') {
-          throw new GatewayError('machine_offline')
-        }
-        // 首次登记在唯一 writer 中使用实际原生 ID 验证完整根；失败回滚，不生成 call 或派发锚点。
-        const checked: unknown = preflight?.(JSON.parse(canonical({ ...request, id: identity.native_request_id })))
-        if (checked !== undefined) {
-          if (checked instanceof Promise) {
-            void checked.catch(/* 消费违反同步契约的晚到拒绝，不能在回调完成前登记。 */ () => {})
+          // 首次登记在唯一 writer 中使用实际原生 ID 验证完整根；失败回滚，不生成 call 或派发锚点。
+          const checked: unknown = preflight?.(JSON.parse(canonical({ ...request, id: identity.native_request_id })))
+          if (checked !== undefined) {
+            if (checked instanceof Promise) {
+              void checked.catch(/* 消费违反同步契约的晚到拒绝，不能在回调完成前登记。 */ () => {})
+            }
+            throw new GatewayError('synchronous_native_preflight_required')
           }
-          throw new GatewayError('synchronous_native_preflight_required')
-        }
-        this.db
-          .prepare(`INSERT INTO calls(call_id,principal,machine_id,provider_id,binding_revision,provider_kind,
+          this.db
+            .prepare(`INSERT INTO calls(call_id,principal,machine_id,provider_id,binding_revision,provider_kind,
         request_hash,key_digest,state,identity_json,target_json,method,mode,request_json,
         created,deadline,content_expires,metadata_expires,dedup_expires,content_status)
         VALUES(?,?,?,?,?,?,?,?,'created',?,?,?,?,?,?,?,?,?,?,'available')`)
-          .run(
-            identity.call_id,
-            principal,
-            target.machine_id,
-            target.provider_id,
-            provider.binding_revision,
-            provider.kind,
-            hash,
-            options.client_request_key === undefined ? null : digest(options.client_request_key),
-            boundedJson(identity),
-            boundedJson(target),
-            request.method,
-            options.validation ?? 'strict',
-            canonical(request),
-            now,
-            identity.registration.deadline,
-            now + this.limits.result_ttl,
-            expires,
-            expires
+            .run(
+              identity.call_id,
+              principal,
+              target.machine_id,
+              target.provider_id,
+              provider.binding_revision,
+              provider.kind,
+              hash,
+              options.client_request_key === undefined ? null : digest(options.client_request_key),
+              boundedJson(identity),
+              boundedJson(target),
+              request.method,
+              options.validation ?? 'strict',
+              canonical(request),
+              now,
+              identity.registration.deadline,
+              now + this.limits.result_ttl,
+              expires,
+              expires
+            )
+          const row = this.row(identity.call_id)
+          this.audit('created', principal, now, row)
+          return { call: publicCall(row, now), created: true }
+        }
+      )
+    } catch (error) {
+      // 预检拒绝回滚后不留任何调用痕迹；补一条只含固定错误码的审计，生产可区分客户端参数错与请求未到达。
+      if (error instanceof NativeRequestPreflightError) {
+        try {
+          this.transaction(
+            /* 独立小事务只写预检拒绝事件，不带参数、目标或原始 schema 细节。 */ (now) => {
+              this.audit('native_preflight_rejected', principal, now, undefined, { code: error.code })
+            },
+            'optional'
           )
-        const row = this.row(identity.call_id)
-        this.audit('created', principal, now, row)
-        return { call: publicCall(row, now), created: true }
+        } catch {
+          /* 审计失败不改变原拒绝语义。 */
+        }
       }
-    )
+      throw error
+    }
   }
   // 核对当前连接、期限及可选的宿主策略 revision，提交完整 attempt 锚点与完成预留后才允许发送。
   // 返回绑定只证明账本派发锚点已持久化，真实原生执行许可仍由适配器独立校验。

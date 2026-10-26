@@ -259,7 +259,8 @@ test(
       }
       assert.deepEqual(observed, {
         invalidAdmitted: false,
-        invalidError: 'herdr_native_request_invalid',
+        // 登记前的参数拒绝收敛为与 Luvus 预检同一公共码，携带确定未派发语义（issue #283 修复）。
+        invalidError: 'native_request_invalid',
         stateBeforeReply: 'dispatching',
         legalCallState: 'responded',
         sameEpoch: true,

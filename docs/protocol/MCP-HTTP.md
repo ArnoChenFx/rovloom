@@ -86,7 +86,7 @@
 ### 错误
 
 - 网关拒绝返回 `isError: true` 与 `gateway_error: {code}`。`code` 取下列之一：`backend_unavailable`、`invalid_arguments`、`native_request_invalid`、`internal_error`、`unauthenticated`、`forbidden`、`unavailable`、`not_found`、`conflict`、`invalid_cursor`、`binding_revision_conflict`、`contract_unavailable`、`unsupported`、`confirmation_required`、`storage_exhausted`、`storage_degraded`、`content_unavailable`、`deadline_exceeded`、`busy`。
-- `native_request_invalid` 在 Luvus 完整请求 schema 于登记预检阶段被拒时附带 `outcome: "not_dispatched"`：此时还没有建立 call 或派发锚点，坏请求不占用 key，不发送 Wire 帧，不关闭设备连接。已有 key 仍返回原调用的真实状态，旧的 unknown 不会倒退或重派。预检通过不授予执行权限，网关不返回参数或 schema 的错误正文。
+- `native_request_invalid` 在 Luvus 或 Herdr 的完整请求 schema 于登记预检阶段被拒时附带 `outcome: "not_dispatched"`：此时还没有建立 call 或派发锚点，坏请求不占用 key，不发送 Wire 帧，不关闭设备连接。已有 key 仍返回原调用的真实状态，旧的 unknown 不会倒退或重派。预检通过不授予执行权限，网关不返回参数或 schema 的错误正文。
 - 响应超过 64 KiB 时，只返回 `response_too_large`、`truncated`、字节数、hash 和适用的 `call_id`，不制造句柄，也不再次执行。
 - 未知工具或非法参数返回固定的 JSON-RPC 错误，不回显请求值、异常、路径或栈。
 

@@ -299,9 +299,9 @@ test(
       const provider = resource.providers[0]!
       assert.equal(typeof provider.preflightRequest, 'function')
       assert.throws(
-        /** 同一完整根仍拒绝缺少 target/text 的 agent.prompt。 */ () =>
+        /** 缺 target/text 的 agent.prompt 在登记前收敛为确定未派发的公共预检码。 */ () =>
           provider.preflightRequest!({ id: 'fixture_id', method: 'agent.prompt', params: {} }),
-        /herdr_native_request_invalid/
+        { name: 'GatewayError', code: 'native_request_invalid' }
       )
       await assert.rejects(sources.connector!(f.config, f.refs()), { code: 'herdr_binary_identity_changed' })
       assert.equal(provider.ready(), true)
