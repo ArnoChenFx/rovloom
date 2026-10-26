@@ -128,6 +128,7 @@ export class Store {
   private maintenance?: ReturnType<typeof setInterval>
   readonly administration: ManagementLedger
   private devices!: DeviceLedger
+  private readonly backupDirectory: string | undefined
   readonly limits: Retention
   // 打开独占的私有 SQLite 账本，检查规范 schema、完整性与恢复状态并启动期限清理。
   // 重开时使原连接离线，未派发调用收敛为未派发、在途调用收敛为结果未知，不自动重放。
@@ -153,6 +154,8 @@ export class Store {
       if (path !== ':memory:' && !existsSync(path)) {
         createPrivate(path)
       }
+      // 每次打开都固定同一备份边界，供迁移、预算和清理共用；重开 v10 库也沿用默认目录。
+      this.backupDirectory = options.backupDirectory ?? (path === ':memory:' ? undefined : snapshotDirectory(path))
       this.db = new CachedDatabase(path)
 
       const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()
@@ -178,11 +181,11 @@ export class Store {
       this.db.exec(
         'PRAGMA foreign_keys=ON; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;'
       )
-      if (this.options.backupDirectory) {
+      if (this.backupDirectory) {
         // 托管目录被离线清理后仍保留原边界，允许维护删除已不存在快照的登记，不创建目录。
-        privatePath(this.options.backupDirectory)
-        if (existsSync(this.options.backupDirectory)) {
-          privatePath(join(this.options.backupDirectory, 'boundary'))
+        privatePath(this.backupDirectory)
+        if (existsSync(this.backupDirectory)) {
+          privatePath(join(this.backupDirectory, 'boundary'))
         }
       }
       if (this.db.prepare('PRAGMA quick_check').get()!.quick_check !== 'ok') {
@@ -277,13 +280,10 @@ export class Store {
    */
   private migrate(from: number): void {
     const now = this.rawTime()
-    // 优先用宿主注入的托管目录；未注入时按同一规则从真实库位置推导 <state>.backups，不留无证据的迁移。
-    const backupDirectory =
-      this.options.backupDirectory ?? (this.path === ':memory:' ? undefined : snapshotDirectory(this.path))
     // 先写迁移前副本：没有可回退证据就不开始改 schema。
     let evidence: string | undefined
-    if (backupDirectory) {
-      evidence = recordMigrationSnapshot(this.db, this.path, backupDirectory, from, now, this.limits)
+    if (this.backupDirectory) {
+      evidence = recordMigrationSnapshot(this.db, this.path, this.backupDirectory, from, now, this.limits)
     }
     // 这一步只新增列，不重建被引用的表，因此无需关闭外键约束。
     this.db.exec('BEGIN IMMEDIATE')
@@ -496,7 +496,7 @@ export class Store {
       admission === 'optional'
         ? { ...this.limits, storage_total_bytes: this.limits.storage_total_bytes - this.limits.storage_reserve_bytes }
         : this.limits
-    assertBudget(this.db, this.path, limits, this.options.backupDirectory, admission !== false)
+    assertBudget(this.db, this.path, limits, this.backupDirectory, admission !== false)
   }
   // 按固定白名单构造脱敏审计记录，并与对应业务变化在同一事务写入。
   private audit(
@@ -1470,12 +1470,12 @@ export class Store {
         // 过期的未批准认领直接清理；已批准认领的交付收敛由运行时 custody 负责，不能在维护里静默吞掉。
         this.db.prepare("DELETE FROM pairing_claims WHERE expires<=? AND status='pending'").run(now)
         // 删除前复核固定目录仍是普通目录：运行中被换成软链接时整轮过期失败关闭，不能跟随链接删到目录外。
-        if (this.options.backupDirectory) {
-          assertSnapshotDirectoryBoundary(this.options.backupDirectory)
+        if (this.backupDirectory) {
+          assertSnapshotDirectoryBoundary(this.backupDirectory)
         }
         for (const row of this.db.prepare('SELECT path FROM backups WHERE expires<=?').all(now)) {
           const path = String(row.path)
-          if (dirname(path) !== this.options.backupDirectory) {
+          if (dirname(path) !== this.backupDirectory) {
             throw new GatewayError('unsafe_backup_path')
           }
           if (existsSync(path + '.lock')) {
@@ -1678,8 +1678,8 @@ export class Store {
   backup(destination: string): void {
     privatePath(destination)
     if (
-      !this.options.backupDirectory ||
-      dirname(destination) !== this.options.backupDirectory ||
+      !this.backupDirectory ||
+      dirname(destination) !== this.backupDirectory ||
       dirname(destination) === dirname(this.path) ||
       dirname(destination).startsWith(dirname(this.path) + '/') ||
       dirname(this.path).startsWith(dirname(destination) + '/')
@@ -1687,8 +1687,8 @@ export class Store {
       throw new GatewayError('separate_backup_directory_required')
     }
     // 写入前同样复核目录边界，软链接替换不能把新快照落到固定目录之外。
-    assertSnapshotDirectoryBoundary(this.options.backupDirectory)
-    const cleanup = snapshotCleanup(this.options.backupDirectory)
+    assertSnapshotDirectoryBoundary(this.backupDirectory)
+    const cleanup = snapshotCleanup(this.backupDirectory)
     let exported = false
     let locked = false
     try {
@@ -1705,7 +1705,7 @@ export class Store {
             Number(this.db.prepare('PRAGMA page_count').get()!.page_count) *
               Number(this.db.prepare('PRAGMA page_size').get()!.page_size) +
             65_536
-          assertBudget(this.db, this.path, this.limits, this.options.backupDirectory, false, estimate)
+          assertBudget(this.db, this.path, this.limits, this.backupDirectory, false, estimate)
           createPrivate(destination + '.lock')
           locked = true
           exportSnapshot(this.db, destination, now, this.limits)

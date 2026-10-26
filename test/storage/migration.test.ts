@@ -609,3 +609,37 @@ test('迁移事务内失败时 backups 登记行一并回滚，不占用备份�
     f.close()
   }
 })
+
+for (const reopen of [false, true]) {
+  test(`默认目录迁移副本到期后清理，${reopen ? '重开 v10 库' : '保持原 Store'}也不阻塞其它 TTL`, () => {
+    const f = fixture()
+    let store: Store | undefined
+    let now = 5_000
+    try {
+      legacy(f.path)
+      store = new Store(f.path, () => now)
+      const evidence = join(f.backups, 'migration-v9-5000.db')
+      assert.equal(existsSync(evidence), true)
+      if (reopen) {
+        store.close()
+        store = new Store(f.path, () => now)
+      }
+      now += store.limits.backup_ttl + 1
+      store.expire()
+      assert.equal(existsSync(evidence), false)
+      const check = new DatabaseSync(f.path, { readOnly: true })
+      try {
+        assert.equal(check.prepare('SELECT COUNT(*) n FROM backups').get()!.n, 0)
+        // 副本清理与业务 TTL 同一事务提交，不能因目录不匹配整轮回滚。
+        assert.equal(check.prepare('SELECT COUNT(*) n FROM calls').get()!.n, 0)
+        assert.equal(check.prepare('SELECT COUNT(*) n FROM results').get()!.n, 0)
+        assert.equal(check.prepare("SELECT COUNT(*) n FROM audit WHERE action='connected'").get()!.n, 0)
+      } finally {
+        check.close()
+      }
+    } finally {
+      store?.close()
+      f.close()
+    }
+  })
+}
