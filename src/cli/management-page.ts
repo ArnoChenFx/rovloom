@@ -1,4 +1,5 @@
 // 只将既有受保护管理员租期交付同源根页面，复用原authority，不建立身份库或公开bootstrap端点。
+import { managementSecureRequest } from '../admin/http-origin.js'
 import { ReadError } from '../webui/reader.js'
 import type { ManagementHttpOptions } from '../admin/read-http.js'
 import type {
@@ -31,6 +32,7 @@ export function createManagementPageInitializer(
     signal
   ) => {
     try {
+      const secure = managementSecureRequest(request) ? '; Secure' : ''
       const html = await page.text()
       if (signal.aborted) {
         throw new ReadError('unavailable')
@@ -106,13 +108,13 @@ export function createManagementPageInitializer(
       // Path=/ 让根页面也能带上该 cookie，刷新与重启后不必重输密码；HttpOnly 与 SameSite=Strict 不变。
       headers.append(
         'set-cookie',
-        `${MANAGEMENT_COOKIE_NAME}=${bootstrap.cookie}; Path=/; HttpOnly; SameSite=Strict; Expires=${expires}`
+        `${MANAGEMENT_COOKIE_NAME}=${bootstrap.cookie}; Path=/; HttpOnly; SameSite=Strict; Expires=${expires}${secure}`
       )
       // 升级前写入的是 Path=/admin/v1。旧 cookie 不会被 Path=/ 覆盖，会与新 cookie 同时出现在 API 请求上，
       // 而 adapter 对同名重复 cookie 一律拒绝；这里显式过期旧路径，使升级后无需手工清 cookie。
       headers.append(
         'set-cookie',
-        `${MANAGEMENT_COOKIE_NAME}=; Path=/admin/v1; HttpOnly; SameSite=Strict; Max-Age=0; Expires=${new Date(0).toUTCString()}`
+        `${MANAGEMENT_COOKIE_NAME}=; Path=/admin/v1; HttpOnly; SameSite=Strict; Max-Age=0; Expires=${new Date(0).toUTCString()}${secure}`
       )
       return new Response(html.replace('</head>', metadata + '</head>'), { status: page.status, headers })
     } catch (error) {

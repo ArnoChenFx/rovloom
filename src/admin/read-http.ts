@@ -1,4 +1,5 @@
 /** 管理六项读取的受保护 HTTP 薄桥；服务、会话与错误分类由可信宿主注入，不建立身份或查询后端。 */
+import { managementRequestOrigin } from './http-origin.js'
 import type { AdminContext, GatewayManagementService } from '../mcp/management.js'
 import { parseManagementReadPath, MANAGEMENT_URL_BYTES } from '../webui/http-contract.js'
 import { checkManagementReadReply } from '../webui/validate.js'
@@ -17,7 +18,7 @@ export type ManagementHttpOptions = {
   assets?: ManagementAssets
   /** 仅初始化现有根HTML；仍受本handler的Origin、取消、五秒截止和在途额度约束。 */
   initializePage?(request: Request, page: Response, signal: AbortSignal): Promise<Response>
-  /** 显式局域网选择：仅在通配明文监听时接纳非回环 Host；缺省保持只接受回环。 */
+  /** 监听器的局域网绑定提示；HTTP 请求不以此限制反向代理域名。 */
   lan?: boolean
 }
 
@@ -40,33 +41,6 @@ const statuses: Record<ManagementHttpProblem, number> = {
   unavailable: 503,
   invalid_response: 502,
   timeout: 504
-}
-
-/** 解析本次请求的受信 origin：回环始终按规范地址，显式 LAN 才接纳同一明文监听的其它 Host。 */
-export function lanAwareOrigin(request: Request, loopback: string, lan: boolean): string | null {
-  const raw = request.headers.get('host')
-  if (!raw || Buffer.byteLength(raw) > 2048) {
-    return null
-  }
-  const expected = new URL(loopback)
-  const host = raw.toLowerCase()
-  if (host === expected.host.toLowerCase()) {
-    return expected.origin
-  }
-  if (!lan) {
-    return null
-  }
-  // 明文 HTTP 监听：仅接纳 Host 与请求 URL 一致的同源访问；跨站 Origin 仍被后续校验拒绝。
-  try {
-    const url = new URL(request.url)
-    const candidate = 'http://' + host
-    if (new URL(candidate).origin !== candidate) {
-      return null
-    }
-    return url.host.toLowerCase() === host && url.protocol === 'http:' ? candidate : null
-  } catch {
-    return null
-  }
 }
 
 /** 固定失败不带请求参数、cookie、宿主异常或后端正文。 */
@@ -114,31 +88,16 @@ function assets(input: ManagementAssets | undefined): Map<string, Uint8Array<Arr
   return result
 }
 
-/** 不以 Origin 作为身份；Host/URL 必须匹配实际 listener 的受信 origin，跨站请求在会话解析前拒绝。 */
-function allowed(request: Request, expected: string | null): URL | null {
-  if (expected === null) {
+/** 不以 Origin 作为身份；请求不绑定代理内部 origin；浏览器跨站请求在会话解析前拒绝。 */
+function allowed(request: Request): URL | null {
+  if (managementRequestOrigin(request) === null) {
     return null
   }
   if (new TextEncoder().encode(request.url).byteLength > MANAGEMENT_URL_BYTES) {
     return null
   }
   const url = new URL(request.url)
-  const origin = new URL(expected)
-  if (
-    url.origin !== expected ||
-    request.headers.get('host') !== origin.host ||
-    url.username ||
-    url.password ||
-    url.hash
-  ) {
-    return null
-  }
-  const source = request.headers.get('origin')
-  if (source !== null && source !== expected) {
-    return null
-  }
-  const site = request.headers.get('sec-fetch-site')
-  if (site !== null && site !== 'same-origin' && site !== 'none') {
+  if (url.username || url.password || url.hash) {
     return null
   }
   let size = 0
@@ -191,8 +150,8 @@ async function initialize(
   )
 }
 
-/** 配置缺失时先失败，保证 start 包装器还没有打开任何端口；来源与 LAN 选择都由受信组合器在绑定后交付。 */
-function prepare(options: ManagementHttpOptions, origin: () => string, lan: () => boolean = () => false) {
+/** 配置缺失时先失败，保证 start 包装器还没有打开任何端口。 */
+function prepare(options: ManagementHttpOptions) {
   if (!options || typeof options.authenticate !== 'function') {
     throw new Error('management_authentication_required')
   }
@@ -265,7 +224,7 @@ function prepare(options: ManagementHttpOptions, origin: () => string, lan: () =
     }
     let url: URL | null
     try {
-      url = allowed(request, lanAwareOrigin(request, origin(), lan()))
+      url = allowed(request)
     } catch {
       url = null
     }
@@ -392,13 +351,7 @@ export function createManagementReadHandler(options: ManagementHttpOptions & { o
   ) {
     throw new Error('management_listener_invalid')
   }
-  return prepare(
-    options,
-    /** 使用宿主固定来源，绝不从请求 Host 自动扩大信任范围。 */
-    () => options.origin,
-    /** 组合器交付的显式 LAN 选择同样作用于只读 handler，不能只由独立 listener 路径生效。 */
-    () => options.lan === true
-  )
+  return prepare(options)
 }
 
 /** 只在配置可信会话适配器与共享服务后打开独立管理 listener；没有默认管理员或 token。 */
@@ -408,25 +361,14 @@ export function startManagementReadListener(
   if (!options) {
     throw new Error('management_listener_invalid')
   }
-  let origin = ''
-  let lan = false
-  // 保留原只读入口的开端口前认证、服务及静态资源检查，真实origin仍只来自绑定结果。
-  const handler = prepare(
-    options,
-    /** 只有实际绑定后才消费来源，不根据请求Host扩大信任。 */ () => origin,
-    () => lan
-  )
+  const handler = prepare(options)
   try {
     return startManagementListener({
       port: options.port,
       hostname: options.hostname,
       lan: options.lan === true,
       maxRequestBodySize: 1,
-      handler: /** 只读入口继续使用同一安全handler，不因共用listener打开写操作。 */ (actualOrigin, actualLan) => {
-        origin = actualOrigin
-        lan = actualLan
-        return handler
-      }
+      handler: /** 只读入口仍复用同一 handler。 */ () => handler
     })
   } catch (error) {
     handler.stop()

@@ -233,7 +233,10 @@ test('resource HTTP routes reuse authentication, CSRF and full administrator che
     assert.equal((await h.fetch(request())).status, 200)
     assert.equal((await h.fetch(request({ cookie: '' }))).status, 401)
     assert.equal((await h.fetch(request({ 'x-rovloom-csrf': 'invalid' }))).status, 403)
-    assert.equal((await h.fetch(request({ origin: 'http://other.invalid' }))).status, 403)
+    assert.equal(
+      (await h.fetch(request({ origin: 'http://other.invalid', 'sec-fetch-site': 'cross-site' }))).status,
+      403
+    )
     o.deny()
     assert.equal((await h.fetch(request())).status, 403)
   } finally {

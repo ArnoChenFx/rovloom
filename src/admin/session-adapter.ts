@@ -1,4 +1,5 @@
 // 将宿主现有管理会话绑定到共享administrator来源；不签发cookie/token、不保存身份或创建listener。
+import { managementRequestOrigin } from './http-origin.js'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import type { CallerIdentity, GatewayIdentitySource } from '../mcp/management.js'
 import type { ManagementHttpIdentity } from './read-http.js'
@@ -24,7 +25,7 @@ export type ManagementSessionAdapterOptions = Readonly<{
   sessions: ManagementSessionSource
   cookie_name: string
   origin: string
-  /** 显式局域网选择：仅在通配明文监听时接纳本次请求 Host 的同源访问；缺省只接受回环。 */
+  /** 监听器的局域网绑定提示；管理会话可经反向代理使用。 */
   lan?: boolean
   /** 可注入同Store可信时钟；测试时钟不构成生产认证。 */
   now?: () => number
@@ -88,43 +89,9 @@ export function createManagementSessionAdapter(options: ManagementSessionAdapter
   const now = options.now ?? Date.now
   let observed = 0
 
-  /** 本次请求的受信 origin：回环固定；显式 LAN 时按 Host 推导，推导失败一律拒绝。 */
-  function expected(request: Request): string | null {
-    const raw = request.headers.get('host')
-    if (!raw || Buffer.byteLength(raw) > 2048) {
-      return null
-    }
-    const host = raw.toLowerCase()
-    if (host === origin.host.toLowerCase()) {
-      return origin.origin
-    }
-    if (!options.lan) {
-      return null
-    }
-    try {
-      const url = new URL(request.url)
-      const candidate = 'http://' + host
-      return new URL(candidate).origin === candidate && url.host.toLowerCase() === host && url.protocol === 'http:'
-        ? candidate
-        : null
-    } catch {
-      return null
-    }
-  }
-
   /** cookie只作为宿主查询键，不从其正文、Authorization、URL或请求JSON推导principal。 */
   function cookie(request: Request): string | null {
-    const url = new URL(request.url)
-    const trusted = expected(request)
-    if (
-      trusted === null ||
-      url.origin !== trusted ||
-      (request.headers.has('origin') && request.headers.get('origin') !== trusted)
-    ) {
-      return null
-    }
-    const site = request.headers.get('sec-fetch-site')
-    if (site !== null && site !== 'same-origin' && site !== 'none') {
+    if (managementRequestOrigin(request) === null) {
       return null
     }
     if (options.sessions !== sessions || sessions.identities !== identities) {
@@ -240,7 +207,8 @@ export function createManagementSessionAdapter(options: ManagementSessionAdapter
         return false
       }
       if (
-        request.headers.get('origin') !== expected(request) ||
+        !request.headers.has('origin') ||
+        managementRequestOrigin(request) === null ||
         (request.headers.has('sec-fetch-site') && request.headers.get('sec-fetch-site') !== 'same-origin')
       ) {
         return false

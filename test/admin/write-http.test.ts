@@ -49,7 +49,7 @@ test(
     const h = handler(f)
     try {
       const rejectedHeaders: Record<string, string>[] = [
-        { origin: 'https://evil.example' },
+        { origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' },
         { origin: '' },
         { host: 'evil.example' },
         { 'sec-fetch-site': 'cross-site' },

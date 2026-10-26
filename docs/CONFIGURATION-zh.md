@@ -15,7 +15,7 @@ rovloom config init connector --provider herdr
 rovloom config init gateway --container
 ```
 
-`--provider` 只适用于 Connector，可选 `luvus`、`herdr`、`mixed`。`--container` 只适用于 Gateway，显式将 MCP、设备和管理监听设为 `0.0.0.0`；维护的 Compose 文件仍把 MCP / 管理端口只发布到宿主回环。`public_url` 需单独配置。不带该参数时，Gateway 保持普通默认值（MCP 与设备通道通配，管理页回环）。`--config` 只选择配置文件，默认状态路径仍属于当前用户 home。
+`--provider` 只适用于 Connector，可选 `luvus`、`herdr`、`mixed`。`--container` 只适用于 Gateway，显式将 MCP、设备和管理监听设为 `0.0.0.0`；维护的 Compose 文件仍把 MCP / 管理端口只发布到宿主回环。MCP 代理客户端可配置 `mcp.public_url`；管理页无需公网 URL 配置。不带该参数时，Gateway 保持普通默认值（MCP 与设备通道通配，管理页回环）。`--config` 只选择配置文件，默认状态路径仍属于当前用户 home。
 
 初始化不启动服务、不创建设备身份、不批准 native 访问，沿用角色首次启动的独占文件发布机制。已有文件不覆盖；显式 provider / 监听请求与已有内容冲突时返回 `config_exists`。已有部署应先核对配置和配对状态，编辑后用 `config check` 校验再重启。
 
@@ -69,7 +69,7 @@ Connector，通常为 `~/.config/rovloom/connector.json`：
 | Gateway `management` | object，必填 | 含 `enabled`、`hostname` 与 `port`；本地 HTTP 管理页。 |
 | `management.enabled` | boolean，必填 | `true`；`false` 关闭该监听。启用不授予管理员身份。 |
 | `management.port` | integer 1–65535，关闭时也必填 | `9445`。 |
-| `management.hostname` | string，可选，默认写出 | `127.0.0.1`，也接受 `0.0.0.0`（局域网访问）。通配绑定接受任意 Host 的明文 HTTP 访问（Cookie 仍为 `HttpOnly`/`SameSite=Strict`，但不是 `Secure`；跨站请求仍被同源检查拒绝）；回环绑定只接受回环寻址。页面离开受信局域网时请用 TLS 反向代理收口。 |
+| `management.hostname` | string，可选 | `127.0.0.1`，也接受 `0.0.0.0`。仅决定监听网卡，不限定反向代理域名。管理页支持 HTTP/HTTPS、保留或改写 Host 的代理，无需公网 URL 配置。登录、会话与 CSRF 校验仍生效。 |
 | Connector `gateway` | object，必填 | 仅含 `url`。 |
 | `gateway.url` | string，必填 | 初始化前为 `""`；其余为 ≤2048 字符的 WS/WSS origin，如 `ws://192.0.2.10:9443` 或 `wss://gateway.example`。不带凭据/查询/片段/路径，可带末尾 `/`；产品固定使用 `/connector`。 |
 | Connector `allow_terminal_execution` | boolean，可选 | `false`；省略也关闭。只有字面量 `true` 开启直接终端输入及自定义启动/恢复命令。修改这一份用户文件并重启 Connector，不改变安装设置或 caller/local grants。 |

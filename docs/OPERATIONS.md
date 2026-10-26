@@ -93,3 +93,17 @@ rovloom storage resume --role gateway --json
 Connector 发送墓碑保留至首次登记的执行 deadline（最长 10 分钟），到期后随下一次 claim 在事务内回收。当前发送账本 schema v2 仅保存 ID、32 字节绑定摘要和固定 deadline，旧 schema 拒绝打开，不自动清空或转换。Gateway 的 30 天调用 key 去重窗口不变。
 
 本地 `connector_transport` 观测中 `reason=claim_capacity` / `connector_attempt_capacity` 的 `capacity` 区分 `claim_entries`、`claim_bytes`、`attempt_entries`、`attempt_bytes`。`reclaim_at` 是已知最早回收时间（Unix 毫秒），不是重试授权。字节满额报告 `null`，需检查磁盘和配置预算。不要删除账本、回调系统时间、重发旧 attempt 或自动换 key 重做写入；已接收后断连的调用可能保持 `outcome_unknown`，应先核对原生结果。
+
+### 管理页反向代理
+
+将站点根路径反向代理到管理端口（默认 `http://127.0.0.1:9445`）即可，无需 `public_url`、域名白名单或可信代理 IP 配置。支持 Nginx、Caddy、Traefik 等代理，外部 HTTPS 与内部 HTTP、任意域名和端口、保留或改写 Host 均可。
+
+Caddy 示例：
+
+```caddyfile
+manage.example.com {
+    reverse_proxy 127.0.0.1:9445
+}
+```
+
+管理页不把浏览器 Origin 与代理内部地址强行比较。浏览器跨站元数据仍会被拒绝；读取和写入继续验证独立管理员会话，写入额外验证 CSRF，响应不开放跨站 CORS。代理头不提供管理员身份。HTTPS 请求、HTTPS Origin 或代理常用的 `X-Forwarded-Proto: https` / `Forwarded: proto=https` 会使登录 Cookie 带上 Secure；协议头仅影响 Cookie 属性，不是认证条件。

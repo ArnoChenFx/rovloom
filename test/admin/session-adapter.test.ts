@@ -88,7 +88,7 @@ test(
         { cookie: 'fixture_admin=' + cookie + '; fixture_admin=' + cookie },
         { cookie: 'fixture_admin=' + 'forged'.repeat(8) },
         { host: 'evil.example' },
-        { origin: 'https://evil.example' }
+        { origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' }
       ]
       for (const headers of rejectedHeaders) {
         assert.equal(await o.adapter.authenticate(request(headers), signal), null)

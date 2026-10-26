@@ -98,11 +98,11 @@ test(
     const wildcard = startManagementReadListener({ ...options(), port: 0, hostname: '0.0.0.0' })
     try {
       assert.match(wildcard.url, /^http:\/\/127\.0\.0\.1:\d+$/u)
-      // 通配绑定后非回环 Host 仍被拒绝，回环 Host 照常服务。
+      // Host 不作域名白名单；此 fixture 已注入有效身份，代理域名与回环均正常读取。
       const port = Number(new URL(wildcard.url).port)
       for (const host of ['example.com', `192.0.2.10:${port}`]) {
         const status = await statusWithHost(port, host, '/admin/v1/status')
-        assert(status >= 400 && status !== 401, `${host} -> ${status}`)
+        assert.equal(status, 200, `${host} -> ${status}`)
       }
       assert.equal(await statusWithHost(port, `127.0.0.1:${port}`, '/admin/v1/status'), 200)
     } finally {
@@ -131,7 +131,7 @@ test(
     })
     for (const [input, status] of [
       [request('/admin/v1/status', { headers: { host: 'evil' } }), 403],
-      [request('/admin/v1/status', { headers: { origin: 'https://evil' } }), 403],
+      [request('/admin/v1/status', { headers: { origin: 'https://evil', 'sec-fetch-site': 'cross-site' } }), 403],
       [request('/admin/v1/status', { headers: { origin: 'null' } }), 403],
       [request('/admin/v1/status', { headers: { 'sec-fetch-site': 'cross-site' } }), 403],
       [request('/admin/v1/status', { method: 'POST' }), 405],

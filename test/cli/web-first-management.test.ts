@@ -78,7 +78,7 @@ for (const lan of [false, true]) {
         assert(cookie && csrf)
         const actionHeaders = { host, origin, cookie, 'content-type': 'application/json', 'x-rovloom-csrf': csrf }
         for (const [overrides, status] of [
-          [{ origin: 'http://cross-site.invalid' }, 403],
+          [{ origin: 'http://cross-site.invalid', 'sec-fetch-site': 'cross-site' }, 403],
           [{ cookie: '' }, 401],
           [{ 'x-rovloom-csrf': 'wrong' }, 403]
         ] as const) {

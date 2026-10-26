@@ -157,3 +157,7 @@ You **cannot** turn this switch on remotely. Report refusals faithfully and do n
 - When the instance, contract or capabilities change, the Connector closes the connection itself. After reconnect `binding_revision` may have changed, so re-run `providers_get` plus `runtime_discover`.
 - One provider failing does not mean the device is offline, and vice versa: check `providers_get.readiness` and `machines_get.link` separately.
 - A roughly 30-second cutoff despite a later call deadline can indicate an older Connector or an explicit shorter local timeout. The long-RPC fix requires updating/restarting the Connector; updating only the Gateway supplies metadata/diagnostics, not that local fix. Existing pairing, config and tokens can be retained. An already-sent call with no result still remains `outcome_unknown`; do not replay it.
+
+### Management reverse proxies
+
+The management UI supports arbitrary proxy domains and ports, external HTTPS with an HTTP upstream, and proxies that preserve or rewrite Host. Proxy the site root to the management listener (9445 by default); no public URL, domain allowlist or trusted-proxy setting is needed. Login and CSRF remain required. Forwarded protocol headers only control the cookie Secure attribute and never establish an administrator identity.
