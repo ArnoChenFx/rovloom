@@ -898,6 +898,16 @@ for (const { isolated, disconnectBeforeRead } of [
           (described.structuredContent!.data as { parameter_help: unknown }).parameter_help,
           error.details.parameter_help
         )
+        const nativeDescription = described.structuredContent!.data as {
+          params_schema: unknown
+          schema_annotations: { pointer: string; text: string }[]
+        }
+        assert(nativeDescription.params_schema)
+        assert(
+          nativeDescription.schema_annotations.some(
+            (note) => note.pointer === '#/$comment' && note.text.includes('new working or blocked transition')
+          )
+        )
         assert.deepEqual(JSON.parse((bad.content[0] as { text: string }).text), bad.structuredContent)
         assert.equal(f.writes(), before)
         assert.equal(f.state.store.call('remote_reader', healthyId).state, 'connector_accepted')

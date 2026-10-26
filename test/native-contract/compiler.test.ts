@@ -65,6 +65,20 @@ async function specimen(): Promise<CompilerArtifact> {
 }
 const artifact = await specimen()
 
+test('安装产物同时核对保留 schema 的原字节，私有端口篡改输入不能注入描述元数据', async () => {
+  const port = new TestPort()
+  const compiler = new SchemaCompiler(() => port)
+  try {
+    const pending = compiler.compile(new Uint8Array(bytes), { identity })
+    assert(port.job?.bytes instanceof Uint8Array)
+    port.job.bytes[0] = 0
+    port.reply({ ok: true, value: artifact })
+    reason(await pending, 'compiler_artifact_invalid')
+  } finally {
+    compiler.close()
+  }
+})
+
 // 编译故障必须返回安全的固定原因。
 function reason(result: Check<unknown>, expected: string): void {
   assert.equal(result.ok, false)
