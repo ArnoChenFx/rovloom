@@ -88,31 +88,43 @@ export function boundedDisconnect(value: unknown): DisconnectObservation | undef
 }
 
 /**
- * 断开记录只增不减：每次收敛 +1，供采样侧按计数差补报，避免快速重连落在两次采样之间被整段漏掉。
- * 晚到的远端关闭事件可纠正最近一次观测，但不重复计数。
+ * 断开记录只增不减：每次收敛 +1，并保留有界队列供采样侧逐条补报。
+ * 单个 250ms 采样窗口内可能发生多次断开（例如先收到 1008，重连又被拒收到 1006），
+ * 只留「最近一条」会把更早的事件覆盖掉，因此按时间从旧到新保留最多 QUEUE 条。
+ * 晚到的远端关闭事件只订正队列里最新一条，不重复计数。
  */
 export class DisconnectLog {
   #count = 0
-  #latest: DisconnectObservation | undefined
+  #queue: DisconnectObservation[] = []
+
+  /** 队列上限：只保留最新 QUEUE 条，超出丢最老的；计数仍完整记录累计断开次数。 */
+  static readonly QUEUE = 16
 
   /** 记录一次新的断开收敛；只有这里推进计数。 */
   record(observation: DisconnectObservation): void {
     this.#count++
-    this.#latest = observation
-  }
-
-  /** 用远端实际观察到的 code/reason 纠正最近一次观测；不推进计数，未记录时不生效。 */
-  refine(observation: DisconnectObservation): void {
-    if (this.#latest !== undefined) {
-      this.#latest = observation
+    this.#queue.push(observation)
+    if (this.#queue.length > DisconnectLog.QUEUE) {
+      this.#queue.splice(0, this.#queue.length - DisconnectLog.QUEUE)
     }
   }
 
-  /** 只读交付累计断开次数与最近一次观测；不做任何裁剪或推断。 */
-  snapshot(): Readonly<{ disconnects: number; disconnect?: DisconnectObservation }> {
-    const latest = boundedDisconnect(this.#latest)
-    return Object.freeze(
-      latest === undefined ? { disconnects: this.#count } : { disconnects: this.#count, disconnect: latest }
-    )
+  /** 用远端实际观察到的 code/reason 订正队列里最新一条；不推进计数，队列为空时不生效。 */
+  refine(observation: DisconnectObservation): void {
+    if (this.#queue.length > 0) {
+      this.#queue[this.#queue.length - 1] = observation
+    }
+  }
+
+  /** 只读交付累计断开次数与有界队列（从旧到新）；每条都重新复核，非法整条丢弃。 */
+  snapshot(): Readonly<{ disconnects: number; disconnect_recent: readonly DisconnectObservation[] }> {
+    const recent: DisconnectObservation[] = []
+    for (const entry of this.#queue) {
+      const bounded = boundedDisconnect(entry)
+      if (bounded !== undefined) {
+        recent.push(bounded)
+      }
+    }
+    return Object.freeze({ disconnects: this.#count, disconnect_recent: Object.freeze(recent) })
   }
 }

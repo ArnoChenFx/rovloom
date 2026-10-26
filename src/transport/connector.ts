@@ -134,7 +134,7 @@ export function createConnector(options: ConnectorOptions) {
   let stopped = false
   let phase = 'disconnected'
   let failure: string | undefined
-  /** 累计断开记录与最近一次观测；只增计数让快速重连不被采样窗口吞掉。 */
+  /** 累计断开记录与有界队列；只增计数让快速重连不被采样窗口吞掉，队列避免同窗口多次断开被覆盖。 */
   const disconnects = new DisconnectLog()
   /** 本机刚收敛的 socket：其远端关闭事件若早于下一个 epoch 到达，可纠正为实际观察值。 */
   let settled: { socket: Socket; local: DisconnectReason } | undefined
@@ -917,7 +917,7 @@ export function createConnector(options: ConnectorOptions) {
   return {
     /** 返回有界连接与 provider 健康观测，不包含凭据或原生内容。 */
     status() {
-      // 无论当前相位都交付累计断开次数与最近一次观测，让采样侧按计数差补报。
+      // 无论当前相位都交付累计断开次数与有界队列，让采样侧按计数差逐条补报。
       return {
         ...(failure ? { failure } : {}),
         ...(capacity ? { capacity } : {}),

@@ -67,16 +67,21 @@ function connectorTo(url: string) {
   })
 }
 
+/** 取队列里最新一条断开观测；队列为空时返回 undefined，不合成观测。 */
+function latest(client: ReturnType<typeof createConnector>) {
+  return client.status().disconnect_recent.at(-1)
+}
+
 /** 等待 Connector 的当前 socket 收敛到断开并带出断开观测；失败只报告固定诊断。 */
 async function untilDisconnect(client: ReturnType<typeof createConnector>) {
   const start = performance.now()
-  while (!['disconnected', 'stopped'].includes(client.status().phase) || !client.status().disconnect) {
+  while (!['disconnected', 'stopped'].includes(client.status().phase) || !latest(client)) {
     if (performance.now() - start > 3000) {
       throw new Error('fixture_disconnect_timeout')
     }
     await new Promise(/** 让出事件循环供真实 socket 关闭事件推进。 */ (resolve) => setTimeout(resolve, 5))
   }
-  return client.status().disconnect
+  return latest(client)
 }
 
 test('对端 close(1008, transport_closed) 交付数值关闭码与固定原因', async () => {
@@ -138,7 +143,7 @@ test('主动 disconnect 与 stop 交付固定本机原因，不伪造对端关�
     client.disconnect()
     assert.deepEqual(await untilDisconnect(client), { reason: 'connector_disconnected' })
     client.stop()
-    assert.deepEqual(client.status().disconnect, { reason: 'connector_stopped' })
+    assert.deepEqual(latest(client), { reason: 'connector_stopped' })
     assert.equal(client.status().phase, 'stopped')
   } finally {
     client.stop()
@@ -161,7 +166,7 @@ test('Gateway 侧主动断开在真实通道上交付 1008/transport_closed', as
       }
       await new Promise(/** 让出事件循环供真实关闭帧到达。 */ (resolve) => setTimeout(resolve, 5))
     }
-    assert.deepEqual(client.status().disconnect, { code: 1008, reason: 'transport_closed' })
+    assert.deepEqual(latest(client), { code: 1008, reason: 'transport_closed' })
   } finally {
     f.stop()
   }
@@ -257,12 +262,68 @@ test('onerror 后到达的 onclose 把本机观测纠正为 1006/transport_abnor
     // 1.4.3 顺序：terminate 先触发 error（本机 transport_unavailable）。
     handlers.error?.({ type: 'error' })
     await untilCount(client, 1)
-    assert.deepEqual(client.status().disconnect, { reason: 'transport_unavailable' })
+    assert.deepEqual(latest(client), { reason: 'transport_unavailable' })
     // 随后 onclose(1006) 到达：纠正为远端实际观察值，不再 +1。
     handlers.close?.({ code: 1006, reason: '' })
     await new Promise(/** 让纠正写入完成。 */ (resolve) => setTimeout(resolve, 20))
-    assert.deepEqual(client.status().disconnect, { code: 1006, reason: 'transport_abnormal' })
+    assert.deepEqual(latest(client), { code: 1006, reason: 'transport_abnormal' })
     assert.equal(client.status().disconnects, 1)
+  } finally {
+    client.stop()
+  }
+})
+
+test('同一窗口内两次真实断开都进队列：先 1008/transport_closed，后 1006/transport_abnormal', async () => {
+  // 复现实跑顺序：网关主动关（1008）后立刻重连被拒（1006）。两者都必须在队列里，
+  // 只留“最近一条”会让更早的 1008 消失。
+  const first: Handlers = {}
+  const second: Handlers = {}
+  let built = 0
+  const client = createConnector({
+    url: 'ws://127.0.0.1:9/connector',
+    developmentLoopback: true,
+    credential: () => ({
+      machine_id: 'mock_window',
+      recovery_generation: 'mock_generation',
+      credential: 'SYNTHETIC_CREDENTIAL_NOT_REAL'
+    }),
+    session: () => {
+      throw new Error('fixture_must_not_open_session')
+    },
+    nativeInput: () => {
+      throw new Error('fixture_must_not_call_native')
+    },
+    execute: async () => {
+      throw new Error('fixture_must_not_execute')
+    },
+    // 退避极短，让第二条 socket 立即建立；两次断开都落在同一次采样窗口内。
+    limits: { heartbeat_ms: 10_000, idle_ms: 10_000, handshake_ms: 10_000, reconnect_ms: 1, reconnect_max_ms: 1 },
+    random: () => 1,
+    now: () => 1000,
+    /** 每建立一条 socket 就把处理器登记到对应的槽位。 */
+    socketFactory: (socket) => capture(socket, built++ === 0 ? first : second)
+  })
+  try {
+    await untilCount(client, 0)
+    // 第一条：网关主动关闭 1008。
+    first.close?.({ code: 1008, reason: 'transport_closed' })
+    await untilCount(client, 1)
+    const start = performance.now()
+    while (built < 2) {
+      if (performance.now() - start > 3000) {
+        throw new Error('fixture_reconnect_timeout')
+      }
+      await new Promise(/** 让出事件循环供退避重连推进。 */ (resolve) => setTimeout(resolve, 5))
+    }
+    // 第二条：重连被拒，只有关闭码没有白名单原因；1006 表示未收到关闭帧 → transport_abnormal。
+    second.close?.({ code: 1006, reason: '' })
+    await untilCount(client, 2)
+    // 两条都保留，顺序从旧到新，计数为 2（更早的 1008 不被最新一条覆盖）。
+    assert.deepEqual(client.status().disconnect_recent, [
+      { code: 1008, reason: 'transport_closed' },
+      { code: 1006, reason: 'transport_abnormal' }
+    ])
+    assert.equal(client.status().disconnects, 2)
   } finally {
     client.stop()
   }
@@ -277,7 +338,7 @@ test('晚到 onclose 只纠正一次，重复事件不重复计数', async () =>
     handlers.close?.({ code: 1006, reason: '' })
     handlers.close?.({ code: 1006, reason: '' })
     await new Promise(/** 让纠正写入完成。 */ (resolve) => setTimeout(resolve, 20))
-    assert.deepEqual(client.status().disconnect, { code: 1006, reason: 'transport_abnormal' })
+    assert.deepEqual(latest(client), { code: 1006, reason: 'transport_abnormal' })
     assert.equal(client.status().disconnects, 1)
   } finally {
     client.stop()
@@ -319,7 +380,7 @@ test('晚到 onclose 不把已重连后的新 epoch 观测覆盖成旧值', asyn
     // 第一条 socket 本机收敛：本机原因，计数 1。
     first.error?.({ type: 'error' })
     await untilCount(client, 1)
-    assert.deepEqual(client.status().disconnect, { reason: 'transport_unavailable' })
+    assert.deepEqual(latest(client), { reason: 'transport_unavailable' })
     // 等第二条 socket 真正建立（新 epoch）。
     const start = performance.now()
     while (built < 2) {
@@ -331,7 +392,7 @@ test('晚到 onclose 不把已重连后的新 epoch 观测覆盖成旧值', asyn
     // 旧 socket 的晚到关闭事件：必须被忽略，不能覆盖当前观测。
     first.close?.({ code: 1006, reason: '' })
     await new Promise(/** 给被忽略的事件充分执行时间。 */ (resolve) => setTimeout(resolve, 30))
-    assert.deepEqual(client.status().disconnect, { reason: 'transport_unavailable' })
+    assert.deepEqual(latest(client), { reason: 'transport_unavailable' })
     assert.equal(client.status().disconnects, 1)
   } finally {
     client.stop()

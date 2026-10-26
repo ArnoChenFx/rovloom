@@ -21,6 +21,7 @@ function status(phase: string, disconnects: unknown, extra: Record<string, unkno
     connection_epoch: 'mock_epoch',
     providers: [],
     disconnects,
+    disconnect_recent: [],
     ...extra
   } as Status
 }
@@ -83,7 +84,7 @@ test('断开诊断独立成行，相位行不再附带关闭码', async () => {
   const output = await observe(
     lifecycle(() => current),
     () => {
-      current = status('disconnected', 1, { disconnect: { code: 1008, reason: 'transport_closed' } })
+      current = status('disconnected', 1, { disconnect_recent: [{ code: 1008, reason: 'transport_closed' }] })
     }
   )
   assert.equal(
@@ -99,7 +100,7 @@ test('本机收敛的断开只输出原因，不伪造未观察到的关闭码',
   const output = await observe(
     lifecycle(() => current),
     () => {
-      current = status('disconnected', 1, { disconnect: { reason: 'handshake_timeout' } })
+      current = status('disconnected', 1, { disconnect_recent: [{ reason: 'handshake_timeout' }] })
     }
   )
   assert.equal(
@@ -117,7 +118,7 @@ test('极快重连：断开与重连同处一次采样周期内仍补报一条�
     lifecycle(() => current),
     () => {
       // 采样窗口内完成：断开后立刻回到 ready，中间态从未被采样看到。
-      current = ready(1, { disconnect: { code: 1008, reason: 'transport_closed' } })
+      current = ready(1, { disconnect_recent: [{ code: 1008, reason: 'transport_closed' }] })
     }
   )
   assert.equal(
@@ -125,6 +126,51 @@ test('极快重连：断开与重连同处一次采样周期内仍补报一条�
     'connector_transport ready provider_ready=true\n' + 'connector_disconnect code=1008 close_reason=transport_closed\n'
   )
   assert.equal(output.includes('provider_ready=true code='), false)
+})
+
+test('同一采样窗口内两次断开必须补打两行，顺序从旧到新', async () => {
+  // 实跑复现：一个窗口内先 1008/transport_closed，再 1006/transport_unclassified（重连被拒）。
+  // 只交付“最近一条”会让更早的 1008 被覆盖，这里要求两行都在且顺序为旧→新。
+  let current = ready(0)
+  const output = await observe(
+    lifecycle(() => current),
+    () => {
+      current = ready(2, {
+        disconnect_recent: [
+          { code: 1008, reason: 'transport_closed' },
+          { code: 1006, reason: 'transport_unclassified' }
+        ]
+      })
+    }
+  )
+  assert.equal(
+    output,
+    'connector_transport ready provider_ready=true\n' +
+      'connector_disconnect code=1008 close_reason=transport_closed\n' +
+      'connector_disconnect code=1006 close_reason=transport_unclassified\n'
+  )
+})
+
+test('计数差大于队列长度时只补报队列里的条数，不虚构事件', async () => {
+  // 宿主在两次采样之间发生了 20 次断开，但队列只保留最新 16 条：只能补报实际交付的条目。
+  let current = ready(0)
+  const recent = Array.from({ length: 16 }, (_, index) => ({
+    code: 1000 + index,
+    reason: 'transport_unclassified'
+  }))
+  const output = await observe(
+    lifecycle(() => current),
+    () => {
+      current = ready(20, { disconnect_recent: recent })
+    }
+  )
+  const lines = output.split('\n').filter(Boolean)
+  // 一行相位行 + 16 行断连诊断，且顺序从旧到新。
+  assert.equal(lines.length, 17)
+  assert.deepEqual(
+    lines.slice(1),
+    recent.map((entry) => 'connector_disconnect code=' + entry.code + ' close_reason=' + entry.reason)
+  )
 })
 
 test('连续两次断开各补报一条，计数不合并', async () => {
@@ -138,9 +184,9 @@ test('连续两次断开各补报一条，计数不合并', async () => {
     setup.observe(lifecycle(() => current))
     await sample()
     // 同一观察会话内两次独立断开，各自补报一条。
-    current = ready(1, { disconnect: { code: 1008, reason: 'transport_closed' } })
+    current = ready(1, { disconnect_recent: [{ code: 1008, reason: 'transport_closed' }] })
     await sample()
-    current = ready(2, { disconnect: { code: 1006, reason: 'transport_abnormal' } })
+    current = ready(2, { disconnect_recent: [{ code: 1006, reason: 'transport_abnormal' }] })
     await sample()
     text = drain(stderr)
   } finally {
@@ -159,7 +205,7 @@ test('首次采样只记基线：进程启动前已有的历史断连不打印',
   const output = await observe(
     lifecycle(() =>
       ready(7, {
-        disconnect: { code: 1008, reason: 'transport_closed' }
+        disconnect_recent: [{ code: 1008, reason: 'transport_closed' }]
       })
     )
   )
@@ -168,11 +214,11 @@ test('首次采样只记基线：进程启动前已有的历史断连不打印',
 })
 
 test('基线之后的第一条新断开仍会打印', async () => {
-  let current = ready(7, { disconnect: { code: 1008, reason: 'transport_closed' } })
+  let current = ready(7, { disconnect_recent: [{ code: 1008, reason: 'transport_closed' }] })
   const output = await observe(
     lifecycle(() => current),
     () => {
-      current = ready(8, { disconnect: { code: 1006, reason: 'transport_abnormal' } })
+      current = ready(8, { disconnect_recent: [{ code: 1006, reason: 'transport_abnormal' }] })
     }
   )
   assert.equal(
@@ -220,9 +266,9 @@ test('非整数或缺失计数不被采信，也不推进基线', async () => {
     setup.observe(lifecycle(() => current))
     await sample()
     // 宿主交付越界计数：整轮按未知处理，既不打印也不污染基线。
-    current = ready(1.5, { disconnect: { code: 1006, reason: 'transport_abnormal' } })
+    current = ready(1.5, { disconnect_recent: [{ code: 1006, reason: 'transport_abnormal' }] })
     await sample()
-    current = ready(2, { disconnect: { code: 1006, reason: 'transport_abnormal' } })
+    current = ready(2, { disconnect_recent: [{ code: 1006, reason: 'transport_abnormal' }] })
     await sample()
     text = drain(stderr)
   } finally {

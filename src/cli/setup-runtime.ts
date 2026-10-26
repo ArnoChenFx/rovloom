@@ -76,21 +76,29 @@ export class CliSetup {
             status.disconnects >= 0
               ? status.disconnects
               : undefined
-          const fresh =
-            disconnects !== undefined && observedDisconnects !== undefined && disconnects > observedDisconnects
           if (disconnects !== undefined) {
-            observedDisconnects = disconnects
-          }
-          // 断开观测经同一白名单二次复核；异常或未知值整条丢弃，不退化为原文输出。
-          const disconnect = fresh ? boundedDisconnect(status.disconnect) : undefined
-          if (disconnect) {
-            this.#io?.stderr.write(
-              'connector_disconnect' +
-                (disconnect.code === undefined ? '' : ' code=' + String(disconnect.code)) +
-                ' close_reason=' +
-                disconnect.reason +
-                '\n'
-            )
+            if (observedDisconnects !== undefined && disconnects > observedDisconnects) {
+              // 一个窗口内可能发生多次断开；逐条补报，不能只留最后一条。
+              const delta = disconnects - observedDisconnects
+              const recent = Array.isArray(status.disconnect_recent) ? status.disconnect_recent : []
+              const pending = recent.slice(-Math.min(delta, recent.length))
+              for (const entry of pending) {
+                // 每条都经同一白名单二次复核；异常或未知值整条丢弃，不退化为原文输出。
+                const disconnect = boundedDisconnect(entry)
+                if (!disconnect) {
+                  continue
+                }
+                this.#io?.stderr.write(
+                  'connector_disconnect' +
+                    (disconnect.code === undefined ? '' : ' code=' + String(disconnect.code)) +
+                    ' close_reason=' +
+                    disconnect.reason +
+                    '\n'
+                )
+              }
+            }
+            // 基线只推进到本轮实际交付的计数；计数倒退（宿主异常）时不回退基线。
+            observedDisconnects = Math.max(observedDisconnects ?? disconnects, disconnects)
           }
           const current = status.phase + ':' + ready + ':' + (status.failure ?? '')
           if (current !== previous) {

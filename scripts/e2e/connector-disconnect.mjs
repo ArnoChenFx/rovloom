@@ -112,7 +112,13 @@ try {
     }
     await pause(25)
   }
-  report('connector_stderr=' + JSON.stringify(connector.stderr.split('\n').filter(Boolean).slice(-8)))
+  const stopLines = connector.stderr.split('\n').filter(Boolean)
+  report('connector_stderr=' + JSON.stringify(stopLines.slice(-8)))
+  // 停网关瞬间可能在同一采样窗口内收到 1008 与随后的 1006；两者都必须出现且 1008 在前。
+  report(
+    'stop_window_lines=' +
+      JSON.stringify(stopLines.filter((entry) => entry.startsWith('connector_disconnect')).slice(0, 2))
+  )
   assert(found, 'e2e_missing_disconnect_line:' + connector.stderr)
   report('disconnect_line=present')
 
