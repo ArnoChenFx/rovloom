@@ -72,16 +72,35 @@ Ports 9443, 9444 and 9445 must be free (the Compose file publishes them from a b
 
 ## 2. Prepare the Connector machine
 
-Install [Herdr](https://github.com/herdrdev/herdr/releases/latest) and/or
-[Luvus](https://github.com/RizRiyz/luvus/releases/latest), plus the Agent you want to use, and
-sign in to your model provider. Rovloom installs none of these.
+A Connector manages nothing by itself: it reaches sessions through a runtime, so this machine needs
+**Herdr** or **Luvus** installed before any device can pair — one of the two is required. Install the
+Agent you want to use as well and sign in to your model provider. Rovloom installs none of these.
+
+| Platform | Herdr | Luvus |
+|---|---|---|
+| Linux x64 / arm64 | `curl -fsSL https://herdr.dev/install.sh \| sh` | `curl -fsSL https://luvus.dev/install.sh \| sh` |
+| macOS x64 / arm64 | same command as Linux, or `brew install herdr` | same command as Linux, or `brew install RizRiyz/luvus/luvus` |
+| Windows x64 | `irm https://herdr.dev/install.ps1 \| iex` | `irm https://luvus.dev/install.ps1 \| iex` |
+
+Both projects publish per-OS and per-architecture builds and list every archive on their releases
+pages ([Herdr](https://github.com/herdrdev/herdr/releases/latest),
+[Luvus](https://github.com/RizRiyz/luvus/releases/latest)); install that way when a script or
+Homebrew is not available. On Windows arm64 Herdr's installer falls back to the x64 build under
+emulation, and Luvus prebuilt binaries are x64 only — the same limit the Connector has.
+
+Both installers put the binary on `PATH` — Herdr in `~/.local/bin`, Luvus in `/usr/local/bin` when
+writable and `~/.local/bin` otherwise — and print the directory they used. Programs are found through
+the `PATH` the Connector starts with (plus `/usr/bin:/bin`), so if the installer asks you to extend
+`PATH`, do that for the Connector too, or list the directory in `native.runtime_bin_dirs` — see
+[installation directories](CONFIGURATION.md#program-and-agent-installation-directories).
+`herdr --version` or `luvus --version` should answer before you pair; when the selected runtime is
+missing, pairing stops with `configuration_required`.
 
 The Connector **attaches to the session you already run**, so remote calls act on your real
 workspaces and Agent logins. It starts one in your own config directory only if none is running.
-Programs are found through `PATH` (plus `/usr/bin:/bin`); for other locations see
-[installation directories](CONFIGURATION.md#program-and-agent-installation-directories).
 
-Luvus is the default. Before first pairing, choose Herdr explicitly (use `mixed` for both):
+Luvus is the default. Before first pairing, choose Herdr explicitly (use `mixed` for both — that
+needs both installed):
 
 ```sh
 rovloom config init connector --provider herdr
@@ -238,6 +257,7 @@ Each role keeps one configuration file, created on first run and never reset:
 | Symptom | What to do |
 |---|---|
 | `configuration_required` / `pairing_required` | Finish the terminal prompts and approvals, or pair from the management page ([Pairing](CONFIGURATION.md#pairing)); a saved Gateway address alone does not pair the device. |
+| `configuration_required` right after a join | The selected runtime is not on the Connector's search path. Install Herdr or Luvus (§2), confirm `herdr --version` / `luvus --version` works, then run the join command again with a fresh code. |
 | Cannot connect / address in use | Check ports, the Gateway listener address and network reachability. |
 | HTTP 401 | Check the `/mcp` URL, the Bearer and its expiry. |
 | `native_state_path_too_long` | Choose a shorter `data.directory` before pairing (Unix socket path limit). |
