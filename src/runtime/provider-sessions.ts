@@ -155,9 +155,14 @@ function compose(
     const terminalState =
       value.type === 'terminal_execution_state' &&
       connection.negotiated.capabilities.includes('terminal_execution_state')
+    // 平台声明属于连接本身而不是某个 provider，没有可校验的 binding；只在协商到该能力时放行。
+    const devicePlatform =
+      value.type === 'device_platform' && connection.negotiated.capabilities.includes('device_platform')
     if (
-      (!isolated && !terminalState) ||
-      !['heartbeat', 'error', 'provider_fenced', 'terminal_execution_state'].includes(value.type as string)
+      (!isolated && !terminalState && !devicePlatform) ||
+      !['heartbeat', 'error', 'provider_fenced', 'terminal_execution_state', 'device_platform'].includes(
+        value.type as string
+      )
     ) {
       return false
     }

@@ -397,6 +397,63 @@ test(
 )
 
 test(
+  '平台声明属于连接本身，组合层不得把它当成 provider 帧转给原 adapter',
+  /** 两个 provider 的 stub 都会把意外帧变成失败；这里只验证治理路由。 */ () => {
+    const a = group('luvus')
+    const b = group('herdr')
+    const platformConnection: Connection = {
+      ...connection,
+      negotiated: { major: 2, minor: 1, capabilities: ['rpc', 'provider_fence', 'device_platform'] }
+    }
+    const combined = composeConnectorSessions(
+      platformConnection,
+      [a.descriptor, b.descriptor],
+      /** 固定隔离时钟。 */ () => 100
+    )
+    try {
+      const frame = envelope(platformConnection, 'device_platform', {
+        os: 'linux',
+        arch: 'x64',
+        distribution: { id: 'ubuntu', version_id: '24.04' }
+      })
+      const raw = combined.adapter.encode(frame, 'connector_to_gateway')
+      assert.deepEqual(combined.adapter.decode(raw, 'connector_to_gateway'), frame)
+      assert.equal(combined.adapter.observeMessage(frame, 'connector_to_gateway'), 'new')
+      // 非法平台仍由共享 codec 拒绝，不因组合层放行而降级。
+      assert.throws(
+        /** 非 Linux 携带发行版不是合法平台。 */ () =>
+          combined.adapter.encode(
+            envelope(platformConnection, 'device_platform', {
+              os: 'darwin',
+              arch: 'arm64',
+              distribution: { id: 'ubuntu', version_id: null }
+            }),
+            'connector_to_gateway'
+          ),
+        /invalid_device_platform/
+      )
+      // 未协商该能力时组合层也不得接受该帧。
+      const withoutCapability = composeConnectorSessions(
+        { ...platformConnection, negotiated: { major: 2, minor: 1, capabilities: ['rpc', 'provider_fence'] } },
+        [group('luvus').descriptor],
+        /** 固定隔离时钟。 */ () => 100
+      )
+      try {
+        assert.throws(
+          /** 能力未协商时不能借组合层写入帧。 */ () => withoutCapability.adapter.encode(frame, 'connector_to_gateway'),
+          /unsupported_capability/
+        )
+      } finally {
+        withoutCapability.close()
+      }
+    } finally {
+      combined.close()
+    }
+    assert.deepEqual([a.state.calls, b.state.calls], [0, 0])
+  }
+)
+
+test(
   'adapter失败仍逆序释放全部owner，并发和重入不重复调用原close',
   /** 故意失败只用于关闭计量。 */ () => {
     const a = group('luvus')
