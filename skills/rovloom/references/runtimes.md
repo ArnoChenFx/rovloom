@@ -33,6 +33,14 @@ The decimal `pane` returned by Luvus 0.14.3 is a process-wide allocated ID, not 
 
 `pane.list` currently omits `terminal_id`. Once you select a `pane`, call `pane.get({pane})` to obtain its `terminal_id`, `workspace_id` and `tab_id`; `agent.read` also returns `terminal_id`. Keep the complete provider target and terminal identity with the pane ID. A terminal ID is an identity check, not a replacement selector accepted by every pane method. Re-discover after an instance restart or identity mismatch; do not silently choose the current pane.
 
+| Native response | Pane field | Terminal / topology identity |
+|---|---|---|
+| `session.snapshot` terminal row | `pane_id` | `terminal_id`; workspace/tab are nested, without their stable IDs in 0.14.3 |
+| `pane.list` row | `pane` | `workspace_id`, `tab_id`; no `terminal_id` |
+| `pane.get` result | `pane` | `terminal_id`, `workspace_id`, `tab_id` |
+
+For a snapshot terminal row, call `pane.get` with `params: {pane: row.pane_id}`; for a list row use `params: {pane: row.pane}`. Do not pass `pane_id` as a replacement request key. Rovloom preserves these native field names. Get is not a strict superset of list: list also has detailed history metrics. `workspace_id` / `tab_id` survive restoration of the saved topology; `terminal_id` survives moves and client reconnects only while the same PTY lives, and changes when the PTY is recreated.
+
 ### Coordinate traps (the easiest thing to get wrong)
 
 Luvus uses different position coordinates in different methods, and Rovloom returns them unchanged without conversion:

@@ -43,6 +43,16 @@ Luvus 0.14.3 的数字 `pane` 是进程级递增分配的 ID，不是布局中�
 
 `pane.list` 当前没有返回 `terminal_id`，但选定 pane 后可用 `pane.get({pane})` 同时读取 `terminal_id`、`workspace_id` 和 `tab_id`；`agent.read` 也会返回终端身份。保存完整 provider target 和这些身份，不必仅因布局变化就重新猜 pane 编号。`terminal_id` 是终端生命周期身份，不是所有 pane 方法都接受的 selector；不能把它直接塞进 `pane` 字段。
 
+| 查询 | pane 标识字段 | 终端 / 拓扑身份 |
+|---|---|---|
+| `session.snapshot` 终端行 | `pane_id` | 有 `terminal_id`；0.14.3 的 workspace/tab 只有嵌套位置，没有稳定 ID |
+| `pane.list` 行 | `pane` | 有 `workspace_id/tab_id`，没有 `terminal_id` |
+| `pane.get` 结果 | `pane` | 有 `terminal_id/workspace_id/tab_id` |
+
+从 snapshot 行构造 `pane.get` 参数时用 `{"pane": row.pane_id}`，从 list 行则用 `{"pane": row.pane}`；请求键仍是 `pane`，不能直接改为 `pane_id`。Rovloom 保留原生字段名，不静默补齐或重命名。get 也不是 list 的严格超集：list 有 get 未提供的详细历史指标。
+
+`workspace_id/tab_id` 随保存的拓扑对象恢复；`terminal_id` 仅在同一个 PTY 存活期间跨移动、客户端断开重连保持，PTY 重建就会变化。数字 workspace/tab 是位置坐标，会随拓扑变化，不能与数字 pane 的进程内 ID 混为一谈。原生字段一致性缺口跟踪在 [issue #291](https://github.com/ArnoChenFx/rovloom/issues/291)，不在 Rovloom 中改写原生正文。
+
 身份变更、原生重启或 pane 消失时重新发现，不自动选择当前 pane 或同名 Agent。依据为固定版本的 [ID 分配](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/ids.rs)、[pane 查询与选择器](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/app/dispatch/topology.rs)以及[重启恢复](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/app/mod.rs)。该范围不扩展为跨原生进程持久 ID 的保证。
 
 ## 位置坐标
