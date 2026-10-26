@@ -142,7 +142,7 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 - `agent.prompt` 仍选 Agent 的 `target`；指定 `until` 或 `timeout_s` 时必须同时指定 `wait:true`。
 - `timeout_s` 是原生方法的秒数；`runtime_call.deadline` 是整个 Rovloom 调用的固定截止，须覆盖原生等待与 RPC 开销。不会根据参数自动延长已经登记的 deadline。
 - Luvus RPC 默认最长等待 10 分钟，并受原调用 deadline、取消和撤权约束；发现 endpoint、读取 schema 的准备超时仍是 30 秒。本机已有的显式短超时继续生效。
-- 登记前参数拒绝保留 `native_request_invalid` 与 `outcome:"not_dispatched"`。上述方法的常见错误附带 `gateway_error.details.issues`，例如 `/params/pane` 缺失、`/params/wait` 必须为 true，以及同一份固定调用指南；不回显用户值或原生错误文本。
+- 登记前参数拒绝保留 `native_request_invalid` 与 `outcome:"not_dispatched"`。上述方法的常见错误附带 `gateway_error.details.issues`，例如 `/params/pane` 缺失、`/params/wait` 必须为 true，以及同一份固定调用指南；不回显用户值或原生错误文本。无法安全定位具体字段时，返回 `/params` 与 `invalid_value` 作为通用参数拒绝提示，不表示已经定位到某个字段。
 
 - `pane.read` 接受 `pane` 和 `lines`。`agent.read` 接受 `target`、`lines` 和 `source`。`lines` 最大为 1000，只取末尾行。返回的 `text`、`content_revision`、`terminal_id` 来自 Luvus。
 - `agent.prompt` 的 `until` 和 `timeout_s` 必须与 `wait:true` 一起使用。
