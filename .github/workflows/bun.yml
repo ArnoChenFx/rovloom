@@ -46,6 +46,11 @@ jobs:
           path: ${{ runner.temp }}/test-phases.json
       - run: bun --no-env-file run build
       - run: bun --no-env-file run smoke
+      - name: Verify connector disconnect and reconnect with real Herdr
+        timeout-minutes: 5
+        env:
+          LUVUS_TEST_ROOT: ${{ runner.temp }}
+        run: bun --no-env-file scripts/e2e/connector-disconnect.mjs
       - name: Pack the npm tarball and run it from a clean bun add
         run: |
           version="$(bun --no-env-file -p 'JSON.parse(await Bun.file("package.json").text()).version')"

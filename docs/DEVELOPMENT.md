@@ -26,6 +26,14 @@ bun run smoke
 - `bun run test:protocol`、`bun run test:toolchain` 聚焦运行协议与工具链测试。
 - `bun run audit:luvus` 核对固定的 Luvus 原生输入。
 
+Linux x64 的真实断连/重连验收已接入 Bun verification，在构建后运行：
+
+```sh
+bun --no-env-file scripts/e2e/connector-disconnect.mjs
+```
+
+默认按 dual-role fixture 的官方 Herdr 版本与 SHA-256 pin 下载；离线或复用已有文件可设置 `ROVLOOM_HERDR_BIN=/absolute/path/to/herdr`，同样核对摘要。`LUVUS_TEST_ROOT` 可指定测试私有目录的父目录。验收会停止并重启本轮 Gateway 子进程，检查原生 Connector 的断连诊断与新 ready 行，不使用用户状态或已有原生会话。
+
 `bunfig.toml` 禁止自动读取 `.env` 和依赖安装脚本，子进程也显式传入 `--no-env-file`。`typecheck` 由 Bun 启动 TypeScript 编译器，保留 `strict` 与 `noUncheckedIndexedAccess`；转译不能替代类型检查。
 
 ## 构建产物

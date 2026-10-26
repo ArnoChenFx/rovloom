@@ -46,6 +46,8 @@ import {
   socket
 } from './common.js'
 import type { Connection, Session, Socket } from './common.js'
+import { DisconnectLog, remoteDisconnect } from './disconnect.js'
+import type { DisconnectReason } from './disconnect.js'
 
 export type WireExecutionResult = Readonly<{ binding: AttemptBinding; native_response: JsonObject }>
 export type ConnectorWireSession = Session & {
@@ -62,6 +64,8 @@ type ConnectorBaseOptions = {
   random?: () => number
   /** 提供独立可信时间，调用方仍须检查单调性和固定到期边界。 */
   now?: () => number
+  /** 只供测试注入受控 socket 桩，以构造真实 runtime 不可复现的事件顺序；生产不传。 */
+  socketFactory?: (socket: Socket) => Socket
   limits?: Partial<{
     heartbeat_ms: number
     idle_ms: number
@@ -89,6 +93,11 @@ export type WireConnectorOptions = ConnectorBaseOptions & {
   execute?: never
 }
 export type ConnectorOptions = NativeConnectorOptions | WireConnectorOptions
+/**
+ * 本机主动关闭的连接用 1000/空原因：Gateway 真实关闭是 1008/transport_closed，
+ * 二者不重叠，本机关闭帧的回声因此不会被归为对端事件。
+ */
+const LOCAL_CLOSE_CODE = 1000
 /** 初次发布前核对整个快照为不可变纯数据；后续 tick 可只比引用，不反复遍历大 capabilities。 */
 function frozenSnapshot(value: unknown): void {
   if (value && typeof value === 'object') {
@@ -130,6 +139,10 @@ export function createConnector(options: ConnectorOptions) {
   let stopped = false
   let phase = 'disconnected'
   let failure: string | undefined
+  /** 累计断开记录与有界队列；只增计数让快速重连不被采样窗口吞掉，队列避免同窗口多次断开被覆盖。 */
+  const disconnects = new DisconnectLog()
+  /** 本机刚收敛的 socket：其远端关闭事件若早于下一个 epoch 到达，可纠正为实际观察值。 */
+  let settled: Socket | undefined
   let capacity: ConnectorCapacity | undefined
   let next = 0
   let retries = 0
@@ -380,20 +393,40 @@ export function createConnector(options: ConnectorOptions) {
     providerFences.clear()
     received = new ReceiveWindow()
   }
-  /** 移除当前 socket 并清理会话，按有界抖动退避安排重连；停止状态不再重连。 */
-  function close(): void {
+  /** 实际连接尝试失败或活动 socket 收敛后才推进退避；重复 disconnect 不调用它。 */
+  function scheduleReconnect(): void {
+    const random = (options.random ?? Math.random)()
+    const jitter = Number.isFinite(random) ? Math.max(0, Math.min(1, random)) : 1
+    next =
+      performance.now() +
+      Math.max(1, jitter * Math.min(limits.reconnect_max_ms, limits.reconnect_ms * 2 ** Math.min(retries++, 16)))
+  }
+
+  /** 只记录实际存在的 socket；无连接时保留尚待订正的记录，停止仅更新全局相位。 */
+  function close(reason: DisconnectReason = stopped ? 'connector_stopped' : 'connector_failure', code?: number): void {
     const previous = ws
+    if (previous === undefined) {
+      if (stopped) {
+        phase = 'stopped'
+        settled = undefined
+      }
+      return
+    }
     ws = undefined
+    // 底层 error 的后续 close 可订正记录；本机主动关闭已定性，不接受回声订正。
+    settled = reason === 'transport_unavailable' ? previous : undefined
     clearSession()
     phase = stopped ? 'stopped' : 'disconnected'
+    // 本机收敛的断开不带对端关闭码；对端事件定性时只附带实际观察到的有界码。
+    disconnects.record(Object.freeze(code === undefined ? { reason } : { code, reason }))
     if (!stopped) {
-      const random = (options.random ?? Math.random)()
-      const jitter = Number.isFinite(random) ? Math.max(0, Math.min(1, random)) : 1
-      next =
-        performance.now() +
-        Math.max(1, jitter * Math.min(limits.reconnect_max_ms, limits.reconnect_ms * 2 ** Math.min(retries++, 16)))
+      scheduleReconnect()
     }
-    previous?.close(1000, 'transport_closed')
+    /**
+     * 本机主动关闭用 1000：Gateway 真实关闭是 1008/transport_closed，
+     * 所以这条帧的回声（码 1000）不会被当对端事件，也不会被当成网关主动关闭。
+     */
+    previous?.close(LOCAL_CLOSE_CODE, '')
     previous?.terminate()
   }
   /** 用当前认证上下文编码并写出单帧，预算或背压异常交给调用者收敛关闭。 */
@@ -605,19 +638,32 @@ export function createConnector(options: ConnectorOptions) {
     try {
       credential = structuredClone(options.credential())
     } catch {
-      close()
+      failure = 'connection_failed'
+      scheduleReconnect()
       return
     }
     const messageId = randomUUID()
     let current: Socket
+    let created: Socket | undefined
     try {
-      current = socket(url)
+      created = current = socket(url)
+      // 桩只能在已建立的真实 socket 上包装，不能替换为任意非 socket 值。
+      current = options.socketFactory?.(current) ?? current
     } catch {
-      close()
+      try {
+        created?.close(LOCAL_CLOSE_CODE, '')
+        created?.terminate()
+      } catch {
+        // 失败的构造没有活动 epoch；清理失败原文不进入诊断。
+      }
+      failure = 'connection_failed'
+      scheduleReconnect()
       return
     }
     ws = current
     phase = 'connecting'
+    // 新 epoch 已建立：任何旧 socket 的晚到事件不再能覆盖当前观测。
+    settled = undefined
     opened = last = sentAt = performance.now()
     sent = sequence = messages = 0
     messageWindow = opened
@@ -648,7 +694,7 @@ export function createConnector(options: ConnectorOptions) {
         } catch (error) {
           failure =
             error instanceof GatewayError && /^[a-z_]{1,80}$/.test(error.code) ? error.code : 'connection_failed'
-          close()
+          close('connector_failure')
         }
       }
     current.onmessage =
@@ -817,17 +863,28 @@ export function createConnector(options: ConnectorOptions) {
         }
       }
     current.onclose =
-      /** 将当前 socket 的关闭事件收敛到清理和重连；过期 socket 的事件被忽略。 */
-      () => {
+      /** 只把对端关闭事件归一化为白名单原因与有界关闭码，再走统一清理和重连。 */
+      (event) => {
         if (ws === current) {
-          close()
+          const observed = remoteDisconnect(event)
+          close(observed.reason, observed.code)
+          return
+        }
+        // 远端关闭晚于本机收敛且新 epoch 尚未建立：纠正最近一次观测，不重复计数。
+        if (settled === current) {
+          settled = undefined
+          const observed = remoteDisconnect(event)
+          // 本机自己发出的关闭帧回声（码 1000）不是对端事件：保留已定性的本机原因。
+          if (observed.code !== LOCAL_CLOSE_CODE) {
+            disconnects.refine(observed)
+          }
         }
       }
     current.onerror =
       /** 隐藏底层网络错误原文，并让当前连接按统一关闭路径回收资源。 */
       () => {
         if (ws === current) {
-          close()
+          close('transport_unavailable')
         }
       }
   }
@@ -847,12 +904,12 @@ export function createConnector(options: ConnectorOptions) {
       try {
         if (!connection) {
           if (now - opened >= limits.handshake_ms) {
-            close()
+            close('handshake_timeout')
           }
           return
         }
         if (!session || now - last >= limits.idle_ms) {
-          close()
+          close('transport_idle')
           return
         }
         reconcileProviders(connection, session)
@@ -880,7 +937,7 @@ export function createConnector(options: ConnectorOptions) {
           phase = 'authenticated'
         }
       } catch {
-        close()
+        close('connector_failure')
       }
     },
     Math.min(100, limits.heartbeat_ms, limits.handshake_ms, limits.reconnect_ms)
@@ -889,9 +946,12 @@ export function createConnector(options: ConnectorOptions) {
   return {
     /** 返回有界连接与 provider 健康观测，不包含凭据或原生内容。 */
     status() {
+      // 无论当前相位都交付累计断开次数与有界队列，让采样侧按计数差逐条补报。
       return {
         ...(failure ? { failure } : {}),
         ...(capacity ? { capacity } : {}),
+        ...disconnects.snapshot(),
+        ...disconnects.changes(),
         phase,
         running: running.size,
         reconnects: retries,
@@ -900,7 +960,8 @@ export function createConnector(options: ConnectorOptions) {
         providers: connection && session ? providerHealth(connection, session.readiness()) : []
       }
     },
-    disconnect: close,
+    /** 操作者主动断开当前连接；不宣称原生动作已回滚，也不伪造对端关闭码。 */
+    disconnect: () => close('connector_disconnected'),
     /** 幂等停止 timer、socket 和观察资源；不会据此宣称原生动作已回滚。 */
     stop(): void {
       if (stopped) {
@@ -908,7 +969,7 @@ export function createConnector(options: ConnectorOptions) {
       }
       stopped = true
       clearInterval(timer)
-      close()
+      close('connector_stopped')
     }
   }
 }

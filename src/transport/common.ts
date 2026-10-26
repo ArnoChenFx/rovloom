@@ -185,6 +185,12 @@ export function endpoint(raw: string, _developmentLoopback = false): URL {
   return url
 }
 
+/** 通道对端被动关闭事件；code/reason 属于不可信对端输入，只能经白名单归一化后使用。 */
+export type CloseEvent = {
+  code: number
+  reason: string
+}
+
 // Bun 原生 API 的局部类型，避免为 transport 改动公共工具链依赖。
 export type Socket = {
   /** 将已编码文本交给 socket，并返回写入或背压状态供调用方判定。 */
@@ -199,10 +205,10 @@ export type Socket = {
   onopen: null | (() => void)
   /** 处理对端帧并核对认证、方向和 epoch 后再进入业务。 */
   onmessage: null | ((event: { data: string | Uint8Array }) => void)
-  /** 回收该 socket 的状态，并由所属角色决定是否退避重连。 */
-  onclose: null | (() => void)
-  /** 将网络失败收敛为关闭，不向普通输出透传错误原文。 */
-  onerror: null | (() => void)
+  /** 回收该 socket 的状态，并由所属角色决定是否退避重连；关闭码/原因须经白名单归一化。 */
+  onclose: null | ((event: CloseEvent) => void)
+  /** 将网络失败收敛为关闭；事件正文完全不读，也不向普通输出透传错误原文。 */
+  onerror: null | ((event: unknown) => void)
 }
 export type ServerSocket<T> = Pick<Socket, 'send' | 'close' | 'terminate'> & {
   data: T
