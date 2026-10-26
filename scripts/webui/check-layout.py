@@ -130,10 +130,41 @@ def main():
                 page.goto(base + '/fixtures/#view=calls')
                 expect(page.locator('.call-card')).to_have_count(3)
                 expect(page.locator('main .gateway')).to_have_count(0)
-                expect(page.locator('.calls-section .metric-scope, .call-metrics p, .distribution-heading .muted')).to_have_count(0)
+                expect(page.locator('.call-metrics p, .distribution-heading .muted')).to_have_count(0)
                 assert page.locator('.calls-section').evaluate('el => getComputedStyle(el).borderLeftWidth === "0px"')
-                assert page.locator('.call-columns').evaluate('el => getComputedStyle(el).borderTopWidth === "0px" && getComputedStyle(el).borderBottomWidth === "0px"')
-                assert page.locator('.call-card').first.evaluate('el => getComputedStyle(el).borderBottomWidth === "0px"')
+                # 明细列表整体是一个带边框的容器，表头与每一行都在框内。
+                frame = page.locator('.call-table')
+                expect(frame).to_have_count(1)
+                assert frame.evaluate('''/* 容器必须真有边框、圆角与裁切，与设备列表同一视觉语言。 */ el => {
+                    const style = getComputedStyle(el);
+                    return style.borderTopWidth === '1px' && style.borderBottomWidth === '1px'
+                        && style.borderLeftWidth === '1px' && style.borderRightWidth === '1px'
+                        && style.borderTopStyle === 'solid' && parseFloat(style.borderTopLeftRadius) >= 8
+                        && style.overflow === 'clip';
+                }''')
+                assert frame.evaluate('''/* 表头与全部行都在同一个容器内，且表头在行之前。 */ el => {
+                    const columns = el.querySelector(':scope > .call-columns');
+                    const list = el.querySelector(':scope > .call-list');
+                    if (!columns || !list) return false;
+                    return list.querySelectorAll('.call-card').length === 3
+                        && Boolean(columns.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING);
+                }''')
+                assert frame.evaluate('''/* 表头底部有分隔线，最后一行不再画边框，行间用一条分隔线。 */ el => {
+                    const columns = getComputedStyle(el.querySelector('.call-columns'));
+                    const cards = [...el.querySelectorAll('.call-card')];
+                    const borders = cards.map(/* 读取每一行的实际下边框宽度。 */ card => getComputedStyle(card).borderBottomWidth);
+                    const boxes = cards.map(/* 读取每一行的实际盒子高度。 */ card => card.getBoundingClientRect().height);
+                    return columns.borderBottomWidth === '1px' && borders.slice(0, -1).every(width => width === '1px')
+                        && borders.at(-1) === '0px' && boxes.every(height => height > 0);
+                }''')
+                # 卡片不再各自浮动：同一行内相邻卡片无缝相接，整体只有容器一层阴影。
+                assert frame.evaluate('''/* 行与行之间不留空隙，阴影只在容器上。 */ el => {
+                    const cards = [...el.querySelectorAll('.call-card')];
+                    const shadows = cards.filter(/* 行本身不再投射独立阴影。 */ card => getComputedStyle(card).boxShadow !== 'none');
+                    const gaps = cards.slice(1).map(/* 比较相邻行的实际位置。 */ (card, index) =>
+                        card.getBoundingClientRect().top - cards[index].getBoundingClientRect().bottom);
+                    return shadows.length === 0 && gaps.every(gap => Math.abs(gap) <= 1);
+                }''')
                 labels = page.locator('.distribution-label').all_text_contents()
                 assert any('fixture-a' in label for label in labels)
                 assert any('fixture-b' in label for label in labels)
@@ -169,7 +200,7 @@ def main():
                 expect(page.locator('.call-card')).to_have_count(3)
                 page.set_viewport_size({'width': 320, 'height': 900})
                 snapshot(page, output, f'{language}-{theme}-calls-320', narrow=True)
-                checks.append(f'{language}/{theme}: clean call cards, machine-scoped labels, stable filter counts, previous links on full/empty pages and 320px layout')
+                checks.append(f'{language}/{theme}: framed call table with header and rows inside one bordered container, machine-scoped labels, stable filter counts, previous links on full/empty pages and 320px layout')
 
                 page.goto(base + '/fixtures/#view=devices')
                 page.locator('.device-card').first.wait_for()

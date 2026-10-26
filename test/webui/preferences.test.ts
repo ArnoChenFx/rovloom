@@ -93,21 +93,76 @@ test(
 )
 
 test(
-  '日期与相对时间按语言展示，UTC和可信年龄不被客户端时间替换',
-  /** 缺失观测仍未知，未来时点只按零年龄展示。 */ () => {
+  '日期按浏览器时区展示且自带偏移标识，写死 UTC 的标签已移除',
+  /** 时间戳只换展示时区，不引入浏览器墙钟作为观测。 */ () => {
     const zh = createLocalizer('zh-CN')
     const en = createLocalizer('en')
     const time = Date.UTC(2026, 9, 19, 3, 4, 5)
     assert.notEqual(zh.timestamp(time), en.timestamp(time))
-    assert(zh.timestamp(time).includes('UTC'))
-    assert(en.timestamp(time).includes('UTC'))
     assert.equal(zh.timestamp(null), '尚无可信观测')
     assert.equal(en.timestamp(null), 'No trusted observation')
-    assert.equal(en.age(time, time + 5000), '5 seconds ago')
-    assert.match(zh.age(time, time + 5000), /^5秒(?:钟)?前$/u)
-    assert.equal(en.age(time + 1000, time), '0 seconds ago')
-    assert.equal(en.age(null, time), 'No trusted heartbeat')
+    // 同一时刻用同一组选项在本机默认时区渲染，证明展示没有固定成 UTC。
+    const localFormatter = (language: string) =>
+      new Intl.DateTimeFormat(language, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        timeZoneName: 'shortOffset',
+        hourCycle: 'h23'
+      })
+    assert.equal(en.timestamp(time), localFormatter('en').format(time))
+    assert.equal(zh.timestamp(time), localFormatter('zh-CN').format(time))
+    // 偏移标识来自实际时区，而不是写死的“UTC”。
+    assert.match(en.timestamp(time), /(?:GMT|UTC)/u)
+    assert.match(zh.timestamp(time), /(?:GMT|UTC)/u)
+    // 两个真实时区的渲染必须彼此不同，也不同于 UTC 渲染。
+    assert.equal(createLocalizer('en', 'UTC').timestamp(time), 'Oct 19, 2026, 03:04:05 GMT+0')
+    assert.equal(createLocalizer('en', 'Asia/Tokyo').timestamp(time), 'Oct 19, 2026, 12:04:05 GMT+9')
+    assert.equal(createLocalizer('en', 'America/Los_Angeles').timestamp(time), 'Oct 18, 2026, 20:04:05 GMT-7')
+    assert.equal(createLocalizer('zh-CN', 'Asia/Tokyo').timestamp(time), '2026年10月19日 GMT+9 12:04:05')
+    for (const key of ['manage.expires', 'manage.observed'] as const) {
+      assert(!messages['zh-CN'][key].includes('UTC'), key)
+      assert(!messages.en[key].includes('UTC'), key)
+    }
     assert.equal(en.reason('heartbeat_timeout'), 'Heartbeat timed out (heartbeat_timeout)')
+  }
+)
+
+test(
+  '相对年龄按量级进位到分/时/天/月/年，未来时点只按零年龄展示',
+  /** 单位只由服务时点与单调经过时间决定，不从浏览器墙钟取“现在”。 */ () => {
+    const zh = createLocalizer('zh-CN')
+    const en = createLocalizer('en')
+    const time = Date.UTC(2026, 9, 19, 3, 4, 5)
+    const second = 1_000
+    const minute = 60 * second
+    const hour = 60 * minute
+    const day = 24 * hour
+    assert.equal(en.age(time, time + 5 * second), '5 seconds ago')
+    assert.match(zh.age(time, time + 5 * second), /^5秒(?:钟)?前$/u)
+    assert.equal(en.age(time, time + 59 * second), '59 seconds ago')
+    assert.equal(en.age(time, time + minute), '1 minute ago')
+    assert.match(zh.age(time, time + minute), /^1分钟前$/u)
+    assert.equal(en.age(time, time + 59 * minute), '59 minutes ago')
+    assert.equal(en.age(time, time + hour), '1 hour ago')
+    assert.match(zh.age(time, time + hour), /^1小时前$/u)
+    // 截图中累加过的 3,665 秒必须显示为 1 小时前。
+    assert.equal(en.age(time, time + 3_665 * second), '1 hour ago')
+    assert.equal(en.age(time, time + 23 * hour), '23 hours ago')
+    assert.equal(en.age(time, time + day), '1 day ago')
+    assert.match(zh.age(time, time + 2 * day), /^2天前$/u)
+    assert.equal(en.age(time, time + 29 * day), '29 days ago')
+    assert.equal(en.age(time, time + 30 * day), '1 month ago')
+    assert.match(zh.age(time, time + 70 * day), /^2个月前$/u)
+    assert.equal(en.age(time, time + 364 * day), '11 months ago')
+    assert.equal(en.age(time, time + 365 * day), '1 year ago')
+    assert.match(zh.age(time, time + 800 * day), /^2年前$/u)
+    assert.equal(en.age(time + second, time), '0 seconds ago')
+    assert.equal(en.age(null, time), 'No trusted heartbeat')
+    assert.equal(zh.age(null, time), '尚无可信心跳')
   }
 )
 

@@ -81,6 +81,14 @@ def main():
                     assert entry.evaluate('''/* 年龄更新保留同一可聚焦、可点击的真实按钮。 */ button =>
                         button.isConnected && button === document.activeElement''')
                     new_name = f'owned_{language.lower().replace("-", "_")}_{theme}_{width}'
+                    # 已连接且权限允许时，操作区不得再出现“尚未接入/不可用”说明，也不挂 aria-describedby。
+                    actions_region = page.locator('section.actions')
+                    assert actions_region.evaluate('/* 只读可见文本，隐藏的旧说明不算。 */ el => el.innerText')
+                    assert '尚未接入' not in actions_region.evaluate('el => el.innerText')
+                    assert 'not connected' not in actions_region.evaluate('el => el.innerText')
+                    assert actions_region.evaluate('''/* 可用入口不再描述一个已隐藏的说明节点。 */ el =>
+                        [...el.querySelectorAll('button')].every(
+                            /* 逐个读取引用属性。 */ button => button.getAttribute('aria-describedby') === null)''')
                     prepare(page, 'device_rename', new_name)
                     assert writes(context, base) == []
                     prepares = metadata(context, base)['calls'].count('confirmations_create')
