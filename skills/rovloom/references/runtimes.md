@@ -10,7 +10,7 @@ Corresponds to Luvus 0.14.3. The authoritative method list is `src/runtime/luvus
 
 `runtime_describe.params_schema`, when present, comes from the same verified installed schema as execution validation. For the ordinary reviewed methods, native branches exist for `pane.list`, `agent.prompt`, `agent.send`, `agent.wait` and `agent.keys`; the returned closure preserves native constraints and annotations. Most other methods, including `agent.start` and `workspace.list`, remain `generic_params_only`. Extra conditions that cannot be accurately projected are not discarded to invent a complete parameter schema.
 
-Read `schema_annotations` as well: each note carries its original `document_uri`, JSON Pointer and text. The native request document's `$comment` explains prompt waiting transitions and current-state matching; document-root notes retain that scope. `parameter_help` for `agent.wait`, `agent.prompt` and `pane.run` is separately marked `rovloom_reviewed_subset`, with field rules and examples. It supplements native coverage, rather than replacing it. These details appear in describe, not discovery summaries.
+Read `schema_annotations` as well: each note carries its original `document_uri`, JSON Pointer and text. The native request document's `$comment` explains prompt waiting transitions and current-state matching; document-root notes retain that scope. `parameter_help` for `agent.wait`, `agent.prompt`, `pane.run` and `wait.output` is separately marked `rovloom_reviewed_subset`, with field rules and examples. It supplements native coverage, rather than replacing it. These details appear in describe, not discovery summaries.
 
 ### There is no `window.*`
 
@@ -76,6 +76,7 @@ Position parameters may be a number or a decimal string and are forwarded unchan
 - `pane.read` takes `pane` and `lines`; `agent.read` takes `target`, `lines` and `source`. `lines` caps at 1000 and returns only trailing lines. `text`, `content_revision` and `terminal_id` are Luvus's own values.
 - `agent.prompt` selects an Agent `target`. Its `until` and `timeout_s` require `wait:true`; `timeout_s` is seconds. Without waiting it returns queue admission immediately. In waiting mode, native semantics require a **new working or blocked transition** before matching `until` (native timeout default: 300 seconds).
 - `agent.wait` selects a `pane`, requires exactly one of `status` or `statuses`, and accepts `timeout_s` in seconds. It has **no `wait` flag** and matches the **current state**. Multiple states match any listed state, not an ordered sequence. An immediate idle match can refer to an old idle state and does not prove a new prompt was consumed.
+- `wait.output` selects a `pane` and waits for a literal `match` substring (1–4096 UTF-8 bytes, no NUL), with optional `timeout_s` in seconds (0..3600, fractions allowed). It first checks recent output, so an old marker can match immediately. Use a different marker for each execution when needed; no regex or implicit command wrapper is supported. A native `type:"wait", matched:false` response can mean timeout or pane closure, not a Gateway failure or proof that a command stopped.
 - `submitted`, `queued`, `ready: true` and `observed_state` only mean **the input was submitted or recognized as ready** — not that the prompt was consumed or that the model replied. Read real state and output separately.
 - Present `status` together with `authority` / `state_source`. Without positive evidence treat it as unknown; do not read idle, queued or TUI text as completion.
 - An upstream model failure triggers no resend and no switch to a paid model.
@@ -85,12 +86,15 @@ Native request examples (use observed selectors and the user's actual message):
 
 ```json
 {"method":"agent.wait","params":{"pane":"2","status":"idle","timeout_s":35}}
+{"method":"wait.output","params":{"pane":"2","match":"unique_marker_for_this_execution","timeout_s":35}}
 {"method":"agent.prompt","params":{"target":"selected-agent","text":"Hello","strict":true,"wait":true,"until":["idle"],"timeout_s":120}}
 ```
 
 The enclosing `runtime_call.deadline` must cover the native wait plus RPC overhead; a 120-second wait can use a deadline roughly 150 seconds in the future. It remains a fixed absolute Unix millisecond timestamp, at most 10 minutes out at registration. Luvus RPC defaults to a local 10-minute cap, while endpoint discovery/schema preparation remain capped at 30 seconds; explicit shorter local settings still apply. Native `timeout_s` may allow up to 3600 seconds, but it cannot raise Rovloom's call or local deadlines. `wait_ms` only controls one short HTTP wait: poll the original call rather than replaying the prompt.
 
-For common parameter failures on the three guided methods, read `gateway_error.details.issues` and `details.parameter_help`. `/params/pane` with `required` indicates a missing pane selector; `/params/wait` with `required_true` identifies the prompt-wait dependency. When the rejected parameter cannot be safely located, `/params` with `invalid_value` is a general diagnostic, not a specific field diagnosis. The error still carries `native_request_invalid` and `outcome:"not_dispatched"`; diagnostics omit user values and raw native errors and are not exhaustive.
+For common parameter failures on the four guided methods, read `gateway_error.details.issues` and `details.parameter_help`. `/params/pane` with `required` indicates a missing pane selector; `/params/wait` with `required_true` identifies the prompt-wait dependency. When the rejected parameter cannot be safely located, `/params` with `invalid_value` is a general diagnostic, not a specific field diagnosis. The error still carries `native_request_invalid` and `outcome:"not_dispatched"`; diagnostics omit user values and raw native errors and are not exhaustive.
+
+Set `timeout_s` explicitly for output waits (35 seconds can use a deadline 45–60 seconds in the future). Waiting remains a blocking native RPC and occupies an execution slot; `wait_ms:0` only releases the HTTP wait. Both Gateway and Connector must support this method, and existing 35-method grants are preserved. The owner must explicitly authorize `wait.output` on both ends and in the provider raw grant; never bypass a refusal. New pairing includes it. The terminal-input switch can remain off for this read-only operation.
 
 ### Terminal command submission
 

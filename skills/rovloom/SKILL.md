@@ -121,6 +121,8 @@ runtime_call {
 
 **6. Query and read the result**
 
+For a Luvus output sentinel, discover and describe `wait.output`, then submit native params `{ "pane": "<observed pane ID>", "match": "<literal marker>", "timeout_s": 35 }` through the same `runtime_call` flow. Give its absolute deadline extra RPC time and poll the original call. It matches existing recent output too; use a fresh marker where needed. `matched:false` is an ordinary native observation result, not proof a command stopped. This read-only method still needs explicit grants; it does not return command stdout or exit code. See [runtime semantics](references/runtimes.md).
+
 ```
 runtime_call_get { "call_id": "<call_id from step 5>", "wait_ms": 2000 }
 ```

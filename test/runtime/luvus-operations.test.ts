@@ -20,6 +20,7 @@ const schema = JSON.parse(
 ).request
 const examples: Record<string, object> = {
   'session.snapshot': {},
+  'wait.output': { pane: '1', match: 'unique_marker', timeout_s: 35 },
   'workspace.list': {},
   'workspace.get': { workspace_id: 'workspace_a' },
   'workspace.new': {},
@@ -68,6 +69,33 @@ const examples: Record<string, object> = {
   'agent.resume': { session_id: 'native-session-id' },
   'agent.wait': { pane: '1', status: 'idle', timeout_s: 30 }
 }
+
+test('输出等待仅接受显式 pane 和有界字面标记，拒绝正则伪字段、错单位和越界值', () => {
+  for (const timeout_s of [undefined, 0, 0.25, 3600]) {
+    validateLuvusOperationParams('wait.output', {
+      pane: '4294967295',
+      match: '.*literal_汉字',
+      ...(timeout_s === undefined ? {} : { timeout_s })
+    })
+  }
+  for (const params of [
+    {},
+    { pane: '1' },
+    { pane: '1', match: '' },
+    { pane: '1', match: 'x'.repeat(4097) },
+    { pane: '1', match: '汉'.repeat(1366) },
+    { pane: '1', match: 'x\0y' },
+    { pane: 1, match: 'x' },
+    { pane: '0', match: 'x' },
+    { pane: '4294967296', match: 'x' },
+    { pane_id: '1', match: 'x' },
+    { pane: '1', match: 'x', regex: true },
+    { pane: '1', match: 'x', timeout_ms: 1000 },
+    ...[-1, 3600.01, Infinity, NaN, '1', null].map((timeout_s) => ({ pane: '1', match: 'x', timeout_s }))
+  ]) {
+    assert.throws(() => validateLuvusOperationParams('wait.output', params), /luvus_operation_params_invalid/)
+  }
+})
 
 test(
   'Luvus ordinary operation descriptors exactly match the official fixed live method contracts',

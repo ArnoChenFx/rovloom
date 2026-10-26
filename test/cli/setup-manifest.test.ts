@@ -50,19 +50,23 @@ test('Luvus 配对清单兼容旧主体授权与新策略授权，拒绝额外�
     }
   }
   try {
-    for (const subject of [
-      { principal_id: authorization.principal_id },
-      { caller_policy_revision: authorization.policies.caller.revision }
-    ]) {
-      const remote = { ...value, raw_grant: { ...subject, methods: grant.methods } }
-      const reviewed = await reviewSetupManifest(
-        { installations: [{ reference, value: remote }] },
-        plan,
-        'synthetic_machine',
-        root,
-        new AbortController().signal
-      )
-      assert.deepEqual(reviewed.reviewed[0]!.value, remote)
+    for (const methods of [grant.methods, grant.methods.filter((method) => method !== 'wait.output')]) {
+      for (const subject of [
+        { principal_id: authorization.principal_id },
+        { caller_policy_revision: authorization.policies.caller.revision }
+      ]) {
+        const remote = { ...value, raw_grant: { ...subject, methods } }
+        const reviewed = await reviewSetupManifest(
+          { installations: [{ reference, value: remote }] },
+          plan,
+          'synthetic_machine',
+          root,
+          new AbortController().signal
+        )
+        assert.deepEqual(reviewed.reviewed[0]!.value, remote)
+        assert.deepEqual(reviewed.authorization.policies.caller.grants[0]!.methods, methods)
+        assert.deepEqual(reviewed.authorization.policies.local.grants[0]!.methods, methods)
+      }
     }
     for (const raw_grant of [
       { principal_id: 'other', methods: grant.methods },
