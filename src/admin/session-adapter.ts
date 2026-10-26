@@ -25,8 +25,6 @@ export type ManagementSessionAdapterOptions = Readonly<{
   sessions: ManagementSessionSource
   cookie_name: string
   origin: string
-  /** 监听器的局域网绑定提示；管理会话可经反向代理使用。 */
-  lan?: boolean
   /** 可注入同Store可信时钟；测试时钟不构成生产认证。 */
   now?: () => number
 }>

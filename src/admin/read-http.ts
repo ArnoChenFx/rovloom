@@ -4,7 +4,7 @@ import type { AdminContext, GatewayManagementService } from '../mcp/management.j
 import { parseManagementReadPath, MANAGEMENT_URL_BYTES } from '../webui/http-contract.js'
 import { checkManagementReadReply } from '../webui/validate.js'
 import { ReadError, type ReadProblem } from '../webui/reader.js'
-import { canonicalLoopbackHost, isWildcardHostname } from '../mcp/listen.js'
+import { canonicalLoopbackHost } from '../mcp/listen.js'
 
 export type ManagementHttpIdentity = Pick<AdminContext, 'caller' | 'management_session_ref'>
 export type ManagementAssets = ReadonlyMap<string, Uint8Array<ArrayBuffer>>
@@ -18,8 +18,6 @@ export type ManagementHttpOptions = {
   assets?: ManagementAssets
   /** 仅初始化现有根HTML；仍受本handler的Origin、取消、五秒截止和在途额度约束。 */
   initializePage?(request: Request, page: Response, signal: AbortSignal): Promise<Response>
-  /** 监听器的局域网绑定提示；HTTP 请求不以此限制反向代理域名。 */
-  lan?: boolean
 }
 
 const headers = {
@@ -366,7 +364,6 @@ export function startManagementReadListener(
     return startManagementListener({
       port: options.port,
       hostname: options.hostname,
-      lan: options.lan === true,
       maxRequestBodySize: 1,
       handler: /** 只读入口仍复用同一 handler。 */ () => handler
     })
@@ -380,10 +377,8 @@ export type ManagementListenerOptions = {
   port: number
   hostname?: '127.0.0.1' | '::1' | '0.0.0.0' | '::'
   maxRequestBodySize: 1 | 16_384
-  /** 显式局域网选择：随通配明文监听传给受信组合代码，由现行 handler 逐请求接纳非回环 Host。 */
-  lan?: boolean
-  /** 实际绑定后交付规范origin与本次LAN选择，只有受信组合代码可选择现行读/写handler。 */
-  handler(origin: string, lan: boolean): ManagementListenerHandler
+  /** 实际绑定后交付规范本机 origin，供受信组合代码装配管理 handler。 */
+  handler(origin: string): ManagementListenerHandler
 }
 
 /** 读写管理面共用唯一绑定与关闭顺序；正文上限只允许现行只读或窄写契约。 */
@@ -427,14 +422,10 @@ export function startManagementListener(options: ManagementListenerOptions) {
     /** 不使用 Bun 默认错误页，防止堆栈或请求信息离开边界。 */
     error: () => failure('unavailable', 503)
   })
-  // 通配绑定时交付的规范 origin 仍是对应回环地址；LAN 选择随选项单独传递，不隐含在 origin 里。
+  // 返回实际监听端口的规范回环地址，不将它作为代理域名白名单。
   const url = new URL(`http://${canonicalLoopbackHost(options.hostname)}:${server.port}`).origin
   try {
-    handler = options.handler(
-      /** LAN 选择按绑定单独传递，只在真实通配监听下生效。 */
-      url,
-      options.lan === true && isWildcardHostname(options.hostname)
-    )
+    handler = options.handler(url)
     if (typeof handler?.fetch !== 'function' || typeof handler.stop !== 'function') {
       throw new Error('management_listener_invalid')
     }

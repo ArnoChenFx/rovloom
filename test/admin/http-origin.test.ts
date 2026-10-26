@@ -13,6 +13,13 @@ test('任意 HTTP/HTTPS 域名和改写后的代理 Host 不需要公网地址�
   }
 })
 
+test('公网 HTTPS Origin 与 HTTP 回环 upstream 可以不同，只要求 Host 与请求 URL 对齐', () => {
+  const request = new Request('http://127.0.0.1:9445/browser.js', {
+    headers: { host: '127.0.0.1:9445', origin: 'https://public.example' }
+  })
+  assert.equal(managementRequestOrigin(request), 'https://public.example')
+})
+
 test('浏览器跨站元数据、无效 Origin 和不一致的 URL/Host 仍被拒绝，转发头不是登录证明', () => {
   for (const headers of [
     { origin: 'null' },
@@ -21,6 +28,7 @@ test('浏览器跨站元数据、无效 Origin 和不一致的 URL/Host 仍被�
     { origin: 'https://user:secret@example' },
     { 'sec-fetch-site': 'cross-site' },
     { 'sec-fetch-site': 'same-site' },
+    // URL 是 127.0.0.1:9445，这里只测 Host 与 URL 不一致；公网域名本身是允许的。
     { host: 'other.example' }
   ] as Record<string, string>[]) {
     assert.equal(

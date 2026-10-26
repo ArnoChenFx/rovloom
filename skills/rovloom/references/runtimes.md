@@ -160,4 +160,4 @@ You **cannot** turn this switch on remotely. Report refusals faithfully and do n
 
 ### Management reverse proxies
 
-The management UI supports arbitrary proxy domains and ports, external HTTPS with an HTTP upstream, and proxies that preserve or rewrite Host. Proxy the site root to the management listener (9445 by default); no public URL, domain allowlist or trusted-proxy setting is needed. Login and CSRF remain required. Forwarded protocol headers only control the cookie Secure attribute and never establish an administrator identity.
+The management UI supports arbitrary proxy domains and ports, external HTTPS with an HTTP upstream, and proxies that preserve or rewrite Host. The management hostname selects the listening interface, not allowed proxy domains. Proxy the site root to the management listener (9445 by default); no public URL, domain allowlist or trusted-proxy setting is needed. Login and CSRF remain required. Forwarded protocol headers only control the cookie Secure attribute and never establish an administrator identity.

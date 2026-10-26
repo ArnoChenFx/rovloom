@@ -33,8 +33,6 @@ export type RuntimeCliManagement = Pick<ManagementWriteOptions, 'pairingPolicy' 
   port: number
   // 绑定地址缺省回环；通配只用于容器等隔离环境，通知的仍是规范回环地址。
   hostname?: '127.0.0.1' | '0.0.0.0'
-  // 显式局域网选择：随通配明文监听传递，由现行读写handler逐请求接纳非回环 Host。
-  lan?: boolean
   // 只通知实际回环地址，不建立管理员身份、CSRF证明或执行许可。
   listening?(url: string): void
 } & (
@@ -142,15 +140,13 @@ export function createRuntimeCliRuntime(host: RuntimeCliHost): CliRuntime {
           management = startManagementListener({
             port: options.port,
             hostname: options.hostname,
-            lan: options.lan === true,
             maxRequestBodySize: 16_384,
-            handler: /* 同一listener挂现行读写handler，不复制管理协议或创建默认session。 */ (origin, lan) => {
+            handler: /* 同一listener挂现行读写handler，不复制管理协议或创建默认session。 */ (origin) => {
               const authentication = options.session
                 ? createManagementSessionAdapter({
                     ...options.session,
                     identities: resource.options.identities,
-                    origin,
-                    lan
+                    origin
                   })
                 : options.http
               const authority = options.session?.authority
@@ -166,7 +162,6 @@ export function createRuntimeCliRuntime(host: RuntimeCliHost): CliRuntime {
                 : undefined
               const handler = createManagementHandler({
                 ...options.http,
-                lan,
                 authenticate: authentication.authenticate,
                 verifyCsrf: authentication.verifyCsrf,
                 service: scoped?.service ?? writes,

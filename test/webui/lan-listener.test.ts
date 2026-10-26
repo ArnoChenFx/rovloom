@@ -24,31 +24,18 @@ function options(): ManagementHttpOptions {
 test(
   'management accepts proxy hosts on loopback and wildcard listeners without a domain opt-in',
   /** 不同绑定下均可携带代理域名 Host；仅使用明确注入的测试身份。 */ async () => {
-    const plain = startManagementReadListener({ ...options(), port: 0, hostname: '0.0.0.0' })
-    const lan = startManagementReadListener({ ...options(), port: 0, hostname: '0.0.0.0', lan: true })
-    try {
-      const plainPort = Number(new URL(plain.url).port)
-      const lanPort = Number(new URL(lan.url).port)
-      assert.match(lan.url, /^http:\/\/127\.0\.0\.1:\d+$/u)
-      // 不以 Host 区分代理域名；监听网卡与请求认证分别控制。
-      const refused = await statusWithHost(plainPort, `192.0.2.10:${plainPort}`, '/admin/v1/status')
-      assert.equal(refused, 200, `plain -> ${refused}`)
-      // 旧 LAN 提示不影响代理域名与回环 Host 的认证。
-      assert.equal(await statusWithHost(lanPort, `192.0.2.10:${lanPort}`, '/admin/v1/status'), 200)
-      assert.equal(await statusWithHost(lanPort, `127.0.0.1:${lanPort}`, '/admin/v1/status'), 200)
-      // 即使物理连接走回环，也可由代理交付任意域名 Host。
-      const loopback = startManagementReadListener({ ...options(), port: 0, lan: true })
+    for (const hostname of ['127.0.0.1', '0.0.0.0'] as const) {
+      const listener = startManagementReadListener({ ...options(), port: 0, hostname })
       try {
-        const loopPort = Number(new URL(loopback.url).port)
-        const denied = await statusWithHost(loopPort, `192.0.2.10:${loopPort}`, '/admin/v1/status')
-        assert.equal(denied, 200, `loopback-only -> ${denied}`)
-        assert.equal(await statusWithHost(loopPort, `127.0.0.1:${loopPort}`, '/admin/v1/status'), 200)
+        assert.match(listener.url, /^http:\/\/127\.0\.0\.1:\d+$/u)
+        const port = Number(new URL(listener.url).port)
+        // Host 对齐请求 URL 即可，物理监听网卡不构成域名白名单。
+        for (const host of [`192.0.2.10:${port}`, `127.0.0.1:${port}`, 'public.example']) {
+          assert.equal(await statusWithHost(port, host, '/admin/v1/status'), 200, `${hostname}: ${host}`)
+        }
       } finally {
-        loopback.stop()
+        listener.stop()
       }
-    } finally {
-      plain.stop()
-      lan.stop()
     }
   }
 )

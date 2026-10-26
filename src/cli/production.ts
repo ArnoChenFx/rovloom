@@ -351,7 +351,6 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
           ? {
               port: managementHost.port,
               hostname: config.management_hostname,
-              lan: config.management_hostname === '0.0.0.0',
               listening: managementHost.listening?.bind(managementHost),
               pairingPolicy: managementHost.pairingPolicy?.bind(managementHost),
               providerEnable: managementHost.providerEnable?.bind(managementHost),
