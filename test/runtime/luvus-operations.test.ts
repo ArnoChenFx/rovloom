@@ -70,6 +70,37 @@ const examples: Record<string, object> = {
   'agent.wait': { pane: '1', status: 'idle', timeout_s: 30 }
 }
 
+test('所有显式 pane 与 anchor 选择器统一接受正 u32 字符串，拒绝越界和非规范形式', () => {
+  const cases = [
+    ...[
+      'pane.get',
+      'pane.status',
+      'pane.focus',
+      'pane.close',
+      'pane.rename',
+      'pane.run',
+      'pane.split',
+      'pane.read',
+      'agent.wait',
+      'wait.output'
+    ].map((method) => ({ method, params: examples[method]!, key: 'pane' })),
+    { method: 'agent.start', params: { name: 'selected-agent', kind: 'opencode' }, key: 'pane' },
+    { method: 'agent.start', params: { name: 'selected-agent', kind: 'opencode' }, key: 'anchor' }
+  ]
+  for (const { method, params, key } of cases) {
+    for (const id of ['1', '4294967295']) {
+      assert.doesNotThrow(() => validateLuvusOperationParams(method, { ...params, [key]: id }), method + ':' + key)
+    }
+    for (const id of ['4294967296', '9999999999', '10000000000', '0', '01', '-1', '1.0', 1]) {
+      assert.throws(
+        () => validateLuvusOperationParams(method, { ...params, [key]: id }),
+        /luvus_operation_params_invalid/,
+        method + ':' + key
+      )
+    }
+  }
+})
+
 test('输出等待仅接受显式 pane 和有界字面标记，拒绝正则伪字段、错单位和越界值', () => {
   for (const timeout_s of [undefined, 0, 0.25, 3600]) {
     validateLuvusOperationParams('wait.output', {
