@@ -18,13 +18,13 @@
 |---|---|---|
 | 1 | 修复长等待硬失败 | [PR #289](https://github.com/ArnoChenFx/rovloom/pull/289) 已拆开准备 / 原生 RPC 超时，并用超过 30 秒的实际通道回归测试覆盖；尚未合并。先让阻塞调用在其有效 deadline 内正常返回，保留独立调用并发与心跳，不能靠 job 掩盖断连 |
 | 2 | 补足 `runtime_describe` 参数信息 | #289 投影五个有原生条件分支的方法，保留引用闭包与原生注释。其他方法仍标记 generic；后续逐方法补原生 schema 或注明来源的审核子集，不能把 `$comment` 文本自动冒充完整 schema，也不能把所有方法都标记为已完成 |
-| 3 | Pane 身份与互查 | 0.14.3 的数字 pane 是进程内 ID，分屏 / 移动不重编号，重启才重新分配。当前 list 缺 `terminal_id`，get 已返回；先说明查询路径，再推动原生 list 同时给出终端身份。Gateway 不拼造跨重启稳定 ID，不擅自给原生响应添加字段 |
+| 3 | Pane 身份与互查 | 0.14.3 的数字 pane 是进程内 ID，分屏 / 移动不重编号，重启才重新分配。当前 list 缺 `terminal_id`，get 已返回；Rovloom 补字段映射和生命周期文档。原生字段缺口只记 [上游依赖 issue #291](https://github.com/ArnoChenFx/rovloom/issues/291)，不修改上游、不给原生正文合成字段；如需聚合，用独立的 derived 契约且不签发正文句柄 |
 | 4 | 输出哨兵与命令结果 | 原生已有 `wait.output`，但 Rovloom 当前静态表未开放，需独立核实参数、权限、等待上限与匹配语义后接入。`pane.run` 只发送文本并返回 `ok`；stdout / stderr / exit code 是另一项执行能力，不能用终端快照或代理进程退出码代替 |
 | 5 | 持久 Agent 对话 job | 本 ADR 的后续实现。先收敛身份、等待与状态证据，保留双 provider、去重、授权及恢复的验收门槛 |
 
 输出哨兵必须明确匹配历史还是仅匹配提交后的新输出；当前原生 `wait.output` 会先检查 recent 文本，旧标记可能立即匹配，不能声称它是某条新命令的完成回执。调用方显式选择执行哨兵协议时应使用每次不同的标记；桥接不能未经授权插入 shell wrapper、修改命令或自动重发。
 
-`pane.run` 的结构化命令结果需要原生提供关联执行 ID 与可验证的结束 / 输出信息，或另行定义受设备 owner 授权的执行接口。它不包含在首期 Agent 对话 job 范围内，不能从 Agent 状态推导 shell exit code。
+`pane.run` 的原生回包不含结构化命令结果，但 Rovloom 可以另行定义受设备 owner 授权的派生执行契约，通过明确的命令包装、唯一标记和有界输出采集提供 stdout / stderr / exit code，不必改上游。必须说明支持的 shell、隔离 / 终端执行语义、截断、超时与结果不确定边界，保持原生 `pane.run` 回包原样。该能力不包含在首期 Agent 对话 job 范围内，也不能从 Agent 状态推导 shell exit code。
 
 ## 决策
 
