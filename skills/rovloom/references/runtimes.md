@@ -90,7 +90,7 @@ Native request examples (use observed selectors and the user's actual message):
 
 The enclosing `runtime_call.deadline` must cover the native wait plus RPC overhead; a 120-second wait can use a deadline roughly 150 seconds in the future. It remains a fixed absolute Unix millisecond timestamp, at most 10 minutes out at registration. Luvus RPC defaults to a local 10-minute cap, while endpoint discovery/schema preparation remain capped at 30 seconds; explicit shorter local settings still apply. Native `timeout_s` may allow up to 3600 seconds, but it cannot raise Rovloom's call or local deadlines. `wait_ms` only controls one short HTTP wait: poll the original call rather than replaying the prompt.
 
-For common parameter failures on the three guided methods, read `gateway_error.details.issues` and `details.parameter_help`. `/params/pane` with `required` indicates a missing pane selector; `/params/wait` with `required_true` identifies the prompt-wait dependency. The error still carries `native_request_invalid` and `outcome:"not_dispatched"`; diagnostics omit user values and raw native errors and are not exhaustive.
+For common parameter failures on the three guided methods, read `gateway_error.details.issues` and `details.parameter_help`. `/params/pane` with `required` indicates a missing pane selector; `/params/wait` with `required_true` identifies the prompt-wait dependency. When the rejected parameter cannot be safely located, `/params` with `invalid_value` is a general diagnostic, not a specific field diagnosis. The error still carries `native_request_invalid` and `outcome:"not_dispatched"`; diagnostics omit user values and raw native errors and are not exhaustive.
 
 ### Terminal command submission
 

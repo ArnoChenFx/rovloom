@@ -46,6 +46,27 @@ test('常见选择器、wait 依赖与 generic 必填字段在登记前得到固
   }
 })
 
+test('未知字段和非法枚举的真实 preflight 拒绝提供根路径诊断，不泄露键名或值', () => {
+  const preflight = createLuvusRequestPreflight(compiled)
+  const secret = 'PRIVATE_UNKNOWN_FIELD_OR_ENUM'
+  for (const [method, params] of [
+    ['pane.run', { pane: '2', command: 'x', [secret]: secret }],
+    ['agent.wait', { pane: '2', status: secret }]
+  ] as const) {
+    assert.throws(
+      () => preflight({ id: 'native_invalid', method, params }),
+      (error) => {
+        assert(error instanceof NativeRequestPreflightError)
+        const detail = publicLuvusParameterDiagnostic(error.parameterDiagnostic!)!
+        assert.deepEqual(detail.issues, [{ path: '/params', rule: 'invalid_value' }])
+        assert.deepEqual(detail.parameter_help, luvusParameterHelp(method))
+        assert(!JSON.stringify(detail).includes(secret))
+        return true
+      }
+    )
+  }
+})
+
 test('MCP 诊断投影拒绝伪造字段路径、规则和额外错误正文', () => {
   const value = {
     method: 'agent.wait',

@@ -31,7 +31,7 @@ const help = {
 } as const
 
 type Method = keyof typeof help
-const rules = ['required', 'object', 'required_true', 'one_of', 'range'] as const
+const rules = ['required', 'object', 'required_true', 'one_of', 'range', 'invalid_value'] as const
 type Rule = (typeof rules)[number]
 export type LuvusParameterDiagnostic = Readonly<{
   method: Method
@@ -106,5 +106,9 @@ export function publicLuvusParameterDiagnostic(value: LuvusParameterDiagnostic) 
         (issue.path === '/params' || fields.some((field) => issue.path === '/params/' + field))
     )
     .map((issue) => ({ path: issue.path, rule: issue.rule }))
+  // 这里只投影已经拒绝的请求；无法安全定位时给出固定根路径，不复述未知字段或原生错误。
+  if (issues.length === 0) {
+    issues.push({ path: '/params', rule: 'invalid_value' })
+  }
   return { issues, parameter_help: luvusParameterHelp(value.method) }
 }

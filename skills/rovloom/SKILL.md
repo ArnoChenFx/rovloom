@@ -170,7 +170,7 @@ A Gateway refusal returns `isError: true` with `gateway_error: { code }`.
 | `confirmation_required` | The user must confirm | Hand the confirmation request to the user verbatim |
 
 `native_request_invalid` additionally carries `outcome: "not_dispatched"` — that is the **only** refusal that confirms "nothing ran, safe to fix the parameters and resubmit".
-For supported Luvus methods, `gateway_error.details.issues` contains fixed field paths and rules such as `/params/pane` with `required`, or `/params/wait` with `required_true`. The details omit user values and raw native error text; they are not a complete list of every possible parameter error.
+For supported Luvus methods, `gateway_error.details.issues` contains fixed field paths and rules such as `/params/pane` with `required`, or `/params/wait` with `required_true`. When the reviewed diagnostics cannot safely locate the rejected parameter, `/params` with `invalid_value` indicates a general parameter rejection; it does not identify a specific field. The details omit user values and raw native error text; they are not a complete list of every possible parameter error.
 
 ## Recipes
 
