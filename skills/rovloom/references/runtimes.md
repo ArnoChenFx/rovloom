@@ -1,14 +1,20 @@
 # Runtime semantics
 
-MCP only forwards `method` and `params`; the parameters and behavior come from each runtime's native contract. **Describe first, then fill parameters from the schema** — never write field names from memory. This file covers the Luvus and Herdr differences that matter most, plus the traps that make calls fail or mislead.
+MCP forwards `method` and `params`; parameters and behavior follow the native contract and Rovloom's reviewed subset. **Describe first and check the reported coverage** — never write field names from memory or infer one provider's parameters from another. This file covers the Luvus and Herdr differences that matter most, plus the traps that make calls fail or mislead.
 
 ## Luvus
 
 Corresponds to Luvus 0.14.3. The authoritative method list is `src/runtime/luvus-operations.ts`; the Gateway only lets through methods in its static table.
 
+### Native schema, annotations and reviewed help
+
+`runtime_describe.params_schema`, when present, comes from the same verified installed schema as execution validation. For the ordinary reviewed methods, native branches exist for `pane.list`, `agent.prompt`, `agent.send`, `agent.wait` and `agent.keys`; the returned closure preserves native constraints and annotations. Most other methods, including `agent.start` and `workspace.list`, remain `generic_params_only`. Extra conditions that cannot be accurately projected are not discarded to invent a complete parameter schema.
+
+Read `schema_annotations` as well: each note carries its original `document_uri`, JSON Pointer and text. The native request document's `$comment` explains prompt waiting transitions and current-state matching; document-root notes retain that scope. `parameter_help` for `agent.wait`, `agent.prompt` and `pane.run` is separately marked `rovloom_reviewed_subset`, with field rules and examples. It supplements native coverage, rather than replacing it. These details appear in describe, not discovery summaries.
+
 ### There is no `window.*`
 
-Luvus uses three levels: workspace → tab → pane. There is no window concept. A call like `window.list` returns `unsupported`.
+Luvus uses three levels: workspace → tab → pane. Discover those actual methods; there is no `window.*` alias to probe.
 
 ### Discovery and selection
 
@@ -56,11 +62,27 @@ Position parameters may be a number or a decimal string and are forwarded unchan
 ### Reading, waiting and conversation
 
 - `pane.read` takes `pane` and `lines`; `agent.read` takes `target`, `lines` and `source`. `lines` caps at 1000 and returns only trailing lines. `text`, `content_revision` and `terminal_id` are Luvus's own values.
-- `agent.prompt`'s `until` and `timeout_s` must be used together with `wait: true`.
+- `agent.prompt` selects an Agent `target`. Its `until` and `timeout_s` require `wait:true`; `timeout_s` is seconds. Without waiting it returns queue admission immediately. In waiting mode, native semantics require a **new working or blocked transition** before matching `until` (native timeout default: 300 seconds).
+- `agent.wait` selects a `pane`, requires exactly one of `status` or `statuses`, and accepts `timeout_s` in seconds. It has **no `wait` flag** and matches the **current state**. Multiple states match any listed state, not an ordered sequence. An immediate idle match can refer to an old idle state and does not prove a new prompt was consumed.
 - `submitted`, `queued`, `ready: true` and `observed_state` only mean **the input was submitted or recognized as ready** — not that the prompt was consumed or that the model replied. Read real state and output separately.
 - Present `status` together with `authority` / `state_source`. Without positive evidence treat it as unknown; do not read idle, queued or TUI text as completion.
 - An upstream model failure triggers no resend and no switch to a paid model.
 - A two-turn conversation keeps the same complete target, the same pane or alias, the same `terminal_id`, and the known Agent `session`. When checking turn two, verify it recalls turn one's random content; terminal echo is not a reply.
+
+Native request examples (use observed selectors and the user's actual message):
+
+```json
+{"method":"agent.wait","params":{"pane":"2","status":"idle","timeout_s":35}}
+{"method":"agent.prompt","params":{"target":"selected-agent","text":"Hello","strict":true,"wait":true,"until":["idle"],"timeout_s":120}}
+```
+
+The enclosing `runtime_call.deadline` must cover the native wait plus RPC overhead; a 120-second wait can use a deadline roughly 150 seconds in the future. It remains a fixed absolute Unix millisecond timestamp, at most 10 minutes out at registration. Luvus RPC defaults to a local 10-minute cap, while endpoint discovery/schema preparation remain capped at 30 seconds; explicit shorter local settings still apply. Native `timeout_s` may allow up to 3600 seconds, but it cannot raise Rovloom's call or local deadlines. `wait_ms` only controls one short HTTP wait: poll the original call rather than replaying the prompt.
+
+For common parameter failures on the three guided methods, read `gateway_error.details.issues` and `details.parameter_help`. `/params/pane` with `required` indicates a missing pane selector; `/params/wait` with `required_true` identifies the prompt-wait dependency. The error still carries `native_request_invalid` and `outcome:"not_dispatched"`; diagnostics omit user values and raw native errors and are not exhaustive.
+
+### Terminal command submission
+
+`pane.run({pane, command})` submits command text to a selected terminal and returns `{"type":"ok"}`. It accepts no `cwd`, `env` or `argv` override. Read the rendered output separately with `pane.read`; the acknowledgement contains no command stdout/stderr or exit code, and it does not prove completion.
 
 ### Session resume
 
@@ -122,3 +144,4 @@ You **cannot** turn this switch on remotely. Report refusals faithfully and do n
 - After a Connector disconnect, revocation, rebind or shutdown, the Gateway stops using the old source; a new connection must deliver again. Existing calls, result handles and unacknowledged responses are **not** migrated to the new connection and are not resent.
 - When the instance, contract or capabilities change, the Connector closes the connection itself. After reconnect `binding_revision` may have changed, so re-run `providers_get` plus `runtime_discover`.
 - One provider failing does not mean the device is offline, and vice versa: check `providers_get.readiness` and `machines_get.link` separately.
+- A roughly 30-second cutoff despite a later call deadline can indicate an older Connector or an explicit shorter local timeout. The long-RPC fix requires updating/restarting the Connector; updating only the Gateway supplies metadata/diagnostics, not that local fix. Existing pairing, config and tokens can be retained. An already-sent call with no result still remains `outcome_unknown`; do not replay it.

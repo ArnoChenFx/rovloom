@@ -28,7 +28,7 @@ The host form **must not** carry `session`; the session form **must**. `runtime_
 ### Reply envelope
 
 Success: `structuredContent: { data: ... }` plus a JSON text copy with the same content (`content[0].text`).
-Refusal: `isError: true` with `structuredContent: { gateway_error: { code, outcome? } }`.
+Refusal: `isError: true` with `structuredContent: { gateway_error: { code, outcome?, details? } }`.
 Over budget: `{ gateway_error: { code: "response_too_large" }, delivery: { truncated: true, bytes, sha256, call_id? } }`.
 
 ## 1. machines_list
@@ -91,9 +91,18 @@ The catalog contains only methods you are currently authorized for **and** that 
 
 Parameters: `target`, `expected_binding_revision`, `method`.
 
-Returns that method's native description (parameter schema, categories, limits) plus `method`, `contract_ref` and `terminal_execution`. A method outside the current authorized catalog returns `not_found`.
+Returns the available native description plus `method`, `contract_ref` and `terminal_execution`. A method outside the current authorized catalog returns `not_found`.
 
-Fill `params` from the described schema. Luvus and Herdr often use different parameter names for the same idea.
+| Field | Meaning |
+|---|---|
+| `params_schema?` | Native parameter schema with a self-contained local `$defs` closure; preserves references, sibling constraints, enums, numeric bounds, `description` and `$comment` |
+| `schema_status` (Luvus) | `conditional_branch` / `generic_params_only` / `unavailable`; native coverage, not execution authorization |
+| `schema_annotations?` (Luvus) | Native document-root notes: `{ document_uri, pointer, text }[]`, currently `$comment` and `description` from the request/response documents |
+| `parameter_help?` (Luvus) | Reviewed guide for `agent.wait`, `agent.prompt`, `pane.run`: `{ source: "rovloom_reviewed_subset", required, optional, rules, examples }` |
+
+Herdr exposes native schemas for its supported methods. In Luvus 0.14.3, the reviewed ordinary methods with native parameter branches are `pane.list` and `agent.prompt/send/wait/keys`. Other methods remain `generic_params_only`; no native `params_schema` is fabricated. A conditional branch whose extra envelope conditions cannot be accurately projected can also omit `params_schema`.
+
+Use `params_schema` when present, read native annotations for behavioral semantics, and use the reviewed guide/runtime reference for coverage gaps. Document-root annotations apply to the source document, not necessarily only this method. A guide does not change `schema_status` or authorize execution. Luvus and Herdr often use different parameter names for the same idea. Discovery summaries do not include these schemas, notes or examples.
 
 ## 7. runtime_call
 
@@ -117,6 +126,8 @@ When `validation` is omitted the Gateway picks per provider and method:
 - Other reviewed Luvus methods (such as `workspace.list`): `raw-contract`
 
 Explicitly supplying a mode the method does not accept is refused before registration as `native_request_invalid`. Unless you have a reason, **do not fill in `validation`** yourself.
+
+Native schema and reviewed-parameter rejection returns `gateway_error.code: "native_request_invalid"` with `outcome: "not_dispatched"`. The three guided Luvus methods can also return `details: { issues: [{ path, rule }], parameter_help }`. Common fixed paths locate missing `pane`/`command`, the `wait:true` dependency, mutually exclusive state selectors or `timeout_s` bounds; values and unknown field names are not echoed. Fix against the guide and original schema, rather than treating every rejection as a connection failure.
 
 `client_request_key` deduplicates over `metadata_ttl`. The same key with the same intent returns the original `call_id`; the same key with a different intent returns `conflict`. The Gateway neither generates nor replaces keys, so idempotent retries must reuse the original.
 
@@ -199,12 +210,15 @@ A standalone action: it requires ownership, the method's current read policy, an
 | MCP sessions | 64 by default, reclaimed after 15 idle minutes |
 | Concurrent HTTP requests | 256, beyond which 429 |
 | Per-request deadline | 35 seconds (host cap 60 seconds) |
+| Luvus RPC local cap | Default 10 minutes; also bounded by the original registered call deadline and explicit shorter local limits |
+| Luvus endpoint discovery / schema preparation | Default 30 seconds |
 | Concurrent tool requests per session | 16, beyond which `busy` |
 
 - Duplicate JSON keys, invalid or truncated UTF-8, over-deep nodes and batched JSON-RPC are all rejected.
 - Resubmitting the same request ID while it is in flight returns 409.
 - There is no event store: no event replay is promised after a disconnect.
 - Request cancellation, an HTTP disconnect, and session `DELETE` only stop the front-end wait. They **do not** call `runtime_call_cancel`, and they do not mean `not_dispatched` or "safe to resend".
+- The HTTP deadline and `wait_ms` bound one front-end request, not the native operation. Query the original `call_id` to observe long execution; neither polling nor a larger native `timeout_s` extends the registered call deadline.
 
 ## Paging
 
