@@ -68,15 +68,30 @@ docker compose up -d
 
 ## 2. 准备 Connector 所在机器
 
-安装 [Herdr](https://github.com/herdrdev/herdr/releases/latest) 和/或
-[Luvus](https://github.com/RizRiyz/luvus/releases/latest)，以及你要使用的 Agent，并登录模型服务。
-Rovloom 不会安装这些程序。
+Connector 自己不能管理任何东西：它必须经一个运行时才能到达会话，所以这台机器在配对前要先装好
+**Herdr** 或 **Luvus**——两者之一必需。再安装你要使用的 Agent，并登录模型服务。Rovloom 不会安装这些程序。
+
+| 平台 | Herdr | Luvus |
+|---|---|---|
+| Linux x64 / arm64 | `curl -fsSL https://herdr.dev/install.sh \| sh` | `curl -fsSL https://luvus.dev/install.sh \| sh` |
+| macOS x64 / arm64 | 同 Linux 的命令，或 `brew install herdr` | 同 Linux 的命令，或 `brew install RizRiyz/luvus/luvus` |
+| Windows x64 | `irm https://herdr.dev/install.ps1 \| iex` | `irm https://luvus.dev/install.ps1 \| iex` |
+
+两个项目都按操作系统与架构分别发布构建，并在各自 Release 页列出全部压缩包
+（[Herdr](https://github.com/herdrdev/herdr/releases/latest)、
+[Luvus](https://github.com/RizRiyz/luvus/releases/latest)）；脚本或 Homebrew 不可用时用这个方式安装。
+Windows arm64 上 Herdr 安装脚本会退回用模拟运行 x64 构建，Luvus 的预编译二进制只有 x64——与 Connector 的限制相同。
+
+两个安装脚本都把二进制放到 `PATH` 上的目录——Herdr 放 `~/.local/bin`，Luvus 在可写时放 `/usr/local/bin`、
+否则放 `~/.local/bin`——并会打印所用目录。程序通过 Connector 启动时的 `PATH`（加上 `/usr/bin:/bin`）查找，
+所以脚本提示你扩展 `PATH` 时，也要让 Connector 看到同一个目录，或把它写进 `native.runtime_bin_dirs`——
+见[安装目录](CONFIGURATION-zh.md#程序与-agent-安装目录)。
+配对前 `herdr --version` 或 `luvus --version` 应当有输出；所选运行时缺失时，配对会以 `configuration_required` 中止。
 
 Connector **附着到你已在运行的会话**，因此远程调用操作的是你真实的工作区和 Agent 登录；
 只有没有运行实例时，才会在你自己的配置目录里启动一个。
-程序通过 `PATH`（加上 `/usr/bin:/bin`）查找；其它位置见[安装目录](CONFIGURATION-zh.md#程序与-agent-安装目录)。
 
-默认使用 Luvus。首次配对前，用以下命令选择 Herdr（两者都用则填 `mixed`）：
+默认使用 Luvus。首次配对前，用以下命令选择 Herdr（`mixed` 表示两个都用，需要两者都已安装）：
 
 ```sh
 rovloom config init connector --provider herdr
@@ -216,6 +231,7 @@ Rovloom 不是 stdio MCP 服务。
 | 现象 | 处理 |
 |---|---|
 | `configuration_required` / `pairing_required` | 完成终端里的提示和批准，或从管理页完成配对（见[配对](CONFIGURATION-zh.md#配对)）；仅保存 Gateway 地址不会配对设备。 |
+| 执行加入命令后立刻 `configuration_required` | 所选运行时不在 Connector 的查找路径里。按第 2 节装好 Herdr 或 Luvus，确认 `herdr --version` / `luvus --version` 有输出，再用新的配对码重新执行加入命令。 |
 | 无法连接 / 地址被占用 | 检查端口、Gateway 监听地址和网络可达性。 |
 | HTTP 401 | 检查 `/mcp` 地址、Bearer 及其有效期。 |
 | `native_state_path_too_long` | 配对前换一个更短的 `data.directory`（Unix socket 路径长度限制）。 |

@@ -72,6 +72,9 @@ Windows PowerShell and the Docker Gateway are covered in the [Quick Start](docs/
 | Gateway | x64, arm64 | x64, arm64 | x64, arm64 |
 | Connector | x64 | x64, arm64 | x64 |
 
+A Connector needs **Herdr** or **Luvus** installed on its machine; see
+[Quick Start §2](docs/QUICK-START.md#2-prepare-the-connector-machine) for per-platform install commands.
+
 Pairing a Connector needs a real local terminal.
 
 ## Documentation

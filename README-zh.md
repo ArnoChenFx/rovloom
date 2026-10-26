@@ -65,6 +65,8 @@ Windows PowerShell 与 Docker Gateway 见[快速开始](docs/QUICK-START-zh.md)�
 | Gateway | x64、arm64 | x64、arm64 | x64、arm64 |
 | Connector | x64 | x64, arm64 | x64 |
 
+Connector 所在机器需要先装 **Herdr** 或 **Luvus**；各平台安装命令见[快速开始第 2 节](docs/QUICK-START-zh.md#2-准备-connector-所在机器)。
+
 配对只需一条 `rovloom connector --join` 命令，无需终端问答。
 
 ## 文档
