@@ -29,6 +29,10 @@ Luvus uses three levels: workspace → tab → pane. Discover those actual metho
 
 Prefer saving **stable IDs** such as `workspace_id`, `tab_id` and `terminal_id`; do not rely on titles, positions or "the most recent object".
 
+The decimal `pane` returned by Luvus 0.14.3 is a process-wide allocated ID, not a layout position. It stays with the pane across splits and moves, so you can reuse it across calls within the same running instance. It is reallocated when the runtime restores panes after a restart; never treat the same number in a new instance as proof of the same terminal.
+
+`pane.list` currently omits `terminal_id`. Once you select a `pane`, call `pane.get({pane})` to obtain its `terminal_id`, `workspace_id` and `tab_id`; `agent.read` also returns `terminal_id`. Keep the complete provider target and terminal identity with the pane ID. A terminal ID is an identity check, not a replacement selector accepted by every pane method. Re-discover after an instance restart or identity mismatch; do not silently choose the current pane.
+
 ### Coordinate traps (the easiest thing to get wrong)
 
 Luvus uses different position coordinates in different methods, and Rovloom returns them unchanged without conversion:
