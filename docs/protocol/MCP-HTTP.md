@@ -5,7 +5,7 @@
 ## 传输与会话
 
 - 协议：MCP 2025-11-25，基于官方 TypeScript SDK 的 Streamable HTTP。不提供 stdio，也不兼容旧的 HTTP+SSE。
-- 端点固定为 `/mcp`，默认监听 `127.0.0.1:9444`，只绑定 `127.0.0.1` 或 `::1`。公网访问由外部反向代理终止 TLS，并配置 `mcp.public_url`。不接受 query、userinfo 或其它路径。
+- 端点固定为 `/mcp`，监听网卡和端口由 `mcp.hostname` / `mcp.port` 决定（端口默认 9444）。公网访问由外部反向代理终止 TLS，无需公网 URL 配置；支持任意域名、端口以及保留或改写 Host。客户端直接填写代理的 HTTPS `/mcp` 地址。不接受 query、userinfo 或其它路径。
 - 每个 MCP 会话独立拥有 Server 与 transport，所有会话共用同一业务服务。会话 ID 只用于路由，不是身份。
 - 默认最多 64 个会话，空闲 15 分钟后回收。最多 256 个 HTTP 请求同时等待，超出返回 429。每个请求的 deadline 为 35 秒（宿主上限 60 秒）。
 - 每个会话最多 16 个工具请求同时进行，超出返回 `gateway_error: busy`。
@@ -17,7 +17,7 @@
 
 - 每个 HTTP 请求都要带 `Authorization: Bearer <令牌>`，并与会话绑定的主体精确匹配。令牌由 `rovloom token` 管理，见 [DESIGN](../DESIGN.md#5-认证)。
 - 不从本机 UID、转发头、工具参数、`_meta` 或 `Mcp-Session-Id` 建立身份。MCP 身份不能获得管理员权限。
-- `Host` 必须精确匹配受信 origin。`Origin` 存在时必须命中白名单，缺少 `Origin` 的非浏览器客户端允许。不信任 `X-Forwarded-*` 等转发头。
+- `Host` 须与本次请求 URL 一致，但不限定部署域名。`Origin` 可以是浏览器看到的 HTTP/HTTPS 地址，不必等于代理内部地址；明确标记 cross-site / same-site 的浏览器请求仍拒绝，且不开放跨站 CORS。认证不依赖 `X-Forwarded-*` 等转发头。
 - 管理 UI 和 API、设备 WSS 与 MCP 是三个独立的 listener，身份和权限互不通用。
 
 ## 请求边界

@@ -6,7 +6,7 @@
 
 | 角色 | 默认监听 | 说明 |
 |---|---|---|
-| Gateway · MCP | `127.0.0.1:9444`（`/mcp`） | 只在回环；远程客户端经反向代理 / 隧道（`mcp.public_url`，https） |
+| Gateway · MCP | `127.0.0.1:9444`（`/mcp`） | 远程客户端经 HTTPS 反向代理 / 隧道，无需公网地址配置 |
 | Gateway · 设备通道 | `127.0.0.1:9443`（WS `/connector`） | 要接受别的机器的 Connector 就改 `devices.hostname`（`0.0.0.0` / `::`），公网用 WSS 代理 |
 | Gateway · 管理页 | `127.0.0.1:9445` | 固定回环，HTTP Basic 登录（见 §4） |
 | Connector | 无监听 | 只主动出站连 Gateway；Luvus / Herdr 留在本机 |
@@ -75,7 +75,7 @@ rovloom storage resume --role gateway --json
 | 现象 | 先看 |
 |---|---|
 | Connector 一直 `disconnected` | Gateway 的 `devices.hostname` 是否允许远端；地址 / 防火墙；Gateway 判断线约 20 秒（空闲超时） |
-| MCP 401 | Bearer 是否过期（默认 30 天，`rovloom token renew`）；`/mcp` URL 是否与 `mcp.public_url` 一致 |
+| MCP 401 | Bearer 是否过期（默认 30 天，`rovloom token renew`）；代理是否保留 Authorization、MCP 会话头和 `/mcp` 路径 |
 | 调用停在 `dispatching` 很久 | 设备可能刚断网（Gateway 20 秒内发现后立即 `not_dispatched`）；已写出的调用是 `outcome_unknown`，**不会自动重发**，先核对再决定 |
 | `invalid_device_credential` | 凭据被撤销或重配：生成新码重新 join |
 | `configuration_required` | 需要真实本地终端完成配对 / 批准；不要删数据后重登记，结果不确定时保留原状态 |
@@ -94,16 +94,28 @@ Connector 发送墓碑保留至首次登记的执行 deadline（最长 10 分钟
 
 本地 `connector_transport` 观测中 `reason=claim_capacity` / `connector_attempt_capacity` 的 `capacity` 区分 `claim_entries`、`claim_bytes`、`attempt_entries`、`attempt_bytes`。`reclaim_at` 是已知最早回收时间（Unix 毫秒），不是重试授权。字节满额报告 `null`，需检查磁盘和配置预算。不要删除账本、回调系统时间、重发旧 attempt 或自动换 key 重做写入；已接收后断连的调用可能保持 `outcome_unknown`，应先核对原生结果。
 
-### 管理页反向代理
+### MCP、管理页与 API 反向代理
 
-将站点根路径反向代理到管理端口（默认 `http://127.0.0.1:9445`）即可，无需 `public_url`、域名白名单或可信代理 IP 配置。支持 Nginx、Caddy、Traefik 等代理，外部 HTTPS 与内部 HTTP、任意域名和端口、保留或改写 Host 均可。
+MCP 的 `/mcp` 反向代理到 9444，管理站点与 `/admin/v1/…` API 反向代理到 9445，设备 WebSocket 与配对入口反向代理到 9443。无需公网 URL、域名白名单或可信代理 IP 配置。支持 Nginx、Caddy、Traefik 等代理，外部 HTTPS 与内部 HTTP、任意域名和端口、保留或改写 Host 均可。
 
 Caddy 示例：
 
 ```caddyfile
+mcp.example.com {
+    reverse_proxy 127.0.0.1:9444 {
+        flush_interval -1
+    }
+}
+
 manage.example.com {
     reverse_proxy 127.0.0.1:9445
 }
+
+devices.example.com {
+    reverse_proxy 127.0.0.1:9443
+}
 ```
+
+AI 客户端填写 `https://mcp.example.com/mcp`；Connector 使用 `wss://devices.example.com`，管理页使用 `https://manage.example.com`。代理须保留 Authorization、MCP 会话头与原路径，并逐块转发 MCP SSE 响应；MCP 的 Bearer 与管理 API 的 Cookie / CSRF 分别核验。
 
 管理页不把浏览器 Origin 与代理内部地址强行比较。浏览器跨站元数据仍会被拒绝；读取和写入继续验证独立管理员会话，写入额外验证 CSRF，响应不开放跨站 CORS。代理头不提供管理员身份。HTTPS 请求、HTTPS Origin 或代理常用的 `X-Forwarded-Proto: https` / `Forwarded: proto=https` 会使登录 Cookie 带上 Secure；协议头仅影响 Cookie 属性，不是认证条件。

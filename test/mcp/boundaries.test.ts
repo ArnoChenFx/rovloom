@@ -90,7 +90,10 @@ test(
       identity = 'bob'
       assert.equal((await fetch(url, { headers: harness.headers() })).status, 403)
       identity = 'alice'
-      for (const headers of [{ host: 'evil.test' }, { origin: 'https://evil.test' }] as Record<string, string>[]) {
+      for (const headers of [
+        { origin: 'null' },
+        { origin: 'https://evil.test', 'sec-fetch-site': 'cross-site' }
+      ] as Record<string, string>[]) {
         assert.equal((await fetch(url, { headers: { ...harness.headers(), ...headers } })).status, 403)
       }
       assert.equal(

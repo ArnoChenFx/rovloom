@@ -6,6 +6,7 @@ import { parseNativeJson } from '../native-contract/json.js'
 import { createMcpFacade, type DiagnosticCode } from './facade.js'
 import { FacadeHttpTransport, type RequestReservation } from './http-transport.js'
 import { canonicalLoopbackHost } from './listen.js'
+import { requestOrigin } from '../http/request-origin.js'
 import type { CliLanguage } from '../cli/messages.js'
 import type { CallerIdentity, GatewayService, ServiceContext } from './types.js'
 
@@ -17,12 +18,6 @@ export type HttpAuthenticationProvider = {
 export type HttpFacadeOptions = {
   service: GatewayService
   authentication: HttpAuthenticationProvider
-  // 完整origin白名单由受信宿主设置；缺Origin允许非浏览器客户端，存在时必须精确匹配。
-  allowedOrigins?: readonly string[]
-  // 反向代理 / TLS 终止后的对外地址（https://host[:port]/mcp）；除回环地址外只接受这个 Host，且自动加入 CORS 白名单。
-  publicUrl?: string
-  // 显式局域网选择：仅在通配明文监听时接纳任意 Host 与同源自 Origin；回环/公开地址校验缺省不变。
-  lan?: boolean
   // 显示语言由唯一 CLI 入口解析后透传给工具目录与说明；省略时按英文输出。
   language?: CliLanguage
   maxSessions?: number
@@ -151,24 +146,6 @@ export function createHttpFacade(options: HttpFacadeOptions & { origin: string }
   const maxSessions = bounded(options.maxSessions, 64, 256)
   const idleMs = bounded(options.idleMs, 15 * 60_000, 60 * 60_000)
   const timeoutMs = bounded(options.requestTimeoutMs, 35_000, 60_000)
-  const publicUrl = options.publicUrl === undefined ? undefined : new URL(options.publicUrl)
-  if (
-    publicUrl &&
-    (publicUrl.protocol !== 'https:' ||
-      publicUrl.pathname !== '/mcp' ||
-      publicUrl.search ||
-      publicUrl.hash ||
-      publicUrl.username ||
-      publicUrl.password)
-  ) {
-    throw new Error('invalid_http_origin')
-  }
-  const allowedOrigins = new Set([...(options.allowedOrigins ?? []), ...(publicUrl ? [publicUrl.origin] : [])])
-  for (const allowed of allowedOrigins) {
-    if (new URL(allowed).origin !== allowed) {
-      throw new Error('invalid_http_origin')
-    }
-  }
   const sessions = new Map<string, Session>()
   const scope = new AsyncLocalStorage<ServiceContext>()
   const pending = new Set<AbortController>()
@@ -259,25 +236,8 @@ export function createHttpFacade(options: HttpFacadeOptions & { origin: string }
     if (closing) {
       return denied(503)
     }
-    const host = request.headers.get('host')
-    // 回环地址按完整 origin 匹配；公开地址只比较 Host（TLS 在代理终止，到这里的 scheme 是 http）。
-    // 显式 LAN 明文监听按本次 Host 推导同源地址；跨站 Origin 仍由下方白名单拒绝。
-    const lanOrigin =
-      options.lan === true &&
-      host !== null &&
-      Buffer.byteLength(host) <= 2048 &&
-      url.protocol === 'http:' &&
-      host.toLowerCase() !== origin.host.toLowerCase() &&
-      host.toLowerCase() !== publicUrl?.host.toLowerCase()
-        ? 'http://' + host.toLowerCase()
-        : undefined
-    const loopback = url.origin === origin.origin && host !== null && host.toLowerCase() === origin.host.toLowerCase()
-    const proxied = publicUrl !== undefined && host === publicUrl.host && url.host === publicUrl.host
-    if ((!loopback && !proxied && lanOrigin === undefined) || url.pathname !== '/mcp' || url.search || url.hash) {
-      return denied(403)
-    }
-    const requestOrigin = request.headers.get('origin')
-    if (requestOrigin !== null && !allowedOrigins.has(requestOrigin) && requestOrigin !== lanOrigin) {
+    // 域名与 TLS 终止方式不影响 Bearer；浏览器跨站元数据与非法来源仍在认证前拒绝。
+    if (requestOrigin(request) === null || url.pathname !== '/mcp' || url.search || url.hash) {
       return denied(403)
     }
     if (!['GET', 'POST', 'DELETE'].includes(request.method)) {
@@ -512,7 +472,7 @@ export function startHttpFacade(
     fetch: /* listener创建后才接受请求，拒绝意外的未初始化窗口。 */ (request) =>
       facade ? facade.handleRequest(request) : Promise.resolve(denied(503))
   })
-  // 通配绑定时 Host/Origin 校验仍按对应回环规范地址，不随绑定地址放宽。
+  // 本机提示地址使用规范回环地址；它不限制客户端经代理访问的域名。
   const origin = new URL(`http://${canonicalLoopbackHost(hostname)}:${listener.port}`).origin
   try {
     facade = createHttpFacade({ ...options, origin })
