@@ -109,6 +109,7 @@ You **cannot** turn this switch on remotely. Report refusals faithfully and do n
 
 ## Result semantics
 
+- `runtime_call(wait_ms: 0)` returns without waiting for native completion. This permits concurrent calls but does not turn a blocking native wait into a persistent Agent job or free its Connector execution slot. Query the original `call_id`; do not submit the prompt again.
 - `native_response` keeps the runtime's original values.
 - Herdr's `ok` and Luvus's `queued` / `executed` only mean **the input operation succeeded**, not that the shell command finished.
 - `pane.read` / `agent.read` return a terminal screen that may be rendered and truncated, and they keep the runtime's truncation information. It is not lossless stdout/stderr.

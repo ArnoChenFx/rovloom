@@ -26,6 +26,7 @@
 | [终端执行](TERMINAL-EXECUTION.md) | Connector 本机终端开关与结果语义 |
 | [Luvus](LUVUS-OPERATIONS.md) | Luvus 窗口与 Agent 操作 |
 | [ADR 0003](adr/0003-bun-toolchain.md) · [ADR 0004](adr/0004-multi-runtime-provider.md) | Bun 工具链、多 runtime provider 的决策理由 |
+| [Agent 对话 job 提议](adr/0009-agent-conversation-jobs.md) | 尚未实现：Luvus / Herdr 的持久对话、短 RPC 观察、恢复与授权边界 |
 
 ## 开发与发布
 

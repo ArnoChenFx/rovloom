@@ -112,6 +112,8 @@ runtime_call {
 - `wait_ms` only bounds this HTTP request's short wait: 0–5000, default 0. It is independent of the execution deadline.
 - `client_request_key` is optional and deduplicates within one principal. Re-sending the same intent **must** reuse the original key.
 
+Calls are already asynchronous: with `wait_ms: 0`, keep the returned `call_id` and query it later. You can submit independent calls concurrently. A native long wait still occupies a Connector execution slot until that native call ends; the immediate MCP receipt does not release that slot. Current tools do not expose a persistent Agent job API, and an old call's result permission does not survive a Connector reconnect. Do not invent `job_id` fields or `runtime_job_*` tools.
+
 **6. Query and read the result**
 
 ```
