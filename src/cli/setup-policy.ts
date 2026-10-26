@@ -15,6 +15,52 @@ export type SetupPlanFacts = Readonly<{
 export const SIMPLE_SETUP_ACTOR = 'operator_simple_pairing'
 export const SIMPLE_SETUP_LINEAGE = 'simple'
 
+// 已发布的首代引导方法集合是兼容边界，不能随当前方法表增长而扩大旧清单或 raw 授权。
+const LUVUS_SETUP_METHODS_V1 = Object.freeze([
+  'session.snapshot',
+  'workspace.list',
+  'workspace.get',
+  'tab.list',
+  'tab.get',
+  'pane.list',
+  'pane.get',
+  'pane.current',
+  'pane.status',
+  'pane.read',
+  'agent.list',
+  'agent.get',
+  'agent.explain',
+  'agent.read',
+  'agent.sessions',
+  'agent.wait',
+  'workspace.new',
+  'workspace.open',
+  'workspace.focus',
+  'workspace.rename',
+  'workspace.close',
+  'tab.new',
+  'tab.focus',
+  'tab.rename',
+  'tab.close',
+  'pane.split',
+  'pane.focus',
+  'pane.rename',
+  'pane.close',
+  'pane.run',
+  'agent.start',
+  'agent.prompt',
+  'agent.send',
+  'agent.keys',
+  'agent.resume'
+])
+
+/** 只接纳程序实际发布过的完整集合，保持次序、方法子集和显式自定义授权的边界。 */
+export function isSetupLuvusMethods(methods: readonly string[]): boolean {
+  return [LUVUS_OPERATION_METHODS, LUVUS_SETUP_METHODS_V1].some(
+    (expected) => methods.length === expected.length && methods.every((method, index) => method === expected[index])
+  )
+}
+
 // Luvus 会话名随运行方式确定：附着用户真实的 default 会话，或 managed 隔离实例的 rovloom；Herdr 固定 default。
 export type SetupSessions = Readonly<{ luvus?: 'default' | 'rovloom' }>
 

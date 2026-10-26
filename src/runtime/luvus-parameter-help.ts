@@ -1,5 +1,16 @@
 // 已审核子集的调用提示与固定字段诊断；不冒充安装版原生 JSON Schema，不返回请求值。
 const help = {
+  'wait.output': {
+    required: ['pane', 'match'],
+    optional: ['timeout_s'],
+    rules: [
+      'Wait for a literal substring in the selected pane. match is non-empty text, at most 4096 UTF-8 bytes; it is not a regex.',
+      'The native runtime first checks recent output, so an existing marker can match immediately. Use a fresh per-execution marker when appropriate.',
+      'timeout_s is seconds (0..3600). Set it explicitly and leave RPC overhead before the absolute runtime_call deadline.',
+      'A native type:wait response with matched:false means the observation ended without a match; it does not prove a command stopped or failed. No stdout or exit code is returned.'
+    ],
+    examples: [{ pane: '2', match: 'unique_marker_for_this_execution', timeout_s: 35 }]
+  },
   'agent.wait': {
     required: ['pane'],
     optional: ['status', 'statuses', 'timeout_s'],

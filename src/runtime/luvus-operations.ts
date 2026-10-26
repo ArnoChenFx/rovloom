@@ -202,6 +202,22 @@ export function validateLuvusOperationParams(method: string, input: unknown): vo
       fields(params, ['pane', 'command'])
       pane(params.pane)
       text(params.command, 65_536)
+    } else if (method === 'wait.output') {
+      fields(params, ['pane', 'match'], ['timeout_s'])
+      pane(params.pane)
+      if (Number(params.pane) > 4_294_967_295) {
+        invalid()
+      }
+      text(params.match, 4096)
+      if (
+        params.timeout_s !== undefined &&
+        (typeof params.timeout_s !== 'number' ||
+          !Number.isFinite(params.timeout_s) ||
+          params.timeout_s < 0 ||
+          params.timeout_s > 3600)
+      ) {
+        invalid()
+      }
     } else if (method === 'pane.split') {
       fields(params, ['pane'], ['direction'])
       pane(params.pane)

@@ -35,6 +35,7 @@ Luvus 没有 `window.*` 方法。窗口选择沿 Luvus 自己的 workspace、tab
 | 发现与选择 | `session.snapshot`、`workspace.list/get`、`tab.list/get`、`pane.list/get/current` | 优先保存 `workspace_id`、`tab_id`、`terminal_id`。`pane.get` 的参数名是 `pane`；`pane.list` 不接收 pane selector，`session.snapshot` 返回 `pane_id` |
 | 窗口管理 | `workspace.new/open/focus/rename/close`、`tab.new/focus/rename/close`、`pane.split/focus/rename/close` | 变更使用已发现的稳定 ID，不按标题或最近对象重选 |
 | 状态与输出 | `pane.status/read`、`agent.list/get/explain/read/sessions/wait` | 原样使用 `status`、`authority`、`state_source`、`session` |
+| 输出哨兵 | `wait.output` | 只读的字面子串等待，参数是 `pane`、`match` 和可选的秒数 `timeout_s` |
 | Agent 操作 | `agent.start/prompt/send/keys/resume` | `agent.start` 的 `pane` 与 `anchor` 互斥。`prompt`、`send`、`keys` 可绑定 `terminal_id`。`resume` 只用于显式选择已有 session |
 
 ## Pane 身份与存活范围
@@ -54,6 +55,25 @@ Luvus 0.14.3 的数字 `pane` 是进程级递增分配的 ID，不是布局中�
 `workspace_id/tab_id` 随保存的拓扑对象恢复；`terminal_id` 仅在同一个 PTY 存活期间跨移动、客户端断开重连保持，PTY 重建就会变化。数字 workspace/tab 是位置坐标，会随拓扑变化，不能与数字 pane 的进程内 ID 混为一谈。原生字段一致性缺口跟踪在 [issue #291](https://github.com/ArnoChenFx/rovloom/issues/291)，不在 Rovloom 中改写原生正文。
 
 身份变更、原生重启或 pane 消失时重新发现，不自动选择当前 pane 或同名 Agent。依据为固定版本的 [ID 分配](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/ids.rs)、[pane 查询与选择器](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/app/dispatch/topology.rs)以及[重启恢复](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/app/mod.rs)。该范围不扩展为跨原生进程持久 ID 的保证。
+
+## 输出哨兵等待
+
+通过现有 `runtime_call` 调用 Luvus 原生 `wait.output`，仍使用发现得到的完整 target、binding revision 和 contract_ref。不是新增 MCP 工具，也不会向终端输入命令。
+
+```json
+{"method":"wait.output","params":{"pane":"2","match":"unique_marker_for_this_execution","timeout_s":35}}
+```
+
+- `pane` 为显式数字 pane ID 字符串；`match` 为 1–4096 UTF-8 字节、无 NUL 的字面子串，不是正则。Rovloom 在登记前拒绝错字段、错单位或越界参数。
+- `timeout_s` 是 0–3600 的秒数，可为小数；建议显式填写，缺省由原生按最多一小时等待。外层 `deadline` 仍是绝对 Unix 毫秒，且服从 Rovloom 十分钟及本机更短上限，不能靠省略 timeout 绕过。
+- 例如等待 35 秒时把 `deadline` 设为当前时间加 45–60 秒，`wait_ms:0` 取得 call_id 后查询同一调用；HTTP 短等结束不重提调用。它仍是一条阻塞 native RPC，会占执行槽，不是异步 job。
+- 原生先检查已有 recent 输出，旧标记可能立即命中。需要区分执行时使用每次不同的标记；匹配不证明标记来自本轮命令，更不证明 exit code。不会自动插入 shell wrapper。
+- 命中回包形如 `{"type":"wait","matched":true,"pane":"2"}`；未命中或 pane 关闭时可为 `{"type":"wait","matched":false}`。Rovloom 原样保留，`matched:false` 不是 Gateway 派发失败，也不代表命令已经停止。
+- 只读等待不需要打开终端输入开关，但双方 dispatch/read ACL、原生权限和 raw 授权仍须允许 `wait.output`。原生 schema 对此方法是 generic，`runtime_describe` 提供明确标记来源的 `parameter_help`，不伪造完整原生参数 schema。
+
+部署需要 Gateway 与 Connector 都支持此方法；已有 35 方法授权保持原范围，升级不会自动加入 `wait.output`。所有者须在 Gateway 当前 caller/local 策略、该 provider 的 `raw_grant.methods` 与 Connector 当前 caller/local 方法授权中明确加入它。新配对包含该只读方法；旧清单的配对重入与 caller 授权迁移保留原方法集合，不强制重配，也不扩大自定义子集。
+
+原生语义依据：[0.14.3 wait.output 接口](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/ipc/api.rs)与[已有输出检查和等待器](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/app/dispatch/agent_workflow.rs)。`pane.run` 的 stdout / exit code 派生执行能力继续在 [#292](https://github.com/ArnoChenFx/rovloom/issues/292) 跟踪，不包含在此等待接口中。
 
 ## 位置坐标
 
@@ -106,7 +126,7 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 
 例如 `agent.prompt` 的原生根注释明确说明：等待模式须先观察到新的 working/blocked 转换，再匹配 `until`；`agent.wait` 则只是当前状态匹配器。MCP 现在可直接读到这段原文。
 
-`runtime_describe` 对 `agent.wait`、`agent.prompt`、`pane.run` 附带
+`runtime_describe` 对 `agent.wait`、`agent.prompt`、`pane.run`、`wait.output` 附带
 `parameter_help`：必填/可选字段、依赖规则和示例，来源标记为
 `rovloom_reviewed_subset`。它是 Rovloom 已审核子集的调用指南，原来的
 `schema_status` 仍表示安装版原生 schema 的覆盖情况。`runtime_discover` 不附带这些示例。

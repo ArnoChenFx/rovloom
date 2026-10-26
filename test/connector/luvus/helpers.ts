@@ -53,7 +53,8 @@ function compiledFixture(): Promise<CompiledContract> {
 export async function fixture(
   transport: 'ipc' | 'cli' = 'ipc',
   method = 'task.add',
-  requestParams?: Record<string, unknown>
+  requestParams?: Record<string, unknown>,
+  mode: 'strict' | 'raw-contract' = 'strict'
 ) {
   const root = mkdtempSync(
     join(process.env.LUVUS_TEST_ROOT ?? fileURLToPath(new URL('../../../../', import.meta.url)), '.luvus-adapter-')
@@ -82,7 +83,10 @@ export async function fixture(
       : method === 'ping'
         ? {}
         : { server_generation: G, terminal_id: '1'.repeat(32), pane_id: '3' })
-  const candidate = request(view(), { id: 'native_1', method, params })
+  const candidate =
+    mode === 'raw-contract'
+      ? request(view(), { id: 'native_1', method, params }, true)
+      : request(view(), { id: 'native_1', method, params })
   const initial = auth(candidate)
   const origin: ContractSource = {
     provider_kind: 'luvus',
@@ -121,7 +125,7 @@ export async function fixture(
     binding,
     principal_id: 'synthetic',
     method,
-    mode: 'strict',
+    mode,
     native_request: { method, params }
   }
   const native: NativeBinding = {
@@ -189,7 +193,10 @@ export async function fixture(
         : undefined,
     nativeSource: source,
     policies: /* 返回本用例的 caller 与本地策略快照。 */ () => policies,
-    authority: /* 复用原生授权 fixture 并移除 Owner、确认和保管授权，避免测试隐式提权。 */ () => {
+    authority: /* raw 只由测试显式选择，每次仍绑定本轮真实 attempt、当前 native 上下文和固定期限。 */ (
+      attempt,
+      context
+    ) => {
       const {
         source: _source,
         principal_id: _principal,
@@ -201,8 +208,20 @@ export async function fixture(
       } = initial
       return {
         ...rest,
-        owner: false,
-        raw_requested: false
+        owner: mode === 'raw-contract',
+        raw_requested: mode === 'raw-contract',
+        ...(mode === 'raw-contract'
+          ? {
+              raw_grant: {
+                id: attempt.binding.call_id,
+                source_verified: true,
+                principal_id: attempt.principal_id,
+                binding: context,
+                methods: [attempt.method],
+                expires_at: attempt.binding.registration.deadline
+              }
+            }
+          : {})
       }
     },
     currentPrincipal: /* 根据测试读取开关切换当前 principal，模拟结果读取权限撤销。 */ () =>
@@ -314,7 +333,7 @@ export async function fixture(
     recovery_generation: 'recovery1',
     connection_epoch: 'e1',
     type: 'request',
-    payload: { attempt, expected_binding_revision: 1, validation: 'strict', native_request: row.native_request }
+    payload: { attempt, expected_binding_revision: 1, validation: mode, native_request: row.native_request }
   }
   return {
     root,
