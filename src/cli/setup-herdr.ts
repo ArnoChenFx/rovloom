@@ -175,7 +175,7 @@ export async function prepareSetupHerdr(
           cwd: join(root, 'w')
         }),
     temporary_home: join(root, 't'),
-    allow_terminal_execution: false,
+    allow_terminal_execution: config.allow_terminal_execution === true,
     ...(attach ? { attach: true as const } : {}),
     ...setupAgentDirectories(config)
   }

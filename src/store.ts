@@ -1221,22 +1221,33 @@ export class Store {
       false
     )
   }
+  /** Gateway 在调用 socket.send 前失败的本机证据；不能由 Connector 帧调用，也不能覆盖 accepted。 */
+  commitGatewayDispatchRefusal(binding: AttemptBinding, code: string): boolean {
+    if (!/^[a-z][a-z0-9_]{0,63}$/u.test(code)) {
+      throw new GatewayError('invalid_dispatch_refusal')
+    }
+    return this.dispatchRefused(binding, code, 'gateway', ['dispatching'])
+  }
   /** 仅由已认证 Wire 拒绝路径调用；原子提交确定未写出，未知或既有终态绝不倒退。 */
   commitDispatchRefusal(binding: AttemptBinding, code: DispatchRefusalCode): boolean {
     if (code !== 'terminal_execution_disabled' && code !== 'policy_revision_stale') {
       throw new GatewayError('invalid_dispatch_refusal')
     }
+    return this.dispatchRefused(binding, code, 'connector', ['dispatching', 'connector_accepted'])
+  }
+  /** 两种证据来源共用事务；Connector 仍只能报告固定白名单，Gateway 只能终结尚未发送的尝试。 */
+  private dispatchRefused(binding: AttemptBinding, code: string, actor: string, states: readonly string[]): boolean {
     return this.transaction(
       /** 先落实原固定 deadline，再核对当前完整锚点；审计提交前不发布拒绝。 */ (now) => {
         this.stopWhere('call_id=? AND deadline<=?', [binding.call_id, String(now)], 'deadline_exceeded', now)
         const row = this.responseAnchorRow(binding)
         // 执行器可能在 accepted 后、原生写入前才复核策略并报告真实未写出；
         // 重放帧的防御在 Connector 的 running/seen 守卫，不在此按 code 区分状态。
-        if (!['dispatching', 'connector_accepted'].includes(row.state)) {
+        if (!states.includes(row.state)) {
           return false
         }
         this.db.prepare("UPDATE calls SET state='not_dispatched',reserved=0 WHERE call_id=?").run(binding.call_id)
-        this.audit('dispatch_refused', 'connector', now, this.row(binding.call_id), { code })
+        this.audit('dispatch_refused', actor, now, this.row(binding.call_id), { code })
         return true
       },
       false

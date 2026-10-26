@@ -41,7 +41,15 @@ import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import { SERVICE_ERROR_CODES, type ReplyData, type ServiceErrorCode } from '../../src/mcp/types.js'
 
 /** Gateway 只建立自身状态目录；没有 binary、HOME、native root 或 socket 输入。 */
-async function fixture(options: { mixed?: boolean; isolated?: boolean; fastObservation?: boolean } = {}) {
+async function fixture(
+  options: {
+    mixed?: boolean
+    isolated?: boolean
+    fastObservation?: boolean
+    rawGrant?: LuvusProductionRemoteConfig['raw_grant']
+    principals?: string[]
+  } = {}
+) {
   const { mixed = false, isolated = false, fastObservation = false } = options
   const root = mixed
     ? privateHerdrTestRoot('.remote-gateway-')
@@ -91,6 +99,7 @@ async function fixture(options: { mixed?: boolean; isolated?: boolean; fastObser
     binding,
     target,
     peer_policy_revision: local.revision,
+    ...(options.rawGrant ? { raw_grant: options.rawGrant } : {}),
     contract: {
       binary_version: '0.14.3',
       binary_sha256: FIXED_LUVUS_SHA256,
@@ -171,7 +180,9 @@ async function fixture(options: { mixed?: boolean; isolated?: boolean; fastObser
     channels: state.channels,
     identities: {
       principal: /** 合成 caller 与设备身份独立。 */ (identity) =>
-        identity.principal_id === 'remote_reader' ? { id: 'remote_reader', policy: caller } : null,
+        (options.principals ?? ['remote_reader']).includes(identity.principal_id)
+          ? { id: identity.principal_id, policy: caller }
+          : null,
       administrator: /** 普通读取不取得管理身份。 */ () => null
     },
     localPolicies: /** 每次门禁读取当前完整目标策略。 */ () => local,
@@ -263,7 +274,13 @@ async function fixture(options: { mixed?: boolean; isolated?: boolean; fastObser
         if (!hold) {
           send('response', {
             attempt: frame.payload.attempt,
-            native_response: { id: frame.payload.attempt.native_request_id, result: { panes: [] } }
+            native_response: {
+              id: frame.payload.attempt.native_request_id,
+              result:
+                frame.payload.attempt.provider_kind === 'herdr'
+                  ? { type: 'pong', protocol: 22, version: '0.9.5' }
+                  : { panes: [] }
+            }
           })
         }
       }
@@ -278,7 +295,13 @@ async function fixture(options: { mixed?: boolean; isolated?: boolean; fastObser
       ) =>
         send('response', {
           attempt: request.payload.attempt,
-          native_response: { id: request.payload.attempt.native_request_id, result: { panes: [] } }
+          native_response: {
+            id: request.payload.attempt.native_request_id,
+            result:
+              request.payload.attempt.provider_kind === 'herdr'
+                ? { type: 'pong', protocol: 22, version: '0.9.5' }
+                : { panes: [] }
+          }
         }),
       fence: /** 合成对端只声明原配置失效，仍须通过实际认证 Wire 的完整 binding 检查。 */ (binding: ProviderBinding) =>
         send('provider_fenced', { binding }),
@@ -309,6 +332,102 @@ async function fixture(options: { mixed?: boolean; isolated?: boolean; fastObser
     }
   }
 }
+
+test('同一真实 mixed 通道中 Luvus raw 拒绝不打断已接受的 Herdr 调用', { timeout: 45000 }, async () => {
+  const f = await fixture({ mixed: true, isolated: true })
+  try {
+    for (const policy of [f.caller, f.local]) {
+      policy.grants.push({ target: f.target, methods: ['workspace.rename'], actions: ['dispatch', 'read'] })
+    }
+    const peer = await f.peer()
+    peer.snapshot()
+    await until(() => f.runtime.transport.status().devices[0]?.ready === true)
+    f.hold()
+    const herdr = f.herdr!.providers[0]!
+    const first = await f.runtime.runAuthenticated({ principal_id: 'remote_reader' }, () =>
+      f.runtime.admit({
+        target: herdr.target,
+        native_request: { method: 'ping', params: {} },
+        options: {
+          binding_revision: 1,
+          contract_ref: herdr.contract_ref!,
+          deadline: f.state.store.clock() + 30000
+        }
+      })
+    )
+    await until(() => f.state.store.call('remote_reader', first.call.call_id).state === 'connector_accepted')
+    const epoch = peer.connection.connection_epoch
+    const refused = await f.runtime.runAuthenticated({ principal_id: 'remote_reader' }, () =>
+      f.runtime.admit({
+        target: f.target,
+        native_request: { method: 'workspace.rename', params: { workspace_id: 'synthetic', name: 'literal' } },
+        options: {
+          binding_revision: 1,
+          contract_ref: contractRef(f.snapshot.source),
+          deadline: f.state.store.clock() + 30000
+        }
+      })
+    )
+    assert.equal(refused.call.state, 'not_dispatched')
+    assert.equal(f.writes(), 1)
+    assert.equal(f.runtime.transport.currentConnection(f.target.machine_id)!.connection_epoch, epoch)
+    assert.equal(f.state.store.call('remote_reader', first.call.call_id).state, 'connector_accepted')
+    peer.reply(peer.requests[0]!)
+    await until(() => f.state.store.call('remote_reader', first.call.call_id).state === 'responded')
+    await f.runtime.runAuthenticated({ principal_id: 'remote_reader' }, () => {
+      const result = f.runtime.results.open(first.call.call_id)
+      const page = f.runtime.results.read(result.result_id, 0, 4096)
+      assert.equal(JSON.parse(Buffer.from(page.data, 'base64').toString()).result.type, 'pong')
+    })
+  } finally {
+    await f.close()
+  }
+})
+
+test('remote Gateway 策略 raw 授权允许多个 caller，调用和结果继续各自归属真实主体', { timeout: 45000 }, async () => {
+  const principals = ['remote_reader', 'test', 'admin']
+  const f = await fixture({
+    principals,
+    rawGrant: { caller_policy_revision: 'remote_caller', methods: ['workspace.rename'] }
+  })
+  try {
+    for (const policy of [f.caller, f.local]) {
+      policy.grants.push({ target: f.target, methods: ['workspace.rename'], actions: ['dispatch', 'read'] })
+    }
+    const peer = await f.peer()
+    peer.snapshot()
+    await until(() => f.runtime.transport.status().devices[0]?.ready === true)
+    for (const principal_id of principals) {
+      const admitted = await f.runtime.runAuthenticated({ principal_id }, () =>
+        f.runtime.admit({
+          target: f.target,
+          native_request: { method: 'workspace.rename', params: { workspace_id: 'synthetic', name: 'literal' } },
+          options: {
+            binding_revision: 1,
+            contract_ref: contractRef(f.snapshot.source),
+            deadline: f.state.store.clock() + 30000
+          }
+        })
+      )
+      await until(() => f.state.store.call(principal_id, admitted.call.call_id).state === 'responded')
+      await f.runtime.runAuthenticated({ principal_id }, () => {
+        const result = f.runtime.results.open(admitted.call.call_id)
+        assert.equal(f.runtime.results.read(result.result_id, 0, 4096).eof, true)
+      })
+      const other = principals.find((id) => id !== principal_id)!
+      await assert.rejects(
+        f.runtime.runAuthenticated({ principal_id: other }, () => f.runtime.results.open(admitted.call.call_id))
+      )
+    }
+    assert.equal(f.writes(), principals.length)
+    assert.equal(
+      f.runtime.transport.currentConnection(f.target.machine_id)!.connection_epoch,
+      peer.connection.connection_epoch
+    )
+  } finally {
+    await f.close()
+  }
+})
 
 /** 非空快照只使用真实Wire治理codec；所有native端口是明确拒绝执行的测试stub。 */
 function snapshotSession(

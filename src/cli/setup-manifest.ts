@@ -101,8 +101,11 @@ export async function reviewSetupManifest(
         remote.binding.binding_revision !== 1 ||
         !remote.binding.enabled ||
         remote.peer_policy_revision !== authorization.policies.local.revision ||
-        boundedJson(remote.raw_grant) !==
-          boundedJson({ principal_id: authorization.principal_id, methods: expectedGrant.methods })
+        ![
+          { caller_policy_revision: authorization.policies.caller.revision, methods: expectedGrant.methods },
+          // 旧 Connector 的清单仍可配对和原样重入；已配对授权在 Gateway 装配时迁移。
+          { principal_id: authorization.principal_id, methods: expectedGrant.methods }
+        ].some((grant) => boundedJson(remote.raw_grant) === boundedJson(grant))
       ) {
         throw new CliError('configuration_required')
       }

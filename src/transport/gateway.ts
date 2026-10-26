@@ -604,10 +604,9 @@ export function createGateway(options: GatewayOptions) {
       pruneOriginalRead(call)
     }
   }
-  /** 对已认证连接编码并计量整帧，发送背压时关闭通道并拒绝继续写出。 */
-  function write(peer: Peer, frame: AuthenticatedEnvelope): void {
+  /** 发送已编码且计量过的完整帧；从调用 send 起，异常一律保持可能已写出的语义。 */
+  function send(peer: Peer, raw: string): void {
     assertPeer(peer)
-    const raw = budget(peer.session.adapter.encode(frame, 'gateway_to_connector'), limits.frame_bytes)
     if (
       !peer.ws ||
       peer.ws.getBufferedAmount() + Buffer.byteLength(raw) > limits.frame_bytes ||
@@ -616,6 +615,11 @@ export function createGateway(options: GatewayOptions) {
       close(peer)
       fail('transport_backpressure')
     }
+  }
+  /** 对已认证连接编码并计量整帧，发送背压时关闭通道并拒绝继续写出。 */
+  function write(peer: Peer, frame: AuthenticatedEnvelope): void {
+    assertPeer(peer)
+    send(peer, budget(peer.session.adapter.encode(frame, 'gateway_to_connector'), limits.frame_bytes))
   }
   /** 处理预认证与已认证文本帧；校验来源/方向/去重后才提交 accepted 或持久响应证据。 */
   function receive(peer: Peer, input: string | Uint8Array): void {
@@ -1158,7 +1162,8 @@ export function createGateway(options: GatewayOptions) {
         fail('transport_concurrency_limit')
       }
       const binding = options.router.dispatch(principal, callId, peer.connection.connection_epoch)
-      // 只有事务成功返回的 binding 才允许建立帧并写出；任何后续失败均保守 unknown。
+      // 编码校验没有 socket IO；仅进入发送阶段后才可能出现不确定结局。
+      let sending = false
       try {
         const row = options.store.attempt(binding.call_id, binding.attempt_id)
         if (!row) {
@@ -1171,9 +1176,11 @@ export function createGateway(options: GatewayOptions) {
           native_request: row.native_request,
           validation: row.mode
         })
+        const raw = budget(peer.session.adapter.encode(frame, 'gateway_to_connector'), limits.frame_bytes)
         inflight.set(callId, frame)
         inflightPrincipals.set(frame, row.principal_id)
-        write(peer, frame)
+        sending = true
+        send(peer, raw)
         if (options.retainOriginalRead === true) {
           reads.set(callId, {
             binding: structuredClone(binding),
@@ -1183,7 +1190,26 @@ export function createGateway(options: GatewayOptions) {
           })
         }
         return binding
-      } catch {
+      } catch (error) {
+        if (!sending) {
+          try {
+            const committed: unknown = options.store.commitGatewayDispatchRefusal(
+              binding,
+              error instanceof WireError ? error.code : 'native_adapter_unavailable'
+            )
+            if (typeof committed !== 'boolean') {
+              void Promise.resolve(committed).catch(/** 不把异步端口当成已提交证据。 */ () => {})
+              fail('synchronous_dispatch_refusal_required')
+            }
+            // 固定 deadline 可能已经收敛为 unknown；无论是否变更终态，本次都没有写入 socket。
+            inflight.delete(callId)
+            reads.delete(callId)
+            peer.session.adapter.release(binding)
+            return binding
+          } catch {
+            // 证据未能持久提交时不能发布 not_dispatched，继续按原保守路径处理。
+          }
+        }
         close(peer)
         fail('dispatch_outcome_unknown')
       }

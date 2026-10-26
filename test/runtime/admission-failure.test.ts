@@ -102,31 +102,31 @@ test(
 )
 
 test(
-  'encoding budget failure after durable dispatch returns outcome_unknown with its original call id',
+  'encoding budget failure before socket write returns not_dispatched with its original call id',
   { timeout: 45_000 },
   /** 正常认证之后用明确大于发送预算的有效请求触发写前失败，不伪造 transport 结果。 */ async () => {
     const f = await runtimeFixture({ frame_bytes: 4096 })
     try {
       await f.ready()
-      const request = input(f, 'unknown_after_anchor')
+      const request = input(f, 'refused_after_anchor')
       request.native_request.params.title = 'x'.repeat(8192)
       const admitted = await f.gateway.runAuthenticated(
         f.caller,
-        /** 锚点已提交，即使整帧超预算尚未写出也保守记为 unknown。 */ () => f.gateway.admit(request)
+        /** 锚点已提交但整帧在发送前超预算；本机证据须持久提交为未派发。 */ () => f.gateway.admit(request)
       )
       assert.equal(admitted.created, true)
-      assert.equal(admitted.call.state, 'outcome_unknown')
+      assert.equal(admitted.call.state, 'not_dispatched')
       assert.equal(typeof admitted.call.attempt_id, 'string')
       assert.equal(admitted.call.response, null)
       const current = await f.gateway.runAuthenticated(
         f.caller,
-        /** 以首次 ID 取回同一未知结果，不能生成第二个 attempt。 */ () => f.gateway.get(admitted.call.call_id)
+        /** 以首次 ID 取回同一拒绝记录，不能生成第二个 attempt。 */ () => f.gateway.get(admitted.call.call_id)
       )
-      assert.equal(current.state, 'outcome_unknown')
+      assert.equal(current.state, 'not_dispatched')
       assert.equal(current.attempt_id, admitted.call.attempt_id)
       const duplicate = await f.gateway.runAuthenticated(
         f.caller,
-        /** 原历史登记只返回旧 unknown，不发送或延长任何截止。 */ () => f.gateway.admit(request)
+        /** 原历史登记只返回旧拒绝，不发送或延长任何截止。 */ () => f.gateway.admit(request)
       )
       assert.equal(duplicate.created, false)
       assert.equal(duplicate.call.call_id, admitted.call.call_id)
@@ -134,6 +134,7 @@ test(
       assert.equal(duplicate.call.dedup_expires, admitted.call.dedup_expires)
       assert.equal(f.native.state.responses, 0)
       assert.equal(f.claims(), 0)
+      assert.equal(f.gateway.transport.status().connections, 1)
     } finally {
       await f.close()
     }

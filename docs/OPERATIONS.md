@@ -17,6 +17,16 @@
 
 ## 2. 安装与升级
 
+Luvus raw 授权与 Gateway readiness 的修复可先只升级 Gateway，沿用现有 Connector、
+配对凭据和 MCP token。旧单码配对的标准 raw 授权在 Gateway 装配时迁移，磁盘原文件
+保留；手动收窄过的授权不自动放宽。新配对 Connector 使用策略修订格式，因此混合
+版本部署应先更新 Gateway。
+
+`state/retired/` 当前没有自动清理策略。它包含原配对凭据和 managed 原生根、HOME、
+工作目录，可能保存实际工作数据，不能仅按 schema 缓存计算容量或直接轮转删除。
+运维时单独监控该目录容量；确认旧工作数据与恢复资料已备份且不再需要后，由所有者
+按退役批次清理。清理退役目录不会撤销 Gateway 侧旧设备，应在设备管理里单独撤销。
+
 - 安装：`install.sh` / `install.ps1` 只安装单文件二进制并核对 `SHA256SUMS`，不建配置、不起服务（[快速开始](QUICK-START-zh.md)）。Docker 只用于 Linux Gateway（[Docker 部署](DOCKER-zh.md)）。
 - 升级：先正常停 Connector 再停 Gateway，替换二进制（重新运行安装脚本，或 `docker compose pull && docker compose up -d`），再按原样启动。配置与数据沿用。脚本只安装官方 latest 稳定版；预发布版本从 Release 页面手动下载。
 - 没有自更新。数据库版本不兼容时拒绝启动（`unsupported_database_version`），不会静默迁移。

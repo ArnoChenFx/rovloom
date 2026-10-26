@@ -14,11 +14,80 @@ import { createProductionCliRuntime } from '../../src/cli/production.js'
 import { configTemplate, type ConnectorConfig } from '../../src/cli/config.js'
 import { saveCredential } from '../../src/transport/credentials.js'
 import { writeSetupJson } from '../../src/cli/setup-files.js'
+import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/runtime/native-source.js'
 
 const plan: SetupPlanFacts = {
   attempt_id: 'synthetic_attempt',
   actor: 'synthetic_operator'
 }
+
+test('Luvus 配对清单兼容旧主体授权与新策略授权，拒绝额外方法或错误授权范围', async () => {
+  const root = privateHerdrTestRoot('.setup-luvus-grant-')
+  const authorization = selectedSetupPolicies(plan, 'synthetic_machine', ['luvus'])
+  const grant = authorization.policies.caller.grants[0]!
+  const schema = readFileSync(new URL('../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8')
+  const reference = setupReference(plan.attempt_id)
+  const value = {
+    kind: 'luvus',
+    authentication: 'remote_connector',
+    target: grant.target,
+    binding: {
+      machine_id: 'synthetic_machine',
+      provider_id: 'luvus',
+      kind: 'luvus',
+      config_ref: reference,
+      binding_revision: 1,
+      enabled: true
+    },
+    peer_policy_revision: authorization.policies.local.revision,
+    contract: {
+      binary_version: 'synthetic_future',
+      binary_sha256: 'f'.repeat(64),
+      schema_sha256: hash(schema),
+      adapter_revision: MANAGED_LUVUS_REVISION,
+      classification_revision: MANAGED_LUVUS_CLASSIFICATION,
+      schema_bundle: schema
+    }
+  }
+  try {
+    for (const subject of [
+      { principal_id: authorization.principal_id },
+      { caller_policy_revision: authorization.policies.caller.revision }
+    ]) {
+      const remote = { ...value, raw_grant: { ...subject, methods: grant.methods } }
+      const reviewed = await reviewSetupManifest(
+        { installations: [{ reference, value: remote }] },
+        plan,
+        'synthetic_machine',
+        root,
+        new AbortController().signal
+      )
+      assert.deepEqual(reviewed.reviewed[0]!.value, remote)
+    }
+    for (const raw_grant of [
+      { principal_id: 'other', methods: grant.methods },
+      { caller_policy_revision: 'other', methods: grant.methods },
+      {
+        caller_policy_revision: authorization.policies.caller.revision,
+        methods: [...grant.methods, 'uhp.token.create']
+      },
+      { caller_policy_revision: authorization.policies.caller.revision, methods: ['workspace.rename'] }
+    ]) {
+      await assert.rejects(
+        reviewSetupManifest(
+          { installations: [{ reference, value: { ...value, raw_grant } }] },
+          plan,
+          'synthetic_machine',
+          root,
+          new AbortController().signal
+        )
+      )
+    }
+    assert.deepEqual(readdirSync(root), [])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 
 // 只制作设备的非秘密声明，binary摘要故意不对应任何官方发行版；Gateway仍须核验原字节及全部协议根。
 function manifest() {

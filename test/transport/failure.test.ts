@@ -91,12 +91,16 @@ test(
       assert.notEqual(restarted.status().connection_epoch, original)
       f.configs.get(a.machine_id)!.sourceVerified = false
       const call = f.call(a.target)
-      assert.throws(
-        /** 让派发后的可信检查失败，确认不会把可能已固定的 attempt 报成未执行。 */
-        () => f.gateway.dispatch(call.call_id),
-        /dispatch_outcome_unknown/
-      )
+      // 原生来源门禁在编码时拒绝，尚未写 socket；账本确定拒绝并保留本次已认证连接。
+      f.gateway.dispatch(call.call_id)
+      assert.equal(f.store.call(f.principal.id, call.call_id).state, 'not_dispatched')
+      assert.equal(f.gateway.status().connections, 1)
       assert.equal(f.executions, 0)
+      f.configs.get(a.machine_id)!.sourceVerified = true
+      const healthy = f.call(a.target)
+      f.gateway.dispatch(healthy.call_id)
+      await until(() => f.store.call(f.principal.id, healthy.call_id).state === 'responded')
+      assert.equal(f.executions, 1)
     } finally {
       f.stop()
     }

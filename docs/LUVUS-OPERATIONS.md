@@ -10,6 +10,22 @@
 - 原有的调用、结果句柄和未确认的响应不会迁移到新连接，也不会自动重发。
 - 通用的 `raw-contract` 参数契约由已审核的方法子集限制，不等于完整的参数 schema。
 
+### Caller 与 raw 授权
+
+配对生成的 Gateway raw 授权绑定 `caller_policy_revision` 和精确方法集合。
+使用同一已批准策略的 gateway 范围 token 可以调用这些方法；实际 raw grant 每次按
+真实 caller 签发，并绑定当前连接、契约、目标和本次调用的固定 deadline。
+撤权、方法范围和 caller/local 双端策略检查继续生效。手动配置的
+`raw_grant.principal_id` 仍只允许该主体；它与 `caller_policy_revision` 互斥。
+
+旧单码配对的完整标准授权在 Gateway 启动时迁移内存副本，无需重新配对、更换 token
+或修改 Connector。自定义主体、方法子集、会话、修订和 binding 不自动扩大范围。
+先升级 Gateway；新 Connector 的策略格式清单需要新版 Gateway 接纳。
+
+Gateway 在编码阶段拒绝请求时，尚未写入设备通道；调用账本记录
+`not_dispatched` 和 Gateway 的 `dispatch_refused` 审计（含固定错误码），释放该次调用的
+资源并保留共享连接。开始发送后的失败仍保留 `outcome_unknown`，不会自动重发。
+
 ## 方法
 
 Luvus 没有 `window.*` 方法。窗口选择沿 Luvus 自己的 workspace、tab、pane 层级进行。
