@@ -1,12 +1,12 @@
 // 迁移前证据：在既有 <state>.backups 边界内导出整库副本，复用原有目录边界、私有权限与备份配额。
 import type { DatabaseSync } from 'node:sqlite'
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, unlinkSync } from 'node:fs'
-import { join } from 'node:path'
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { GatewayError } from '../contracts.js'
 import { assertBudget } from './budget.js'
 import type { Retention } from './config.js'
-import { createPrivate, privateFile } from './files.js'
-import { assertSnapshotDirectoryBoundary } from './snapshot-directory.js'
+import { privatePath, syncParentDirectory } from './files.js'
+import { assertSnapshotDirectoryBoundary, snapshotCleanup } from './snapshot-directory.js'
 
 /** 迁移前副本固定命名：带源版本与迁移时刻，便于人工判断是哪一次升级的完整状态。 */
 export function migrationSnapshotPath(backupDirectory: string, from: number, now: number): string {
@@ -18,30 +18,34 @@ export function migrationSnapshotPath(backupDirectory: string, from: number, now
  * 产物是可直接打开的完整库。目的文件先以 0600 排他创建，再由 SQLite 覆盖写入。
  */
 export function writeMigrationSnapshot(source: DatabaseSync, destination: string): void {
-  createPrivate(destination)
-  let written = false
+  privatePath(destination)
+  const cleanup = snapshotCleanup(dirname(destination))
+  let created = false
+  let fd: number | undefined
   try {
-    // VACUUM INTO 不接受参数绑定；路径只来自本模块按固定目录与数字拼出的字符串。
-    source.exec(`VACUUM INTO '${destination.replaceAll("'", "''")}'`)
-    written = true
+    fd = openSync(destination, 'wx', 0o600)
+    created = true
+    closeSync(fd)
+    fd = undefined
+    source.prepare('VACUUM INTO ?').run(destination)
+    fd = openSync(destination, 'r')
+    fsyncSync(fd)
+    closeSync(fd)
+    fd = undefined
+    syncParentDirectory(destination)
   } catch {
-    // 只报固定码：SQLite 原文可能带路径或页面细节，不能进入错误或日志。
-    throw new GatewayError('migration_snapshot_failed')
-  } finally {
-    if (!written) {
+    if (fd !== undefined) {
       try {
-        privateFile(destination)
-        unlinkSync(destination)
+        closeSync(fd)
       } catch {
-        /* 产物已不存在或已不是普通文件时不再追究清理细节。 */
+        // 关闭失败不掩盖原错误，也不妨碍回收本次独占创建的副本。
       }
     }
-  }
-  const fd = openSync(destination, 'r')
-  try {
-    fsyncSync(fd)
-  } finally {
-    closeSync(fd)
+    if (created) {
+      cleanup(destination)
+    }
+    // SQLite 与文件系统错误都只交付固定码；不删除同名的既有文件。
+    throw new GatewayError('migration_snapshot_failed')
   }
 }
 
@@ -50,7 +54,7 @@ export function writeMigrationSnapshot(source: DatabaseSync, destination: string
  * 配额判断复用运行时的 assertBudget：整库副本与目录内既有快照一起计入原备份预算。
  * 这里**不**写 backups 登记行：调用方必须在自己的迁移事务内登记，失败时才能随事务回滚，
  * 否则失败迁移会留下永久占用备份数量配额的孤儿行。
- * 返回副本的绝对路径，供审计与登记使用；不含库内容。
+ * 返回路径与锚定原目录身份的清理闭包；回滚不能沿替换后的目录删除别处文件。
  */
 export function recordMigrationSnapshot(
   db: DatabaseSync,
@@ -59,10 +63,14 @@ export function recordMigrationSnapshot(
   from: number,
   now: number,
   limits: Retention
-): string {
+): Readonly<{ path: string; cleanup(): void }> {
+  if (Number(db.prepare('SELECT COUNT(*) n FROM backups').get()!.n) >= limits.backup_max_count) {
+    throw new GatewayError('backup_count_quota')
+  }
   // 目录缺失时按既有私有目录约定新建 0700 目录，不改变已有对象的权限与内容。
   if (!existsSync(backupDirectory)) {
     mkdirSync(backupDirectory, { mode: 0o700 })
+    syncParentDirectory(backupDirectory)
   }
   assertSnapshotDirectoryBoundary(backupDirectory)
   const destination = migrationSnapshotPath(backupDirectory, from, now)
@@ -75,19 +83,7 @@ export function recordMigrationSnapshot(
       Number(db.prepare('PRAGMA page_size').get()!.page_size) +
     65_536
   assertBudget(db, databasePath, limits, backupDirectory, false, estimate)
+  const cleanup = snapshotCleanup(backupDirectory)
   writeMigrationSnapshot(db, destination)
-  return destination
-}
-
-/**
- * 迁移失败后删除本次未登记的副本：只删普通文件，且只在固定备份目录内。
- * 删除失败不影响原错误，也不留下可被误用的"成功迁移"印象。
- */
-export function cleanupMigrationSnapshot(path: string): void {
-  try {
-    privateFile(path)
-    unlinkSync(path)
-  } catch {
-    /* 副本已不存在或已不是普通文件时保留现场，不掩盖迁移失败本身。 */
-  }
+  return Object.freeze({ path: destination, cleanup: () => cleanup(destination) })
 }

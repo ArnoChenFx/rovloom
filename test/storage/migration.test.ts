@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
+import { spawnSync } from 'node:child_process'
 import {
   chmodSync,
   closeSync,
@@ -15,7 +16,9 @@ import {
   openSync,
   readFileSync,
   readdirSync,
-  rmSync
+  rmSync,
+  symlinkSync,
+  writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -639,6 +642,141 @@ for (const reopen of [false, true]) {
       }
     } finally {
       store?.close()
+      f.close()
+    }
+  })
+}
+
+for (const count of [1, 2]) {
+  test(`迁移副本遵循数量上限：已有 ${count} 份备份时不删除既有备份或突破两份限制`, () => {
+    const f = fixture()
+    try {
+      legacy(f.path)
+      mkdirSync(f.backups, { mode: 0o700 })
+      const db = new DatabaseSync(f.path)
+      try {
+        for (let index = 0; index < count; index++) {
+          const path = join(f.backups, `existing-${index}.db`)
+          writeFileSync(path, '', { mode: 0o600, flag: 'wx' })
+          db.prepare('VACUUM INTO ?').run(path)
+          db.prepare('INSERT INTO backups VALUES(?,?,?)').run(path, 1_000, 1_000_000)
+        }
+      } finally {
+        db.close()
+      }
+      const before = readFileSync(f.path)
+      const files = readdirSync(f.backups).sort()
+      if (count === 2) {
+        assert.throws(() => new Store(f.path, () => 5_000), { code: 'backup_count_quota' })
+        assert.deepEqual(readFileSync(f.path), before)
+        assert.deepEqual(readdirSync(f.backups).sort(), files)
+      } else {
+        new Store(f.path, () => 5_000).close()
+        assert.equal(readdirSync(f.backups).length, 2)
+        assert(existsSync(join(f.backups, files[0]!)))
+      }
+      const check = new DatabaseSync(f.path, { readOnly: true })
+      try {
+        assert.equal(check.prepare('SELECT COUNT(*) n FROM backups').get()!.n, 2)
+      } finally {
+        check.close()
+      }
+    } finally {
+      f.close()
+    }
+  })
+}
+
+test('目录别名迁移与真实路径重开共用同一备份边界并能到期清理', () => {
+  const f = fixture()
+  let store: Store | undefined
+  let now = 5_000
+  try {
+    legacy(f.path)
+    const alias = join(f.root, 'state-alias')
+    symlinkSync(f.state, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    assert.equal(snapshotDirectory(join(alias, 'gateway.db')), snapshotDirectory(f.path))
+    store = new Store(join(alias, 'gateway.db'), () => now)
+    store.close()
+    store = new Store(f.path, () => now)
+    const evidence = join(snapshotDirectory(f.path), 'migration-v9-5000.db')
+    assert(existsSync(evidence))
+    now += store.limits.backup_ttl + 1
+    store.expire()
+    assert.equal(existsSync(evidence), false)
+  } finally {
+    store?.close()
+    f.close()
+  }
+})
+
+test('目录链接目标中的父级按真实目录解析，不把副本放到同名逻辑目录旁', () => {
+  if (process.platform === 'win32') {
+    return // Windows 使用原生 realpath；相对目录链接与 POSIX 规则不同。
+  }
+  const f = fixture()
+  try {
+    const physical = join(f.root, 'physical')
+    mkdirSync(join(physical, 'child'), { recursive: true })
+    mkdirSync(join(physical, 'state'))
+    symlinkSync(join(physical, 'child'), join(f.root, 'through'), 'dir')
+    const alias = join(f.root, 'nested-alias')
+    symlinkSync('through/../state', alias, 'dir')
+    assert.equal(snapshotDirectory(join(alias, 'gateway.db')), snapshotDirectory(join(physical, 'state', 'gateway.db')))
+    assert.notEqual(snapshotDirectory(join(alias, 'gateway.db')), snapshotDirectory(f.path))
+  } finally {
+    f.close()
+  }
+})
+
+for (const stage of ['fsync', 'open', 'begin'] as const) {
+  test(`迁移 ${stage} 失败清理未登记副本，原库保持 v9 且同一时间戳可以重试`, () => {
+    const f = fixture()
+    try {
+      legacy(f.path)
+      const before = readFileSync(f.path)
+      const storeModule = new URL('../../src/store.ts', import.meta.url).href
+      const databaseModule = new URL('../../src/storage/database.ts', import.meta.url).href
+      // 故障注入限定在独立子进程，不能替换其它并发测试持有的文件系统函数。
+      const script = `
+import * as fs from 'node:fs';
+import {mock} from 'bun:test';
+const stage=${JSON.stringify(stage)};
+let injected=false;
+const originalOpen=fs.openSync, originalClose=fs.closeSync, originalSync=fs.fsyncSync;
+const paths=new Map();
+if(stage!=='begin') mock.module('node:fs',()=>({...fs,
+ openSync(path,flags,...rest){
+   if(stage==='open' && flags==='r' && String(path).includes('migration-v9-')) {injected=true;throw new Error('PRIVATE_IO_FAILURE')}
+   const fd=originalOpen(path,flags,...rest);paths.set(fd,String(path));return fd;
+ },
+ closeSync(fd){try{return originalClose(fd)}finally{paths.delete(fd)}},
+ fsyncSync(fd){if(stage==='fsync' && paths.get(fd)?.includes('migration-v9-')) {injected=true;throw new Error('PRIVATE_IO_FAILURE')}return originalSync(fd)}
+}));
+const {Store}=await import(${JSON.stringify(storeModule)});
+if(stage==='begin'){
+ const {CachedDatabase}=await import(${JSON.stringify(databaseModule)});
+ const exec=CachedDatabase.prototype.exec;
+ CachedDatabase.prototype.exec=function(sql){if(sql==='BEGIN IMMEDIATE'){injected=true;throw new Error('PRIVATE_BEGIN_FAILURE')}return exec.call(this,sql)};
+}
+try{new Store(${JSON.stringify(f.path)},()=>5000).close();process.exitCode=9}
+catch(error){if(!injected || error.code!==(stage==='begin'?'database_migration_failed':'migration_snapshot_failed'))throw error;process.stdout.write('expected_failure')}
+`
+      const child = spawnSync(process.execPath, ['--no-env-file', '-e', script], { encoding: 'utf8', timeout: 20_000 })
+      assert.equal(child.status, 0, child.stderr)
+      assert.equal(child.stdout, 'expected_failure')
+      assert.deepEqual(readFileSync(f.path), before)
+      assert.deepEqual(existsSync(f.backups) ? readdirSync(f.backups) : [], [])
+      const check = new DatabaseSync(f.path, { readOnly: true })
+      try {
+        assert.equal(storedVersion(check), 9)
+        assert.equal(check.prepare('SELECT COUNT(*) n FROM backups').get()!.n, 0)
+      } finally {
+        check.close()
+      }
+      new Store(f.path, () => 5_000).close()
+      assert.deepEqual(readdirSync(f.backups), ['migration-v9-5000.db'])
+    } finally {
       f.close()
     }
   })

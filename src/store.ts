@@ -34,7 +34,7 @@ import { assertBudget, assertUsage } from './storage/budget.js'
 import { auditRecord } from './storage/audit.js'
 import { SCHEMA, SCHEMA_VERSION } from './storage/schema.js'
 import { applyMigration, migrationRequired, storedVersion } from './storage/migration.js'
-import { cleanupMigrationSnapshot, recordMigrationSnapshot } from './storage/migration-snapshot.js'
+import { recordMigrationSnapshot } from './storage/migration-snapshot.js'
 import { CachedDatabase } from './storage/database.js'
 import { createPrivate, databasePath, privateFile, privatePath } from './storage/files.js'
 import { assertSnapshotDirectoryBoundary, snapshotCleanup, snapshotDirectory } from './storage/snapshot-directory.js'
@@ -281,34 +281,41 @@ export class Store {
   private migrate(from: number): void {
     const now = this.rawTime()
     // 先写迁移前副本：没有可回退证据就不开始改 schema。
-    let evidence: string | undefined
-    if (this.backupDirectory) {
-      evidence = recordMigrationSnapshot(this.db, this.path, this.backupDirectory, from, now, this.limits)
-    }
-    // 这一步只新增列，不重建被引用的表，因此无需关闭外键约束。
-    this.db.exec('BEGIN IMMEDIATE')
+    let snapshot: ReturnType<typeof recordMigrationSnapshot> | undefined
+    let transaction = false
     try {
+      if (this.backupDirectory) {
+        snapshot = recordMigrationSnapshot(this.db, this.path, this.backupDirectory, from, now, this.limits)
+      }
+      // BEGIN 失败也必须清理刚生成、尚未登记的副本。
+      this.db.exec('BEGIN IMMEDIATE')
+      transaction = true
       applyMigration(this.db)
       // 副本登记与版本推进同一事务：失败时登记行随回滚消失，不会永久占用备份数量配额。
-      if (evidence !== undefined) {
-        this.db.prepare('INSERT INTO backups VALUES(?,?,?)').run(evidence, now, now + this.limits.backup_ttl)
+      if (snapshot !== undefined) {
+        this.db.prepare('INSERT INTO backups VALUES(?,?,?)').run(snapshot.path, now, now + this.limits.backup_ttl)
       }
       // 平台列未上报的旧设备保持 NULL；不给它们编造任何平台。
       this.audit('database_migrated', 'system', now, undefined, {
         from,
         to: SCHEMA_VERSION,
-        evidence: evidence === undefined ? null : basename(evidence)
+        evidence: snapshot === undefined ? null : basename(snapshot.path)
       })
       this.db.exec('COMMIT')
+      transaction = false
     } catch (error) {
-      try {
-        this.db.exec('ROLLBACK')
-      } catch {
-        /* 回滚失败仍以原错误为准，不把 SQL 或内容拼进错误。 */
+      let rolledBack = !transaction
+      if (transaction) {
+        try {
+          this.db.exec('ROLLBACK')
+          rolledBack = true
+        } catch {
+          // 无法确认回滚时保留副本作为恢复证据，不掩盖原错误。
+        }
       }
       // 副本登记行随回滚消失；磁盘上的那份迁移前副本不再被任何登记引用，按同一清理边界删除。
-      if (evidence !== undefined) {
-        cleanupMigrationSnapshot(evidence)
+      if (rolledBack) {
+        snapshot?.cleanup()
       }
       throw error instanceof GatewayError ? error : new GatewayError('database_migration_failed')
     }
