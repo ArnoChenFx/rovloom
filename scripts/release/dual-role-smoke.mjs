@@ -15,7 +15,7 @@ import { createManagementHttpRead } from '../../src/webui/http-client.ts'
 export function assertConnectorDiagnostics(text) {
   assert.match(
     text,
-    /^(?:(?:connector_transport (?:disconnected|connecting|authenticated|ready|stopped) provider_ready=(?:true|false)(?: capacity=[a-z_]+ reclaim_at=\d+)?(?: reason=[a-z_]+)?|connector_disconnect(?:_update)?(?: code=\d{4})? close_reason=[a-z_]+)\n)*$/u,
+    /^(?:(?:connector_transport (?:disconnected|connecting|authenticated|ready|stopped) provider_ready=(?:true|false)(?: capacity=[a-z_]+ reclaim_at=\d+)?(?: reason=[a-z_]+)?|connector_observation unavailable|connector_disconnect(?:_update)?(?: code=\d{4})? close_reason=[a-z_]+)\n)*$/u,
     'dual_role_connector_stderr'
   )
 }

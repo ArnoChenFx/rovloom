@@ -383,6 +383,50 @@ test('订阅时首次取样失败不弃掉整个观察：后续窗口仍打印�
   // 首次失败不建立基线，因此下一次成功取样的第 1 条事件仍算新事件。
   assert.equal(
     text,
-    'connector_transport ready provider_ready=true\n' + 'connector_disconnect code=1008 close_reason=transport_closed\n'
+    'connector_observation unavailable\n' +
+      'connector_transport ready provider_ready=true\n' +
+      'connector_disconnect code=1008 close_reason=transport_closed\n'
   )
+})
+
+test('连续 status 失败只报告一次不可用，恢复后继续相位和断连观察', async () => {
+  let broken = true
+  let current = ready(0)
+  const stderr = new PassThrough()
+  const setup = new CliSetup()
+  try {
+    await setup.prepare({ ...configTemplate('connector'), state_dir: '/nonexistent' } as ConnectorConfig, '', {
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr,
+      signal: new AbortController().signal
+    })
+    setup.observe(
+      lifecycle(() => {
+        if (broken) {
+          throw new Error('provider_binding_mismatch PRIVATE_SNAPSHOT')
+        }
+        return current
+      })
+    )
+    await sample()
+    await sample()
+    assert.equal(drain(stderr), 'connector_observation unavailable\n')
+    broken = false
+    await sample()
+    assert.equal(drain(stderr), 'connector_transport ready provider_ready=true\n')
+    broken = true
+    await sample()
+    assert.equal(drain(stderr), 'connector_observation unavailable\n')
+    current = ready(1, { disconnect_recent: [{ code: 1008, reason: 'transport_closed' }] })
+    broken = false
+    await sample()
+    assert.equal(
+      drain(stderr),
+      'connector_disconnect code=1008 close_reason=transport_closed\n' +
+        'connector_transport ready provider_ready=true\n'
+    )
+  } finally {
+    setup.close()
+  }
 })

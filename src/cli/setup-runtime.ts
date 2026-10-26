@@ -65,16 +65,29 @@ export class CliSetup {
       return
     }
     let previous = ''
+    let observationUnavailable = false
+    const unavailable = () => {
+      previous = ''
+      if (observationUnavailable) {
+        return
+      }
+      observationUnavailable = true
+      try {
+        this.#io?.stderr.write('connector_observation unavailable\n')
+      } catch {
+        // 诊断端口故障不得让定时回调抛出，也不能输出底层异常正文。
+      }
+    }
     // 同步建立订阅基线；之后首个采样窗口里的事件也属于新事件。
     let observedChanges: number | undefined
     try {
       const initial = running.transport.status()
       observedChanges = observationCount(initial.disconnect_change_sequence)
     } catch {
-      //
       // 首次状态取样失败（降级宿主可能抛 provider limit 等）不能静默废掉整个观察：
       // 继续采样，改由首个成功的取样建立基线并输出首条相位行。
       observedChanges = undefined
+      unavailable()
     }
     this.#observation = setInterval(
       /* 状态变化才输出固定阶段、布尔值与已知容量；断开与订正按独立事件序号补报，不输出凭据、epoch或原生正文。 */ () => {
@@ -126,9 +139,9 @@ export class CliSetup {
                 '\n'
             )
           }
+          observationUnavailable = false
         } catch {
-          clearInterval(this.#observation)
-          this.#observation = undefined
+          unavailable()
         }
       },
       250

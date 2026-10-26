@@ -200,7 +200,7 @@ test('主动 disconnect 与 stop 交付固定本机原因，不伪造对端关�
     client.disconnect()
     assert.deepEqual(await untilDisconnect(client), { reason: 'connector_disconnected' })
     client.stop()
-    assert.deepEqual(latest(client), { reason: 'connector_stopped' })
+    assert.deepEqual(latest(client), { reason: 'connector_disconnected' })
     assert.equal(client.status().phase, 'stopped')
   } finally {
     client.stop()
@@ -272,7 +272,9 @@ function capture(socket: Socket, slot: Handlers, { keepOpen = false } = {}): Soc
   })
 }
 
-function stubConnector() {
+function stubConnector(
+  extra: Partial<Pick<Parameters<typeof createConnector>[0], 'credential' | 'socketFactory'>> = {}
+) {
   const handlers: Handlers = {}
   const client = createConnector({
     url: 'ws://127.0.0.1:9/connector',
@@ -302,7 +304,8 @@ function stubConnector() {
     random: () => 1,
     now: () => 1000,
     /** 包装真实 socket，只接管事件处理器以构造指定顺序；其余行为仍是原 socket。 */
-    socketFactory: (socket) => capture(socket, handlers)
+    socketFactory: (socket) => capture(socket, handlers),
+    ...extra
   })
   return { client, handlers }
 }
@@ -410,6 +413,60 @@ test('晚到 onclose 只纠正一次，重复事件不重复计数', async () =>
   }
 })
 
+test('重复 disconnect 不清掉同一 socket 尚待交付的晚到关闭码', async () => {
+  const { client, handlers } = stubConnector()
+  try {
+    handlers.error?.({ type: 'error' })
+    const before = client.status()
+    for (let index = 0; index < 3; index++) {
+      client.disconnect()
+    }
+    handlers.close?.({ code: 1006, reason: '' })
+    assert.deepEqual(latest(client), { code: 1006, reason: 'transport_abnormal' })
+    assert.equal(client.status().disconnects, before.disconnects)
+    assert.equal(client.status().reconnects, before.reconnects)
+  } finally {
+    client.stop()
+  }
+})
+
+test('没有 socket 的真实连接尝试失败仍退避，重复断开和停止不虚增断连', async () => {
+  for (const stage of ['credential', 'socket'] as const) {
+    let attempts = 0
+    const fail = () => {
+      attempts++
+      throw new Error('SYNTHETIC_PRIVATE_CONNECT_FAILURE')
+    }
+    const { client } = stubConnector(stage === 'credential' ? { credential: fail } : { socketFactory: fail })
+    try {
+      assert.equal(attempts, 1)
+      assert.equal(client.status().reconnects, 1)
+      assert.equal(client.status().disconnects, 0)
+      client.disconnect()
+      client.disconnect()
+      await new Promise((resolve) => setTimeout(resolve, 320))
+      assert.equal(attempts, 1, '连接尝试必须等待既有退避，而不是随每个 tick 热重试')
+      assert.equal(client.status().reconnects, 1)
+      assert.equal(client.status().disconnects, 0)
+      client.stop()
+      assert.equal(client.status().phase, 'stopped')
+      assert.equal(client.status().disconnects, 0)
+      assert(!JSON.stringify(client.status()).includes('SYNTHETIC_PRIVATE'))
+    } finally {
+      client.stop()
+    }
+  }
+})
+
+test('停止活动 socket 只记录一次真实的 connector_stopped', () => {
+  const { client } = stubConnector()
+  client.stop()
+  client.stop()
+  assert.equal(client.status().disconnects, 1)
+  assert.equal(client.status().phase, 'stopped')
+  assert.deepEqual(latest(client), { reason: 'connector_stopped' })
+})
+
 test('晚到 onclose 不把已重连后的新 epoch 观测覆盖成旧值', async () => {
   // 快速重连：本机收敛后立即建新 socket，旧 socket 的关闭事件必须被忽略。
   const first: Handlers = {}
@@ -480,10 +537,10 @@ test('已断开时重复 disconnect/stop 不新增断开记录，也不推迟重
     assert.equal(current.disconnects, settled.disconnects)
     assert.equal(current.reconnects, settled.reconnects)
     assert.equal(current.disconnect_recent.length, settled.disconnect_recent.length)
-    // 唯一例外是停止：这是全局生命周期的真实状态变化，仍如实交付一条。
+    // 停止时没有活动 socket，只更新相位，不虚增断连。
     client.stop()
-    assert.equal(client.status().disconnects, settled.disconnects + 1)
-    assert.deepEqual(latest(client), { reason: 'connector_stopped' })
+    assert.equal(client.status().disconnects, settled.disconnects)
+    assert.deepEqual(latest(client), settled.disconnect_recent.at(-1))
     assert.equal(client.status().phase, 'stopped')
   } finally {
     client.stop()
