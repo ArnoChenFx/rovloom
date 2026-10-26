@@ -1,6 +1,7 @@
 // 定义 MCP 与 CLI 宿主共享的参数、公开 DTO、受信 caller 和服务拒绝契约，不发行身份或权限。
 import type { JsonObject, ProviderKind, V2Target, ValidationMode } from '../wire/types.js'
 import type { CallerIdentity, Page, ProviderView } from './management.js'
+import type { LuvusParameterDiagnostic } from '../runtime/luvus-parameter-help.js'
 export type { CallerIdentity, Page, ProviderView } from './management.js'
 
 export type PageArguments = { cursor?: string; limit?: number }
@@ -128,7 +129,7 @@ export class NativeRequestNotDispatchedError extends FacadeServiceError {
   readonly outcome = 'not_dispatched' as const
 
   /** 仅投影已完成登记前拒绝的固定结果，不把普通后端异常声明为未派发。 */
-  constructor() {
+  constructor(readonly parameterDiagnostic?: LuvusParameterDiagnostic) {
     super('native_request_invalid')
   }
 }
