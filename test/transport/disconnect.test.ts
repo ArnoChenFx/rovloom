@@ -1,7 +1,7 @@
 // 断连观测只保留固定原因词与有界关闭码；对端正文、路径、凭据和不可信 getter 一律不进入输出。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { boundedDisconnect, remoteDisconnect } from '../../src/transport/disconnect.js'
+import { boundedDisconnect, DisconnectLog, remoteDisconnect } from '../../src/transport/disconnect.js'
 
 const secret = 'SYNTHETIC_SECRET token=/etc/passwd 你好'
 
@@ -102,4 +102,31 @@ test('status 交付的断开观测二次复核：原因必须在固定词表内�
   ]) {
     assert.deepEqual(boundedDisconnect({ reason }), { reason })
   }
+})
+
+test('断开记录只增计数，远端纠正不重复计数', () => {
+  const log = new DisconnectLog()
+  assert.deepEqual(log.snapshot(), { disconnects: 0 })
+  // 本机收敛先记一次未知原因。
+  log.record({ reason: 'transport_unavailable' })
+  assert.deepEqual(log.snapshot(), { disconnects: 1, disconnect: { reason: 'transport_unavailable' } })
+  // 远端实际观察纠正同一事件：计数不变。
+  log.refine({ code: 1006, reason: 'transport_abnormal' })
+  assert.deepEqual(log.snapshot(), { disconnects: 1, disconnect: { code: 1006, reason: 'transport_abnormal' } })
+  // 下一次独立断开才推进计数。
+  log.record({ code: 1008, reason: 'transport_closed' })
+  assert.deepEqual(log.snapshot(), { disconnects: 2, disconnect: { code: 1008, reason: 'transport_closed' } })
+})
+
+test('未记录时纠正不生效，也不能凭空产生断连计数', () => {
+  const log = new DisconnectLog()
+  log.refine({ code: 1006, reason: 'transport_abnormal' })
+  assert.deepEqual(log.snapshot(), { disconnects: 0 })
+})
+
+test('记录入口本身也不放行非白名单观测', () => {
+  const log = new DisconnectLog()
+  // 计数仍推进，但不可交付的观测不会出现在快照里，避免原文外泄。
+  log.record({ reason: secret } as never)
+  assert.deepEqual(log.snapshot(), { disconnects: 1 })
 })

@@ -1,19 +1,18 @@
-// 观察循环的对外输出：断开只打印有界关闭码与白名单原因，未知/越界值整条丢弃且不输出正文。
+// 观察循环的对外输出：断开按计数差补报为独立诊断行，与 250ms 采样相位解耦；未知/越界值整条丢弃。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { PassThrough } from 'node:stream'
 import { configTemplate, type ConnectorConfig } from '../../src/cli/config.js'
 import { CliSetup } from '../../src/cli/setup-runtime.js'
 import type { RunningConnector } from '../../src/cli/run.js'
-import type { RunningConnector as _RunningConnector } from '../../src/cli/run.js'
 
-type Status = ReturnType<NonNullable<_RunningConnector['transport']>['status']>
+type Status = ReturnType<NonNullable<RunningConnector['transport']>['status']>
 
 /**
  * 合成状态只覆盖被观察字段，其余字段取固定空值，不伪造连接或 provider 事实。
  * extra 按 unknown 透传：观察循环必须能处理宿主交付的越界/未知值，不能靠类型断言屏蔽。
  */
-function status(phase: string, extra: Record<string, unknown> = {}): Status {
+function status(phase: string, disconnects: unknown, extra: Record<string, unknown> = {}): Status {
   return {
     phase,
     running: 0,
@@ -21,9 +20,14 @@ function status(phase: string, extra: Record<string, unknown> = {}): Status {
     machine_id: 'mock_observed',
     connection_epoch: 'mock_epoch',
     providers: [],
+    disconnects,
     ...extra
   } as Status
 }
+
+/** 已就绪状态，供“采样期间仍 ready”的用例复用。 */
+const ready = (disconnects: unknown, extra: Record<string, unknown> = {}) =>
+  status('ready', disconnects, { providers: [{ provider_id: 'provider', ready: true }], ...extra })
 
 /** 交付固定状态快照的合成 Connector 生命周期，不创建 socket、身份或原生会话。 */
 function lifecycle(current: () => Status): RunningConnector {
@@ -52,56 +56,129 @@ function drain(stderr: PassThrough): string {
 const sample = () =>
   new Promise<void>(/** 覆盖固定取样周期，不推断观察循环内部状态。 */ (resolve) => setTimeout(resolve, 320))
 
-/** 启动真实 CliSetup 观察循环，执行本轮到状态变化后再排空 stderr。 */
-async function observe(connector: RunningConnector, during: () => Promise<void>): Promise<string> {
+/**
+ * 启动真实 CliSetup 观察循环。首个 sample 周期建立断开计数基线，随后由 change 推进状态，
+ * 再用一个 sample 周期观察补报结果。
+ */
+async function observe(connector: RunningConnector, change?: () => void): Promise<string> {
   const stderr = new PassThrough()
   const setup = new CliSetup()
   const io = { stdin: new PassThrough(), stdout: new PassThrough(), stderr, signal: new AbortController().signal }
   try {
     await setup.prepare({ ...configTemplate('connector'), state_dir: '/nonexistent' } as ConnectorConfig, '', io)
     setup.observe(connector)
-    await during()
+    await sample()
+    if (change) {
+      change()
+      await sample()
+    }
     return drain(stderr)
   } finally {
     setup.close()
   }
 }
 
-test('断开输出有界关闭码与固定原因，与现有 reason/capacity 顺序稳定', async () => {
+test('断开诊断独立成行，相位行不再附带关闭码', async () => {
+  let current = ready(0)
   const output = await observe(
-    lifecycle(() => status('disconnected', { disconnect: { code: 1008, reason: 'transport_closed' } })),
-    sample
+    lifecycle(() => current),
+    () => {
+      current = status('disconnected', 1, { disconnect: { code: 1008, reason: 'transport_closed' } })
+    }
   )
   assert.equal(
     output,
-    'connector_transport disconnected provider_ready=false code=1008 close_reason=transport_closed\n'
+    'connector_transport ready provider_ready=true\n' +
+      'connector_disconnect code=1008 close_reason=transport_closed\n' +
+      'connector_transport disconnected provider_ready=false\n'
   )
 })
 
 test('本机收敛的断开只输出原因，不伪造未观察到的关闭码', async () => {
+  let current = ready(0)
   const output = await observe(
-    lifecycle(() => status('disconnected', { disconnect: { reason: 'handshake_timeout' } })),
-    sample
-  )
-  assert.equal(output, 'connector_transport disconnected provider_ready=false close_reason=handshake_timeout\n')
-})
-
-test('容量、失败码与断开观测同帧输出时保持固定顺序', async () => {
-  const output = await observe(
-    lifecycle(() =>
-      status('disconnected', {
-        providers: [{ provider_id: 'provider', ready: false }],
-        failure: 'claim_capacity',
-        capacity: { resource: 'claim_entries', reclaim_at: 1234 },
-        disconnect: { code: 1006, reason: 'transport_abnormal' }
-      })
-    ),
-    sample
+    lifecycle(() => current),
+    () => {
+      current = status('disconnected', 1, { disconnect: { reason: 'handshake_timeout' } })
+    }
   )
   assert.equal(
     output,
-    'connector_transport disconnected provider_ready=false capacity=claim_entries reclaim_at=1234' +
-      ' reason=claim_capacity code=1006 close_reason=transport_abnormal\n'
+    'connector_transport ready provider_ready=true\n' +
+      'connector_disconnect close_reason=handshake_timeout\n' +
+      'connector_transport disconnected provider_ready=false\n'
+  )
+})
+
+test('极快重连：断开与重连同处一次采样周期内仍补报一条断连诊断行', async () => {
+  // 采样只看到 ready，但 disconnects 已 +1：相位行不得吞掉这条事件，也不得挂关闭码。
+  let current = ready(0)
+  const output = await observe(
+    lifecycle(() => current),
+    () => {
+      // 采样窗口内完成：断开后立刻回到 ready，中间态从未被采样看到。
+      current = ready(1, { disconnect: { code: 1008, reason: 'transport_closed' } })
+    }
+  )
+  assert.equal(
+    output,
+    'connector_transport ready provider_ready=true\n' + 'connector_disconnect code=1008 close_reason=transport_closed\n'
+  )
+  assert.equal(output.includes('provider_ready=true code='), false)
+})
+
+test('连续两次断开各补报一条，计数不合并', async () => {
+  let current = ready(0)
+  const stderr = new PassThrough()
+  const setup = new CliSetup()
+  const io = { stdin: new PassThrough(), stdout: new PassThrough(), stderr, signal: new AbortController().signal }
+  let text = ''
+  try {
+    await setup.prepare({ ...configTemplate('connector'), state_dir: '/nonexistent' } as ConnectorConfig, '', io)
+    setup.observe(lifecycle(() => current))
+    await sample()
+    // 同一观察会话内两次独立断开，各自补报一条。
+    current = ready(1, { disconnect: { code: 1008, reason: 'transport_closed' } })
+    await sample()
+    current = ready(2, { disconnect: { code: 1006, reason: 'transport_abnormal' } })
+    await sample()
+    text = drain(stderr)
+  } finally {
+    setup.close()
+  }
+  assert.equal(
+    text,
+    'connector_transport ready provider_ready=true\n' +
+      'connector_disconnect code=1008 close_reason=transport_closed\n' +
+      'connector_disconnect code=1006 close_reason=transport_abnormal\n'
+  )
+})
+
+test('首次采样只记基线：进程启动前已有的历史断连不打印', async () => {
+  // 连接启动时 transport 已带历史计数与观测；首轮采样不得把它当作本进程新事件。
+  const output = await observe(
+    lifecycle(() =>
+      ready(7, {
+        disconnect: { code: 1008, reason: 'transport_closed' }
+      })
+    )
+  )
+  assert.equal(output, 'connector_transport ready provider_ready=true\n')
+  assert.equal(output.includes('connector_disconnect'), false)
+})
+
+test('基线之后的第一条新断开仍会打印', async () => {
+  let current = ready(7, { disconnect: { code: 1008, reason: 'transport_closed' } })
+  const output = await observe(
+    lifecycle(() => current),
+    () => {
+      current = ready(8, { disconnect: { code: 1006, reason: 'transport_abnormal' } })
+    }
+  )
+  assert.equal(
+    output,
+    'connector_transport ready provider_ready=true\n' +
+      'connector_disconnect code=1006 close_reason=transport_abnormal\n'
   )
 })
 
@@ -116,28 +193,44 @@ test('未知或越界的断开观测整条丢弃，绝不把宿主文本写进�
     secret
   ]
   for (const disconnect of values) {
+    let current = ready(0)
+    // 计数已推进但观测不可交付：只能省掉诊断行，不能退化成原文输出。
     const output = await observe(
-      lifecycle(() => status('disconnected', { disconnect })),
-      sample
+      lifecycle(() => current),
+      () => {
+        current = status('disconnected', 1, { disconnect })
+      }
     )
-    assert.equal(output, 'connector_transport disconnected provider_ready=false\n')
+    assert.equal(
+      output,
+      'connector_transport ready provider_ready=true\nconnector_transport disconnected provider_ready=false\n'
+    )
     assert.equal(output.includes(secret), false)
   }
 })
 
-test('相同状态只输出一次，阶段变化后才输出新行', async () => {
-  let current = status('disconnected', { disconnect: { code: 1008, reason: 'transport_closed' } })
-  const output = await observe(
-    lifecycle(() => current),
-    async () => {
-      await new Promise<void>(/** 覆盖两个取样周期，确认同状态不重复输出。 */ (resolve) => setTimeout(resolve, 560))
-      current = status('connecting')
-      await sample()
-    }
-  )
+test('非整数或缺失计数不被采信，也不推进基线', async () => {
+  let current = ready(0)
+  const stderr = new PassThrough()
+  const setup = new CliSetup()
+  const io = { stdin: new PassThrough(), stdout: new PassThrough(), stderr, signal: new AbortController().signal }
+  let text = ''
+  try {
+    await setup.prepare({ ...configTemplate('connector'), state_dir: '/nonexistent' } as ConnectorConfig, '', io)
+    setup.observe(lifecycle(() => current))
+    await sample()
+    // 宿主交付越界计数：整轮按未知处理，既不打印也不污染基线。
+    current = ready(1.5, { disconnect: { code: 1006, reason: 'transport_abnormal' } })
+    await sample()
+    current = ready(2, { disconnect: { code: 1006, reason: 'transport_abnormal' } })
+    await sample()
+    text = drain(stderr)
+  } finally {
+    setup.close()
+  }
   assert.equal(
-    output,
-    'connector_transport disconnected provider_ready=false code=1008 close_reason=transport_closed\n' +
-      'connector_transport connecting provider_ready=false\n'
+    text,
+    'connector_transport ready provider_ready=true\n' +
+      'connector_disconnect code=1006 close_reason=transport_abnormal\n'
   )
 })

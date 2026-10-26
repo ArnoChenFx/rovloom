@@ -209,6 +209,13 @@ export function createHerdrRuntimeChain(root: string, methods: readonly string[]
     gateways,
     runtimes,
     failures,
+    /** 交付同一个真实 transport 的只读 status 端口，供 CLI 观察循环验收使用；不建立第二通道。 */
+    transport(): { status: () => ReturnType<ReturnType<typeof createConnector>['status']> } {
+      if (!client) {
+        fail('herdr_chain_state_invalid')
+      }
+      return { status: () => client!.status() }
+    },
     /** 仅输出阶段、计数和 provider 健康布尔值；不包含凭据、连接 ID、原生帧或文件路径。 */
     diagnostics() {
       let connector: unknown = { phase: 'not_created' }

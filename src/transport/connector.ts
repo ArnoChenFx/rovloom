@@ -46,8 +46,8 @@ import {
   socket
 } from './common.js'
 import type { Connection, Session, Socket } from './common.js'
-import { boundedDisconnect, remoteDisconnect } from './disconnect.js'
-import type { DisconnectObservation, DisconnectReason } from './disconnect.js'
+import { DisconnectLog, remoteDisconnect } from './disconnect.js'
+import type { DisconnectReason } from './disconnect.js'
 
 export type WireExecutionResult = Readonly<{ binding: AttemptBinding; native_response: JsonObject }>
 export type ConnectorWireSession = Session & {
@@ -64,6 +64,8 @@ type ConnectorBaseOptions = {
   random?: () => number
   /** 提供独立可信时间，调用方仍须检查单调性和固定到期边界。 */
   now?: () => number
+  /** 只供测试注入受控 socket 桩，以构造真实 runtime 不可复现的事件顺序；生产不传。 */
+  socketFactory?: (socket: Socket) => Socket
   limits?: Partial<{
     heartbeat_ms: number
     idle_ms: number
@@ -132,8 +134,10 @@ export function createConnector(options: ConnectorOptions) {
   let stopped = false
   let phase = 'disconnected'
   let failure: string | undefined
-  /** 最近一次断开的固定原因；本机主动断开由调用点直接给定，不让对端文本参与定性。 */
-  let disconnect: DisconnectObservation | undefined
+  /** 累计断开记录与最近一次观测；只增计数让快速重连不被采样窗口吞掉。 */
+  const disconnects = new DisconnectLog()
+  /** 本机刚收敛的 socket：其远端关闭事件若早于下一个 epoch 到达，可纠正为实际观察值。 */
+  let settled: { socket: Socket; local: DisconnectReason } | undefined
   let capacity: ConnectorCapacity | undefined
   let next = 0
   let retries = 0
@@ -388,10 +392,17 @@ export function createConnector(options: ConnectorOptions) {
   function close(reason: DisconnectReason = stopped ? 'connector_stopped' : 'connector_failure', code?: number): void {
     const previous = ws
     ws = undefined
+    /**
+     * 只把「本机仅因底层网络错误而收敛」的 socket 留作晚到远端事件的纠正目标：
+     * 1.4.3 上 terminate 先触发 onerror 再触发 onclose(1006)，那时本机原因只是未知错误。
+     * 本机主动 close（握手超时、空闲、停止）是已定性的诊断，不能被自己的关闭事件改写。
+     */
+    settled =
+      previous === undefined || reason !== 'transport_unavailable' ? undefined : { socket: previous, local: reason }
     clearSession()
     phase = stopped ? 'stopped' : 'disconnected'
     // 本机收敛的断开不带对端关闭码；对端事件定性时只附带实际观察到的有界码。
-    disconnect = Object.freeze(code === undefined ? { reason } : { code, reason })
+    disconnects.record(Object.freeze(code === undefined ? { reason } : { code, reason }))
     if (!stopped) {
       const random = (options.random ?? Math.random)()
       const jitter = Number.isFinite(random) ? Math.max(0, Math.min(1, random)) : 1
@@ -618,12 +629,16 @@ export function createConnector(options: ConnectorOptions) {
     let current: Socket
     try {
       current = socket(url)
+      // 桩只能在已建立的真实 socket 上包装，不能替换为任意非 socket 值。
+      current = options.socketFactory?.(current) ?? current
     } catch {
       close('transport_unavailable')
       return
     }
     ws = current
     phase = 'connecting'
+    // 新 epoch 已建立：任何旧 socket 的晚到事件不再能覆盖当前观测。
+    settled = undefined
     opened = last = sentAt = performance.now()
     sent = sequence = messages = 0
     messageWindow = opened
@@ -828,6 +843,12 @@ export function createConnector(options: ConnectorOptions) {
         if (ws === current) {
           const observed = remoteDisconnect(event)
           close(observed.reason, observed.code)
+          return
+        }
+        // 远端关闭晚于本机收敛且新 epoch 尚未建立：纠正最近一次观测，不重复计数。
+        if (settled?.socket === current) {
+          settled = undefined
+          disconnects.refine(remoteDisconnect(event))
         }
       }
     current.onerror =
@@ -896,12 +917,11 @@ export function createConnector(options: ConnectorOptions) {
   return {
     /** 返回有界连接与 provider 健康观测，不包含凭据或原生内容。 */
     status() {
-      // 断开观测只在 disconnected/stopped 阶段交付，连上后不残留上一 epoch 的关闭码。
-      const observed = phase === 'disconnected' || phase === 'stopped' ? boundedDisconnect(disconnect) : undefined
+      // 无论当前相位都交付累计断开次数与最近一次观测，让采样侧按计数差补报。
       return {
         ...(failure ? { failure } : {}),
         ...(capacity ? { capacity } : {}),
-        ...(observed ? { disconnect: observed } : {}),
+        ...disconnects.snapshot(),
         phase,
         running: running.size,
         reconnects: retries,

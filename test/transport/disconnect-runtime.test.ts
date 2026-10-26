@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createConnector } from '../../src/transport/index.js'
 import { runtime } from '../../src/transport/common.js'
+import type { Socket } from '../../src/transport/common.js'
 import { fixture, until } from './helpers.js'
 
 type ServerAction = { kind: 'close'; code: number; reason: string } | { kind: 'terminate' } | { kind: 'stay' }
@@ -163,5 +164,176 @@ test('Gateway 侧主动断开在真实通道上交付 1008/transport_closed', as
     assert.deepEqual(client.status().disconnect, { code: 1008, reason: 'transport_closed' })
   } finally {
     f.stop()
+  }
+})
+
+/**
+ * 受控 socket 桩：捕获 connector 安装的处理器，由测试精确决定 error/close 的到达顺序，
+ * 不建立真实链路，也不读写任何凭据或原生资源。
+ */
+type Handlers = {
+  close?: (event: { code: number; reason: string }) => void
+  error?: (event: unknown) => void
+}
+
+/**
+ * 用属性描述符接管 onclose/onerror：Object.assign 只复制取值，会把访问器拍平成数据属性，
+ * 必须用 defineProperties 才能截获 connector 的赋值。真实 socket 行为与字段全部保留。
+ */
+function capture(socket: Socket, slot: Handlers): Socket {
+  const real = { onclose: socket.onclose, onerror: socket.onerror }
+  return Object.defineProperties(socket, {
+    /** 记录 connector 安装的关闭处理器，供测试稍后触发。 */
+    onclose: {
+      get: () => real.onclose,
+      set: (value: Handlers['close'] | null) => {
+        real.onclose = value as never
+        slot.close = value ?? undefined
+      }
+    },
+    /** 记录 connector 安装的错误处理器，供测试稍后触发。 */
+    onerror: {
+      get: () => real.onerror,
+      set: (value: Handlers['error'] | null) => {
+        real.onerror = value as never
+        slot.error = value ?? undefined
+      }
+    }
+  })
+}
+
+function stubConnector() {
+  const handlers: Handlers = {}
+  const client = createConnector({
+    url: 'ws://127.0.0.1:9/connector',
+    developmentLoopback: true,
+    credential: () => ({
+      machine_id: 'mock_ordered',
+      recovery_generation: 'mock_generation',
+      credential: 'SYNTHETIC_CREDENTIAL_NOT_REAL'
+    }),
+    session: () => {
+      throw new Error('fixture_must_not_open_session')
+    },
+    nativeInput: () => {
+      throw new Error('fixture_must_not_call_native')
+    },
+    execute: async () => {
+      throw new Error('fixture_must_not_execute')
+    },
+    // 长退避与长握手：观测窗口内不会建立新 epoch，也不会被本机超时提前收敛。
+    limits: {
+      heartbeat_ms: 10_000,
+      idle_ms: 10_000,
+      handshake_ms: 10_000,
+      reconnect_ms: 60_000,
+      reconnect_max_ms: 60_000
+    },
+    random: () => 1,
+    now: () => 1000,
+    /** 包装真实 socket，只接管事件处理器以构造指定顺序；其余行为仍是原 socket。 */
+    socketFactory: (socket) => capture(socket, handlers)
+  })
+  return { client, handlers }
+}
+
+/** 等待断开计数达到期望值；失败只报告固定诊断。 */
+async function untilCount(client: ReturnType<typeof createConnector>, count: number) {
+  const start = performance.now()
+  while (client.status().disconnects < count) {
+    if (performance.now() - start > 3000) {
+      throw new Error('fixture_disconnect_timeout')
+    }
+    await new Promise(/** 让出事件循环供受控事件处理器推进。 */ (resolve) => setTimeout(resolve, 5))
+  }
+}
+
+test('onerror 后到达的 onclose 把本机观测纠正为 1006/transport_abnormal 且只记一次', async () => {
+  const { client, handlers } = stubConnector()
+  try {
+    // 先等 connector 装好处理器（connect 在构造时同步执行）。
+    await untilCount(client, 0)
+    assert.equal(client.status().disconnects, 0)
+    // 1.4.3 顺序：terminate 先触发 error（本机 transport_unavailable）。
+    handlers.error?.({ type: 'error' })
+    await untilCount(client, 1)
+    assert.deepEqual(client.status().disconnect, { reason: 'transport_unavailable' })
+    // 随后 onclose(1006) 到达：纠正为远端实际观察值，不再 +1。
+    handlers.close?.({ code: 1006, reason: '' })
+    await new Promise(/** 让纠正写入完成。 */ (resolve) => setTimeout(resolve, 20))
+    assert.deepEqual(client.status().disconnect, { code: 1006, reason: 'transport_abnormal' })
+    assert.equal(client.status().disconnects, 1)
+  } finally {
+    client.stop()
+  }
+})
+
+test('晚到 onclose 只纠正一次，重复事件不重复计数', async () => {
+  const { client, handlers } = stubConnector()
+  try {
+    await untilCount(client, 0)
+    handlers.error?.({ type: 'error' })
+    await untilCount(client, 1)
+    handlers.close?.({ code: 1006, reason: '' })
+    handlers.close?.({ code: 1006, reason: '' })
+    await new Promise(/** 让纠正写入完成。 */ (resolve) => setTimeout(resolve, 20))
+    assert.deepEqual(client.status().disconnect, { code: 1006, reason: 'transport_abnormal' })
+    assert.equal(client.status().disconnects, 1)
+  } finally {
+    client.stop()
+  }
+})
+
+test('晚到 onclose 不把已重连后的新 epoch 观测覆盖成旧值', async () => {
+  // 快速重连：本机收敛后立即建新 socket，旧 socket 的关闭事件必须被忽略。
+  const first: Handlers = {}
+  const second: Handlers = {}
+  let built = 0
+  const client = createConnector({
+    url: 'ws://127.0.0.1:9/connector',
+    developmentLoopback: true,
+    credential: () => ({
+      machine_id: 'mock_reconnect',
+      recovery_generation: 'mock_generation',
+      credential: 'SYNTHETIC_CREDENTIAL_NOT_REAL'
+    }),
+    session: () => {
+      throw new Error('fixture_must_not_open_session')
+    },
+    nativeInput: () => {
+      throw new Error('fixture_must_not_call_native')
+    },
+    execute: async () => {
+      throw new Error('fixture_must_not_execute')
+    },
+    // 退避极短，让旧 socket 的 close 一定在新 epoch 建立之后才到达。
+    limits: { heartbeat_ms: 10_000, idle_ms: 10_000, handshake_ms: 10_000, reconnect_ms: 1, reconnect_max_ms: 1 },
+    random: () => 1,
+    now: () => 1000,
+    /** 每建立一条 socket 就把处理器登记到对应的槽位。 */
+    socketFactory: (socket) => capture(socket, built++ === 0 ? first : second)
+  })
+  try {
+    await untilCount(client, 0)
+    assert.equal(built, 1)
+    // 第一条 socket 本机收敛：本机原因，计数 1。
+    first.error?.({ type: 'error' })
+    await untilCount(client, 1)
+    assert.deepEqual(client.status().disconnect, { reason: 'transport_unavailable' })
+    // 等第二条 socket 真正建立（新 epoch）。
+    const start = performance.now()
+    while (built < 2) {
+      if (performance.now() - start > 3000) {
+        throw new Error('fixture_reconnect_timeout')
+      }
+      await new Promise(/** 让出事件循环供退避重连推进。 */ (resolve) => setTimeout(resolve, 5))
+    }
+    // 旧 socket 的晚到关闭事件：必须被忽略，不能覆盖当前观测。
+    first.close?.({ code: 1006, reason: '' })
+    await new Promise(/** 给被忽略的事件充分执行时间。 */ (resolve) => setTimeout(resolve, 30))
+    assert.deepEqual(client.status().disconnect, { reason: 'transport_unavailable' })
+    assert.equal(client.status().disconnects, 1)
+  } finally {
+    client.stop()
   }
 })

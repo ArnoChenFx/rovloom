@@ -60,23 +60,39 @@ export class CliSetup {
       return
     }
     let previous = ''
+    // 断开次数基线：首次采样只记录，历史记录不算本进程新事件。
+    let observedDisconnects: number | undefined
     this.#observation = setInterval(
-      /* 状态变化才输出固定阶段、布尔值、有界关闭码/原因与已知容量，不输出设备凭据、epoch或原生正文。 */ () => {
+      /* 状态变化才输出固定阶段、布尔值与已知容量；断开另按计数差补报，不输出凭据、epoch或原生正文。 */ () => {
         try {
           const status = running.transport!.status()
           const ready = status.providers.some(
             /* 采用原transport已经核验的当前provider就绪值。 */ (provider) => provider.ready
           )
+          // 先取基线再判增量：采样相位与断开时刻无关，窗口内完成的断开/重连不会丢。
+          const disconnects =
+            typeof status.disconnects === 'number' &&
+            Number.isSafeInteger(status.disconnects) &&
+            status.disconnects >= 0
+              ? status.disconnects
+              : undefined
+          const fresh =
+            disconnects !== undefined && observedDisconnects !== undefined && disconnects > observedDisconnects
+          if (disconnects !== undefined) {
+            observedDisconnects = disconnects
+          }
           // 断开观测经同一白名单二次复核；异常或未知值整条丢弃，不退化为原文输出。
-          const disconnect = boundedDisconnect(status.disconnect)
-          const current =
-            status.phase +
-            ':' +
-            ready +
-            ':' +
-            (status.failure ?? '') +
-            ':' +
-            (disconnect ? String(disconnect.code ?? '') + ':' + disconnect.reason : '')
+          const disconnect = fresh ? boundedDisconnect(status.disconnect) : undefined
+          if (disconnect) {
+            this.#io?.stderr.write(
+              'connector_disconnect' +
+                (disconnect.code === undefined ? '' : ' code=' + String(disconnect.code)) +
+                ' close_reason=' +
+                disconnect.reason +
+                '\n'
+            )
+          }
+          const current = status.phase + ':' + ready + ':' + (status.failure ?? '')
           if (current !== previous) {
             previous = current
             this.#io?.stderr.write(
@@ -88,11 +104,6 @@ export class CliSetup {
                   ? ' capacity=' + status.capacity.resource + ' reclaim_at=' + String(status.capacity.reclaim_at)
                   : '') +
                 (status.failure ? ' reason=' + status.failure : '') +
-                (disconnect
-                  ? (disconnect.code === undefined ? '' : ' code=' + String(disconnect.code)) +
-                    ' close_reason=' +
-                    disconnect.reason
-                  : '') +
                 '\n'
             )
           }

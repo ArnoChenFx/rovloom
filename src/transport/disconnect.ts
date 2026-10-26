@@ -86,3 +86,33 @@ export function boundedDisconnect(value: unknown): DisconnectObservation | undef
   }
   return Object.freeze({ code, reason: reason as DisconnectReason })
 }
+
+/**
+ * 断开记录只增不减：每次收敛 +1，供采样侧按计数差补报，避免快速重连落在两次采样之间被整段漏掉。
+ * 晚到的远端关闭事件可纠正最近一次观测，但不重复计数。
+ */
+export class DisconnectLog {
+  #count = 0
+  #latest: DisconnectObservation | undefined
+
+  /** 记录一次新的断开收敛；只有这里推进计数。 */
+  record(observation: DisconnectObservation): void {
+    this.#count++
+    this.#latest = observation
+  }
+
+  /** 用远端实际观察到的 code/reason 纠正最近一次观测；不推进计数，未记录时不生效。 */
+  refine(observation: DisconnectObservation): void {
+    if (this.#latest !== undefined) {
+      this.#latest = observation
+    }
+  }
+
+  /** 只读交付累计断开次数与最近一次观测；不做任何裁剪或推断。 */
+  snapshot(): Readonly<{ disconnects: number; disconnect?: DisconnectObservation }> {
+    const latest = boundedDisconnect(this.#latest)
+    return Object.freeze(
+      latest === undefined ? { disconnects: this.#count } : { disconnects: this.#count, disconnect: latest }
+    )
+  }
+}
