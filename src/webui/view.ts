@@ -1,5 +1,11 @@
 /** 管理页直接渲染共享管理 DTO；不补造未核实状态，也不建立另一套管理协议。 */
-import type { DeviceSnapshot, ManagementStatus, ManagementReply, PermissionSnapshot } from '../mcp/management.js'
+import type {
+  CallAggregate,
+  DeviceSnapshot,
+  ManagementStatus,
+  ManagementReply,
+  PermissionSnapshot
+} from '../mcp/management.js'
 import type { ReaderState } from './reader.js'
 import { createLocalizer, type Localizer, type MessageKey } from './i18n.js'
 import { uiIcon, type IconName } from './icons.js'
@@ -13,14 +19,21 @@ export interface PageView {
   providers: ManagementReply['providers_list']
   permissions: PermissionSnapshot | null
   providersProblem: 'forbidden' | 'unavailable' | null
+  /** 调用窗口只在调用页读取；其它页面为 null，部分失败单独标记。 */
+  calls: ManagementReply['calls_list'] | null
+  callsProblem: 'forbidden' | 'unavailable' | null
 }
 export type PageRoute = {
   machineId: string | null
   cursor: string | null
   providerCursor: string | null
-  section?: 'devices' | 'pairing' | 'connect'
+  /** 调用页分页游标；省略等同于没有后续页。 */
+  callsCursor?: string | null
+  section?: 'devices' | 'pairing' | 'connect' | 'calls'
 }
 export type DeviceFilter = { query: string; status: 'all' | 'online' | 'attention' }
+/** 调用页只在前端筛选当前页；不发起新的服务端读取，也不改变统计范围。 */
+export type CallFilter = 'all' | 'responded' | 'pending' | 'failed'
 type PageSection = { heading: HTMLElement; body: HTMLElement }
 
 const connectionNames = {
@@ -101,6 +114,9 @@ export function routeHref(route: PageRoute): string {
   if (route.providerCursor !== null) {
     parameters.set('providers', route.providerCursor)
   }
+  if (route.callsCursor) {
+    parameters.set('calls', route.callsCursor)
+  }
   if (route.machineId === null && route.section) {
     parameters.set('view', route.section)
   }
@@ -115,17 +131,20 @@ export function parseRoute(hash: string): PageRoute {
     return empty
   }
   const parameters = new URLSearchParams(hash.replace(/^#/, ''))
-  for (const key of ['machine', 'cursor', 'providers', 'view']) {
+  for (const key of ['machine', 'cursor', 'providers', 'calls', 'view']) {
     if (parameters.getAll(key).length > 1 || (parameters.get(key)?.length ?? 0) > 1_024) {
       return empty
     }
   }
   const machineId = parameters.get('machine') || null
+  const callsCursor = machineId ? null : parameters.get('calls') || null
   return {
     machineId,
     cursor: machineId ? null : parameters.get('cursor') || null,
     providerCursor: machineId ? parameters.get('providers') || null : null,
-    ...(!machineId && ['devices', 'pairing', 'connect'].includes(parameters.get('view') ?? '')
+    // 省略而非 null，使既有路由字面量保持不变且不引入隐式分页。
+    ...(callsCursor === null ? {} : { callsCursor }),
+    ...(!machineId && ['devices', 'pairing', 'connect', 'calls'].includes(parameters.get('view') ?? '')
       ? { section: parameters.get('view') as PageRoute['section'] }
       : {})
   }
@@ -395,6 +414,306 @@ function guidePage(section: 'pairing' | 'connect', i18n: Localizer, management: 
     body.append(card)
   }
   return { heading, body }
+}
+
+/** 调用状态到展示词条的固定映射；未知状态已在共享校验中拒绝。 */
+const callStateNames = {
+  created: 'calls.state.created',
+  dispatching: 'calls.state.dispatching',
+  connector_accepted: 'calls.state.connector_accepted',
+  responded: 'calls.state.responded',
+  not_dispatched: 'calls.state.not_dispatched',
+  outcome_unknown: 'calls.state.outcome_unknown'
+} as const satisfies Record<string, MessageKey>
+const callContentNames = {
+  available: 'calls.contentAvailable',
+  expired: 'calls.contentExpired',
+  discarded: 'calls.contentDiscarded',
+  unavailable: 'calls.contentUnavailable'
+} as const satisfies Record<string, MessageKey>
+
+/** 状态标签沿用设备页的语义色：已响应为良好，结果未知/未派发为警告，其余中性。 */
+function callStateTone(state: keyof typeof callStateNames): string {
+  if (state === 'responded') {
+    return 'good'
+  }
+  if (state === 'outcome_unknown' || state === 'not_dispatched') {
+    return 'warning'
+  }
+  return 'neutral'
+}
+
+/** 水平条只按本页最大计数归一；数值始终以文本给出，不依赖颜色读数。 */
+function distributionRows(
+  title: MessageKey,
+  note: MessageKey,
+  rows: readonly { label: string; count: number; tone?: string }[],
+  freshness: Freshness
+): HTMLElement {
+  const { t } = freshness.i18n
+  const section = node('section', '', 'call-distribution')
+  const header = node('div', '', 'distribution-heading')
+  header.append(node('h3', t(title)), node('span', t(note), 'muted'))
+  section.append(header)
+  const max = Math.max(1, ...rows.map((row) => row.count))
+  if (!rows.length) {
+    section.append(node('p', t('calls.noData'), 'muted'))
+    return section
+  }
+  const list = node('ul', '', 'distribution-list')
+  for (const row of rows) {
+    const item = node('li', '', 'distribution-row')
+    const label = node('span', row.label, 'distribution-label')
+    label.title = row.label
+    const bar = node('span', '', 'distribution-bar')
+    const fill = node('span', '', `distribution-fill ${row.tone ?? ''}`)
+    // 宽度只表达相对计数，不承载唯一信息；计数文本同时可读。
+    fill.style.setProperty('--share', String(Math.round((row.count / max) * 100)) + '%')
+    bar.append(fill)
+    const value = node('strong', t('calls.count', { count: row.count }), 'distribution-value')
+    item.append(label, bar, value)
+    list.append(item)
+  }
+  section.append(list)
+  return section
+}
+
+/** 状态分布用环形图与计数并列；未知状态不合并进成功。 */
+function stateDistribution(aggregate: CallAggregate, freshness: Freshness): HTMLElement {
+  const { t } = freshness.i18n
+  const section = node('section', '', 'call-distribution call-states')
+  const header = node('div', '', 'distribution-heading')
+  header.append(node('h3', t('calls.distribution')), node('span', t('calls.distributionNote'), 'muted'))
+  section.append(header)
+  if (!aggregate.total) {
+    section.append(node('p', t('calls.noData'), 'muted'))
+    return section
+  }
+  // 环形图只用 CSS conic-gradient 表达比例，中心给出总数；分类明细在右侧文本列表中重复。
+  const ring = node('div', '', 'state-ring')
+  const slices: string[] = []
+  let offset = 0
+  const tones: Record<string, string> = {
+    responded: 'var(--good-text)',
+    created: 'var(--muted)',
+    dispatching: 'var(--accent)',
+    connector_accepted: 'var(--accent)',
+    not_dispatched: 'var(--warning-text)',
+    outcome_unknown: 'var(--warning-text)'
+  }
+  for (const row of aggregate.by_state) {
+    const end = offset + (row.count / aggregate.total) * 100
+    slices.push(`${tones[row.state] ?? 'var(--muted)'} ${offset}% ${end}%`)
+    offset = end
+  }
+  ring.style.setProperty('--ring', slices.length ? `conic-gradient(${slices.join(',')})` : 'none')
+  const center = node('div', '', 'state-ring-center')
+  center.append(node('strong', String(aggregate.total), 'state-ring-total'), node('span', t('calls.total'), 'muted'))
+  ring.append(center)
+  const legend = node('ul', '', 'state-legend')
+  for (const row of aggregate.by_state) {
+    const item = node('li')
+    const dot = node('span', '', 'state-dot')
+    dot.style.setProperty('--tone', tones[row.state] ?? 'var(--muted)')
+    item.append(
+      dot,
+      node('span', t(callStateNames[row.state]), 'state-name'),
+      node('strong', String(row.count), 'state-count')
+    )
+    legend.append(item)
+  }
+  section.append(ring, legend)
+  return section
+}
+
+/** 调用页只使用共享调用窗口 DTO；正文、凭据与未授权设备不在此构造。 */
+function callsPage(page: PageView, freshness: Freshness, route: PageRoute, filter: CallFilter): PageSection {
+  const { i18n } = freshness
+  const { t } = i18n
+  const heading = node('header', '', 'page-heading')
+  const copy = node('div', '', 'heading-copy')
+  copy.append(node('p', t('calls.eyebrow'), 'eyebrow'))
+  copy.append(node('h1', t('calls.title')), node('p', t('calls.description'), 'muted'))
+  heading.append(copy)
+  const section = node('section', '', 'devices-section calls-section')
+  if (page.callsProblem !== null) {
+    section.append(
+      node('p', page.callsProblem === 'forbidden' ? t('calls.forbidden') : t('calls.unavailable'), 'notice warning')
+    )
+    return { heading, body: section }
+  }
+  const calls = page.calls
+  if (!calls) {
+    section.append(node('p', t('calls.unavailable'), 'notice warning'))
+    return { heading, body: section }
+  }
+  const aggregate = calls.aggregate
+  const responded = aggregate.by_state.find(/* 已响应计数只来自账本状态。 */ (row) => row.state === 'responded')
+  const pending = aggregate.by_state
+    .filter(
+      /* 在途只含明确未定状态，不把未派发算作在途。 */ (row) =>
+        ['created', 'dispatching', 'connector_accepted'].includes(row.state)
+    )
+    .reduce((sum, row) => sum + row.count, 0)
+  const metrics = node('section', '', 'overview-metrics call-metrics')
+  metrics.setAttribute('aria-label', t('calls.title'))
+  for (const [label, note, value, icon] of [
+    ['calls.total', 'calls.totalNote', String(aggregate.total), 'calls'],
+    ['calls.responded', 'calls.respondedNote', String(responded?.count ?? 0), 'check'],
+    ['calls.pending', 'calls.pendingNote', String(pending), 'activity']
+  ] as const) {
+    const card = node('article', '', 'metric-card')
+    const top = node('div', '', 'metric-heading')
+    top.append(node('span', t(label)), uiIcon(icon))
+    card.append(top, node('strong', value, 'metric-value'), node('p', t(note), 'muted'))
+    metrics.append(card)
+  }
+  metrics.append(
+    node(
+      'p',
+      t('calls.window', {
+        since: i18n.timestamp(calls.window.since),
+        sampled: String(calls.window.sampled),
+        truncated: calls.window.truncated ? t('calls.truncated') : ''
+      }),
+      'metric-scope'
+    )
+  )
+  const charts = node('section', '', 'call-charts')
+  charts.append(
+    stateDistribution(aggregate, freshness),
+    distributionRows(
+      'calls.bySource',
+      'calls.bySourceNote',
+      aggregate.by_principal.map(
+        /* 来源使用 principal 标识，不展开凭据。 */ (row) => ({
+          label: row.principal,
+          count: row.count
+        })
+      ),
+      freshness
+    ),
+    distributionRows(
+      'calls.byTarget',
+      'calls.byTargetNote',
+      aggregate.by_provider.map(
+        /* 目标使用 provider 实例标识与类型。 */ (row) => ({
+          label: `${row.machine_id} · ${row.kind === 'luvus' ? 'Luvus' : 'Herdr'} · ${row.provider_id}`,
+          count: row.count
+        })
+      ),
+      freshness
+    ),
+    distributionRows(
+      'calls.byMethod',
+      'calls.byMethodNote',
+      aggregate.by_method.map(/* 命令只展示已提交方法名。 */ (row) => ({ label: row.method, count: row.count })),
+      freshness
+    )
+  )
+  const listHeader = node('div', '', 'section-heading')
+  const listCopy = node('div')
+  listCopy.append(node('h2', t('calls.listHeading')), node('p', t('calls.listSubtitle'), 'muted'))
+  listHeader.append(listCopy)
+  if (calls.items.length) {
+    const filters = node('div', '', 'device-filters call-filters')
+    filters.setAttribute('role', 'group')
+    filters.setAttribute('aria-label', t('calls.filterLabel'))
+    for (const [value, key] of [
+      ['all', 'calls.filterAll'],
+      ['responded', 'calls.state.responded'],
+      ['pending', 'calls.pending'],
+      ['failed', 'calls.failed']
+    ] as const) {
+      const button = node('button', t(key))
+      button.type = 'button'
+      button.dataset.callFilter = value
+      button.setAttribute('aria-pressed', String(value === filter))
+      filters.append(button)
+    }
+    listHeader.append(filters)
+  }
+  section.append(metrics, charts, listHeader)
+  if (!calls.items.length) {
+    const empty = node('div', '', 'empty')
+    empty.append(uiIcon('calls'), node('h2', t('calls.emptyTitle')), node('p', t('calls.emptyHint'), 'muted'))
+    section.append(empty)
+    return { heading, body: section }
+  }
+  const columns = node('div', '', 'call-columns')
+  columns.setAttribute('aria-hidden', 'true')
+  for (const key of ['calls.colCall', 'calls.colSource', 'calls.colState', 'calls.colTime'] as const) {
+    columns.append(node('span', t(key)))
+  }
+  const list = node('ul', '', 'call-list')
+  list.setAttribute('aria-label', t('calls.listHeading'))
+  const visible = calls.items.filter(
+    /* 前端筛选只作用于当前页；统计始终来自完整采样窗口。 */ (call) =>
+      filter === 'all' ||
+      (filter === 'responded'
+        ? call.state === 'responded'
+        : filter === 'pending'
+          ? ['created', 'dispatching', 'connector_accepted'].includes(call.state)
+          : ['not_dispatched', 'outcome_unknown'].includes(call.state))
+  )
+  for (const call of visible) {
+    const row = node('li', '', 'call-card')
+    const identity = node('div', '', 'call-identity')
+    const method = node('strong', call.method, 'call-method')
+    const id = node('code', call.call_id)
+    id.title = call.call_id
+    identity.append(method, id)
+    const source = node('div', '', 'call-source')
+    source.append(node('span', call.principal, 'call-principal'))
+    source.append(
+      node(
+        'p',
+        call.target.profile === 'session' && call.target.session
+          ? t('calls.targetSession', { session: call.target.session })
+          : t('calls.targetHost'),
+        'muted'
+      )
+    )
+    source.append(node('p', `${call.machine_id} · ${call.provider_id}`, 'mono muted'))
+    const state = node('div', '', 'call-state')
+    state.append(
+      node('span', t(callStateNames[call.state]), `badge ${callStateTone(call.state)}`),
+      node('span', t(call.dispatched ? 'calls.dispatched' : 'calls.notDispatched'), 'muted')
+    )
+    const content = node('p', t(callContentNames[call.content_status]), 'muted')
+    if (call.outcome !== null) {
+      content.textContent = `${t(call.outcome === 'result' ? 'calls.outcome.result' : 'calls.outcome.error')} · ${content.textContent}`
+    }
+    state.append(content)
+    const when = node('div', '', 'call-time')
+    when.append(
+      node('strong', i18n.timestamp(call.created_at), 'activity-age'),
+      node('p', i18n.age(call.created_at, freshness.now), 'muted'),
+      node('p', t('calls.deadline', { time: i18n.timestamp(call.deadline) }), 'muted')
+    )
+    row.append(identity, source, state, when)
+    list.append(row)
+  }
+  section.append(columns, list)
+  if (!visible.length) {
+    const empty = node('div', '', 'empty search-empty')
+    empty.append(uiIcon('search'), node('h3', t('devices.noMatches')), node('p', t('calls.emptyHint'), 'muted'))
+    section.append(empty)
+  }
+  section.append(node('p', t('calls.results', { shown: visible.length }), 'list-count'))
+  if (calls.next_cursor !== undefined) {
+    const next = node('a', t('calls.next'), 'button-link')
+    next.href = routeHref({
+      machineId: null,
+      cursor: null,
+      providerCursor: null,
+      callsCursor: calls.next_cursor,
+      section: 'calls'
+    })
+    section.append(next)
+  }
+  section.append(node('p', t('calls.scope'), 'metric-scope'))
+  return { heading, body: section }
 }
 
 /** 概览只汇总当前授权页并给出设备页入口，不复用设备列表，避免两页内容重复。 */
@@ -802,7 +1121,8 @@ export function renderPage(
   route: PageRoute,
   i18n: Localizer = createLocalizer('zh-CN'),
   management = false,
-  filter: DeviceFilter = { query: '', status: 'all' }
+  filter: DeviceFilter = { query: '', status: 'all' },
+  callFilter: CallFilter = 'all'
 ): void {
   const { t } = i18n
   const focused =
@@ -923,14 +1243,16 @@ export function renderPage(
           ? guidePage(route.section, i18n, management)
           : route.section === 'devices'
             ? deviceList(page, freshness, route, filter)
-            : overviewPage(page, freshness)
+            : route.section === 'calls'
+              ? callsPage(page, freshness, route, callFilter)
+              : overviewPage(page, freshness)
     view.append(section.heading)
     if (route.section === 'pairing' && (state.stale || status.mode !== 'active')) {
       view.append(node('p', t(state.stale ? 'reader.stale' : 'gateway.degradedNote'), 'notice warning'))
     }
     if (route.machineId !== null || !['pairing', 'connect'].includes(route.section ?? '')) {
-      // 指标卡只属于概览；设备页与详情页各自展示自己的数据。
-      if (route.machineId === null && route.section !== 'devices') {
+      // 指标卡只属于概览与调用页；设备页与详情页各自展示自己的数据。
+      if (route.machineId === null && route.section !== 'devices' && route.section !== 'calls') {
         view.append(overviewMetrics(page, freshness))
       }
       view.append(gateway)

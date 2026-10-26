@@ -144,7 +144,13 @@ test(
           const first = source.administrator(caller, ref)!.grants
           assert(first.some((grant) => grant.action === 'gateway_read'))
           assert(first.some((grant) => grant.action === 'devices_register'))
-          for (const action of ['devices_read', 'devices_rename', 'devices_disconnect', 'devices_revoke']) {
+          for (const action of [
+            'devices_read',
+            'devices_rename',
+            'devices_disconnect',
+            'devices_revoke',
+            'calls_read'
+          ]) {
             assert(
               first.some((grant) => grant.action === action && 'machine_id' in grant && grant.machine_id === 'm_one')
             )

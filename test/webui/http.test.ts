@@ -1,4 +1,4 @@
-/** 隔离验证六项 HTTP 读取与浏览器传输边界；合成身份/DTO 不能证明真实登录后端完成。 */
+/** 隔离验证七项 HTTP 读取与浏览器传输边界；合成身份/DTO 不能证明真实登录后端完成。 */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { GatewayManagementService, ManagementArguments } from '../../src/mcp/management.js'
@@ -45,15 +45,16 @@ function deferred<T>() {
 }
 
 test(
-  '六项固定路径往返与权限目标，不把身份或写操作塞入查询',
-  /** 六 read 的共享参数只经固定 GET 资源。 */ () => {
+  '七项固定路径往返与权限目标，不把身份或写操作塞入查询',
+  /** 七 read 的共享参数只经固定 GET 资源。 */ () => {
     const cases: [ManagementReadOperation, ManagementArguments[ManagementReadOperation]][] = [
       ['status', {}],
       ['devices_list', { cursor: 'opaque/游标', limit: 200, states: ['pending', 'revoked'] }],
       ['devices_get', { machine_id: 'opaque/device' }],
       ['providers_list', { machine_id: 'm', limit: 1 }],
       ['providers_get', { machine_id: 'm', provider_id: 'p/1' }],
-      ['permissions_get', { machine_id: 'm', provider_id: 'p' }]
+      ['permissions_get', { machine_id: 'm', provider_id: 'p' }],
+      ['calls_list', { cursor: 'opaque/call', limit: 20, machine_id: 'm', states: ['responded', 'outcome_unknown'] }]
     ]
     for (const [operation, args] of cases) {
       assert.deepEqual(parseManagementReadPath(managementReadPath(operation, args)), { operation, args })
@@ -64,6 +65,10 @@ test(
       '/admin/v1/devices?limit=1&limit=2',
       '/admin/v1/devices?states=online,online',
       '/admin/v1/devices/%zz',
+      '/admin/v1/calls?states=responded,responded',
+      '/admin/v1/calls?states=bogus',
+      '/admin/v1/calls?limit=201',
+      '/admin/v1/calls?principal_id=admin',
       '//evil/admin/v1/status',
       'https://evil/admin/v1/status'
     ]) {
@@ -301,6 +306,10 @@ test(
         (await read('permissions_get', { machine_id: 'fixture-a' }, signal)).principal_id,
         'fixture-principal'
       )
+      const calls = await read('calls_list', { limit: 2, states: ['responded'] }, signal)
+      assert.equal(calls.aggregate.total, 1)
+      assert.equal(calls.items[0]?.state, 'responded')
+      assert.equal(calls.window.sampled, 1)
     } finally {
       listener.stop()
     }

@@ -1,6 +1,7 @@
 // 将门面查询、调用元数据和独立清理接到实际 Store/Router；缺执行、管理审计或通道后端时拒绝写入。
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { canonical, digest, GatewayError } from '../contracts.js'
+import type { CallState } from '../contracts.js'
 import { Router, type LocalPolicies, type Principal } from '../router.js'
 import type { Store } from '../store.js'
 import { providerScopeAllowed, validatePolicies } from '../wire/index.js'
@@ -32,6 +33,8 @@ import {
 import type {
   AdminContext,
   Administrator,
+  CallAggregate,
+  CallSummary,
   DeviceSnapshot,
   GatewayIdentitySource,
   GatewayManagementService,
@@ -62,6 +65,18 @@ export type StoreGatewayOptions = {
 }
 const idPattern = /^[a-zA-Z0-9_-]{1,128}$/
 const persistedStates = new Set(['pending', 'offline', 'online', 'revoked'])
+/** 调用状态是账本枚举，管理筛选不接受未知或现场推导状态。 */
+const callStates = new Set<CallState>([
+  'created',
+  'dispatching',
+  'connector_accepted',
+  'responded',
+  'not_dispatched',
+  'outcome_unknown'
+])
+/** 管理调用视图固定回看窗口与单次采样上限；更早的记录仍需按原保留期清理，页面不宣称全量。 */
+const CALL_WINDOW_MS = 86_400_000
+const CALL_WINDOW_LIMIT = 2_000
 const gatewayErrors: Record<string, ServiceErrorCode> = {
   machine_not_found: 'not_found',
   call_not_found: 'not_found',
@@ -161,6 +176,98 @@ function adminArguments(value: unknown, required: string[], optional: string[] =
     }
   }
   return args
+}
+
+// 管理调用窗口只接受显式分页、可选设备与调用状态；请求正文、来源或命令都不能作为查询注入。
+function callArguments(value: unknown): ManagementArguments['calls_list'] {
+  let args: Record<string, unknown>
+  try {
+    args = JSON.parse(canonical(value))
+  } catch {
+    throw new FacadeServiceError('invalid_arguments')
+  }
+  if (
+    !args ||
+    Array.isArray(args) ||
+    typeof args !== 'object' ||
+    Object.keys(args).some(
+      /* 只允许分页、设备范围和状态筛选，不接受身份或正文条件。 */ (key) =>
+        !['cursor', 'limit', 'machine_id', 'states'].includes(key)
+    )
+  ) {
+    throw new FacadeServiceError('invalid_arguments')
+  }
+  if (
+    args.limit !== undefined &&
+    (!Number.isSafeInteger(args.limit) || Number(args.limit) < 1 || Number(args.limit) > 200)
+  ) {
+    throw new FacadeServiceError('invalid_arguments')
+  }
+  if (
+    args.cursor !== undefined &&
+    (typeof args.cursor !== 'string' || args.cursor.length < 1 || args.cursor.length > 1024)
+  ) {
+    throw new FacadeServiceError('invalid_arguments')
+  }
+  if (args.machine_id !== undefined && (typeof args.machine_id !== 'string' || !idPattern.test(args.machine_id))) {
+    throw new FacadeServiceError('invalid_arguments')
+  }
+  if (
+    args.states !== undefined &&
+    (!Array.isArray(args.states) ||
+      args.states.length < 1 ||
+      args.states.length > 6 ||
+      new Set(args.states).size !== args.states.length ||
+      args.states.some(
+        /* 只接受账本状态枚举，不从数据库状态推断连接。 */ (state) => !callStates.has(state as CallState)
+      ))
+  ) {
+    throw new FacadeServiceError('invalid_arguments')
+  }
+  return args as ManagementArguments['calls_list']
+}
+
+/** 只保留目标 profile 与调用方声明的 session 名；原生句柄、凭据和其它字段不进入管理投影。 */
+function callTarget(value: string): CallSummary['target'] {
+  try {
+    const target = JSON.parse(value) as { profile?: unknown; session?: unknown }
+    if (target?.profile === 'host') {
+      return { profile: 'host', session: null }
+    }
+    if (target?.profile === 'session' && typeof target.session === 'string' && target.session.length <= 1024) {
+      return { profile: 'session', session: target.session }
+    }
+  } catch {
+    /* 无法解析的账本行按未记录目标处理，不猜测。 */
+  }
+  return { profile: 'host', session: null }
+}
+
+/** 按固定顺序汇总计数，切片不改变统计范围；空窗口返回空数组而不是零值行。 */
+function tally<T extends string>(values: readonly T[], order: readonly T[]): { key: T; count: number }[] {
+  const counts = new Map<T, number>()
+  for (const value of values) {
+    counts.set(value, (counts.get(value) ?? 0) + 1)
+  }
+  return order
+    .filter(/* 只输出已知枚举，避免未知账本值成为展示分类。 */ (key) => counts.has(key))
+    .map((key) => ({ key, count: counts.get(key)! }))
+}
+
+/** 计数按降序、同值按码元序排列，限制展示长度以免单页返回过多分类。 */
+function ranked<T>(rows: readonly { key: T; count: number }[], limit: number): { key: T; count: number }[] {
+  return [...rows]
+    .sort(
+      /* 计数优先；同值用码元比较，避免不同 locale 给出不同分类顺序。 */ (a, b) =>
+        b.count === a.count
+          ? String(a.key) < String(b.key)
+            ? -1
+            : String(a.key) > String(b.key)
+              ? 1
+              : 0
+          : b.count - a.count
+    )
+    .slice(0, limit)
 }
 
 export class StoreGatewayService implements GatewayService {
@@ -617,7 +724,7 @@ export class StoreGatewayService implements GatewayService {
   ): PermissionSnapshot {
     const actions: ManagementGrant['action'][] = target.provider_id
       ? ['providers_read', 'providers_manage']
-      : ['devices_read', 'devices_rename', 'devices_disconnect', 'devices_revoke', 'permissions_read']
+      : ['devices_read', 'devices_rename', 'devices_disconnect', 'devices_revoke', 'permissions_read', 'calls_read']
     const mode = this.options.store.health().mode
     const capabilities = new Set(this.options.managementCapabilities?.(target) ?? [])
     const current = this.administrator(context)
@@ -634,7 +741,7 @@ export class StoreGatewayService implements GatewayService {
         )
         const reason = !allowed
           ? 'forbidden'
-          : !['devices_read', 'providers_read', 'permissions_read'].includes(action)
+          : !['devices_read', 'providers_read', 'permissions_read', 'calls_read'].includes(action)
             ? mode === 'storage_degraded'
               ? 'storage_degraded'
               : capabilities.has(action)
@@ -654,6 +761,140 @@ export class StoreGatewayService implements GatewayService {
       observed_at: now,
       expires_at: now + 5000,
       decisions
+    }
+  }
+
+  // 管理调用窗口只读当前授权设备的账本元数据；分页与统计来自同一次采样，正文与凭据不进入回复。
+  private callList(
+    principal: Principal,
+    admin: Administrator,
+    args: ManagementArguments['calls_list'],
+    now: number,
+    mode: ManagementStatus['mode']
+  ): ManagementReply['calls_list'] {
+    const granted = [
+      ...new Set(
+        admin.grants
+          .filter(/* 只有明确的 calls_read 授权设备可进入调用视图。 */ (grant) => grant.action === 'calls_read')
+          .map(/* 提取同一条 grant 中的设备范围。 */ (grant) => (grant as { machine_id: string }).machine_id)
+      )
+    ].sort()
+    if (!granted.length) {
+      throw new FacadeServiceError('forbidden')
+    }
+    // 授权设备数受管理员记录上限约束；超出视为异常授权，不构造超长查询。
+    if (granted.length > 900) {
+      throw new FacadeServiceError('busy')
+    }
+    if (args.machine_id !== undefined && !granted.includes(args.machine_id)) {
+      throw new FacadeServiceError('not_found')
+    }
+    const machines = args.machine_id === undefined ? granted : [args.machine_id]
+    const since = Math.max(0, now - CALL_WINDOW_MS)
+    // 多取一条用于判定窗口是否被采样上限截断；列表仍按签名游标分页。
+    const rows = this.options.store.callsWindow(machines, since, CALL_WINDOW_LIMIT + 1)
+    const truncated = rows.length > CALL_WINDOW_LIMIT
+    const windowRows = truncated ? rows.slice(0, CALL_WINDOW_LIMIT) : rows
+    const projected: CallSummary[] = windowRows.map(
+      /* 逐行投影账本元数据；降级时未定结论保持 outcome_unknown，不宣称已执行。 */ (row) => {
+        const state =
+          mode === 'storage_degraded' && ['dispatching', 'connector_accepted'].includes(row.state)
+            ? ('outcome_unknown' as const)
+            : row.state
+        const content =
+          row.content_status === 'available' && now < row.content_expires
+            ? ('available' as const)
+            : row.content_status === 'available'
+              ? ('expired' as const)
+              : (row.content_status as CallSummary['content_status'])
+        return {
+          call_id: row.call_id,
+          principal: row.principal,
+          machine_id: row.machine_id,
+          provider_id: row.provider_id,
+          provider_kind: row.provider_kind,
+          method: row.method,
+          state,
+          dispatched: row.epoch !== null,
+          target: callTarget(row.target_json),
+          outcome:
+            row.response_category === 'result' || row.response_category === 'error' ? row.response_category : null,
+          created_at: row.created,
+          deadline: row.deadline,
+          content_status: content
+        }
+      }
+    )
+    const items = args.states ? projected.filter((row) => args.states!.includes(row.state)) : projected
+    const scope = {
+      principal: principal.id,
+      admin,
+      generation: this.options.store.generation(),
+      name: 'calls_list',
+      args: queryArguments(args)
+    }
+    const page = this.page(items, args, scope, now)
+    return {
+      ...page,
+      observed_at: now,
+      aggregate: this.callAggregate(items),
+      window: {
+        since,
+        first_at: items.length ? items[items.length - 1]!.created_at : null,
+        last_at: items.length ? items[0]!.created_at : null,
+        // 采样数与统计同一范围（含状态筛选），避免页面出现两个互相矛盾的总数。
+        sampled: items.length,
+        truncated
+      }
+    }
+  }
+
+  // 分布只覆盖本次采样并受分页过滤影响；分类长度有界，避免单次回复膨胀。
+  private callAggregate(items: readonly CallSummary[]): CallAggregate {
+    const states: CallState[] = [
+      'created',
+      'dispatching',
+      'connector_accepted',
+      'responded',
+      'not_dispatched',
+      'outcome_unknown'
+    ]
+    // provider_id 只在所属机器内唯一；历史记录也可能包含同一实例的不同 kind。
+    const providerCounts = new Map<string, CallAggregate['by_provider'][number]>()
+    for (const item of items) {
+      const key = canonical([item.machine_id, item.provider_id, item.provider_kind])
+      const previous = providerCounts.get(key)
+      providerCounts.set(key, {
+        machine_id: item.machine_id,
+        provider_id: item.provider_id,
+        kind: item.provider_kind,
+        count: (previous?.count ?? 0) + 1
+      })
+    }
+    return {
+      total: items.length,
+      by_state: tally(
+        items.map(/* 状态分布用于页面环形图，值域固定。 */ (item) => item.state),
+        states
+      ).map(({ key, count }) => ({ state: key, count })),
+      by_provider: ranked(
+        [...providerCounts].map(([key, value]) => ({ key, count: value.count })),
+        8
+      ).map(({ key }) => providerCounts.get(key)!),
+      by_principal: ranked(
+        tally(
+          items.map(/* 来源分布按 principal 计数，是审计可见的调用方标识。 */ (item) => item.principal),
+          [...new Set(items.map((item) => item.principal))]
+        ),
+        8
+      ).map(({ key, count }) => ({ principal: key, count })),
+      by_method: ranked(
+        tally(
+          items.map(/* 命令分布按已提交方法名计数，不展开参数。 */ (item) => item.method),
+          [...new Set(items.map((item) => item.method))]
+        ),
+        8
+      ).map(({ key, count }) => ({ method: key, count }))
     }
   }
 
@@ -692,6 +933,15 @@ export class StoreGatewayService implements GatewayService {
         } as ManagementReply[K]
       }
       this.now()
+      if (name === 'calls_list') {
+        return this.callList(
+          principal,
+          admin,
+          callArguments(value),
+          now,
+          health.mode as ManagementStatus['mode']
+        ) as ManagementReply[K]
+      }
       if (!['devices_list', 'devices_get', 'providers_list', 'providers_get', 'permissions_get'].includes(name)) {
         throw new FacadeServiceError('backend_unavailable')
       }

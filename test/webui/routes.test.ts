@@ -5,7 +5,7 @@ import { parseRoute, routeHref } from '../../src/webui/view.js'
 import { unavailableRead } from '../../src/webui/page.js'
 
 test('workspace navigation round-trips separately from explicit device targets', () => {
-  for (const section of ['devices', 'pairing', 'connect'] as const) {
+  for (const section of ['devices', 'calls', 'pairing', 'connect'] as const) {
     const route = { machineId: null, cursor: null, providerCursor: null, section }
     assert.deepEqual(parseRoute(routeHref(route)), route)
   }
@@ -22,6 +22,16 @@ test(
     assert.deepEqual(parseRoute(routeHref(route)), route)
     assert.deepEqual(parseRoute('#cursor=next'), { machineId: null, cursor: 'next', providerCursor: null })
     assert.deepEqual(parseRoute('#machine=a&cursor=next'), { machineId: 'a', cursor: null, providerCursor: null })
+    // 调用页游标只在无设备目标时保留，且与设备列表游标互不覆盖。
+    const callsRoute = {
+      machineId: null,
+      cursor: null,
+      providerCursor: null,
+      callsCursor: 'call-page',
+      section: 'calls' as const
+    }
+    assert.deepEqual(parseRoute(routeHref(callsRoute)), callsRoute)
+    assert.deepEqual(parseRoute('#machine=a&calls=call-page'), { machineId: 'a', cursor: null, providerCursor: null })
     const unicodeRoute = { machineId: '机'.repeat(1024), cursor: null, providerCursor: '界'.repeat(1024) }
     assert.deepEqual(parseRoute(routeHref(unicodeRoute)), unicodeRoute)
   }

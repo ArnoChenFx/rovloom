@@ -122,7 +122,7 @@ export function fixtureReply<K extends ManagementReadOperation>(
   name: K,
   args: ManagementArguments[K]
 ): ManagementReply[K] {
-  const target = 'machine_id' in args ? args.machine_id : 'fixture-a'
+  const target = ('machine_id' in args ? args.machine_id : undefined) ?? 'fixture-a'
   let result: ManagementReply[ManagementReadOperation]
   switch (name) {
     case 'status':
@@ -163,8 +163,98 @@ export function fixtureReply<K extends ManagementReadOperation>(
         decisions: [{ action: 'devices_read', allowed: true, reason_code: 'allowed' }]
       }
       break
+    case 'calls_list':
+      result = fixtureCalls(args as ManagementArguments['calls_list'])
+      break
   }
   return result! as ManagementReply[K]
+}
+
+/** 三条覆盖已响应、在途与未派发的调用；统计与窗口由同一 fixture 集合派生。 */
+function fixtureCalls(args: ManagementArguments['calls_list']): ManagementReply['calls_list'] {
+  const items = [
+    {
+      call_id: 'call-fixture-1',
+      principal: 'fixture-client',
+      machine_id: 'fixture-a',
+      provider_id: 'fixture-luvus',
+      provider_kind: 'luvus' as const,
+      method: 'pane.read',
+      state: 'responded' as const,
+      dispatched: true,
+      target: { profile: 'session' as const, session: 'fixture-session' },
+      outcome: 'result' as const,
+      created_at: fixtureTime - 2000,
+      deadline: fixtureTime + 28_000,
+      content_status: 'available' as const
+    },
+    {
+      call_id: 'call-fixture-2',
+      principal: 'fixture-client',
+      machine_id: 'fixture-a',
+      provider_id: 'fixture-luvus',
+      provider_kind: 'luvus' as const,
+      method: 'pane.list',
+      state: 'dispatching' as const,
+      dispatched: true,
+      target: { profile: 'host' as const, session: null },
+      outcome: null,
+      created_at: fixtureTime - 4000,
+      deadline: fixtureTime + 26_000,
+      content_status: 'available' as const
+    },
+    {
+      call_id: 'call-fixture-3',
+      principal: 'fixture-other',
+      machine_id: 'fixture-b',
+      provider_id: 'fixture-herdr',
+      provider_kind: 'herdr' as const,
+      method: 'session.status',
+      state: 'not_dispatched' as const,
+      dispatched: false,
+      target: { profile: 'session' as const, session: 'fixture-herdr-session' },
+      outcome: null,
+      created_at: fixtureTime - 6000,
+      deadline: fixtureTime + 24_000,
+      content_status: 'unavailable' as const
+    }
+  ].filter(
+    /** 设备与状态筛选只作用于本 fixture 集合。 */ (item) =>
+      (args.machine_id === undefined || item.machine_id === args.machine_id) &&
+      (args.states === undefined || args.states.includes(item.state))
+  )
+  const counted = (key: 'state' | 'provider_id' | 'principal' | 'method') => {
+    const counts = new Map<string, number>()
+    for (const item of items) {
+      counts.set(item[key], (counts.get(item[key]) ?? 0) + 1)
+    }
+    return [...counts].sort(
+      /** 与生产排序一致：计数降序、同值字典序。 */ (a, b) => b[1] - a[1] || a[0].localeCompare(b[0])
+    )
+  }
+  return {
+    items,
+    observed_at: fixtureTime,
+    aggregate: {
+      total: items.length,
+      by_state: counted('state').map(([state, count]) => ({ state: state as (typeof items)[number]['state'], count })),
+      by_provider: counted('provider_id').map(([provider_id, count]) => ({
+        machine_id: items.find((item) => item.provider_id === provider_id)!.machine_id,
+        provider_id,
+        kind: items.find((item) => item.provider_id === provider_id)!.provider_kind,
+        count
+      })),
+      by_principal: counted('principal').map(([principal, count]) => ({ principal, count })),
+      by_method: counted('method').map(([method, count]) => ({ method, count }))
+    },
+    window: {
+      since: fixtureTime - 86_400_000,
+      first_at: items.length ? Math.min(...items.map((item) => item.created_at)) : null,
+      last_at: items.length ? Math.max(...items.map((item) => item.created_at)) : null,
+      sampled: items.length,
+      truncated: false
+    }
+  }
 }
 
 /** 组合直接页面校验所需 fixture，不作为任何生产默认数据。 */
@@ -181,7 +271,9 @@ export function fixtureSnapshot(route: PageRoute): TimedSnapshot<PageView> {
       providers:
         route.machineId === null ? { items: [] } : fixtureReply('providers_list', { machine_id: route.machineId }),
       permissions: route.machineId === null ? null : fixtureReply('permissions_get', { machine_id: route.machineId }),
-      providersProblem: null
+      providersProblem: null,
+      calls: route.machineId === null && route.section === 'calls' ? fixtureReply('calls_list', {}) : null,
+      callsProblem: null
     }
   }
 }

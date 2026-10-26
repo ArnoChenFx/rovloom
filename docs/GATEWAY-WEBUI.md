@@ -41,6 +41,27 @@
 
 页面没有 Gateway 的实际监听范围、设备 OS 版本和管理员会话截止时间，缺失处如实显示为未核实。设备名、标签、ID、方法名和协议引用保持原文。页面不显示设备凭据或原生输出；管理员可在 MCP 管理区查看和复制 MCP Token。
 
+## 调用记录
+
+「调用记录」页面按时间倒序展示当前管理员获授权设备最近 24 小时的调用元数据。需要 `calls_read` 授权；`scope=all_devices` 的管理员会自动获得，其它管理员需要在受保护来源中显式声明。
+
+页面内容：
+
+- 顶部三张指标卡：采样调用总数、已响应数、在途数（`created`、`dispatching`、`connector_accepted`）。
+- 四张分布图：状态环形图，以及来源（调用方 principal）、目标（provider 实例）、命令（已提交方法名）三张条形图。
+- 目标分布按 `machine_id`、`provider_id` 和类型区分，避免不同机器上的同名 provider 被合并。
+- 明细列表：每条显示命令与方法名、调用 ID、来源 principal、目标（会话名或主机级）、provider、状态、派发尝试是否已登记、响应类别（结果/错误）与正文保留状态、登记时间、年龄和截止时间。登记派发尝试不证明原生已接收或执行，正文保留状态也不授予管理员读取正文的权限。
+- 状态筛选只作用于当前页列表，不改变上方统计；分页只向后翻，也不改变统计。
+
+约束：
+
+- 统计和列表来自服务端单次采样（最多 2000 条）。窗口内超出上限时标记 `truncated`，只覆盖最新部分，分页也仅能查看采样内的记录，页面会明确提示。
+- 只展示元数据。请求正文、响应正文、凭据、`identity_json`、`binding_json` 和原生会话引用都不会进入管理面回复。
+- 目标只保留 `session` 或 `host` profile 和调用方声明的会话名。
+- 存储降级时，`dispatching` 和 `connector_accepted` 收敛为 `outcome_unknown`，不宣称已执行。
+- 状态查询筛选按上述公开状态执行，列表分页不会改变本次采样的统计总数。
+- 部分失败（403/503）只标记调用区块，设备列表照常显示；401 仍清空整页。
+
 ## 刷新
 
 - 页面可见时每 5 秒读取一次，隐藏时暂停，回到前台立即刷新。单次读取超时 5 秒。
@@ -124,6 +145,7 @@ CLI 新创建或轮换的 Token 同样可查看。旧的纯摘要记录不能还
 | `/admin/v1/devices/{machine_id}/providers` | provider 列表，分页 |
 | `/admin/v1/devices/{machine_id}/providers/{provider_id}` | 单个 provider |
 | `/admin/v1/devices/{machine_id}/permissions` | 当前管理员对该设备的权限提示，可用 `provider_id` 指定 provider |
+| `/admin/v1/calls` | 调用记录窗口：支持 `cursor`、`limit`（默认 50，最大 200）、`machine_id` 与 `states` 筛选 |
 
 写入接口为 `POST /admin/v1/actions/<action>`，其中 `<action>` 包括 `confirmations_create`、`confirmations_confirm`、`devices_rename`、`devices_disconnect`、`devices_revoke`、`providers_disable`，以及查询回执的 `operations_get`。每个写请求带请求 ID、预期 revision 和确认 ID 等字段，后端按管理员和目标去重。
 

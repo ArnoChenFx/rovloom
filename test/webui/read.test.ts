@@ -292,3 +292,141 @@ test(
     await assert.rejects(read(detailRoute, new AbortController().signal), { problem: 'not_found' })
   }
 )
+
+// 调用页只在调用路由读取窗口；其它页面不夹带调用数据，部分失败只标记该区块。
+test(
+  '调用页按路由读取窗口，部分失败不清空设备列表',
+  /** 调用读取与设备列表同属全局范围；401 仍整页失败。 */ async () => {
+    const callsRoute = { ...listRoute, section: 'calls' as const }
+    const seen: string[] = []
+    const read = createManagementPageRead(
+      /** 记录固定操作，验证不会从浏览器注入设备或身份。 */
+      async (name, args) => {
+        seen.push(name)
+        return fixtureReply(name, args)
+      }
+    )
+    const result = await read(callsRoute, new AbortController().signal)
+    assert.deepEqual(seen, ['status', 'devices_list', 'calls_list', 'status'])
+    assert.equal(result.value.calls?.aggregate.total, 3)
+    assert.equal(result.value.devices.items.length, 2)
+    checkPage(result, callsRoute)
+
+    const overview = await read(listRoute, new AbortController().signal)
+    assert.equal(overview.value.calls, null)
+    assert.equal(overview.value.callsProblem, null)
+
+    const partial = createManagementPageRead(
+      /** 调用窗口不可见时设备列表仍然交付。 */
+      async (name, args) => {
+        if (name === 'calls_list') {
+          throw new ReadError('forbidden')
+        }
+        return fixtureReply(name, args)
+      }
+    )
+    const degraded = await partial(callsRoute, new AbortController().signal)
+    assert.equal(degraded.value.callsProblem, 'forbidden')
+    assert.equal(degraded.value.calls, null)
+    assert.equal(degraded.value.devices.items.length, 2)
+    checkPage(degraded, callsRoute)
+
+    const revoked = createManagementPageRead(
+      /** 会话失效必须清空整页，而不是只标记调用区块。 */
+      async (name, args) => {
+        if (name === 'calls_list') {
+          throw new ReadError('unauthenticated')
+        }
+        return fixtureReply(name, args)
+      }
+    )
+    await assert.rejects(revoked(callsRoute, new AbortController().signal), { problem: 'unauthenticated' })
+  }
+)
+
+test(
+  '调用窗口游标与采样时点必须落在同一页面 fence 内',
+  /** 过期或跨代次的调用采样不能与新的全局状态混拼。 */ async () => {
+    const callsRoute = { ...listRoute, section: 'calls' as const, callsCursor: 'fixture-cursor' }
+    const seen: unknown[] = []
+    let statuses = 0
+    const read = createManagementPageRead(
+      /** 调用窗口采样早于读取前状态时拒绝整页。 */
+      async (name, args) => {
+        const reply = fixtureReply(name, args)
+        if (name === 'calls_list') {
+          seen.push(args)
+          Object.assign(reply, { observed_at: fixtureSnapshot(listRoute).serverTime - 30_000 })
+        }
+        if (name === 'status' && ++statuses === 2) {
+          Object.assign(reply, { observed_at: fixtureSnapshot(listRoute).serverTime })
+        }
+        return reply
+      }
+    )
+    await assert.rejects(read(callsRoute, new AbortController().signal), { problem: 'conflict' })
+    assert.deepEqual(seen, [{ limit: 50, cursor: 'fixture-cursor' }])
+  }
+)
+
+// 调用校验拒绝秘密字段、跨设备与未知状态，合法页可被深拷贝。
+test(
+  '调用视图拒绝未知状态、秘密字段与非法窗口',
+  /** 共享白名单同时约束服务输出与浏览器输入。 */ () => {
+    const callsRoute = { ...listRoute, section: 'calls' as const }
+    const snapshot = fixtureSnapshot(callsRoute)
+    const valid = checkPage(snapshot, callsRoute)
+    snapshot.value.calls!.items[0]!.method = 'changed after read'
+    assert.notEqual(valid.value.calls!.items[0]!.method, 'changed after read')
+
+    for (const scenario of ['secret', 'state', 'window', 'time', 'partial'] as const) {
+      const copy = fixtureSnapshot(callsRoute)
+      const calls = copy.value.calls!
+      if (scenario === 'secret') {
+        Object.assign(calls.items[0]!, { request_json: 'fixture-secret-must-not-leak' })
+      }
+      if (scenario === 'state') {
+        calls.items[0]!.state = 'ready' as never
+      }
+      if (scenario === 'window') {
+        calls.window.last_at = copy.serverTime + 1
+      }
+      if (scenario === 'time') {
+        calls.items[0]!.created_at = copy.serverTime + 1
+      }
+      if (scenario === 'partial') {
+        // 同时存在调用数据与部分失败标记是自相矛盾的。
+        copy.value.callsProblem = 'unavailable'
+      }
+      assert.throws(
+        /** 每个非法组合都只返回固定分类。 */
+        () => checkPage(copy, callsRoute),
+        { problem: 'invalid_response' }
+      )
+    }
+    // 非调用路由不得夹带调用窗口。
+    const smuggled = fixtureSnapshot(callsRoute)
+    assert.throws(
+      /** 概览不能携带调用数据。 */
+      () => checkPage(smuggled, listRoute),
+      { problem: 'invalid_response' }
+    )
+  }
+)
+
+test(
+  '空调用窗口允许零采样并保持统计为零',
+  /** 空窗口是合法状态，不能因为 sampled=0 被判为非法响应。 */ () => {
+    const callsRoute = { ...listRoute, section: 'calls' as const }
+    const snapshot = fixtureSnapshot(callsRoute)
+    snapshot.value.calls = {
+      items: [],
+      observed_at: snapshot.serverTime,
+      aggregate: { total: 0, by_state: [], by_provider: [], by_principal: [], by_method: [] },
+      window: { since: snapshot.serverTime - 86_400_000, first_at: null, last_at: null, sampled: 0, truncated: false }
+    }
+    const checked = checkPage(snapshot, callsRoute)
+    assert.equal(checked.value.calls?.window.sampled, 0)
+    assert.equal(checked.value.calls?.aggregate.total, 0)
+  }
+)

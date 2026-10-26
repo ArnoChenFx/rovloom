@@ -772,3 +772,151 @@ test(
     }
   }
 )
+
+test(
+  '管理调用窗口只覆盖 calls_read 授权设备，投影不含请求或响应正文',
+  /** 真实 Store 中的人工调用同时含正文；窗口必须只输出元数据并按设备范围过滤。 */ async () => {
+    const f = storeFixture()
+    try {
+      const window = await f.service.management.execute('calls_list', {}, adminContext())
+      assert.equal(window.aggregate.total, 1)
+      assert.deepEqual(
+        window.items.map(/* 只有 machine_a 在授权范围内。 */ (item) => item.machine_id),
+        ['machine_a']
+      )
+      const item = window.items[0]!
+      assert.equal(item.method, 'pane.read')
+      assert.equal(item.state, 'responded')
+      assert.equal(item.dispatched, false)
+      assert.deepEqual(item.target, { profile: 'session', session: target.session })
+      assert.equal(item.outcome, null)
+      assert.equal(window.aggregate.by_provider[0]?.provider_id, 'luvus_a')
+      assert.equal(window.aggregate.by_principal[0]?.principal, 'alice')
+      assert.equal(window.aggregate.by_method[0]?.method, 'pane.read')
+      // 正文与内部摘要不属于管理调用视图。
+      const encoded = JSON.stringify(window)
+      assert(!encoded.includes(syntheticSecret))
+      assert(!encoded.includes('identity_json'))
+      assert(!encoded.includes('binding_json'))
+      assert(!encoded.includes('request_hash'))
+      // 越范围设备与未知状态筛选都被拒绝。
+      await assert.rejects(
+        f.service.management.execute('calls_list', { machine_id: 'machine_b' }, adminContext()),
+        code('not_found')
+      )
+      await assert.rejects(
+        f.service.management.execute('calls_list', { states: ['bogus'] } as never, adminContext()),
+        code('invalid_arguments')
+      )
+      await assert.rejects(
+        f.service.management.execute(
+          'calls_list',
+          { machine_id: 'machine_a', cursor: 'bogus' } as never,
+          adminContext()
+        ),
+        code('invalid_cursor')
+      )
+    } finally {
+      f.close()
+    }
+  }
+)
+
+test(
+  '调用窗口分页游标绑定设备范围与状态筛选，撤销授权立即拒绝',
+  /** 游标不能跨 scope 复用；管理会话撤销后窗口读取与其它管理读取一同失败。 */ async () => {
+    const f = storeFixture('active', (db) => {
+      for (const [index, machine] of ['machine_a', 'machine_a'].entries()) {
+        db.prepare(
+          `INSERT INTO calls(call_id,principal,machine_id,provider_id,binding_revision,provider_kind,
+          request_hash,state,identity_json,target_json,method,mode,
+          created,deadline,content_expires,metadata_expires,dedup_expires,content_status)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+        ).run(
+          `call_page_${index}`,
+          'alice',
+          machine!,
+          'luvus_a',
+          1,
+          'luvus',
+          'a'.repeat(64),
+          'not_dispatched',
+          '{}',
+          JSON.stringify({ machine_id: 'machine_a', provider_id: 'luvus_a', profile: 'host' }),
+          'pane.list',
+          'strict',
+          1_000_000 + index,
+          1_030_000,
+          1_060_000,
+          2_000_000,
+          2_000_000,
+          'unavailable'
+        )
+      }
+    })
+    try {
+      const first = await f.service.management.execute('calls_list', { limit: 1 }, adminContext())
+      assert.equal(first.items.length, 1)
+      assert(first.next_cursor)
+      const second = await f.service.management.execute(
+        'calls_list',
+        { limit: 1, cursor: first.next_cursor },
+        adminContext()
+      )
+      assert.notEqual(second.items[0]!.call_id, first.items[0]!.call_id)
+      // 同一游标不能用于不同设备范围或状态筛选。
+      await assert.rejects(
+        f.service.management.execute(
+          'calls_list',
+          { limit: 1, cursor: first.next_cursor, machine_id: 'machine_a', states: ['not_dispatched'] },
+          adminContext()
+        ),
+        code('invalid_cursor')
+      )
+      f.setAdmin(null)
+      await assert.rejects(f.service.management.execute('calls_list', {}, adminContext()), code('unauthenticated'))
+    } finally {
+      f.close()
+    }
+  }
+)
+
+test(
+  '存储降级时调用窗口把未定派发状态收敛为结果未知',
+  /** 降级不能把 dispatching 宣称成已执行；窗口读取本身仍允许，与既有只读规则一致。 */ async () => {
+    const f = storeFixture('storage_degraded', (db) => {
+      db.prepare(
+        `INSERT INTO calls(call_id,principal,machine_id,provider_id,binding_revision,provider_kind,
+        request_hash,state,identity_json,target_json,method,mode,
+        created,deadline,content_expires,metadata_expires,dedup_expires,content_status)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+      ).run(
+        'call_inflight',
+        'alice',
+        'machine_a',
+        'luvus_a',
+        1,
+        'luvus',
+        'b'.repeat(64),
+        'dispatching',
+        '{}',
+        JSON.stringify({ machine_id: 'machine_a', provider_id: 'luvus_a', profile: 'host' }),
+        'pane.list',
+        'strict',
+        1_000_000,
+        1_030_000,
+        1_060_000,
+        2_000_000,
+        2_000_000,
+        'available'
+      )
+    })
+    try {
+      const window = await f.service.management.execute('calls_list', {}, adminContext())
+      const inflight = window.items.find(/* 只看本次新增的未定调用。 */ (item) => item.call_id === 'call_inflight')!
+      assert.equal(inflight.state, 'outcome_unknown')
+    } finally {
+      f.close()
+    }
+  }
+)

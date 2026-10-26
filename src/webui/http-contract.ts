@@ -107,6 +107,37 @@ export function parseManagementReadPath(path: string): ManagementReadRequest | n
     }
     return { operation: 'devices_list', args }
   }
+  if (url.pathname === '/admin/v1/calls') {
+    query(parameters, ['cursor', 'limit', 'machine_id', 'states'])
+    const args: ManagementArguments['calls_list'] = pagination(parameters)
+    if (parameters.has('machine_id')) {
+      reference(parameters.get('machine_id')!)
+      args.machine_id = parameters.get('machine_id')!
+    }
+    if (parameters.has('states')) {
+      const states = parameters.get('states')!.split(',')
+      if (
+        !states.length ||
+        new Set(states).size !== states.length ||
+        states.some(
+          /** 调用状态是账本枚举；未知值不成为筛选条件。 */
+          (state) =>
+            ![
+              'created',
+              'dispatching',
+              'connector_accepted',
+              'responded',
+              'not_dispatched',
+              'outcome_unknown'
+            ].includes(state)
+        )
+      ) {
+        invalid()
+      }
+      args.states = states as NonNullable<typeof args.states>
+    }
+    return { operation: 'calls_list', args }
+  }
   const parts = /^\/admin\/v1\/devices\/([^/]+)(?:\/(providers|permissions)(?:\/([^/]+))?)?$/u.exec(url.pathname)
   if (!parts) {
     return null
@@ -148,7 +179,8 @@ export function managementReadPath<K extends ManagementReadOperation>(
     devices_get: ['machine_id'],
     providers_list: ['machine_id', 'cursor', 'limit'],
     providers_get: ['machine_id', 'provider_id'],
-    permissions_get: ['machine_id', 'provider_id']
+    permissions_get: ['machine_id', 'provider_id'],
+    calls_list: ['cursor', 'limit', 'machine_id', 'states']
   }
   if (
     !Object.hasOwn(allowed, operation) ||
@@ -180,6 +212,30 @@ export function managementReadPath<K extends ManagementReadOperation>(
         values.states.length > 4 ||
         values.states.some(
           /** 状态只接受固定字符串，不能通过对象转换注入查询。 */
+          (state) => typeof state !== 'string'
+        )
+      ) {
+        invalid()
+      }
+      parameters.set('states', values.states.join(','))
+    }
+  } else if (operation === 'calls_list') {
+    path = '/admin/v1/calls'
+    if (values.machine_id !== undefined) {
+      reference(values.machine_id)
+      if (values.machine_id === '.' || values.machine_id === '..') {
+        invalid()
+      }
+      parameters.set('machine_id', values.machine_id)
+    }
+    if (values.states !== undefined) {
+      if (
+        !Array.isArray(values.states) ||
+        Object.getPrototypeOf(values.states) !== Array.prototype ||
+        !values.states.length ||
+        values.states.length > 6 ||
+        values.states.some(
+          /** 调用状态只接受固定枚举，不能通过对象转换注入查询。 */
           (state) => typeof state !== 'string'
         )
       ) {

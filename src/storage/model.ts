@@ -76,8 +76,26 @@ export type Row = Call & {
   created: number
   response_hash: string | null
   response_bytes: number | null
+  response_category: string | null
   reserved: number
   mode: ValidationMode
+}
+// 管理只读窗口行只取账本元数据与调用方已提交的命令名；原文、绑定与证据摘要不进入此投影。
+export type CallWindowRow = {
+  call_id: string
+  principal: string
+  machine_id: string
+  provider_id: string
+  provider_kind: 'luvus' | 'herdr'
+  method: string
+  state: CallState
+  target_json: string
+  created: number
+  deadline: number
+  content_expires: number
+  content_status: string
+  response_category: string | null
+  epoch: string | null
 }
 // 构造公开调用的新对象，仅在内容仍可用且未到期时返回响应，隐藏内部请求、绑定和证据摘要。
 // 到期状态仅反映在返回投影，不清理数据库或刷新既有期限，也不赋予原生执行或响应校验能力。
