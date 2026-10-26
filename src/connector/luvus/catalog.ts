@@ -3,6 +3,7 @@ import { createNativeValidator } from '../../native-contract/index.js'
 import type { CompiledContract, TrustedNativeContext } from '../../native-contract/index.js'
 import { boundedJson, hash } from '../../wire/index.js'
 import { LuvusAdapterError } from './types.js'
+import { describeLuvusSchema } from '../../native-contract/description.js'
 
 // 安装 schema 与在线能力是独立输入；不把 CLI session list 当成 capabilities。
 // 宿主负责经认证获得 capabilities、发布 contract registry，并维护当前完整 binding。
@@ -81,7 +82,14 @@ export function createLuvusCatalog(
       if (!result.ok) {
         throw new LuvusAdapterError(result.error.code)
       }
-      return result.value
+      let details: ReturnType<typeof describeLuvusSchema>
+      try {
+        details = describeLuvusSchema(compiled, result.value)
+      } catch {
+        throw new LuvusAdapterError('native_schema_description_unavailable')
+      }
+      fresh()
+      return { ...result.value, ...details }
     }
   })
 }

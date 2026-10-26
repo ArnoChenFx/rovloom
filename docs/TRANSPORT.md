@@ -43,6 +43,20 @@ Connector 主动出站连接 Gateway，Gateway 不连接设备。通道上的帧
 - Connector 断线后按指数退避重连，间隔从 250 毫秒起，上限 30 秒，带随机抖动。重连使用稳定的设备 ID 和新的 epoch。
 - 重连不会迁入或重放任何旧请求。断线时旧 epoch 上未完成的调用由 Gateway 记为 `outcome_unknown`。
 - 旧 epoch 的响应、过期的 provider 绑定或策略修订的响应一律拒绝。
+- Connector 的断开诊断是独立一行 `connector_disconnect code=<4位关闭码> close_reason=<固定原因词>`；本机原因没有对端关闭码时只输出 `connector_disconnect close_reason=<原因>`。
+  - `transport_closed`：对端（Gateway）主动关闭。
+  - `transport_abnormal`：未收到关闭帧，例如 TCP 被掐或连接被强制终止；此时通常同时给出 `code=1006`。
+  - `transport_unclassified`：收到了关闭码，但原因不在固定白名单内。
+  - `handshake_timeout`、`transport_idle`、`connector_failure`、`transport_unavailable`、`connector_disconnected`、`connector_stopped`：Connector 本机收敛的原因，不带对端关闭码。
+- CLI 每 250 毫秒按独立事件序号补报新断开与订正，不依赖相位变化。同一窗口内的事件按时间从旧到新打印。观察器启动时同步记录基线；订阅前已有的历史不打印，订阅后首个窗口内发生的事件照常补报。
+- 断开快照队列最多保留最近 16 次断开，累计断开次数仍完整记录。
+- 相位行 `connector_transport <phase> provider_ready=<bool>` 只描述当前相位，不再附带关闭码；快速重连时可能出现“`ready` 行 + 一条 `connector_disconnect` 行”，两者不矛盾。
+- 远端关闭晚于本机收敛时（例如先收到底层网络错误、随后才收到 `1006` 关闭帧），把最近一次断开的定性纠正为实际观察值，通过独立事件序号补报 `connector_disconnect_update code=<关闭码> close_reason=<原因词>`，不重复计入断连次数；新 epoch 建立之后到达的旧 socket 事件一律忽略，不会覆盖当前观测。
+- 新断开与订正共用最多 16 条的事件日志，事件序号与断连次数分开。两次采样间超出容量时只交付日志保留的事件；订正行明确标为 update，不能计作新断开。
+- 已没有活跃通道时，本机的重复断开请求（例如来源重建后重复调用 `disconnect()`）不新增断开记录，也不推迟下一次重连。没有 socket 时停止进程仅更新 stopped 相位；只有停止实际活动 socket 才记录 `connector_stopped`。
+- Connector 自己发出的关闭帧不会当对端事件：本机主动关闭用码 `1000`，而 Gateway 的真实关闭是 `1008 transport_closed`，两者不重叠；即使本机关闭帧的回声先于强制终止到达，已定性的本机原因也不会被改写。
+- 管理 CLI 的 `status()` 取样异常会输出固定的 `connector_observation unavailable`，连续异常只报告一次，随后继续取样。恢复时重新输出实际相位，并保留已建立的事件游标，异常正文不进入日志。连接建立前的凭据或 socket 构造失败仍按实际尝试退避，但不虚构一次断连。
+- 断开观测只输出白名单原因和数值关闭码。对端给出的任意关闭正文、凭据和路径一律不进入日志；越界或未知值整条丢弃。
 
 ## 派发
 

@@ -16,6 +16,7 @@ import {
 import type { AttemptBinding, JsonObject, ProviderBinding, ProviderPolicy, V2Target } from '../wire/types.js'
 import { FacadeServiceError } from './types.js'
 import { terminalExecutionCatalog } from '../connector/terminal-execution.js'
+import { luvusParameterHelp } from '../runtime/luvus-parameter-help.js'
 
 export type GatewayCatalogSource = Readonly<{
   record: NativeContractRecord
@@ -227,10 +228,12 @@ export function authorizedLuvusCatalog(options: CatalogOptions) {
         }
         try {
           const entry = terminalExecutionCatalog('luvus', method, terminal)
+          const parameterHelp = luvusParameterHelp(method)
           return JSON.parse(
             boundedJson({
               ...catalog.describe(method),
               contract_ref: ref,
+              ...(parameterHelp ? { parameter_help: parameterHelp } : {}),
               ...(entry.details ? { terminal_execution: entry.details } : {})
             })
           ) as JsonObject

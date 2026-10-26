@@ -167,6 +167,29 @@ test('Connector release smoke accepts transport diagnostics and rejects unknown 
   assertConnectorDiagnostics(
     'connector_transport connecting provider_ready=false\nconnector_transport ready provider_ready=true\n'
   )
+  /* 断开诊断是独立行，允许有界四位关闭码与固定原因词；快速重连时可紧跟 ready 行。 */
+  assertConnectorDiagnostics(
+    'connector_transport ready provider_ready=true\n' +
+      'connector_disconnect code=1008 close_reason=transport_closed\n' +
+      'connector_disconnect close_reason=handshake_timeout\n' +
+      'connector_transport ready provider_ready=true\n'
+  )
+  /* 同一采样窗口内两次断开必须允许连续两行诊断，且顺序为旧→新（更早的 1008 不被覆盖）。 */
+  assertConnectorDiagnostics(
+    'connector_transport ready provider_ready=true\n' +
+      'connector_disconnect code=1008 close_reason=transport_closed\n' +
+      'connector_disconnect code=1006 close_reason=transport_abnormal\n' +
+      'connector_transport ready provider_ready=true\n'
+  )
+  assertConnectorDiagnostics('connector_disconnect_update code=1006 close_reason=transport_abnormal\n')
+  assertConnectorDiagnostics('connector_observation unavailable\n')
+  assert.throws(() => assertConnectorDiagnostics('connector_observation private_error\n'))
   assert.throws(() => assertConnectorDiagnostics('runtime_failed\n'))
   assert.throws(() => assertConnectorDiagnostics('Bearer (private): synthetic-secret\n'))
+  /* 相位行不再附带关闭码，避免同一事件重复且避免 ready 行挂历史关闭码。 */
+  assert.throws(() => assertConnectorDiagnostics('connector_transport disconnected provider_ready=false code=1008\n'))
+  assert.throws(() => assertConnectorDiagnostics('connector_disconnect code=1008 close_reason=synthetic-secret\n'))
+  /* 关闭码必须有界四位；任意长度或非数字的码都不属于固定诊断格式。 */
+  assert.throws(() => assertConnectorDiagnostics('connector_disconnect code=10080 close_reason=transport_closed\n'))
+  assert.throws(() => assertConnectorDiagnostics('connector_disconnect close_reason=transport_closed code=1008\n'))
 })

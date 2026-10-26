@@ -19,6 +19,9 @@ export type ContractData = {
   validators: Map<string, ValidateFunction>
   requestMethods: readonly string[]
   branches: Map<string, readonly string[]>
+  // 只用于 describe 的原始已核验 schema；首次读取后以文档缓存替代原文本，不参与执行授权。
+  schemaSource: string
+  schemaDocuments?: ReadonlyMap<string, unknown>
 }
 export type ViewData = {
   contract: CompiledContract

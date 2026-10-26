@@ -15,7 +15,9 @@ export type { DispatchRefusalLedger } from './dispatch-refusal.js'
 export { PairingAdmin } from './pairing.js'
 export type { ManagementHost, ManagementAction } from './pairing.js'
 export { loadCredential, saveCredential, createFileCredentialSink } from './credentials.js'
-export type { Session, Connection, Readiness, Adapter } from './common.js'
+export type { Session, Connection, Readiness, Adapter, CloseEvent } from './common.js'
+export { boundedDisconnect, remoteDisconnect } from './disconnect.js'
+export type { DisconnectObservation, DisconnectReason } from './disconnect.js'
 export { createPairingDelivery } from './custody.js'
 export type {
   PairingBackend,

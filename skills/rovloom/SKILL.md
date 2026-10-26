@@ -93,7 +93,13 @@ runtime_describe {
 }
 ```
 
-Returns the native parameter schema, categories, limits and `terminal_execution` details. **Fill `params` from that schema** instead of guessing field names from memory.
+Read the actual coverage and description fields before filling `params`:
+
+- `params_schema`, when present, is the native parameter schema with its local `$defs` reference closure. Follow its constraints and annotations.
+- Luvus `schema_annotations` exposes native request/response document `$comment` and `description`, with `document_uri` and JSON Pointer. Document-root notes describe the document; they are not necessarily specific to this method.
+- `schema_status: "generic_params_only"` means there is no native per-method parameter schema. Use available `parameter_help` and the [runtime reference](references/runtimes.md); do not invent a complete schema or reuse another provider's field names. `parameter_help.source: "rovloom_reviewed_subset"` identifies Rovloom's reviewed guide, not native schema coverage.
+
+`terminal_execution` still describes the local gate. Description grants no execution permission. These detailed schemas, notes and examples belong to `runtime_describe`; `runtime_discover` remains a summary list.
 
 **5. Submit the call — exactly once**
 
@@ -108,8 +114,9 @@ runtime_call {
 }
 ```
 
-- `deadline` is an **absolute Unix millisecond timestamp in the future**, no more than 10 minutes out at registration time (`Date.now() + 60_000` is a safe default).
+- `deadline` is an **absolute Unix millisecond timestamp in the future**, no more than 10 minutes out at registration time. `Date.now() + 60_000` suits short operations; for a longer native wait, allow its duration plus RPC overhead (for example, 150 seconds for a 120-second wait).
 - `wait_ms` only bounds this HTTP request's short wait: 0–5000, default 0. It is independent of the execution deadline.
+- Luvus RPC defaults to a local cap of 10 minutes, bounded by the original call deadline and any explicit shorter local limit. Endpoint discovery and schema reading still have a 30-second preparation budget. Poll the original call for long waits; increasing `wait_ms` does not extend execution.
 - `client_request_key` is optional and deduplicates within one principal. Re-sending the same intent **must** reuse the original key.
 
 **6. Query and read the result**
@@ -151,7 +158,7 @@ A Gateway refusal returns `isError: true` with `gateway_error: { code }`.
 | `binding_revision_conflict` | The revision changed | Re-run `providers_get` and `runtime_discover` |
 | `unavailable` / `backend_unavailable` | Device offline or backend unavailable | Check `link` from `machines_get`; do not hammer it |
 | `contract_unavailable` | Native contract, capabilities or policy changed mid-read | Re-run discover and describe |
-| `native_request_invalid` | The native schema rejected the parameters, and the call is **definitely not dispatched** | Fix per `runtime_describe` and resubmit; this one is safe to retry |
+| `native_request_invalid` | Native schema or reviewed parameter checks rejected the request before registration; **definitely not dispatched** | Read optional `details.issues` / `details.parameter_help` and `runtime_describe`, correct the parameters, then resubmit |
 | `invalid_arguments` | MCP parameter shape is wrong | Fix against the schema |
 | `conflict` | One `client_request_key` used for a different intent | Use a new key for the new intent; keep the old key for the same intent |
 | `invalid_cursor` | Cursor expired, was tampered with, or is reused across queries | Restart from the first page |
@@ -163,6 +170,7 @@ A Gateway refusal returns `isError: true` with `gateway_error: { code }`.
 | `confirmation_required` | The user must confirm | Hand the confirmation request to the user verbatim |
 
 `native_request_invalid` additionally carries `outcome: "not_dispatched"` — that is the **only** refusal that confirms "nothing ran, safe to fix the parameters and resubmit".
+For supported Luvus methods, `gateway_error.details.issues` contains fixed field paths and rules such as `/params/pane` with `required`, or `/params/wait` with `required_true`. When the reviewed diagnostics cannot safely locate the rejected parameter, `/params` with `invalid_value` indicates a general parameter rejection; it does not identify a specific field. The details omit user values and raw native error text; they are not a complete list of every possible parameter error.
 
 ## Recipes
 
@@ -191,7 +199,13 @@ Most Luvus methods (such as `workspace.list` and `pane.list`) have the validatio
 2. `agent.prompt` (Luvus) with `target`, `text`, the observed `terminal_id`, and `strict: true`.
 3. `agent.get` / `agent.wait` / `agent.read` for the real reply. `submitted`, `queued` and `ready=true` **do not mean the model answered**.
 
+For Luvus, `agent.prompt` selects an Agent **`target`**; `agent.wait` selects a **`pane`**. A blocking prompt uses `wait:true`, `until:["idle"]` and `timeout_s`; `until` or `timeout_s` without `wait:true` is invalid. Prompt waiting first requires a new working/blocked transition before matching `until`. In contrast, `agent.wait` matches the current state, uses exactly one of `status` or `statuses`, and has no `wait` flag. Multiple states mean **any** listed state, not a sequence. Read the native notes before interpreting an immediate idle match as a reply.
+
 A two-turn conversation must keep the same complete target, the same pane or alias, the same `terminal_id`, and the known Agent `session`. When checking turn two, verify it recalls turn one's content; terminal echo is not a reply.
+
+### Submitting a terminal command (Luvus)
+
+`pane.run` accepts `pane` and `command`; it accepts no `cwd`, `env` or `argv` override. Its `{"type":"ok"}` acknowledges input submission. Read output with `pane.read`; the acknowledgement contains no command stdout, stderr or exit status and does not prove completion.
 
 ### Herdr
 

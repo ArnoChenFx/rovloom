@@ -17,7 +17,13 @@ import {
 import type { CompilerArtifact, CompilerPort } from './compiler-protocol.js'
 import type { Check, CompiledContract, CompileOptions, ContractIdentity, Limits } from './types.js'
 
-type Expected = { identity: ContractIdentity; budget: Limits; until: number; inputSha256: string }
+type Expected = {
+  identity: ContractIdentity
+  budget: Limits
+  until: number
+  inputSha256: string
+  input: Uint8Array | string
+}
 type Pending = Expected & {
   id: string
   resolve: (result: Check<CompiledContract>) => void
@@ -81,6 +87,8 @@ function install(value: unknown, expected: Expected): CompiledContract {
     fail('schema_unavailable', 'compile', 'generated_code_limit')
   }
   const { code, ...rawMetadata } = artifact
+  const schemaSource =
+    typeof expected.input === 'string' ? expected.input : Buffer.from(expected.input).toString('utf8')
   const metadata = snapshot(rawMetadata) as unknown as Omit<CompilerArtifact, 'code'>
   if (
     metadata.version !== ARTIFACT_VERSION ||
@@ -90,6 +98,7 @@ function install(value: unknown, expected: Expected): CompiledContract {
     metadata.options_sha256 !== hash(JSON.stringify(AJV_OPTIONS)) ||
     metadata.code_sha256 !== hash(code) ||
     metadata.identity?.schema_sha256 !== expected.inputSha256 ||
+    hash(schemaSource) !== expected.inputSha256 ||
     !equal(metadata.identity, expected.identity) ||
     !equal(metadata.limits, expected.budget)
   ) {
@@ -154,6 +163,7 @@ function install(value: unknown, expected: Expected): CompiledContract {
   contracts.set(compiled, {
     limits: metadata.limits,
     validators,
+    schemaSource,
     requestMethods: Object.freeze([...metadata.request_methods]),
     branches: new Map(
       metadata.branches.map(/* 冻结宿主的方法分支元数据。 */ ([name, paths]) => [name, Object.freeze([...paths])])
@@ -235,7 +245,8 @@ export class SchemaCompiler {
           until,
           identity: prepared.value.identity,
           budget: prepared.value.budget,
-          inputSha256: prepared.value.inputSha256
+          inputSha256: prepared.value.inputSha256,
+          input: prepared.value.input
         }
         signal?.addEventListener('abort', cancel, { once: true })
         try {
