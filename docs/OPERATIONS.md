@@ -29,7 +29,7 @@ Luvus raw 授权与 Gateway readiness 的修复可先只升级 Gateway，沿用�
 
 - 安装：`install.sh` / `install.ps1` 只安装单文件二进制并核对 `SHA256SUMS`，不建配置、不起服务（[快速开始](QUICK-START-zh.md)）。Docker 只用于 Linux Gateway（[Docker 部署](DOCKER-zh.md)）。
 - 升级：先正常停 Connector 再停 Gateway，替换二进制（重新运行安装脚本，或 `docker compose pull && docker compose up -d`），再按原样启动。配置与数据沿用。脚本只安装官方 latest 稳定版；预发布版本从 Release 页面手动下载。
-- 没有自更新。启动时数据库 schema 落后会按版本链自动升级到当前版本：先在真实状态目录同级的 `<state>.backups` 里写一份整库迁移前副本（按原备份期限与两份上限过期），再在单个事务内按顺序迁移，任一步失败整体回滚并保持原版本。高于当前版本的库仍拒绝启动（`unsupported_database_version`）并保持库文件字节不变；从未发布过的 v1-v4 同样拒绝。详见[存储与数据保留](STORAGE.md#数据库与文件)。
+- 没有自更新。启动时 v9 库会自动升级到 v10：先在真实状态目录同级的 `<state>.backups` 里写一份整库迁移前副本（按原备份期限与两份上限过期），再在单个事务内加列并推进版本，失败整体回滚并保持 v9。高于当前版本的库仍拒绝启动（`unsupported_database_version`）并保持库文件字节不变；比 v9 更旧的库（v1-v8）不在迁移范围内，同样拒绝。详见[存储与数据保留](STORAGE.md#数据库与文件)。
 
 ## 3. 开机服务
 

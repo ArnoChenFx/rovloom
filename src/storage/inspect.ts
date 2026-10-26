@@ -9,7 +9,7 @@ import { DEFAULT_RETENTION } from './config.js'
 import { createPrivate, databasePath, managedBytes, syncParentDirectory } from './files.js'
 import { lockContent } from './lock-recovery.js'
 import { SCHEMA_VERSION } from './schema.js'
-import { migrationStatus } from './migration.js'
+import { migrationRequired } from './migration.js'
 import { configuredSnapshotDirectory } from './snapshot-directory.js'
 
 /** 报告固定模式、schema、用量和检查结论，不读取原文、凭据或对外返回恢复 generation。 */
@@ -50,15 +50,13 @@ export function inspectStorage(input: string) {
       throw new GatewayError('database_integrity_failed')
     }
     const version = Number(versions[0]!.version)
-    if (version > SCHEMA_VERSION) {
-      throw new GatewayError('unsupported_database_version')
-    }
-    const migration = migrationStatus(version)
+    // 未来版本与比 v9 更旧的库都不可迁移，只读路径同样明确拒绝。
+    const required = migrationRequired(version)
     if (db.prepare('PRAGMA quick_check(1)').get()!.quick_check !== 'ok') {
       throw new GatewayError('database_integrity_failed')
     }
     // 用量与预算只在当前 schema 上可核对；待迁移旧库先报告需迁移，不自行升级。
-    if (!migration.required) {
+    if (!required) {
       assertUsage(db)
     }
     const mode = versions[0]!.mode
@@ -66,7 +64,7 @@ export function inspectStorage(input: string) {
       throw new GatewayError('database_mode_invalid')
     }
     let quota: string | undefined
-    if (!migration.required) {
+    if (!required) {
       try {
         assertBudget(db, path, DEFAULT_RETENTION, configuredSnapshotDirectory(path), true)
       } catch (error) {
@@ -85,16 +83,16 @@ export function inspectStorage(input: string) {
     return Object.freeze({
       schema: SCHEMA_VERSION,
       schema_version: version,
-      migration_required: migration.required,
+      migration_required: required,
       mode: storageMode,
       integrity: 'ok' as const,
-      quota: quota ?? (migration.required ? 'not_checked' : 'ok'),
+      quota: quota ?? (required ? 'not_checked' : 'ok'),
       read_only: true,
       bytes: managedBytes(dirname(path)),
       free_bytes: fs.bavail * fs.bsize,
       storage_limit_bytes: DEFAULT_RETENTION.storage_total_bytes,
       admission_reserve_bytes: DEFAULT_RETENTION.storage_reserve_bytes,
-      healthy: storageMode === 'active' && !quota && !migration.required
+      healthy: storageMode === 'active' && !quota && !required
     })
   } finally {
     try {

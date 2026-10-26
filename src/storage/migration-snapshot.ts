@@ -1,11 +1,11 @@
 // 迁移前证据：在既有 <state>.backups 边界内导出整库副本，复用原有目录边界、私有权限与备份配额。
 import type { DatabaseSync } from 'node:sqlite'
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, statSync, unlinkSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, unlinkSync } from 'node:fs'
+import { join } from 'node:path'
 import { GatewayError } from '../contracts.js'
 import { assertBudget } from './budget.js'
 import type { Retention } from './config.js'
-import { createPrivate, managedBytes, privateFile } from './files.js'
+import { createPrivate, privateFile } from './files.js'
 import { assertSnapshotDirectoryBoundary } from './snapshot-directory.js'
 
 /** 迁移前副本固定命名：带源版本与迁移时刻，便于人工判断是哪一次升级的完整状态。 */
@@ -24,6 +24,9 @@ export function writeMigrationSnapshot(source: DatabaseSync, destination: string
     // VACUUM INTO 不接受参数绑定；路径只来自本模块按固定目录与数字拼出的字符串。
     source.exec(`VACUUM INTO '${destination.replaceAll("'", "''")}'`)
     written = true
+  } catch {
+    // 只报固定码：SQLite 原文可能带路径或页面细节，不能进入错误或日志。
+    throw new GatewayError('migration_snapshot_failed')
   } finally {
     if (!written) {
       try {
@@ -65,46 +68,15 @@ export function recordMigrationSnapshot(
     throw new GatewayError('backup_exists')
   }
   // 与普通快照同一预检：把本次产物估进原备份预算与总存储预算，超限时不产生任何文件。
-  // 旧库还没有 storage_usage 表，此时只核对备份目录与文件本身的物理占用。
   const estimate =
     Number(db.prepare('PRAGMA page_count').get()!.page_count) *
       Number(db.prepare('PRAGMA page_size').get()!.page_size) +
     65_536
-  if (hasUsage(db)) {
-    assertBudget(db, databasePath, limits, backupDirectory, false, estimate)
-  } else {
-    assertPhysicalBudget(databasePath, backupDirectory, limits, estimate)
-  }
+  assertBudget(db, databasePath, limits, backupDirectory, false, estimate)
   writeMigrationSnapshot(db, destination)
   // 与普通快照共用同一张登记表和同一份期限/数量清理规则，不新造一套落盘逻辑。
   db.prepare('INSERT INTO backups VALUES(?,?,?)').run(destination, now, now + limits.backup_ttl)
   return destination
-}
-
-/** 旧库没有用量账本；只有在当前 schema 上才能按既有 assertBudget 核对逻辑用量。 */
-function hasUsage(db: DatabaseSync): boolean {
-  return db.prepare("SELECT COUNT(*) n FROM sqlite_schema WHERE type='table' AND name='storage_usage'").get()!.n === 1
-}
-
-/**
- * 旧 schema 的物理预检：整库文件、其 sidecar 与备份目录既有占用之和不得超出原备份/总存储预算。
- * 与 assertBudget 使用同一组 limits 字段，不引入第二套阈值。
- */
-function assertPhysicalBudget(
-  databasePath: string,
-  backupDirectory: string,
-  limits: Retention,
-  estimate: number
-): void {
-  assertSnapshotDirectoryBoundary(backupDirectory)
-  const backupBytes = existsSync(backupDirectory) ? managedBytes(backupDirectory) : 0
-  if (backupBytes + estimate > limits.backup_bytes) {
-    throw new GatewayError('backup_quota')
-  }
-  const directory = dirname(databasePath)
-  if (managedBytes(directory) + backupBytes + estimate > limits.storage_total_bytes) {
-    throw new GatewayError('storage_exhausted')
-  }
 }
 
 /**
@@ -117,13 +89,5 @@ export function cleanupMigrationSnapshot(path: string): void {
     unlinkSync(path)
   } catch {
     /* 副本已不存在或已不是普通文件时保留现场，不掩盖迁移失败本身。 */
-  }
-}
-
-/** 只复核固定目录当前仍是普通目录；只读检查路径不创建目录。 */
-export function assertMigrationSnapshotDirectory(backupDirectory: string): void {
-  assertSnapshotDirectoryBoundary(backupDirectory)
-  if (existsSync(backupDirectory) && !statSync(backupDirectory).isDirectory()) {
-    throw new GatewayError('invalid_backup_directory')
   }
 }

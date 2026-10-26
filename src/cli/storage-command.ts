@@ -67,7 +67,6 @@ const STORAGE_ERRORS = new Set([
   'database_migration_failed',
   'migration_snapshot_failed',
   'migration_chain_invalid',
-  'migration_constraints_enabled',
   'migration_foreign_key_violation',
   'database_integrity_failed',
   'database_mode_invalid',

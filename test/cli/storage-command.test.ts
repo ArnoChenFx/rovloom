@@ -412,11 +412,11 @@ test('removing the fixed snapshot directory does not poison normal Gateway expir
 test('storage check reports a pending migration read-only, then the upgraded database is current', async () => {
   const f = fixture()
   try {
-    // 用真实历史 schema 建库，模拟一台仍在使用旧版本的 Gateway。
+    // 用真实 v9 schema 建库，模拟一台仍在使用当前线上版本的 Gateway。
     const legacy = new DatabaseSync(f.path)
     try {
-      legacy.exec(readFileSync(new URL('../fixtures/storage/schema-v8.sql', import.meta.url), 'utf8'))
-      legacy.prepare("INSERT INTO metadata VALUES(1,8,'legacy_generation','active',1000)").run()
+      legacy.exec(readFileSync(new URL('../fixtures/storage/schema-v9.sql', import.meta.url), 'utf8'))
+      legacy.prepare("INSERT INTO metadata VALUES(1,9,'legacy_generation','active',1000)").run()
       legacy
         .prepare(
           "INSERT INTO machines(machine_id,name,status,credential_hash) VALUES('machine_old','old','offline',NULL)"
@@ -431,7 +431,7 @@ test('storage check reports a pending migration read-only, then the upgraded dat
     // 只读检查不迁移、不建副本目录，并明确报告需要迁移。
     assert.equal(pending.code, 3)
     assert.equal(pending.data.schema, SCHEMA_VERSION)
-    assert.equal(pending.data.schema_version, 8)
+    assert.equal(pending.data.schema_version, 9)
     assert.equal(pending.data.migration_required, true)
     assert.equal(pending.data.read_only, true)
     assert.deepEqual(readFileSync(f.path), before)

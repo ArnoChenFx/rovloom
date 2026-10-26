@@ -33,8 +33,7 @@ import { exportSnapshot } from './storage/backup.js'
 import { assertBudget, assertUsage } from './storage/budget.js'
 import { auditRecord } from './storage/audit.js'
 import { SCHEMA, SCHEMA_VERSION } from './storage/schema.js'
-import { applyMigrations, migrationPlan, storedVersion } from './storage/migration.js'
-import type { MigrationStep } from './storage/migration.js'
+import { applyMigration, migrationRequired, storedVersion } from './storage/migration.js'
 import { cleanupMigrationSnapshot, recordMigrationSnapshot } from './storage/migration-snapshot.js'
 import { CachedDatabase } from './storage/database.js'
 import { createPrivate, databasePath, privateFile, privatePath } from './storage/files.js'
@@ -158,11 +157,10 @@ export class Store {
 
       const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()
       if (tables.length) {
-        // 版本检查先于任何写操作：未来版本必须字节不变地拒绝，已发布旧版本才进入迁移。
+        // 版本检查先于任何写操作：未来版本与更旧版本必须字节不变地拒绝，只有 v9 进入迁移。
         const version = storedVersion(this.db)
-        const plan = migrationPlan(version)
-        if (plan.length) {
-          this.migrate(version, plan)
+        if (migrationRequired(version)) {
+          this.migrate(version)
         }
       } else {
         this.db.exec('BEGIN IMMEDIATE')
@@ -274,10 +272,10 @@ export class Store {
     }
   }
   /**
-   * 迁移前先在固定备份目录留一份整库副本作为可回退证据，再在单个事务内按链升级。
+   * 迁移前先在固定备份目录留一份整库副本作为可回退证据，再在单个事务内升级。
    * 任一步失败整体回滚，库保持迁移前版本；副本登记与版本推进同一事务，不留下半升级状态。
    */
-  private migrate(from: number, plan: readonly MigrationStep[]): void {
+  private migrate(from: number): void {
     const now = this.rawTime()
     // 优先用宿主注入的托管目录；未注入时按同一规则从真实库位置推导 <state>.backups，不留无证据的迁移。
     const backupDirectory =
@@ -287,16 +285,14 @@ export class Store {
     if (backupDirectory) {
       evidence = recordMigrationSnapshot(this.db, this.path, backupDirectory, from, now, this.limits)
     }
-    // 重建引用表需要临时关闭约束；SQLite 在事务内忽略该开关，因此必须在 BEGIN 之前设置。
-    this.db.exec('PRAGMA foreign_keys=OFF')
+    // 这一步只新增列，不重建被引用的表，因此无需关闭外键约束。
     this.db.exec('BEGIN IMMEDIATE')
     try {
-      applyMigrations(this.db, plan)
+      applyMigration(this.db)
       // 平台列未上报的旧设备保持 NULL；不给它们编造任何平台。
       this.audit('database_migrated', 'system', now, undefined, {
         from,
         to: SCHEMA_VERSION,
-        steps: plan.length,
         evidence: evidence === undefined ? null : basename(evidence)
       })
       this.db.exec('COMMIT')
