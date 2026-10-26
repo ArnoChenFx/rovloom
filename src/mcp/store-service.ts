@@ -693,6 +693,8 @@ export class StoreGatewayService implements GatewayService {
     if (!persistedStates.has(row.status)) {
       throw new FacadeServiceError('unavailable')
     }
+    // 平台来自账本里的最近一次上报；从未上报时明确未记录，不从 os 猜测。
+    const platform = this.options.store.devicePlatform(row.machine_id)
     return observed.device({
       machine_id: row.machine_id,
       name: row.name,
@@ -700,6 +702,19 @@ export class StoreGatewayService implements GatewayService {
       persisted_state: row.status as DeviceSnapshot['persisted_state'],
       resource_revision: null,
       observed_at: now,
+      platform:
+        platform === null
+          ? { verification: 'unverified', reason_code: 'not_recorded' }
+          : {
+              verification: 'verified',
+              observed_at: now,
+              source: 'store',
+              value: {
+                os: platform.os,
+                arch: platform.arch,
+                distribution: platform.distribution
+              }
+            },
       connection: { verification: 'unverified', reason_code: 'backend_unavailable' },
       authentication:
         row.status === 'revoked' || row.status === 'pending'

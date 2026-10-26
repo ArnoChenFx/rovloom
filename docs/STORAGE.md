@@ -12,7 +12,10 @@ Gateway 的全部状态保存在单个 SQLite 库 `<data.directory>/gateway.db` 
 
 ## 数据库与文件
 
-- 数据库 schema 版本为 9。遇到其他版本拒绝启动（`unsupported_database_version`），不做迁移。
+- 数据库 schema 版本为 10。已发布过的旧版本（5-9）在启动时按版本链就地升级：先在 `<state>.backups` 写一份迁移前整库副本（复用同一目录边界、私有权限、备份配额与七天/两份清理），再在单个事务内依次执行各步迁移，任一步失败整体回滚，库保持迁移前版本与数据。迁移成功后写一条 `database_migrated` 审计（只含 from/to/步骤数与副本文件名）。
+- 高于当前版本的库（例如 999）仍拒绝启动（`unsupported_database_version`），且在写入前拒绝，库文件字节不变。从未发布过的 v1-v4 没有可核对的来源，同样拒绝。
+- `rovloom storage check` 只读：对落后版本报告 `schema_version` 与 `migration_required: true`（`quota` 为 `not_checked`），不写库、不建备份目录；对更高版本仍返回 `unsupported_database_version`。
+- 设备最近一次上报的平台存在 `machines.platform_json`，语义是历史观测：离线后保留旧值，管理面标注为历史，不作为当前在线依据。
 - 内容、结果和收尾预约用量由同事务 SQLite 触发器维护；启动与离线检查重算核对。热路径不扫描历史，物理文件与备份仍逐次计入预算，见 [ADR 0007](adr/0007-transactional-storage-usage.md)。
 - Connector 的共享发送账本为独立 schema v2，仅保留 call/attempt ID、32 字节绑定摘要和原执行 deadline；版本不匹配拒绝打开，不自动转换，见 [ADR 0008](adr/0008-compact-connector-claims.md)。
 - SQLite 使用 DELETE journal 与 FULL synchronous，打开时做完整性检查。它依赖操作系统和文件系统的持久性。

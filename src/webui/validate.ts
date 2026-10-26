@@ -129,7 +129,8 @@ function device(value: DeviceSnapshot): void {
     'resource_revision',
     'observed_at',
     'connection',
-    'authentication'
+    'authentication',
+    'platform'
   ])
   text(value.machine_id)
   text(value.name, 256)
@@ -151,6 +152,32 @@ function device(value: DeviceSnapshot): void {
       nullableText(connection.connection_epoch_ref)
       if (connection.last_heartbeat_at !== null) {
         time(connection.last_heartbeat_at)
+      }
+    }
+  )
+  observed(
+    value.platform,
+    /** 平台只接收契约枚举与受限发行版标识；不接收路径、版本探针输出或自由文本。 */
+    (platform) => {
+      record(platform, ['os', 'arch', 'distribution'])
+      choice(platform.os, ['linux', 'darwin', 'win32'])
+      choice(platform.arch, ['x64', 'arm64'])
+      if (platform.distribution !== null) {
+        record(platform.distribution, ['id', 'version_id'])
+        // 与 Wire 侧同一字符集；不合规内容不进入页面。
+        if (
+          typeof platform.distribution.id !== 'string' ||
+          !/^[a-z0-9][a-z0-9._-]{0,31}$/u.test(platform.distribution.id)
+        ) {
+          invalid()
+        }
+        if (
+          platform.distribution.version_id !== null &&
+          (typeof platform.distribution.version_id !== 'string' ||
+            !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,31}$/u.test(platform.distribution.version_id))
+        ) {
+          invalid()
+        }
       }
     }
   )

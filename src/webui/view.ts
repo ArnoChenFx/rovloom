@@ -201,6 +201,45 @@ function currentDeviceLink(device: DeviceSnapshot, freshness: Freshness): boolea
   )
 }
 
+/**
+ * 把设备最近一次上报的平台渲染成人类可读文本：如「Linux · Ubuntu 24.04 · x64」。
+ * 只翻译固定词汇；发行版标识是原始值，不做大小写或名称猜测。
+ */
+function platformLabel(platform: DeviceSnapshot['platform'], i18n: Localizer): string {
+  const { t } = i18n
+  if (platform.verification !== 'verified') {
+    // 未记录是最常见的情况：直接说明没有上报，不重复拼接原因码。
+    return platform.reason_code === 'not_recorded'
+      ? t('device.platformNotRecorded')
+      : t('device.platformUnknown', { reason: i18n.reason(platform.reason_code) })
+  }
+  const value = platform.value
+  const os = t(
+    value.os === 'linux' ? 'platform.osLinux' : value.os === 'darwin' ? 'platform.osDarwin' : 'platform.osWindows'
+  )
+  const arch = t(value.arch === 'x64' ? 'platform.archX64' : 'platform.archArm64')
+  if (value.os !== 'linux' || value.distribution === null) {
+    return t('device.platformParts', { os, arch })
+  }
+  const distribution = value.distribution.version_id
+    ? `${value.distribution.id} ${value.distribution.version_id}`
+    : value.distribution.id
+  return t('device.platformDistribution', { os, distribution, arch })
+}
+
+/** 平台徽标说明这是历史观测；过期时明确标注，不冒充当前在线事实。 */
+function platformBadge(device: DeviceSnapshot, freshness: Freshness): HTMLElement {
+  const { i18n } = freshness
+  const label = platformLabel(device.platform, i18n)
+  const historical = device.platform.verification === 'verified' && !current(device.platform.observed_at, freshness)
+  const result = badge(
+    historical ? i18n.t('device.platformHistory', { platform: label }) : label,
+    historical ? 'warning' : 'neutral'
+  )
+  result.dataset.platform = device.platform.verification === 'verified' ? device.platform.value.os : 'unknown'
+  return result
+}
+
 /** 分开显示持久状态、连接与认证；过期的已验证来源仅可作为历史，不呈绿色在线。 */
 function deviceBadges(device: DeviceSnapshot, freshness: Freshness): HTMLElement {
   const { i18n } = freshness
@@ -867,6 +906,8 @@ function deviceList(page: PageView, freshness: Freshness, route: PageRoute, filt
     )
     const health = node('div', '', 'device-health')
     health.append(node('span', t('devices.health'), 'cell-label'), deviceBadges(device, freshness))
+    // 平台是最近一次上报的历史观测，与连接/认证徽标并列但不参与在线判定。
+    health.append(platformBadge(device, freshness))
     const heartbeat = device.connection.verification === 'verified' ? device.connection.value.last_heartbeat_at : null
     const activity = node('div', '', 'device-activity')
     activity.append(node('span', t('devices.activity'), 'cell-label'))
@@ -1033,6 +1074,13 @@ function deviceDetail(page: PageView, freshness: Freshness, management = false):
       [
         t('detail.revision'),
         device.resource_revision === null ? t('value.notProvided') : String(device.resource_revision)
+      ],
+      [t('detail.platform'), platformLabel(device.platform, i18n)],
+      [
+        t('detail.platformObserved'),
+        device.platform.verification === 'verified'
+          ? `${observationTime(device.platform.observed_at, freshness)}${current(device.platform.observed_at, freshness) ? '' : t('device.platformHistorical')}`
+          : t('value.notRecorded')
       ]
     ])
   )

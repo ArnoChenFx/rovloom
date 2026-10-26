@@ -107,6 +107,30 @@ const read: PageRead = async (route, signal) => {
         device.connection = { verification: 'unverified', reason_code: 'not_recorded' }
         device.authentication = { verification: 'unverified', reason_code: 'not_recorded' }
       }
+      // 四种平台形态各出现一次，供窄屏与双语文案验收真实排版。
+      device.platform =
+        index === 0
+          ? {
+              verification: 'verified',
+              observed_at: result.serverTime,
+              source: 'store',
+              value: { os: 'linux', arch: 'x64', distribution: { id: 'ubuntu', version_id: '24.04' } }
+            }
+          : index === 1
+            ? {
+                verification: 'verified',
+                observed_at: result.serverTime,
+                source: 'store',
+                value: { os: 'darwin', arch: 'arm64', distribution: null }
+              }
+            : index === 2
+              ? {
+                  verification: 'verified',
+                  observed_at: result.serverTime - 180_000,
+                  source: 'store',
+                  value: { os: 'win32', arch: 'x64', distribution: null }
+                }
+              : { verification: 'unverified', reason_code: 'not_recorded' }
       return device
     })
     if (route.machineId) {

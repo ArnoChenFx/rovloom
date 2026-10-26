@@ -121,8 +121,21 @@ def main():
                     assert abs(columns['headers'][index] - columns['cells'][index]) <= 1
                 last_row = bounds(page, '.device-card:last-child')
                 assert last_row['y'] + last_row['height'] < 1024
+                # 平台徽标在两语下都在列表中出现，且不超出所在列宽。
+                assert page.locator('.device-card [data-platform]').count() == 2
+                assert page.locator('.device-card [data-platform]').first.evaluate('''el => {
+                    /* 徽标不得横向溢出所在列，长文本必须换行。 */
+                    const cell = el.closest('.device-health');
+                    return el.getBoundingClientRect().width <= cell.getBoundingClientRect().width + 1;
+                }''')
                 snapshot(page, output, f'{language}-{theme}-list-desktop')
                 page.set_viewport_size({'width': 320, 'height': 900})
+                # 320px 下平台徽标仍在视口内且不撑破页面宽度。
+                assert page.locator('.device-card [data-platform]').first.evaluate('''el => {
+                    /* 窄屏断言：徽标完整落在视口内且不产生横向滚动。 */
+                    const box = el.getBoundingClientRect();
+                    return box.left >= 0 && box.right <= innerWidth + 1 && document.documentElement.scrollWidth <= innerWidth;
+                }''')
                 snapshot(page, output, f'{language}-{theme}-list-320', narrow=True)
                 checks.append(f'{language}/{theme}: aligned desktop columns, visible device rows, original wordmark proportions, readable text and 320px list')
 
@@ -214,6 +227,10 @@ def main():
                 assert abs(connection['y'] - registration['y']) <= 1
                 assert observations['y'] >= connection['y'] + connection['height']
                 assert page.locator('.actions button:enabled').count() == 0
+                # 详情把平台放在登记分组里，并在观测分组给出上报时间。
+                registration_text = page.locator('.detail-registration').inner_text()
+                assert 'x64' in registration_text and 'ubuntu 24.04' in registration_text
+                assert page.locator('.detail-registration .facts .fact').count() == 5
                 snapshot(page, output, f'{language}-{theme}-detail-desktop')
 
                 page.set_viewport_size({'width': 320, 'height': 900})

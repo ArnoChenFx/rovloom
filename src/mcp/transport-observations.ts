@@ -108,6 +108,40 @@ function authentication(
   }
 }
 
+/**
+ * 平台是"最近一次上报"的历史观测：已核实就原样复制，未记录就保持未记录。
+ * 它不因连接或认证过期而降级，也不会被升级成当前在线事实。
+ */
+function platform(value: DeviceSnapshot['platform']): DeviceSnapshot['platform'] {
+  if (value.verification !== 'verified' || value.source !== 'store') {
+    return unknown('not_recorded')
+  }
+  const platform = value.value
+  const distribution = platform.distribution
+  if (
+    !['linux', 'darwin', 'win32'].includes(platform.os) ||
+    !['x64', 'arm64'].includes(platform.arch) ||
+    (distribution !== null &&
+      (typeof distribution.id !== 'string' ||
+        !/^[a-z0-9][a-z0-9._-]{0,31}$/u.test(distribution.id) ||
+        (distribution.version_id !== null &&
+          (typeof distribution.version_id !== 'string' ||
+            !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,31}$/u.test(distribution.version_id)))))
+  ) {
+    return unknown('not_recorded')
+  }
+  return {
+    verification: 'verified',
+    observed_at: value.observed_at,
+    source: 'store',
+    value: {
+      os: platform.os,
+      arch: platform.arch,
+      distribution: distribution === null ? null : { id: distribution.id, version_id: distribution.version_id ?? null }
+    }
+  }
+}
+
 /** 只保留既有Store来源的pending/revoked证明，不把持久登记字段另造认证事实。 */
 function storedAuthentication(
   device: DeviceSnapshot,
@@ -198,7 +232,9 @@ export function createManagementTransportProjection(
         persisted_state: device.persisted_state,
         observed_at: device.observed_at,
         connection: link,
-        authentication: auth
+        authentication: auth,
+        // 平台是账本里的历史上报，不来自本次传输取样，因此不随连接失效而降级。
+        platform: platform(device.platform)
       }
     },
     /** 只把已核实的在线连接投影为 connected；其余一律 unverified，不推测 offline。 */

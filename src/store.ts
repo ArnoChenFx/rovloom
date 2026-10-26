@@ -1,7 +1,7 @@
 // 持久化 SQLite 调用账本与设备生命周期，按固定期限治理内容、预算，并在提交后通知宿主回收上下文。
 import { DatabaseSync } from 'node:sqlite'
 import { closeSync, existsSync, openSync, unlinkSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { canonical, digest, GatewayError, validateRequest } from './contracts.js'
 import type { NativeRequest } from './contracts.js'
@@ -12,10 +12,12 @@ import {
   LIMITS,
   registeredRequestDigest,
   validateAttempt,
+  validateDevicePlatform,
   validateProvider,
   validateTarget
 } from './wire/index.js'
 import type { ResponseAnchor, ResponseEvidencePlan } from './wire/evidence.js'
+import type { DevicePlatformPayload } from './wire/types.js'
 import type {
   AttemptBinding,
   AttemptIdentity,
@@ -31,9 +33,12 @@ import { exportSnapshot } from './storage/backup.js'
 import { assertBudget, assertUsage } from './storage/budget.js'
 import { auditRecord } from './storage/audit.js'
 import { SCHEMA, SCHEMA_VERSION } from './storage/schema.js'
+import { applyMigrations, migrationPlan, storedVersion } from './storage/migration.js'
+import type { MigrationStep } from './storage/migration.js'
+import { cleanupMigrationSnapshot, recordMigrationSnapshot } from './storage/migration-snapshot.js'
 import { CachedDatabase } from './storage/database.js'
 import { createPrivate, databasePath, privateFile, privatePath } from './storage/files.js'
-import { assertSnapshotDirectoryBoundary, snapshotCleanup } from './storage/snapshot-directory.js'
+import { assertSnapshotDirectoryBoundary, snapshotCleanup, snapshotDirectory } from './storage/snapshot-directory.js'
 import { lockContent, recoverStaleLock } from './storage/lock-recovery.js'
 import { reviewedHerdrRequest } from './connector/herdr/methods.js'
 
@@ -153,11 +158,11 @@ export class Store {
 
       const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()
       if (tables.length) {
-        const version = this.db.prepare('SELECT version FROM metadata').all() as {
-          version: number
-        }[]
-        if (version.length !== 1 || version[0]!.version !== SCHEMA_VERSION) {
-          throw new GatewayError('unsupported_database_version')
+        // 版本检查先于任何写操作：未来版本必须字节不变地拒绝，已发布旧版本才进入迁移。
+        const version = storedVersion(this.db)
+        const plan = migrationPlan(version)
+        if (plan.length) {
+          this.migrate(version, plan)
         }
       } else {
         this.db.exec('BEGIN IMMEDIATE')
@@ -266,6 +271,46 @@ export class Store {
         throw error
       }
       throw new GatewayError('database_open_failed')
+    }
+  }
+  /**
+   * 迁移前先在固定备份目录留一份整库副本作为可回退证据，再在单个事务内按链升级。
+   * 任一步失败整体回滚，库保持迁移前版本；副本登记与版本推进同一事务，不留下半升级状态。
+   */
+  private migrate(from: number, plan: readonly MigrationStep[]): void {
+    const now = this.rawTime()
+    // 优先用宿主注入的托管目录；未注入时按同一规则从真实库位置推导 <state>.backups，不留无证据的迁移。
+    const backupDirectory =
+      this.options.backupDirectory ?? (this.path === ':memory:' ? undefined : snapshotDirectory(this.path))
+    // 先写迁移前副本：没有可回退证据就不开始改 schema。
+    let evidence: string | undefined
+    if (backupDirectory) {
+      evidence = recordMigrationSnapshot(this.db, this.path, backupDirectory, from, now, this.limits)
+    }
+    // 重建引用表需要临时关闭约束；SQLite 在事务内忽略该开关，因此必须在 BEGIN 之前设置。
+    this.db.exec('PRAGMA foreign_keys=OFF')
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      applyMigrations(this.db, plan)
+      // 平台列未上报的旧设备保持 NULL；不给它们编造任何平台。
+      this.audit('database_migrated', 'system', now, undefined, {
+        from,
+        to: SCHEMA_VERSION,
+        steps: plan.length,
+        evidence: evidence === undefined ? null : basename(evidence)
+      })
+      this.db.exec('COMMIT')
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK')
+      } catch {
+        /* 回滚失败仍以原错误为准，不把 SQL 或内容拼进错误。 */
+      }
+      // 副本登记行随回滚消失；磁盘上的那份迁移前副本不再被任何登记引用，按同一清理边界删除。
+      if (evidence !== undefined) {
+        cleanupMigrationSnapshot(evidence)
+      }
+      throw error instanceof GatewayError ? error : new GatewayError('database_migration_failed')
     }
   }
   // 验证宿主时钟为非负安全整数，拒绝无效时间进入账本期限计算。
@@ -612,6 +657,22 @@ export class Store {
   }
   connect(machine: string, credential: string): string {
     return this.devices.connect(machine, credential)
+  }
+  /**
+   * 记录当前认证连接上报的平台。只接受该设备当前 online 状态与精确 epoch 的写入；
+   * 平台是"最近一次上报"的历史观测，离线后保留旧值，不当作当前在线事实。
+   */
+  recordDevicePlatform(machine: string, platform: unknown): void {
+    validateDevicePlatform(platform)
+    const epoch = this.devices.deviceEpoch(machine)
+    if (epoch === null) {
+      throw new GatewayError('connection_unavailable')
+    }
+    this.devices.recordPlatform(machine, epoch, platform)
+  }
+  /** 读取设备最近一次上报的平台；从未上报或已不可解析时返回 null。 */
+  devicePlatform(machine: string): DevicePlatformPayload | null {
+    return this.devices.storedPlatform(machine)
   }
   resetDeviceEnrollment(machineId: string, recoveryGeneration: string, expectedEpoch: string | null): void {
     this.devices.resetDeviceEnrollment(machineId, recoveryGeneration, expectedEpoch)

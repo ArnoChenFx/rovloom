@@ -78,6 +78,15 @@ export type DeviceSnapshot = {
     connection_epoch_ref: string | null
     last_heartbeat_at: number | null
   }>
+  /**
+   * 设备最近一次上报的平台。这是历史观测：离线后仍保留旧值，
+   * 因此 verification 只说明"账本里确有该次上报"，不说明它代表当前在线事实。
+   */
+  platform: Observed<{
+    os: 'linux' | 'darwin' | 'win32'
+    arch: 'x64' | 'arm64'
+    distribution: { id: string; version_id: string | null } | null
+  }>
   authentication: Observed<{
     state: 'pending' | 'authenticated' | 'failed' | 'expired' | 'revoked'
     last_failure: {

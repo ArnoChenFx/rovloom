@@ -63,6 +63,12 @@ const STORAGE_ERRORS = new Set([
   'storage_writer_locked',
   'storage_lock_changed',
   'unsupported_database_version',
+  // 迁移自身的固定失败码：只报类别，不带 SQL、路径或旧库内容。
+  'database_migration_failed',
+  'migration_snapshot_failed',
+  'migration_chain_invalid',
+  'migration_constraints_enabled',
+  'migration_foreign_key_violation',
   'database_integrity_failed',
   'database_mode_invalid',
   'clock_untrusted',

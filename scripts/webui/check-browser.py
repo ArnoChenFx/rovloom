@@ -136,6 +136,15 @@ def main():
         page.locator('.brand').screenshot(path=str(output / 'branding.png'))
         checks.append('双机器隔离展示、XSS 转义及轮询年龄更新保留键盘焦点')
 
+        # 平台是账本里的历史上报：列表显示真实 os/发行版/架构，未上报的设备明确显示未记录。
+        platforms = page.locator('.device-card [data-platform]')
+        assert platforms.count() == 2
+        first_platform = platforms.first.inner_text()
+        assert 'Linux' in first_platform and 'ubuntu 24.04' in first_platform and 'x64' in first_platform
+        second_platform = platforms.nth(1).inner_text()
+        assert second_platform.strip() == '平台未记录'
+        checks.append('设备列表显示 Linux/发行版/x64，未上报平台的设备明确未记录')
+
         page.evaluate("window.webUiFixture.mode='stale_children'")
         page.get_by_role('button', name='刷新', exact=True).click()
         page.get_by_text('设备观测已过期', exact=True).first.wait_for()
@@ -149,6 +158,11 @@ def main():
         checks.append('新鲜 status 不续期旧设备/连接/认证观测，列表无绿色在线')
 
         page.locator('.device-name').first.click()
+        # 详情页在同一登记分组里显示平台与上报时间，且不把它当作在线证据。
+        detail_platform = page.locator('.detail-registration').inner_text()
+        assert '平台（最近一次上报）' in detail_platform
+        assert 'Linux · ubuntu 24.04 · x64' in detail_platform
+        checks.append('设备详情显示平台与上报时间，且不参与在线判定')
         page.get_by_role('heading', name='Runtime providers').wait_for()
         expect(page.locator('.gateway')).to_have_count(0)
         assert page.locator('.provider-card').count() == 3

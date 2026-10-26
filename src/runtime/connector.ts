@@ -13,6 +13,7 @@ import type { ProviderSessionGroup } from './provider-sessions.js'
 import { composeConnectorSessions } from './provider-sessions.js'
 import { connectorAdmissionAdapter } from './connector-attempts.js'
 import { OFFER } from '../transport/common.js'
+import { probePlatform } from '../platform/device.js'
 import type { ConnectorRuntimeOptions } from './types.js'
 
 type Pending = {
@@ -369,7 +370,12 @@ export async function createConnectorRuntime(options: ConnectorRuntimeOptions) {
     if (options.provider_snapshot && !offer.capabilities.includes('provider_snapshot')) {
       offer.capabilities.push('provider_snapshot')
     }
-    transport = createConnector({ ...options.transport, offer, session })
+    // 平台采集只读固定系统文件；采集不到时不广告该能力，老 Gateway 的握手因此完全不变。
+    const platform = options.transport.platform ?? (() => probePlatform())
+    if (platform() !== undefined && !offer.capabilities.includes('device_platform')) {
+      offer.capabilities.push('device_platform')
+    }
+    transport = createConnector({ ...options.transport, offer, platform, session })
   } catch {
     stopping = true
     cleanup([/** 原构建器停止全部已交付epoch。 */ () => owner.close()])
