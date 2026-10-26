@@ -7,6 +7,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { setTimeout as pause } from 'node:timers/promises'
 import { createDualRoleFixture } from '../release/dual-role-fixture.mjs'
+import { createConnectorOutput } from './connector-output.mjs'
 
 setTimeout(() => {
   process.stderr.write('E2E_TIMEOUT\n')
@@ -23,15 +24,18 @@ function start(executable, args, name, configPath, cwd, env) {
     shell: false,
     stdio: ['ignore', 'pipe', 'pipe']
   })
-  let stderr = ''
+  const output = createConnectorOutput()
   let stdout = ''
   child.stdout.on('data', (b) => (stdout = (stdout + String(b)).slice(-8192)))
-  child.stderr.on('data', (b) => (stderr = (stderr + String(b)).slice(-16384)))
+  child.stderr.on('data', (b) => output.write(b))
   const closed = new Promise((resolve) => child.once('close', (code, signal) => resolve({ code, signal })))
   return {
     child,
     get stderr() {
-      return stderr
+      return output.stderr
+    },
+    get readyCount() {
+      return output.readyCount
     },
     get stdout() {
       return stdout
@@ -88,7 +92,7 @@ try {
   // 等 connector 真实 ready（stderr 的固定相位行）。
   let ready = false
   for (let attempt = 0; attempt < 600; attempt++) {
-    if (connector.stderr.includes('connector_transport ready provider_ready=true')) {
+    if (connector.readyCount > 0) {
       ready = true
       break
     }
@@ -123,7 +127,7 @@ try {
   report('disconnect_line=present')
 
   // 网关重启：同一端口/配置再起一个真实进程，connector 应自动退避重连回到 ready。
-  const before = connector.stderr.length
+  const before = connector.readyCount
   gateway = start(executable, args, 'gateway', f.gatewayConfigPath, cwd, env)
   let relistening = false
   for (let attempt = 0; attempt < 400; attempt++) {
@@ -139,11 +143,10 @@ try {
   assert(relistening, 'e2e_gateway_restart_failed:' + gateway.stderr)
   report('gateway=restarted')
 
-  // connector 的新 ready 行必须在重启之后出现（截取重启后的新增 stderr）。
+  // 只接纳重启后新增的完整 ready 行；有界日志的旧行和截断不影响累计计数。
   let reready = false
   for (let attempt = 0; attempt < 800; attempt++) {
-    const tail = connector.stderr.slice(Math.max(0, connector.stderr.length - 4096))
-    if (connector.stderr.length > before && tail.includes('connector_transport ready provider_ready=true')) {
+    if (connector.readyCount > before) {
       reready = true
       break
     }

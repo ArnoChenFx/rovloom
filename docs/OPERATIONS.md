@@ -96,4 +96,6 @@ Connector 发送墓碑保留至首次登记的执行 deadline（最长 10 分钟
 
 ### Connector 断连诊断
 
-Connector 每次收敛一条连接都会打印一行 `connector_disconnect`，字段顺序固定：有对端关闭码时是 `code=<4位> close_reason=<原因词>`，本机原因没有关闭码时只有 `close_reason=<原因词>`。这一行按累计断开次数补报，不受 250 毫秒相位采样窗口限制，因此快速重连也能看到；同一个采样窗口内的多次断开会各打一行、按时间从旧到新，不会只留最后一条。断开队列最多保留 16 条，超出丢最老的，累计次数仍完整。相位行 `connector_transport <phase> provider_ready=<bool>` 只说明当前相位，两者可以同时出现。原因词的含义与白名单见[通道文档](TRANSPORT.md#断线与重连)。
+Connector 新断开的诊断行是 `connector_disconnect`，有对端关闭码时字段为 `code=<4位> close_reason=<原因词>`，本机原因没有关闭码时只有 `close_reason=<原因词>`。晚到的关闭码使用 `connector_disconnect_update` 补报订正，不代表再次断连。相位行 `connector_transport <phase> provider_ready=<bool>` 只说明当前相位，两者可以同时出现。
+
+观察器启动时同步建立基线，订阅后首个 250 毫秒窗口里的断开照常补报。断开和订正按独立事件序号交付，共用最多 16 条的事件日志；同一窗口里的事件按时间顺序打印，超出容量只保留最新事件。累计断连次数只在新断开时增加。原因词与白名单见[通道文档](TRANSPORT.md#断线与重连)。

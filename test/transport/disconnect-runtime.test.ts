@@ -1,6 +1,9 @@
 // 用真实 loopback 与原生 WebSocket 验证 Connector 断连观测：只交付白名单原因与有界关闭码，正文不进入输出。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { PassThrough } from 'node:stream'
+import { CliSetup } from '../../src/cli/setup-runtime.js'
+import { configTemplate, type ConnectorConfig } from '../../src/cli/config.js'
 import { createConnector } from '../../src/transport/index.js'
 import { runtime } from '../../src/transport/common.js'
 import type { Socket } from '../../src/transport/common.js'
@@ -71,6 +74,60 @@ function connectorTo(url: string) {
 function latest(client: ReturnType<typeof createConnector>) {
   return client.status().disconnect_recent.at(-1)
 }
+
+/** 先准备 CLI，再创建真实 transport 并同步订阅，确保首个采样窗口从零计数开始。 */
+async function observedTransport(create: () => ReturnType<typeof createConnector>) {
+  const setup = new CliSetup()
+  const stderr = new PassThrough()
+  let output = ''
+  stderr.on('data', (chunk) => {
+    output += String(chunk)
+  })
+  await setup.prepare({ ...configTemplate('connector'), state_dir: '/nonexistent' } as ConnectorConfig, '', {
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr,
+    signal: new AbortController().signal
+  })
+  const client = create()
+  setup.observe({ transport: client, closed: new Promise(() => {}), close: async () => client.stop() })
+  return { client, setup, output: () => output }
+}
+
+test('真实关闭发生在 CLI 首个采样之前仍打印 1008 原因', async () => {
+  const peer = server({ kind: 'close', code: 1008, reason: 'transport_closed' })
+  const observed = await observedTransport(() => connectorTo(peer.url))
+  try {
+    assert.equal(observed.client.status().disconnects, 0)
+    await untilDisconnect(observed.client)
+    await new Promise((resolve) => setTimeout(resolve, 320))
+    assert.match(observed.output(), /connector_disconnect code=1008 close_reason=transport_closed\n/)
+  } finally {
+    observed.setup.close()
+    observed.client.stop()
+    peer.stop()
+  }
+})
+
+test('真实 transport 的晚到关闭订正在下一采样补报，计数不重复', async () => {
+  let controlled: ReturnType<typeof stubConnector>
+  const observed = await observedTransport(() => {
+    controlled = stubConnector()
+    return controlled.client
+  })
+  try {
+    controlled!.handlers.error?.({ type: 'error' })
+    await new Promise((resolve) => setTimeout(resolve, 320))
+    assert.match(observed.output(), /connector_disconnect close_reason=transport_unavailable\n/)
+    controlled!.handlers.close?.({ code: 1006, reason: '' })
+    await new Promise((resolve) => setTimeout(resolve, 320))
+    assert.match(observed.output(), /connector_disconnect_update code=1006 close_reason=transport_abnormal\n/)
+    assert.equal(observed.client.status().disconnects, 1)
+  } finally {
+    observed.setup.close()
+    observed.client.stop()
+  }
+})
 
 /** 等待 Connector 的当前 socket 收敛到断开并带出断开观测；失败只报告固定诊断。 */
 async function untilDisconnect(client: ReturnType<typeof createConnector>) {

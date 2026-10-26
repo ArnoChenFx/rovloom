@@ -922,6 +922,7 @@ export function createConnector(options: ConnectorOptions) {
         ...(failure ? { failure } : {}),
         ...(capacity ? { capacity } : {}),
         ...disconnects.snapshot(),
+        ...disconnects.changes(),
         phase,
         running: running.size,
         reconnects: retries,

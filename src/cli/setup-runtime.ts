@@ -7,6 +7,11 @@ import { LuvusAdapterError } from '../connector/luvus/types.js'
 import { HerdrLocalError } from '../connector/herdr/local.js'
 import { boundedDisconnect } from '../transport/disconnect.js'
 
+/** 计数与事件游标仅接受非负安全整数，不把宿主异常值打印到诊断。 */
+function observationCount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+}
+
 export class CliSetup {
   #io: CliIo | undefined
   #issueCode = false
@@ -60,45 +65,48 @@ export class CliSetup {
       return
     }
     let previous = ''
-    // 断开次数基线：首次采样只记录，历史记录不算本进程新事件。
-    let observedDisconnects: number | undefined
+    // 同步建立订阅基线；之后首个采样窗口里的事件也属于新事件。
+    let observedChanges: number | undefined
+    try {
+      const initial = running.transport.status()
+      observedChanges = observationCount(initial.disconnect_change_sequence)
+    } catch {
+      return
+    }
     this.#observation = setInterval(
-      /* 状态变化才输出固定阶段、布尔值与已知容量；断开另按计数差补报，不输出凭据、epoch或原生正文。 */ () => {
+      /* 状态变化才输出固定阶段、布尔值与已知容量；断开与订正按独立事件序号补报，不输出凭据、epoch或原生正文。 */ () => {
         try {
           const status = running.transport!.status()
           const ready = status.providers.some(
             /* 采用原transport已经核验的当前provider就绪值。 */ (provider) => provider.ready
           )
           // 先取基线再判增量：采样相位与断开时刻无关，窗口内完成的断开/重连不会丢。
-          const disconnects =
-            typeof status.disconnects === 'number' &&
-            Number.isSafeInteger(status.disconnects) &&
-            status.disconnects >= 0
-              ? status.disconnects
-              : undefined
-          if (disconnects !== undefined) {
-            if (observedDisconnects !== undefined && disconnects > observedDisconnects) {
-              // 一个窗口内可能发生多次断开；逐条补报，不能只留最后一条。
-              const delta = disconnects - observedDisconnects
-              const recent = Array.isArray(status.disconnect_recent) ? status.disconnect_recent : []
-              const pending = recent.slice(-Math.min(delta, recent.length))
-              for (const entry of pending) {
-                // 每条都经同一白名单二次复核；异常或未知值整条丢弃，不退化为原文输出。
-                const disconnect = boundedDisconnect(entry)
-                if (!disconnect) {
-                  continue
-                }
-                this.#io?.stderr.write(
-                  'connector_disconnect' +
-                    (disconnect.code === undefined ? '' : ' code=' + String(disconnect.code)) +
-                    ' close_reason=' +
-                    disconnect.reason +
-                    '\n'
-                )
+          const changeSequence = observationCount(status.disconnect_change_sequence)
+          if (changeSequence !== undefined && Array.isArray(status.disconnect_changes)) {
+            for (const change of status.disconnect_changes.slice(-16)) {
+              const sequence = observationCount(change?.sequence)
+              if (
+                sequence === undefined ||
+                observedChanges === undefined ||
+                sequence <= observedChanges ||
+                sequence > changeSequence ||
+                typeof change.correction !== 'boolean'
+              ) {
+                continue
               }
+              const disconnect = boundedDisconnect(change.observation)
+              if (!disconnect) {
+                continue
+              }
+              this.#io?.stderr.write(
+                (change.correction ? 'connector_disconnect_update' : 'connector_disconnect') +
+                  (disconnect.code === undefined ? '' : ' code=' + String(disconnect.code)) +
+                  ' close_reason=' +
+                  disconnect.reason +
+                  '\n'
+              )
             }
-            // 基线只推进到本轮实际交付的计数；计数倒退（宿主异常）时不回退基线。
-            observedDisconnects = Math.max(observedDisconnects ?? disconnects, disconnects)
+            observedChanges = Math.max(observedChanges ?? changeSequence, changeSequence)
           }
           const current = status.phase + ':' + ready + ':' + (status.failure ?? '')
           if (current !== previous) {

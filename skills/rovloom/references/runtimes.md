@@ -120,5 +120,6 @@ You **cannot** turn this switch on remotely. Report refusals faithfully and do n
 
 - When a device is offline, new calls return `unavailable` immediately (milliseconds, no hang); they do not queue waiting for a reconnect.
 - After a Connector disconnect, revocation, rebind or shutdown, the Gateway stops using the old source; a new connection must deliver again. Existing calls, result handles and unacknowledged responses are **not** migrated to the new connection and are not resent.
+- Connector stderr uses `connector_disconnect` for a new disconnect and `connector_disconnect_update` for a later correction of its close code/reason. An update is not another disconnect or permission to resend an in-flight call; check the original call state. These diagnostics contain only bounded codes and fixed reason words.
 - When the instance, contract or capabilities change, the Connector closes the connection itself. After reconnect `binding_revision` may have changed, so re-run `providers_get` plus `runtime_discover`.
 - One provider failing does not mean the device is offline, and vice versa: check `providers_get.readiness` and `machines_get.link` separately.

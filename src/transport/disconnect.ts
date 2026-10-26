@@ -96,14 +96,27 @@ export function boundedDisconnect(value: unknown): DisconnectObservation | undef
 export class DisconnectLog {
   #count = 0
   #queue: DisconnectObservation[] = []
+  #sequence = 0
+  #changes: Readonly<{ sequence: number; correction: boolean; observation: DisconnectObservation }>[] = []
 
   /** 队列上限：只保留最新 QUEUE 条，超出丢最老的；计数仍完整记录累计断开次数。 */
   static readonly QUEUE = 16
+
+  /** 新断开与订正共用独立事件序号；有界事件日志不会把订正误记为第二次断开。 */
+  #change(observation: DisconnectObservation, correction: boolean): void {
+    const bounded = boundedDisconnect(observation)
+    if (!bounded) {
+      return
+    }
+    this.#changes.push(Object.freeze({ sequence: ++this.#sequence, correction, observation: bounded }))
+    this.#changes.splice(0, Math.max(0, this.#changes.length - DisconnectLog.QUEUE))
+  }
 
   /** 记录一次新的断开收敛；只有这里推进计数。 */
   record(observation: DisconnectObservation): void {
     this.#count++
     this.#queue.push(observation)
+    this.#change(observation, false)
     if (this.#queue.length > DisconnectLog.QUEUE) {
       this.#queue.splice(0, this.#queue.length - DisconnectLog.QUEUE)
     }
@@ -112,7 +125,12 @@ export class DisconnectLog {
   /** 用远端实际观察到的 code/reason 订正队列里最新一条；不推进计数，队列为空时不生效。 */
   refine(observation: DisconnectObservation): void {
     if (this.#queue.length > 0) {
+      const previous = this.#queue[this.#queue.length - 1]!
+      if (previous.code === observation.code && previous.reason === observation.reason) {
+        return
+      }
       this.#queue[this.#queue.length - 1] = observation
+      this.#change(observation, true)
     }
   }
 
@@ -126,5 +144,13 @@ export class DisconnectLog {
       }
     }
     return Object.freeze({ disconnects: this.#count, disconnect_recent: Object.freeze(recent) })
+  }
+
+  /** 观察器按独立序号补报新断开和晚到订正；每条记录及返回数组均不可回写。 */
+  changes() {
+    return Object.freeze({
+      disconnect_change_sequence: this.#sequence,
+      disconnect_changes: Object.freeze([...this.#changes])
+    })
   }
 }

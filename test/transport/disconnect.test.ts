@@ -185,3 +185,43 @@ test('队列交付是只读快照，调用方修改不影响内部记录', () =>
   )
   assert.deepEqual(log.snapshot(), { disconnects: 1, disconnect_recent: [{ code: 1008, reason: 'transport_closed' }] })
 })
+
+test('断开与订正的事件序号独立推进，历史快照不可变且相同订正不重复记事件', () => {
+  const log = new DisconnectLog()
+  log.record({ reason: 'transport_unavailable' })
+  const before = log.changes()
+  log.refine({ code: 1006, reason: 'transport_abnormal' })
+  log.refine({ code: 1006, reason: 'transport_abnormal' })
+  log.record({ code: 1008, reason: 'transport_closed' })
+  assert.equal(log.snapshot().disconnects, 2)
+  assert.equal(before.disconnect_change_sequence, 1)
+  assert.equal(before.disconnect_changes.length, 1)
+  const changes = log.changes()
+  assert.equal(changes.disconnect_change_sequence, 3)
+  assert.deepEqual(
+    changes.disconnect_changes.map((entry) => [entry.sequence, entry.correction]),
+    [
+      [1, false],
+      [2, true],
+      [3, false]
+    ]
+  )
+  assert.equal(Object.isFrozen(changes.disconnect_changes), true)
+  assert.equal(Object.isFrozen(changes.disconnect_changes[0]!.observation), true)
+})
+
+test('订正事件日志有界且未知文本不能进入补报记录', () => {
+  const log = new DisconnectLog()
+  log.record({ reason: secret } as never)
+  assert.equal(log.changes().disconnect_changes.length, 0)
+  for (let index = 0; index < 20; index++) {
+    log.record({ reason: 'transport_unavailable' })
+    log.refine({ code: 1006, reason: 'transport_abnormal' })
+  }
+  const changes = log.changes()
+  assert.equal(log.snapshot().disconnects, 21)
+  assert.equal(changes.disconnect_change_sequence, 40)
+  assert.equal(changes.disconnect_changes.length, 16)
+  assert.equal(changes.disconnect_changes[0]!.sequence, 25)
+  assert(!JSON.stringify(changes).includes(secret))
+})
