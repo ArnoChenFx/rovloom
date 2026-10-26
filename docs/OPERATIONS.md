@@ -29,6 +29,7 @@ Luvus raw 授权与 Gateway readiness 的修复可先只升级 Gateway，沿用�
 
 - 安装：`install.sh` / `install.ps1` 只安装单文件二进制并核对 `SHA256SUMS`，不建配置、不起服务（[快速开始](QUICK-START-zh.md)）。Docker 只用于 Linux Gateway（[Docker 部署](DOCKER-zh.md)）。
 - 升级：先正常停 Connector 再停 Gateway，替换二进制（重新运行安装脚本，或 `docker compose pull && docker compose up -d`），再按原样启动。配置与数据沿用。脚本只安装官方 latest 稳定版；预发布版本从 Release 页面手动下载。
+- **反向代理配置变更：升级前删除 Gateway 配置中的 `mcp.public_url`。保留该字段会导致 `config check` 和 Gateway 启动报 `invalid_config`，不会继续兼容或忽略旧值。** AI 客户端仍直接填写代理的 HTTPS `/mcp` 地址。
 - 没有自更新。数据库版本不兼容时拒绝启动（`unsupported_database_version`），不会静默迁移。
 
 ## 3. 开机服务

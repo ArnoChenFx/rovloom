@@ -181,7 +181,8 @@ Gateway 在本机/可信网络使用普通 HTTP/WS，公网 TLS 由外部标准 
 终止。Connector WSS 始终使用系统证书验证，没有自定义 CA 或跳过验证选项。
 
 MCP、管理页与管理 API 均支持保留或改写 Host、外部 HTTPS / 内部 HTTP 的反向代理，
-无需公网 URL、域名白名单或可信代理配置。旧配置中的 `mcp.public_url` 字段请删除。
+无需公网 URL、域名白名单或可信代理配置。**升级前必须删除旧配置中的 `mcp.public_url` 字段；
+保留该字段会被作为未知配置拒绝，导致 `config check` 和 Gateway 启动报 `invalid_config`，不会忽略旧值。**
 在 AI 客户端直接填写代理的 HTTPS `/mcp` 地址；Gateway 显示的本机地址仍供本机客户端使用。
 代理保留 `/mcp`、`/admin/v1/…`、Authorization 与 MCP 会话头，MCP 的 SSE 响应不要缓冲。
 管理 API 继续核验管理员 Cookie 和写操作 CSRF，MCP 每次请求仍核验当前 Bearer。

@@ -223,8 +223,10 @@ certificate validation. There is no custom CA or skip-verification option.
 
 MCP, the management UI and management APIs accept reverse proxies that preserve or
 rewrite Host, with HTTPS outside and HTTP upstream. No public URL, allowed-domain
-or trusted-proxy configuration is required. Remove the retired `mcp.public_url`
-field from older configuration files. Configure the external HTTPS `/mcp` URL in
+or trusted-proxy configuration is required. **Before upgrading, remove the retired
+`mcp.public_url` field from older configuration files. Leaving it present causes
+`config check` and Gateway startup to fail with `invalid_config`; it is not ignored.**
+Configure the external HTTPS `/mcp` URL in
 the AI client; the local endpoint printed by Gateway remains useful for local clients.
 Preserve `/mcp`, `/admin/v1/…`, Authorization and MCP session headers. Forward MCP
 SSE responses without buffering. Management requests still require administrator
