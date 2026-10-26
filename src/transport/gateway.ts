@@ -706,8 +706,8 @@ export function createGateway(options: GatewayOptions) {
         machines.set(connection.machine_id, peer)
         const welcome = encodeWireFrame(
           {
-            protocol_major: 2,
-            protocol_minor: 0,
+            protocol_major: selected.major,
+            protocol_minor: selected.minor,
             type: 'welcome',
             message_id: randomUUID(),
             payload: {
@@ -748,6 +748,15 @@ export function createGateway(options: GatewayOptions) {
         fail('authentication_required')
       }
       if (peer.session.adapter.observeMessage(decoded, 'connector_to_gateway') === 'duplicate') {
+        return
+      }
+      if (decoded.type === 'device_platform') {
+        // 平台只属于当前认证连接：写入本设备的"最近一次上报"，离线后保留为历史观测。
+        const reported: unknown = options.store.recordDevicePlatform(peer.connection.machine_id, decoded.payload)
+        if (reported !== undefined) {
+          fail('synchronous_platform_record_required')
+        }
+        assertPeer(peer)
         return
       }
       if (decoded.type === 'terminal_execution_state') {

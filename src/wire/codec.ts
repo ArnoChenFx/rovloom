@@ -8,6 +8,7 @@ import type {
   NativeValidationContext,
   ProviderSnapshot,
   ProviderBinding,
+  DevicePlatformPayload,
   WireEnvelope
 } from './types.js'
 import { boundedJson, fields, object, id, uint, sha, text, oneOf, fail, parseJson, LIMITS } from './validation.js'
@@ -40,6 +41,7 @@ const DIRECTIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   welcome: ['gateway_to_connector'],
   provider_snapshot: ['connector_to_gateway'],
   terminal_execution_state: ['connector_to_gateway'],
+  device_platform: ['connector_to_gateway'],
   provider_fenced: ['gateway_to_connector', 'connector_to_gateway'],
   request: ['gateway_to_connector'],
   accepted: ['connector_to_gateway'],
@@ -153,6 +155,33 @@ function bind(frame: JsonObject, attempt: unknown): AttemptBinding {
     recovery_generation: frame.recovery_generation as string,
     connection_epoch: frame.connection_epoch as string,
     ...attempt
+  }
+}
+
+/** 只校验平台声明的形状与允许取值；不核对它是否属于该设备，也不把它当作可信身份。 */
+export function validateDevicePlatform(value: unknown): asserts value is DevicePlatformPayload {
+  const p = object(value)
+  fields(p, ['os', 'arch', 'distribution'])
+  oneOf(p.os, ['linux', 'darwin', 'win32'])
+  oneOf(p.arch, ['x64', 'arm64'])
+  if (p.distribution !== null) {
+    const d = object(p.distribution)
+    fields(d, ['id', 'version_id'])
+    // 发行版标识是小写的固定字符集，避免任意文本或路径片段进入账本。
+    if (typeof d.id !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,31}$/u.test(d.id)) {
+      fail('invalid_device_platform')
+    }
+    if (
+      d.version_id !== null &&
+      (typeof d.version_id !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,31}$/u.test(d.version_id))
+    ) {
+      fail('invalid_device_platform')
+    }
+  }
+  // 只有非 Linux 不允许带发行版。Linux 允许 distribution 为 null（/etc/os-release 读不到），
+  // 此时表示"未读到"，既不编造也不因此断连。
+  if (p.os !== 'linux' && p.distribution !== null) {
+    fail('invalid_device_platform')
   }
 }
 
@@ -357,6 +386,10 @@ function decode(input: string | Uint8Array, context: CodecContext, limit: number
   authenticateEnvelope(frame, context)
 
   switch (frame.type) {
+    case 'device_platform':
+      capability(context, 'device_platform')
+      validateDevicePlatform(p)
+      break
     case 'terminal_execution_state':
       capability(context, 'terminal_execution_state')
       fields(p, ['binding', 'enabled'])

@@ -1,6 +1,6 @@
-// 声明当前 持久化表、管理事务及过期索引；不提供对未发布旧版本的自动迁移。
-export const SCHEMA_VERSION = 9
-// 未发布的旧库不在这里猜测来源或迁移；版本检查必须先于本 schema 的执行。
+// 当前持久化表、管理事务及过期索引；既有数据库按迁移链升级到当前版本，见 migration.ts。
+export const SCHEMA_VERSION = 10
+// 待发布旧库有校验过的历史迁移链；高于当前版本的未来库仍拒绝，见 migration.ts 与不变量。
 export const SCHEMA = `
 CREATE TABLE metadata (
   singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL,
@@ -10,7 +10,8 @@ CREATE TABLE machines (
   machine_id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
   status TEXT NOT NULL, credential_hash TEXT, epoch TEXT, needs_confirmation INTEGER NOT NULL DEFAULT 0,
   resource_revision INTEGER NOT NULL DEFAULT 1 CHECK(resource_revision>0 AND resource_revision<9007199254740991), labels_json TEXT NOT NULL DEFAULT '[]',
-  credential_revision INTEGER NOT NULL DEFAULT 0
+  credential_revision INTEGER NOT NULL DEFAULT 0,
+  platform_json TEXT
 );
 CREATE TABLE enrollments (
   token_hash TEXT PRIMARY KEY, machine_id TEXT NOT NULL REFERENCES machines,

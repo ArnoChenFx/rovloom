@@ -700,6 +700,8 @@ export class StoreGatewayService implements GatewayService {
       persisted_state: row.status as DeviceSnapshot['persisted_state'],
       resource_revision: null,
       observed_at: now,
+      // 平台是设备属性：从未上报就是 null，不从 os 猜测。
+      platform: this.options.store.devicePlatform(row.machine_id),
       connection: { verification: 'unverified', reason_code: 'backend_unavailable' },
       authentication:
         row.status === 'revoked' || row.status === 'pending'

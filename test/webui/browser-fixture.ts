@@ -107,6 +107,16 @@ const read: PageRead = async (route, signal) => {
         device.connection = { verification: 'unverified', reason_code: 'not_recorded' }
         device.authentication = { verification: 'unverified', reason_code: 'not_recorded' }
       }
+      // 四种平台形态各出现一次，供窄屏与双语文案验收真实排版：
+      // Linux+发行版、Linux 无发行版（os-release 读不到）、macOS、从未上报。
+      device.platform =
+        index === 0
+          ? { os: 'linux', arch: 'x64', distribution: { id: 'ubuntu', version_id: '24.04' } }
+          : index === 1
+            ? { os: 'linux', arch: 'arm64', distribution: null }
+            : index === 2
+              ? { os: 'darwin', arch: 'arm64', distribution: null }
+              : null
       return device
     })
     if (route.machineId) {

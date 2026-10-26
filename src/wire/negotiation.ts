@@ -3,15 +3,17 @@ import { fields, object, uint, fail, id } from './validation.js'
 import type { Capability, Negotiated, VersionOffer } from './types.js'
 
 export const WIRE_MAJOR = 2
-export const WIRE_MINOR = 0
-// 2.0 中的可选能力仍须双方明确广告；较高 minor 不能隐式启用它们。
+export const WIRE_MINOR = 1
+// 2.x 中的可选能力仍须双方明确广告；较高 minor 不能隐式启用它们。
 const CAPABILITIES: Readonly<Record<Capability, number>> = Object.freeze({
   rpc: 0,
   provider_fence: 0,
   dispatch_refusal: 0,
   provider_snapshot: 0,
   terminal_execution_state: 0,
-  late_evidence: 0
+  late_evidence: 0,
+  // 设备平台在 welcome 后单独上报；老 Gateway 协商不到它，握手行为不变。
+  device_platform: 1
 })
 
 // 校验版本广告，要求能力列表无重复且必需能力均已广告。

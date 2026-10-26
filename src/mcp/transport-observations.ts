@@ -108,6 +108,36 @@ function authentication(
   }
 }
 
+/**
+ * 平台是设备属性，不随时效观测变化：形状合法就原样透传，非法形状按"从未上报"处理（null）。
+ * 它不因连接或认证过期而降级，也不会被升级成当前在线事实。
+ */
+function platform(value: DeviceSnapshot['platform']): DeviceSnapshot['platform'] {
+  if (value === null) {
+    return null
+  }
+  const distribution = value.distribution
+  if (
+    !['linux', 'darwin', 'win32'].includes(value.os) ||
+    !['x64', 'arm64'].includes(value.arch) ||
+    // Linux 允许未读到发行版（null）；非 Linux 携带发行版属于不一致形状。
+    (value.os !== 'linux' && distribution !== null) ||
+    (distribution !== null &&
+      (typeof distribution.id !== 'string' ||
+        !/^[a-z0-9][a-z0-9._-]{0,31}$/u.test(distribution.id) ||
+        (distribution.version_id !== null &&
+          (typeof distribution.version_id !== 'string' ||
+            !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,31}$/u.test(distribution.version_id)))))
+  ) {
+    return null
+  }
+  return {
+    os: value.os,
+    arch: value.arch,
+    distribution: distribution === null ? null : { id: distribution.id, version_id: distribution.version_id ?? null }
+  }
+}
+
 /** 只保留既有Store来源的pending/revoked证明，不把持久登记字段另造认证事实。 */
 function storedAuthentication(
   device: DeviceSnapshot,
@@ -198,7 +228,9 @@ export function createManagementTransportProjection(
         persisted_state: device.persisted_state,
         observed_at: device.observed_at,
         connection: link,
-        authentication: auth
+        authentication: auth,
+        // 平台是账本里的历史上报，不来自本次传输取样，因此不随连接失效而降级。
+        platform: platform(device.platform)
       }
     },
     /** 只把已核实的在线连接投影为 connected；其余一律 unverified，不推测 offline。 */

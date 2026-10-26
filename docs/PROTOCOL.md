@@ -30,7 +30,7 @@ AI 客户端 ──MCP Streamable HTTP──▶ Gateway ──Wire v2 (WS/WSS)�
 ## 2. Wire v2（Gateway ↔ Connector）
 
 - 传输：Connector 主动出站的 WebSocket（`ws://` 或 `wss://`，路径 `/connector`），每条消息一个 UTF-8 JSON 信封。
-- 版本：只有 major 2。minor 取双方交集。可选能力（`rpc`、`dispatch_refusal`、`provider_snapshot`、`terminal_execution_state`、`provider_fence`、`late_evidence`）取双方广告的交集，未知的 required 能力被拒绝。
+- 版本：只有 major 2，当前 minor 1。minor 取双方交集。可选能力（`rpc`、`dispatch_refusal`、`provider_snapshot`、`terminal_execution_state`、`provider_fence`、`late_evidence`、`device_platform`）取双方广告的交集，未知的 required 能力被拒绝。
 - 限额：单帧 1 MiB，JSON 深度 64，节点 10 万。超限的响应不截断，调用保持 `outcome_unknown`。
 - 已认证帧都带 `machine_id`、`recovery_generation`、`connection_epoch`，逐项核对当前认证连接。心跳间隔 5 秒，20 秒无有效心跳判定断线。
 - 细则：[Wire 协议](protocol/WIRE-PROTOCOL.md)、[通道](TRANSPORT.md)。

@@ -1,7 +1,7 @@
 // 持久化 SQLite 调用账本与设备生命周期，按固定期限治理内容、预算，并在提交后通知宿主回收上下文。
 import { DatabaseSync } from 'node:sqlite'
 import { closeSync, existsSync, openSync, unlinkSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { canonical, digest, GatewayError, validateRequest } from './contracts.js'
 import type { NativeRequest } from './contracts.js'
@@ -12,10 +12,12 @@ import {
   LIMITS,
   registeredRequestDigest,
   validateAttempt,
+  validateDevicePlatform,
   validateProvider,
   validateTarget
 } from './wire/index.js'
 import type { ResponseAnchor, ResponseEvidencePlan } from './wire/evidence.js'
+import type { DevicePlatformPayload } from './wire/types.js'
 import type {
   AttemptBinding,
   AttemptIdentity,
@@ -31,9 +33,11 @@ import { exportSnapshot } from './storage/backup.js'
 import { assertBudget, assertUsage } from './storage/budget.js'
 import { auditRecord } from './storage/audit.js'
 import { SCHEMA, SCHEMA_VERSION } from './storage/schema.js'
+import { applyMigration, migrationRequired, storedVersion } from './storage/migration.js'
+import { recordMigrationSnapshot } from './storage/migration-snapshot.js'
 import { CachedDatabase } from './storage/database.js'
 import { createPrivate, databasePath, privateFile, privatePath } from './storage/files.js'
-import { assertSnapshotDirectoryBoundary, snapshotCleanup } from './storage/snapshot-directory.js'
+import { assertSnapshotDirectoryBoundary, snapshotCleanup, snapshotDirectory } from './storage/snapshot-directory.js'
 import { lockContent, recoverStaleLock } from './storage/lock-recovery.js'
 import { reviewedHerdrRequest } from './connector/herdr/methods.js'
 
@@ -124,6 +128,7 @@ export class Store {
   private maintenance?: ReturnType<typeof setInterval>
   readonly administration: ManagementLedger
   private devices!: DeviceLedger
+  private readonly backupDirectory: string | undefined
   readonly limits: Retention
   // 打开独占的私有 SQLite 账本，检查规范 schema、完整性与恢复状态并启动期限清理。
   // 重开时使原连接离线，未派发调用收敛为未派发、在途调用收敛为结果未知，不自动重放。
@@ -149,15 +154,16 @@ export class Store {
       if (path !== ':memory:' && !existsSync(path)) {
         createPrivate(path)
       }
+      // 每次打开都固定同一备份边界，供迁移、预算和清理共用；重开 v10 库也沿用默认目录。
+      this.backupDirectory = options.backupDirectory ?? (path === ':memory:' ? undefined : snapshotDirectory(path))
       this.db = new CachedDatabase(path)
 
       const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()
       if (tables.length) {
-        const version = this.db.prepare('SELECT version FROM metadata').all() as {
-          version: number
-        }[]
-        if (version.length !== 1 || version[0]!.version !== SCHEMA_VERSION) {
-          throw new GatewayError('unsupported_database_version')
+        // 版本检查先于任何写操作：未来版本与更旧版本必须字节不变地拒绝，只有 v9 进入迁移。
+        const version = storedVersion(this.db)
+        if (migrationRequired(version)) {
+          this.migrate(version)
         }
       } else {
         this.db.exec('BEGIN IMMEDIATE')
@@ -175,11 +181,11 @@ export class Store {
       this.db.exec(
         'PRAGMA foreign_keys=ON; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;'
       )
-      if (this.options.backupDirectory) {
+      if (this.backupDirectory) {
         // 托管目录被离线清理后仍保留原边界，允许维护删除已不存在快照的登记，不创建目录。
-        privatePath(this.options.backupDirectory)
-        if (existsSync(this.options.backupDirectory)) {
-          privatePath(join(this.options.backupDirectory, 'boundary'))
+        privatePath(this.backupDirectory)
+        if (existsSync(this.backupDirectory)) {
+          privatePath(join(this.backupDirectory, 'boundary'))
         }
       }
       if (this.db.prepare('PRAGMA quick_check').get()!.quick_check !== 'ok') {
@@ -266,6 +272,52 @@ export class Store {
         throw error
       }
       throw new GatewayError('database_open_failed')
+    }
+  }
+  /**
+   * 迁移前先在固定备份目录留一份整库副本作为可回退证据，再在单个事务内升级。
+   * 任一步失败整体回滚，库保持迁移前版本；副本登记与版本推进同一事务，不留下半升级状态。
+   */
+  private migrate(from: number): void {
+    const now = this.rawTime()
+    // 先写迁移前副本：没有可回退证据就不开始改 schema。
+    let snapshot: ReturnType<typeof recordMigrationSnapshot> | undefined
+    let transaction = false
+    try {
+      if (this.backupDirectory) {
+        snapshot = recordMigrationSnapshot(this.db, this.path, this.backupDirectory, from, now, this.limits)
+      }
+      // BEGIN 失败也必须清理刚生成、尚未登记的副本。
+      this.db.exec('BEGIN IMMEDIATE')
+      transaction = true
+      applyMigration(this.db)
+      // 副本登记与版本推进同一事务：失败时登记行随回滚消失，不会永久占用备份数量配额。
+      if (snapshot !== undefined) {
+        this.db.prepare('INSERT INTO backups VALUES(?,?,?)').run(snapshot.path, now, now + this.limits.backup_ttl)
+      }
+      // 平台列未上报的旧设备保持 NULL；不给它们编造任何平台。
+      this.audit('database_migrated', 'system', now, undefined, {
+        from,
+        to: SCHEMA_VERSION,
+        evidence: snapshot === undefined ? null : basename(snapshot.path)
+      })
+      this.db.exec('COMMIT')
+      transaction = false
+    } catch (error) {
+      let rolledBack = !transaction
+      if (transaction) {
+        try {
+          this.db.exec('ROLLBACK')
+          rolledBack = true
+        } catch {
+          // 无法确认回滚时保留副本作为恢复证据，不掩盖原错误。
+        }
+      }
+      // 副本登记行随回滚消失；磁盘上的那份迁移前副本不再被任何登记引用，按同一清理边界删除。
+      if (rolledBack) {
+        snapshot?.cleanup()
+      }
+      throw error instanceof GatewayError ? error : new GatewayError('database_migration_failed')
     }
   }
   // 验证宿主时钟为非负安全整数，拒绝无效时间进入账本期限计算。
@@ -451,7 +503,7 @@ export class Store {
       admission === 'optional'
         ? { ...this.limits, storage_total_bytes: this.limits.storage_total_bytes - this.limits.storage_reserve_bytes }
         : this.limits
-    assertBudget(this.db, this.path, limits, this.options.backupDirectory, admission !== false)
+    assertBudget(this.db, this.path, limits, this.backupDirectory, admission !== false)
   }
   // 按固定白名单构造脱敏审计记录，并与对应业务变化在同一事务写入。
   private audit(
@@ -612,6 +664,22 @@ export class Store {
   }
   connect(machine: string, credential: string): string {
     return this.devices.connect(machine, credential)
+  }
+  /**
+   * 记录当前认证连接上报的平台。只接受该设备当前 online 状态与精确 epoch 的写入；
+   * 平台是"最近一次上报"的历史观测，离线后保留旧值，不当作当前在线事实。
+   */
+  recordDevicePlatform(machine: string, platform: unknown): void {
+    validateDevicePlatform(platform)
+    const epoch = this.devices.deviceEpoch(machine)
+    if (epoch === null) {
+      throw new GatewayError('connection_unavailable')
+    }
+    this.devices.recordPlatform(machine, epoch, platform)
+  }
+  /** 读取设备最近一次上报的平台；从未上报或已不可解析时返回 null。 */
+  devicePlatform(machine: string): DevicePlatformPayload | null {
+    return this.devices.storedPlatform(machine)
   }
   resetDeviceEnrollment(machineId: string, recoveryGeneration: string, expectedEpoch: string | null): void {
     this.devices.resetDeviceEnrollment(machineId, recoveryGeneration, expectedEpoch)
@@ -1409,12 +1477,12 @@ export class Store {
         // 过期的未批准认领直接清理；已批准认领的交付收敛由运行时 custody 负责，不能在维护里静默吞掉。
         this.db.prepare("DELETE FROM pairing_claims WHERE expires<=? AND status='pending'").run(now)
         // 删除前复核固定目录仍是普通目录：运行中被换成软链接时整轮过期失败关闭，不能跟随链接删到目录外。
-        if (this.options.backupDirectory) {
-          assertSnapshotDirectoryBoundary(this.options.backupDirectory)
+        if (this.backupDirectory) {
+          assertSnapshotDirectoryBoundary(this.backupDirectory)
         }
         for (const row of this.db.prepare('SELECT path FROM backups WHERE expires<=?').all(now)) {
           const path = String(row.path)
-          if (dirname(path) !== this.options.backupDirectory) {
+          if (dirname(path) !== this.backupDirectory) {
             throw new GatewayError('unsafe_backup_path')
           }
           if (existsSync(path + '.lock')) {
@@ -1617,8 +1685,8 @@ export class Store {
   backup(destination: string): void {
     privatePath(destination)
     if (
-      !this.options.backupDirectory ||
-      dirname(destination) !== this.options.backupDirectory ||
+      !this.backupDirectory ||
+      dirname(destination) !== this.backupDirectory ||
       dirname(destination) === dirname(this.path) ||
       dirname(destination).startsWith(dirname(this.path) + '/') ||
       dirname(this.path).startsWith(dirname(destination) + '/')
@@ -1626,8 +1694,8 @@ export class Store {
       throw new GatewayError('separate_backup_directory_required')
     }
     // 写入前同样复核目录边界，软链接替换不能把新快照落到固定目录之外。
-    assertSnapshotDirectoryBoundary(this.options.backupDirectory)
-    const cleanup = snapshotCleanup(this.options.backupDirectory)
+    assertSnapshotDirectoryBoundary(this.backupDirectory)
+    const cleanup = snapshotCleanup(this.backupDirectory)
     let exported = false
     let locked = false
     try {
@@ -1644,7 +1712,7 @@ export class Store {
             Number(this.db.prepare('PRAGMA page_count').get()!.page_count) *
               Number(this.db.prepare('PRAGMA page_size').get()!.page_size) +
             65_536
-          assertBudget(this.db, this.path, this.limits, this.options.backupDirectory, false, estimate)
+          assertBudget(this.db, this.path, this.limits, this.backupDirectory, false, estimate)
           createPrivate(destination + '.lock')
           locked = true
           exportSnapshot(this.db, destination, now, this.limits)

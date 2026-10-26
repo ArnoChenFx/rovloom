@@ -201,6 +201,35 @@ function currentDeviceLink(device: DeviceSnapshot, freshness: Freshness): boolea
   )
 }
 
+/**
+ * 把设备平台渲染成人类可读文本：如「Linux · Ubuntu 24.04 · x64」「Linux · x64」「macOS · arm64」。
+ * 只翻译固定词汇；发行版标识是原始值，不做大小写或名称猜测。Linux 没有发行版标识时只显示 os 与架构。
+ */
+function platformLabel(platform: NonNullable<DeviceSnapshot['platform']>, i18n: Localizer): string {
+  const { t } = i18n
+  const os = t(
+    platform.os === 'linux' ? 'platform.osLinux' : platform.os === 'darwin' ? 'platform.osDarwin' : 'platform.osWindows'
+  )
+  const arch = t(platform.arch === 'x64' ? 'platform.archX64' : 'platform.archArm64')
+  if (platform.os !== 'linux' || platform.distribution === null) {
+    return t('device.platformParts', { os, arch })
+  }
+  const distribution = platform.distribution.version_id
+    ? `${platform.distribution.id} ${platform.distribution.version_id}`
+    : platform.distribution.id
+  return t('device.platformDistribution', { os, distribution, arch })
+}
+
+/** 只在设备确有平台时渲染一个中性徽标；没有平台就不渲染任何占位。 */
+function platformBadge(device: DeviceSnapshot, i18n: Localizer): HTMLElement | null {
+  if (device.platform === null) {
+    return null
+  }
+  const result = badge(platformLabel(device.platform, i18n))
+  result.dataset.platform = device.platform.os
+  return result
+}
+
 /** 分开显示持久状态、连接与认证；过期的已验证来源仅可作为历史，不呈绿色在线。 */
 function deviceBadges(device: DeviceSnapshot, freshness: Freshness): HTMLElement {
   const { i18n } = freshness
@@ -867,6 +896,11 @@ function deviceList(page: PageView, freshness: Freshness, route: PageRoute, filt
     )
     const health = node('div', '', 'device-health')
     health.append(node('span', t('devices.health'), 'cell-label'), deviceBadges(device, freshness))
+    // 平台是设备属性，与连接/认证徽标并列但不参与在线判定；没有平台就不渲染。
+    const platform = platformBadge(device, i18n)
+    if (platform) {
+      health.append(platform)
+    }
     const heartbeat = device.connection.verification === 'verified' ? device.connection.value.last_heartbeat_at : null
     const activity = node('div', '', 'device-activity')
     activity.append(node('span', t('devices.activity'), 'cell-label'))
@@ -1033,7 +1067,11 @@ function deviceDetail(page: PageView, freshness: Freshness, management = false):
       [
         t('detail.revision'),
         device.resource_revision === null ? t('value.notProvided') : String(device.resource_revision)
-      ]
+      ],
+      // 平台只在确有值时出现；没有平台就没有这一行，也不写占位说明。
+      ...(device.platform === null
+        ? []
+        : ([[t('detail.platform'), platformLabel(device.platform, i18n)]] as [string, string][]))
     ])
   )
   const connectionSection = node('section', '', 'detail-connection')

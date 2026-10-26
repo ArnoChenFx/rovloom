@@ -1,6 +1,6 @@
 # Wire v2：Gateway 与 Connector 的消息协议
 
-Wire 当前版本为 major **2** / minor **0**。每条 WebSocket 消息是一个 UTF-8 JSON 信封。编解码在 `src/wire/`，Luvus 原生校验经 `src/integration/luvus-wire.ts` 接入，见 [原生契约](NATIVE-CONTRACT.md)。认证、存储和传输由宿主提供可信实现，见 [通道](../TRANSPORT.md)。总览见 [协议总览](../PROTOCOL.md)。
+Wire 当前版本为 major **2** / minor **1**。每条 WebSocket 消息是一个 UTF-8 JSON 信封。编解码在 `src/wire/`，Luvus 原生校验经 `src/integration/luvus-wire.ts` 接入，见 [原生契约](NATIVE-CONTRACT.md)。认证、存储和传输由宿主提供可信实现，见 [通道](../TRANSPORT.md)。总览见 [协议总览](../PROTOCOL.md)。
 
 Luvus / Herdr 的原生协议、UHP 标识和 fixture 保持原样，Wire 不改写它们。
 
@@ -23,6 +23,7 @@ Luvus / Herdr 的原生协议、UHP 标识和 fixture 保持原样，Wire 不改
 | `terminal_execution_state` | Connector 上报本机终端开关的布尔值，仅供目录使用。依赖 `rpc` |
 | `provider_fence` | 普通 RPC 的逐 provider 来源永久撤回。依赖 `rpc` |
 | `late_evidence` | 为 `outcome_unknown` 的同一 attempt 补充证据 |
+| `device_platform` | Connector 上报本机 os / arch / Linux 发行版标识。minor ≥ 1 |
 
 ## 信封与消息类型
 
@@ -38,6 +39,7 @@ Luvus / Herdr 的原生协议、UHP 标识和 fixture 保持原样，Wire 不改
 | `welcome` | Gateway → Connector，预认证 | machine_id, recovery_generation, connection_epoch, in_reply_to, selected |
 | `provider_snapshot` | Connector → Gateway | binding, target, source, capabilities, capability_revision |
 | `terminal_execution_state` | Connector → Gateway | binding, enabled |
+| `device_platform` | Connector → Gateway | os, arch, distribution |
 | `provider_fenced` | 双向 | binding |
 | `request` | Gateway → Connector | attempt, expected_binding_revision, native_request, validation |
 | `accepted` | Connector → Gateway | attempt |
@@ -163,6 +165,16 @@ Luvus / Herdr 的原生协议、UHP 标识和 fixture 保持原样，Wire 不改
 - 重连后必须重新认证并独立交付快照，旧调用不重发。
 
 codec 成功只证明消息边界。受保护配置先固定 schema 原字节及版本、hash、revision，Gateway 在本地 Worker 中编译。runtime 再核对规范 binding、完整 Target、能力、当前 SocketChannel 与 Store epoch，成功后才发布 live 来源。schema 不经 Wire 传输，快照不是 provider 注册入口，也不是任意 schema 的信任入口。
+
+## 可选设备平台上报
+
+`device_platform` 只在双方协商后由当前认证的 Connector 发送，并在 `welcome` 之后立即发一次。
+
+- payload 严格只有 `os`（`linux` / `darwin` / `win32`）、`arch`（`x64` / `arm64`）与 `distribution`。
+- `distribution` 只在 `os` 为 `linux` 且 `/etc/os-release` 可读时非空，形如 `{id, version_id}`，两者都是受限字符集的原始标识；macOS / Windows 明确为 `null`。codec 拒绝 `linux` 缺发行版或非 Linux 带发行版的不一致形状。
+- 该帧不携带路径、环境变量、命令输出、凭据或任何执行许可，也不改变身份、provider 或调用账本。
+- 老 Gateway 只广告 minor 0：协商结果不含该能力，Connector 因此不发此帧，握手与业务帧与升级前完全一致。
+- Gateway 把它记成该设备"最近一次上报"的平台，离线后保留旧值，管理面标注为历史观测。
 
 ## 可选终端开关观察
 

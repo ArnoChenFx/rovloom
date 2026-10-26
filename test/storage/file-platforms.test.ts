@@ -18,6 +18,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPrivate, ensurePrivateDirectory, managedBytes, readPrivateBytes } from '../../src/storage/files.js'
+import { snapshotDirectory } from '../../src/storage/snapshot-directory.js'
 import { readOrCreateRoleConfig } from '../../src/cli/first-config.js'
 import { readConfig } from '../../src/cli/config.js'
 import { readRuntimeJson } from '../../src/cli/runtime-files.js'
@@ -152,6 +153,7 @@ test(
         const search = join(root, 'search')
         const directory = join(search, 'state')
         ensurePrivateDirectory(directory)
+        const expectedBackups = join(realpathSync(root), 'search', 'state') + '.backups'
         chmodSync(search, 0o111)
         chmodSync(directory, 0o300)
         try {
@@ -161,6 +163,7 @@ test(
             })
           }
           const path = join(directory, 'gateway.json')
+          assert.equal(snapshotDirectory(join(directory, 'gateway.db')), expectedBackups)
           readOrCreateRoleConfig('gateway', path, { home: root, platform: process.platform })
           assert.equal(readConfig(path).role, 'gateway')
           new Store(join(directory, 'gateway.db')).close()

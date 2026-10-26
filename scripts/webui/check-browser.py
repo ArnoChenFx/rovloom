@@ -136,6 +136,14 @@ def main():
         page.locator('.brand').screenshot(path=str(output / 'branding.png'))
         checks.append('双机器隔离展示、XSS 转义及轮询年龄更新保留键盘焦点')
 
+        # 平台是设备属性：只有确有平台的设备才有徽标，未上报的设备没有任何占位文字。
+        platforms = page.locator('.device-card [data-platform]')
+        assert platforms.count() == 1
+        first_platform = platforms.first.inner_text().strip()
+        assert first_platform == 'Linux · ubuntu 24.04 · x64'
+        assert page.locator('.device-card').count() == 2
+        checks.append('设备列表只对确有平台的设备显示 Linux/发行版/x64，未上报者无占位文字')
+
         page.evaluate("window.webUiFixture.mode='stale_children'")
         page.get_by_role('button', name='刷新', exact=True).click()
         page.get_by_text('设备观测已过期', exact=True).first.wait_for()
@@ -149,6 +157,16 @@ def main():
         checks.append('新鲜 status 不续期旧设备/连接/认证观测，列表无绿色在线')
 
         page.locator('.device-name').first.click()
+        # 详情页登记分组只有一行平台，且不参与在线判定。
+        registration = page.locator('.detail-registration')
+        assert 'Linux · ubuntu 24.04 · x64' in registration.inner_text()
+        assert registration.locator('.facts .fact').count() == 3
+        checks.append('设备详情登记分组显示一行平台，无上报时间或历史标注')
+        # 页面上不出现任何说明性小字。
+        page_text = page.locator('main').inner_text()
+        for removed in ['平台未记录', '最近一次上报', '历史观测', '平台上报时间', '上次平台']:
+            assert removed not in page_text, removed
+        checks.append('页面不再出现平台未记录/最近一次上报/历史观测/平台上报时间等说明性文案')
         page.get_by_role('heading', name='Runtime providers').wait_for()
         expect(page.locator('.gateway')).to_have_count(0)
         assert page.locator('.provider-card').count() == 3

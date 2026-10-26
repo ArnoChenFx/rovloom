@@ -162,3 +162,7 @@ You **cannot** turn this switch on remotely. Report refusals faithfully and do n
 ### MCP and management API reverse proxies
 
 MCP, the management UI and management APIs support arbitrary proxy domains and ports, external HTTPS with an HTTP upstream, and proxies that preserve or rewrite Host. Listener hostnames select interfaces, not allowed domains. Proxy `/mcp` to the MCP listener (9444 by default) and the management site and `/admin/v1/…` APIs to the management listener (9445). No public URL, domain allowlist or trusted-proxy setting is needed. Configure the external HTTPS `/mcp` address in the AI client; forward Authorization, MCP session headers and SSE responses without buffering. Every MCP request requires its current Bearer. Management login, cookies and write CSRF remain required. Forwarded protocol headers only control the cookie Secure attribute and never establish an identity.
+
+## Gateway database upgrades
+
+A v9 Gateway database upgrades to v10 during startup after writing a full rollback copy in the existing sibling backup directory. The copy uses the existing backup count and byte budgets; a full backup quota prevents migration and keeps the v9 database unchanged. Snapshot I/O or transaction-start failures clean up the unregistered copy so startup can be retried after the cause is resolved. Existing records and credentials are retained; older Connectors can still connect, while platform metadata requires a Connector that reports it.

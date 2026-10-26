@@ -3,6 +3,7 @@ import { GatewayError } from '../contracts.js'
 import { createConnector } from '../transport/index.js'
 import type { Connection, ConnectorWireSession, WireConnectorOptions } from '../transport/index.js'
 import { closeSession, OFFER } from '../transport/common.js'
+import { probePlatform } from '../platform/device.js'
 
 export type ConnectorHostOptions = Readonly<{
   transport: Omit<WireConnectorOptions, 'session'>
@@ -271,7 +272,12 @@ export async function createProviderConnectorRuntime(options: ConnectorHostOptio
     if (options.provider_snapshot && !offer.capabilities.includes('provider_snapshot')) {
       offer.capabilities.push('provider_snapshot')
     }
-    transport = createConnector({ ...options.transport, offer, session })
+    // 与单一 provider 组合器一致：采集不到平台时不广告该能力。
+    const platform = options.transport.platform ?? (() => probePlatform())
+    if (platform() !== undefined && !offer.capabilities.includes('device_platform')) {
+      offer.capabilities.push('device_platform')
+    }
+    transport = createConnector({ ...options.transport, offer, platform, session })
   } catch {
     await close().catch(/** 启动失败只等待有界逻辑结果，未确认物理释放继续由 shutdown 暴露。 */ () => {})
     throw new ConnectorHostStartupError(shutdown)

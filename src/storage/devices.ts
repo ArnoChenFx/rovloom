@@ -2,7 +2,8 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { canonical, digest, GatewayError } from '../contracts.js'
-import { boundedJson, id as validateId } from '../wire/index.js'
+import { boundedJson, id as validateId, validateDevicePlatform } from '../wire/index.js'
+import type { DevicePlatformPayload } from '../wire/types.js'
 import type { LedgerInvalidation, Machine, Row } from './model.js'
 
 // 为本地账本实体生成带类别前缀的随机标识，避免顺序 ID 产生关联。
@@ -108,6 +109,38 @@ export class DeviceLedger {
       throw new GatewayError('machine_not_found')
     }
     return typeof row.epoch === 'string' ? row.epoch : null
+  }
+  /**
+   * 记录当前认证连接上报的平台，语义是"最近一次上报"：离线后保留旧值，是否仍然新鲜由读取方判定。
+   * 只写已校验的形状，按 machine_id 与当前 epoch 双重限定，不接受别的连接代写。
+   */
+  recordPlatform(machine: string, epoch: string, platform: DevicePlatformPayload): void {
+    this.transaction(
+      // 平台是观测数据，不推进 resource_revision，也不改变设备状态或凭据。
+      (_now) => {
+        const row = this.db.prepare('SELECT status,epoch FROM machines WHERE machine_id=?').get(machine)
+        if (!row || row.status !== 'online' || row.epoch !== epoch) {
+          throw new GatewayError('connection_unavailable')
+        }
+        this.db.prepare('UPDATE machines SET platform_json=? WHERE machine_id=?').run(boundedJson(platform), machine)
+      },
+      false
+    )
+  }
+  /** 读取最近一次上报的平台；从未上报或内容不可解析时返回 null，不补造任何平台。 */
+  storedPlatform(machine_id: string): DevicePlatformPayload | null {
+    const row = this.db.prepare('SELECT platform_json FROM machines WHERE machine_id=?').get(machine_id)
+    if (!row || typeof row.platform_json !== 'string') {
+      return null
+    }
+    try {
+      const value: unknown = JSON.parse(row.platform_json)
+      validateDevicePlatform(value)
+      return value
+    } catch {
+      // 账本里出现不合规内容时按"未记录"处理，不把原始文本交给调用方。
+      return null
+    }
   }
   /** 私有读取设备行，批观察不经可由宿主覆盖的公开入口。 */
   storedMachine(machine_id: string): Machine {

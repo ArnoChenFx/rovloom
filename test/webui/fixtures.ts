@@ -38,7 +38,10 @@ export function fixtureDevice(id: string): DeviceSnapshot {
         state: id === 'fixture-a' ? 'authenticated' : 'revoked',
         last_failure: null
       }
-    }
+    },
+    /** 平台是设备属性：A 有真实 Linux 发行版标识，B 从未上报。 */
+    platform:
+      id === 'fixture-a' ? { os: 'linux', arch: 'x64', distribution: { id: 'ubuntu', version_id: '24.04' } } : null
   }
 }
 

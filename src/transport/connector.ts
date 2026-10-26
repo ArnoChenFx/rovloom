@@ -46,6 +46,7 @@ import {
   socket
 } from './common.js'
 import type { Connection, Session, Socket } from './common.js'
+import type { DevicePlatformPayload } from '../wire/types.js'
 import { DisconnectLog, remoteDisconnect } from './disconnect.js'
 import type { DisconnectReason } from './disconnect.js'
 
@@ -60,6 +61,11 @@ type ConnectorBaseOptions = {
   /** 从受保护启动输入取得稳定设备凭据，不能按自报 hostname 创建身份。 */
   credential(): DeviceCredential
   offer?: VersionOffer
+  /**
+   * 本机平台声明。只在双方协商到 `device_platform` 后于 welcome 之后上报一次；
+   * 返回 undefined 表示当前平台不在允许集合内，此时什么都不发。
+   */
+  platform?: () => DevicePlatformPayload | undefined
   /** 提供有界退避的随机采样，不影响请求授权或派发去重。 */
   random?: () => number
   /** 提供独立可信时间，调用方仍须检查单调性和固定到期边界。 */
@@ -159,6 +165,8 @@ export function createConnector(options: ConnectorOptions) {
   let received = new ReceiveWindow()
   let observedTime = 0
   const terminalReported = new Map<string, string>()
+  /** 每个 epoch 只上报一次平台；未协商或平台不可知时不发，老 Gateway 完全收不到该帧。 */
+  let platformReported = false
   let published:
     | {
         connection: Connection
@@ -306,6 +314,33 @@ export function createConnector(options: ConnectorOptions) {
     }
   }
   /** 只发布本 epoch 的本地有效开关；原生能力与执行许可仍走各自原接口。 */
+  /**
+   * welcome 后上报一次本机平台。未协商该能力、平台未知或已上报过时什么都不发，
+   * 因此与只认识 2.0 的 Gateway 交互时行为与升级前完全一致。
+   */
+  function publishPlatform(active: Connection): void {
+    if (platformReported || !active.negotiated.capabilities.includes('device_platform')) {
+      return
+    }
+    let value: DevicePlatformPayload | undefined
+    try {
+      value = options.platform?.()
+    } catch {
+      // 采集失败不阻塞连接，也不把异常正文带进日志或帧。
+      platformReported = true
+      return
+    }
+    if (value === undefined) {
+      platformReported = true
+      return
+    }
+    if (connection !== active || stopped) {
+      fail('connection_unavailable')
+    }
+    write(envelope(active, 'device_platform', value))
+    platformReported = true
+  }
+
   function publishTerminalExecution(active: Connection, current: Session): void {
     if (!active.negotiated.capabilities.includes('terminal_execution_state')) {
       return
@@ -758,8 +793,10 @@ export function createConnector(options: ConnectorOptions) {
               fail('provider_fence_backend_unavailable')
             }
             terminalReported.clear()
+            platformReported = false
             publishSnapshots(connection, session)
             publishTerminalExecution(connection, session)
+            publishPlatform(connection)
             if (stopped || ws !== current || !connection || !session) {
               fail('connection_unavailable')
             }

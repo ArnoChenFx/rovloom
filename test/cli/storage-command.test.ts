@@ -3,8 +3,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import {
+  chmodSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
   rmSync,
@@ -402,6 +404,74 @@ test('removing the fixed snapshot directory does not poison normal Gateway expir
     } finally {
       after.close()
     }
+  } finally {
+    f.close()
+  }
+})
+
+test('storage check reports a pending migration read-only, then the upgraded database is current', async () => {
+  const f = fixture()
+  try {
+    // 用真实 v9 schema 建库，模拟一台仍在使用当前线上版本的 Gateway。
+    const legacy = new DatabaseSync(f.path)
+    try {
+      legacy.exec(readFileSync(new URL('../fixtures/storage/schema-v9.sql', import.meta.url), 'utf8'))
+      legacy.prepare("INSERT INTO metadata VALUES(1,9,'legacy_generation','active',1000)").run()
+      legacy
+        .prepare(
+          "INSERT INTO machines(machine_id,name,status,credential_hash) VALUES('machine_old','old','offline',NULL)"
+        )
+        .run()
+    } finally {
+      legacy.close()
+    }
+    chmodSync(f.path, 0o600)
+    const before = readFileSync(f.path)
+    const pending = await f.run('storage', 'check')
+    // 只读检查不迁移、不建副本目录，并明确报告需要迁移。
+    assert.equal(pending.code, 3)
+    assert.equal(pending.data.schema, SCHEMA_VERSION)
+    assert.equal(pending.data.schema_version, 9)
+    assert.equal(pending.data.migration_required, true)
+    assert.equal(pending.data.read_only, true)
+    assert.deepEqual(readFileSync(f.path), before)
+    assert.equal(existsSync(f.backup), true)
+    assert.deepEqual(readdirSync(f.backup), [])
+    // 真正启动一次 Gateway 后才升级，之后检查回到当前版本且健康。
+    new Store(f.path, Date.now, { management }).close()
+    const current = await f.run('storage', 'check')
+    assert.equal(current.code, 0)
+    assert.equal(current.data.schema_version, SCHEMA_VERSION)
+    assert.equal(current.data.migration_required, false)
+    assert.equal(current.data.healthy, true)
+    const upgraded = new DatabaseSync(f.path, { readOnly: true })
+    try {
+      assert.equal(upgraded.prepare('SELECT name FROM machines WHERE machine_id=?').get('machine_old')!.name, 'old')
+    } finally {
+      upgraded.close()
+    }
+  } finally {
+    f.close()
+  }
+})
+
+test('storage check still rejects a future version and leaves the file byte-identical', async () => {
+  const f = fixture()
+  try {
+    const db = new DatabaseSync(f.path)
+    db.exec(
+      'CREATE TABLE metadata(singleton INTEGER PRIMARY KEY,version INTEGER,mode TEXT,generation TEXT,clock INTEGER)'
+    )
+    db.exec("INSERT INTO metadata VALUES(1,999,'active','future',1)")
+    db.close()
+    chmodSync(f.path, 0o600)
+    const before = readFileSync(f.path)
+    const check = await f.run('storage', 'check')
+    assert.equal(check.code, 3)
+    assert.equal(check.data.code, 'unsupported_database_version')
+    assert.deepEqual(readFileSync(f.path), before)
+    assert.equal(existsSync(f.backup), true)
+    assert.deepEqual(readdirSync(f.backup), [])
   } finally {
     f.close()
   }

@@ -25,7 +25,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import { CliError, configTemplate, type GatewayConfig } from '../../src/cli/config.js'
-import { createProductionCliRuntime } from '../../src/cli/production.js'
+import { createProductionCliRuntime, productionOffer } from '../../src/cli/production.js'
+import { negotiate, WIRE_MAJOR, WIRE_MINOR } from '../../src/wire/index.js'
 import { createProductSources } from '../../src/cli/product-sources.js'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
 import { privateHerdrTestRoot } from '../connector/herdr/private-root.js'
@@ -917,3 +918,20 @@ test(
     }
   }
 )
+
+test('生产 offer 的 minor 跟随 WIRE_MINOR，双端协商后能拿到 device_platform', () => {
+  const gateway = productionOffer()
+  const connector = productionOffer()
+  // 生产 offer 必须与当前实现支持的 minor 一致，不能写死旧值。
+  assert.equal(gateway.minor, WIRE_MINOR)
+  assert.equal(connector.minor, WIRE_MINOR)
+  assert.equal(gateway.major, WIRE_MAJOR)
+  // 两端都来自生产 offer，协商结果必须包含平台能力，否则真实部署永远拿不到平台。
+  const negotiated = negotiate(gateway, connector)
+  assert.equal(negotiated.minor, WIRE_MINOR)
+  assert.equal(negotiated.capabilities.includes('device_platform'), true)
+  // 与只广告 2.0 的老 Gateway 协商仍退回 0，且不带该能力（向后兼容不受影响）。
+  const legacy = negotiate(gateway, { major: 2, minor: 0, capabilities: ['rpc'], required: ['rpc'] })
+  assert.equal(legacy.minor, 0)
+  assert.equal(legacy.capabilities.includes('device_platform'), false)
+})

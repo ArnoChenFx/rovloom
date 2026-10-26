@@ -38,6 +38,7 @@ export type Capability =
   | 'provider_snapshot'
   | 'terminal_execution_state'
   | 'late_evidence'
+  | 'device_platform'
 export type VersionOffer = {
   major: number
   minor: number
@@ -90,9 +91,16 @@ export type RequestPayload = {
 }
 export type DispatchRefusalCode = 'terminal_execution_disabled' | 'policy_revision_stale'
 export type TerminalExecutionState = Readonly<{ binding: ProviderBinding; enabled: boolean }>
+/** 设备最近一次上报的平台；distribution 只在 Linux 且 os-release 可读时出现。 */
+export type DevicePlatformPayload = Readonly<{
+  os: 'linux' | 'darwin' | 'win32'
+  arch: 'x64' | 'arm64'
+  distribution: Readonly<{ id: string; version_id: string | null }> | null
+}>
 export type Payloads = {
   provider_fenced: { binding: ProviderBinding }
   terminal_execution_state: TerminalExecutionState
+  device_platform: DevicePlatformPayload
   provider_snapshot: {
     binding: ProviderBinding
     target: V2Target

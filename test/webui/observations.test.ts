@@ -173,3 +173,38 @@ test(
     assert.equal(projection.device(fixtureDevice('fixture-a')).connection.verification, 'unverified')
   }
 )
+
+test(
+  '平台是设备属性：不经 Observed 投影、不随时效失效，非法形状退化为 null',
+  /** 平台像 labels 一样随设备返回，不因连接/认证过期而消失或被标成历史。 */ () => {
+    const withPlatform = fixtureDevice('fixture-a')
+    assert.deepEqual(withPlatform.platform, {
+      os: 'linux',
+      arch: 'x64',
+      distribution: { id: 'ubuntu', version_id: '24.04' }
+    })
+    // 传输取样缺失（fence 不匹配）时，平台仍原样交付：它不是时效观测。
+    const stale = createManagementTransportProjection(sample(), {
+      ...fence(),
+      server_time: fixtureTime + 60_000
+    }).device(withPlatform)
+    assert.deepEqual(stale.platform, withPlatform.platform)
+    // 从未上报就是 null，不会被包装成 unverified 占位。
+    assert.equal(
+      createManagementTransportProjection(sample(), fence()).device(fixtureDevice('fixture-b')).platform,
+      null
+    )
+    // 非法形状（这里是非 Linux 携带发行版）按 null 处理，不把坏数据带进管理面。
+    const invalid = fixtureDevice('fixture-a')
+    invalid.platform = { os: 'darwin', arch: 'arm64', distribution: { id: 'ubuntu', version_id: null } }
+    assert.equal(createManagementTransportProjection(sample(), fence()).device(invalid).platform, null)
+    // Linux 无发行版（os-release 读不到）是合法形状，必须原样保留。
+    const linuxNoDistro = fixtureDevice('fixture-a')
+    linuxNoDistro.platform = { os: 'linux', arch: 'arm64', distribution: null }
+    assert.deepEqual(createManagementTransportProjection(sample(), fence()).device(linuxNoDistro).platform, {
+      os: 'linux',
+      arch: 'arm64',
+      distribution: null
+    })
+  }
+)
