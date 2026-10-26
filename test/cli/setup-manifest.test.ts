@@ -5,7 +5,13 @@ import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { hash } from '../../src/wire/index.js'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
-import { selectedSetupPolicies, setupProviderKinds, setupReference, setupTarget } from '../../src/cli/setup-policy.js'
+import {
+  isSetupLuvusMethods,
+  selectedSetupPolicies,
+  setupProviderKinds,
+  setupReference,
+  setupTarget
+} from '../../src/cli/setup-policy.js'
 import { publishSetupSchemas, reviewSetupManifest } from '../../src/cli/setup-manifest.js'
 import type { SetupPlanFacts } from '../../src/cli/setup-policy.js'
 import { privateHerdrTestRoot } from '../connector/herdr/private-root.js'
@@ -16,10 +22,61 @@ import { saveCredential } from '../../src/transport/credentials.js'
 import { writeSetupJson } from '../../src/cli/setup-files.js'
 import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/runtime/native-source.js'
 
+// v0.6.6（953e4f1）已发布的配对授权顺序；独立固定，不能从当前方法表过滤生成。
+const publishedLuvusSetupMethods = [
+  'session.snapshot',
+  'workspace.list',
+  'workspace.get',
+  'tab.list',
+  'tab.get',
+  'pane.list',
+  'pane.get',
+  'pane.current',
+  'pane.status',
+  'pane.read',
+  'agent.list',
+  'agent.get',
+  'agent.explain',
+  'agent.read',
+  'agent.sessions',
+  'agent.wait',
+  'workspace.new',
+  'workspace.open',
+  'workspace.focus',
+  'workspace.rename',
+  'workspace.close',
+  'tab.new',
+  'tab.focus',
+  'tab.rename',
+  'tab.close',
+  'pane.split',
+  'pane.focus',
+  'pane.rename',
+  'pane.close',
+  'pane.run',
+  'agent.start',
+  'agent.prompt',
+  'agent.send',
+  'agent.keys',
+  'agent.resume'
+]
+
 const plan: SetupPlanFacts = {
   attempt_id: 'synthetic_attempt',
   actor: 'synthetic_operator'
 }
+
+test('已发布的 35 方法配对集合持续可重入，重排、遗漏、重复或额外权限不能冒充旧版本', () => {
+  assert.equal(isSetupLuvusMethods(publishedLuvusSetupMethods), true)
+  for (const methods of [
+    [...publishedLuvusSetupMethods].reverse(),
+    publishedLuvusSetupMethods.slice(1),
+    [...publishedLuvusSetupMethods.slice(0, -1), publishedLuvusSetupMethods[0]!],
+    [...publishedLuvusSetupMethods, 'uhp.token.create']
+  ]) {
+    assert.equal(isSetupLuvusMethods(methods), false)
+  }
+})
 
 test('Luvus 配对清单兼容旧主体授权与新策略授权，拒绝额外方法或错误授权范围', async () => {
   const root = privateHerdrTestRoot('.setup-luvus-grant-')
@@ -50,7 +107,7 @@ test('Luvus 配对清单兼容旧主体授权与新策略授权，拒绝额外�
     }
   }
   try {
-    for (const methods of [grant.methods, grant.methods.filter((method) => method !== 'wait.output')]) {
+    for (const methods of [grant.methods, publishedLuvusSetupMethods]) {
       for (const subject of [
         { principal_id: authorization.principal_id },
         { caller_policy_revision: authorization.policies.caller.revision }

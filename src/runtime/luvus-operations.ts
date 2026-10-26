@@ -95,9 +95,9 @@ function mutationRevision(params: Record<string, unknown>): void {
   }
 }
 
-/** pane 与 Agent 的 target 必须显式选择；terminal_id 另作真实 PTY 生命周期 fence。 */
+/** pane 显式选择原生正 u32 ID；terminal_id 另作真实 PTY 生命周期 fence。 */
 function pane(value: unknown): void {
-  if (typeof value !== 'string' || !/^[1-9][0-9]{0,9}$/.test(value)) {
+  if (typeof value !== 'string' || !/^[1-9][0-9]{0,9}$/.test(value) || Number(value) > 4_294_967_295) {
     invalid()
   }
 }
@@ -205,9 +205,6 @@ export function validateLuvusOperationParams(method: string, input: unknown): vo
     } else if (method === 'wait.output') {
       fields(params, ['pane', 'match'], ['timeout_s'])
       pane(params.pane)
-      if (Number(params.pane) > 4_294_967_295) {
-        invalid()
-      }
       text(params.match, 4096)
       if (
         params.timeout_s !== undefined &&

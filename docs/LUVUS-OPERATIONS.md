@@ -40,6 +40,8 @@ Luvus 没有 `window.*` 方法。窗口选择沿 Luvus 自己的 workspace、tab
 
 ## Pane 身份与存活范围
 
+所有已审核方法中的 `pane`（以及 `agent.start.anchor`）统一接受 `1`–`4294967295` 的十进制字符串，不接受数值类型、前导零或超出原生 `u32` 的值；超界 ID 在登记前拒绝。
+
 Luvus 0.14.3 的数字 `pane` 是进程级递增分配的 ID，不是布局中的第几个位置。分屏、交换或移动不会对同一个存活 pane 重新编号，因此同一原生实例中可以跨调用复用。原生进程重启恢复 pane 时会重新分配，不能把重启后的相同数字视为原终端。
 
 `pane.list` 当前没有返回 `terminal_id`，但选定 pane 后可用 `pane.get({pane})` 同时读取 `terminal_id`、`workspace_id` 和 `tab_id`；`agent.read` 也会返回终端身份。保存完整 provider target 和这些身份，不必仅因布局变化就重新猜 pane 编号。`terminal_id` 是终端生命周期身份，不是所有 pane 方法都接受的 selector；不能把它直接塞进 `pane` 字段。
