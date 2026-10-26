@@ -56,7 +56,7 @@ CLI 输出（帮助、配对提示、状态说明）默认英文。设置 `ROVLO
 curl --fail --silent --show-error --location https://raw.githubusercontent.com/ArnoChenFx/rovloom/main/scripts/install.sh | sh
 ```
 
-已装 Bun（1.4.3 及以上）也可以用 npm 包：`bun add -g rovloom` 全局安装，`bunx rovloom` 免安装运行，无需下载内置运行时的单文件。
+已装 Bun（1.4.4 及以上）也可以用 npm 包：`bun add -g rovloom` 全局安装，`bunx rovloom` 免安装运行，无需下载内置运行时的单文件。
 
 Windows PowerShell 与 Docker Gateway 见[快速开始](docs/QUICK-START-zh.md)。
 
