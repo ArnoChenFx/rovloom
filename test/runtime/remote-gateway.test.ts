@@ -813,6 +813,7 @@ for (const { isolated, disconnectBeforeRead } of [
         f.hold()
         service = new RuntimeGatewayService({
           runtime: f.runtime,
+          catalog: f.runtime.catalog,
           identities: {
             principal: /** 沿用原 runtime 的当前 caller 来源。 */ (caller) =>
               caller.principal_id === 'remote_reader' ? { id: 'remote_reader', policy: f.caller } : null,
@@ -869,9 +870,34 @@ for (const { isolated, disconnectBeforeRead } of [
           })
         )
         assert.equal(bad.isError, true)
-        assert.deepEqual(bad.structuredContent, {
-          gateway_error: { code: 'native_request_invalid', outcome: 'not_dispatched' }
-        })
+        const error = bad.structuredContent!.gateway_error as {
+          code: string
+          outcome: string
+          details: { issues: unknown[]; parameter_help: { source: string; required: string[] } }
+        }
+        assert.equal(error.code, 'native_request_invalid')
+        assert.equal(error.outcome, 'not_dispatched')
+        assert.deepEqual(error.details.issues, [
+          { path: '/params/pane', rule: 'required' },
+          { path: '/params/statuses', rule: 'one_of' }
+        ])
+        assert.equal(error.details.parameter_help.source, 'rovloom_reviewed_subset')
+        assert.deepEqual(error.details.parameter_help.required, ['pane'])
+        const described = CallToolResultSchema.parse(
+          await http.client.callTool({
+            name: 'runtime_describe',
+            arguments: {
+              target: f.target,
+              expected_binding_revision: 1,
+              method: 'agent.wait'
+            }
+          })
+        )
+        assert.equal(described.isError, undefined)
+        assert.deepEqual(
+          (described.structuredContent!.data as { parameter_help: unknown }).parameter_help,
+          error.details.parameter_help
+        )
         assert.deepEqual(JSON.parse((bad.content[0] as { text: string }).text), bad.structuredContent)
         assert.equal(f.writes(), before)
         assert.equal(f.state.store.call('remote_reader', healthyId).state, 'connector_accepted')

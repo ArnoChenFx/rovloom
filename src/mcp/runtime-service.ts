@@ -53,7 +53,7 @@ const errors: Record<string, ServiceErrorCode> = {
 // 只映射受信错误类中的固定公共码，未知原生异常及code不进入MCP诊断。
 function publicError(error: unknown): FacadeServiceError {
   if (error instanceof NativeRequestPreflightError) {
-    return new NativeRequestNotDispatchedError()
+    return new NativeRequestNotDispatchedError(error.parameterDiagnostic)
   }
   if (error instanceof FacadeServiceError && SERVICE_ERROR_CODES.includes(error.code)) {
     return error

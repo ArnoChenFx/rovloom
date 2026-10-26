@@ -364,10 +364,10 @@ export class LuvusRpcAdapter {
         linked()
       }
       this.#active.set(key, { binding, abort })
-      scope = deadline(abort.signal, Math.min(remaining, this.#limits.timeout_ms))
+      scope = deadline(abort.signal, Math.min(remaining, this.#limits.rpc_timeout_ms))
       const activeSignal = scope.signal
       const native = this.#nativeBoundary(binding, request.payload.native_request.method as string)
-      const endpoint = await this.#discover(activeSignal)
+      const endpoint = await this.discoverEndpoint(activeSignal)
       // 完整摘要验证在打开原生连接之前做完；连接建立后原生对空闲有期限，期间只复核身份戳。
       const installed = await interruptible(verifyInstallation(this.#config), activeSignal)
       const raw = boundedJson(request)

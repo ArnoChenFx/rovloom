@@ -23,6 +23,7 @@ const defaults: LuvusLocalLimits = Object.freeze({
   stderr_bytes: 65_536,
   discovery_bytes: DEFAULT_LIMITS.bundle_bytes,
   timeout_ms: 30_000,
+  rpc_timeout_ms: 10 * 60_000,
   attempts: 128
 })
 /** 合并本地限制，仅接受正安全整数且允许收紧，禁止扩大默认预算。 */
@@ -38,6 +39,10 @@ export function localLimits(overrides: Partial<LuvusLocalLimits> = {}): LuvusLoc
       throw new LuvusAdapterError('invalid_local_limits')
     }
     result[key as keyof LuvusLocalLimits] = value
+  }
+  // 旧显式 timeout_ms 也曾限制 RPC；保留所有者设置的更短期限。新字段可独立设置 RPC 上限。
+  if (overrides.timeout_ms !== undefined && overrides.rpc_timeout_ms === undefined) {
+    result.rpc_timeout_ms = overrides.timeout_ms
   }
   return Object.freeze(result)
 }

@@ -80,6 +80,24 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 
 ## 读取、等待与对话
 
+`runtime_describe` 对 `agent.wait`、`agent.prompt`、`pane.run` 附带
+`parameter_help`：必填/可选字段、依赖规则和示例，来源标记为
+`rovloom_reviewed_subset`。它是 Rovloom 已审核子集的调用指南，原来的
+`schema_status` 仍表示安装版原生 schema 的覆盖情况。`runtime_discover` 不附带这些示例。
+
+两个 Agent 等待入口的参数不同：
+
+```json
+{"method":"agent.wait","params":{"pane":"2","status":"idle","timeout_s":35}}
+{"method":"agent.prompt","params":{"target":"selected-agent","text":"Hello","strict":true,"wait":true,"until":["idle"],"timeout_s":120}}
+```
+
+- `agent.wait` 选 `pane`，`status` 与 `statuses` 二选一；多状态按“任意一个匹配”判断。它不使用 `wait` 开关。
+- `agent.prompt` 仍选 Agent 的 `target`；指定 `until` 或 `timeout_s` 时必须同时指定 `wait:true`。
+- `timeout_s` 是原生方法的秒数；`runtime_call.deadline` 是整个 Rovloom 调用的固定截止，须覆盖原生等待与 RPC 开销。不会根据参数自动延长已经登记的 deadline。
+- Luvus RPC 默认最长等待 10 分钟，并受原调用 deadline、取消和撤权约束；发现 endpoint、读取 schema 的准备超时仍是 30 秒。本机已有的显式短超时继续生效。
+- 登记前参数拒绝保留 `native_request_invalid` 与 `outcome:"not_dispatched"`。上述方法的常见错误附带 `gateway_error.details.issues`，例如 `/params/pane` 缺失、`/params/wait` 必须为 true，以及同一份固定调用指南；不回显用户值或原生错误文本。
+
 - `pane.read` 接受 `pane` 和 `lines`。`agent.read` 接受 `target`、`lines` 和 `source`。`lines` 最大为 1000，只取末尾行。返回的 `text`、`content_revision`、`terminal_id` 来自 Luvus。
 - `agent.prompt` 的 `until` 和 `timeout_s` 必须与 `wait:true` 一起使用。
 - `submitted`、`queued`、`ready=true` 和 `observed_state` 只表示输入已提交或识别就绪，不表示 prompt 已被消费或模型已回复。需要继续读取真实状态和输出。
@@ -91,3 +109,5 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 ## 验证
 
 对真实 Luvus 的端到端验证见 [`e2e/README.md`](../e2e/README.md)。流程按 Quick Start 在真实终端配对后，经官方 MCP SDK 依次执行发现、描述、调用、查询和读取，并覆盖崩溃接管、进程被杀后重建、未知结果不重发和离线撤销。
+
+升级长等待修复需要更新并重启 **Connector**，无需重新配对或换 token；Gateway 更新用于参数指南和字段诊断。
