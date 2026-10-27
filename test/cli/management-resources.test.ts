@@ -129,6 +129,11 @@ test('Dashboard device scope is strictly validated, authorized and applied to th
     // 空数组是面板显式的「全部设备」，写回缺省语义。
     const narrowed = readFileSync(path)
     assert.notDeepEqual(narrowed, stamp)
+    // 缺失或 null 不能隐式放开已收窄的范围；拒绝后注册表必须逐字节不变。
+    for (const args of [{ principal: 'claude' }, { principal: 'claude', machine_ids: null }]) {
+      assert.throws(() => o.execute('tokens_scope', args), /invalid_arguments/)
+      assert.deepEqual(readFileSync(path), narrowed)
+    }
     o.execute('tokens_scope', { principal: 'claude', machine_ids: [] })
     assert.equal(read().callers.find((entry) => entry.principal.id === 'claude')!.device_scope, undefined)
     assert.deepEqual(o.execute('tokens_list').items[0].device_scope, { mode: 'all' })

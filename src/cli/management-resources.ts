@@ -149,7 +149,7 @@ export function createManagementResources(options: {
           fields(args, ['principal'])
         } else if (operation === 'tokens_scope') {
           // 面板显式提交整张列表；空数组等价于「全部设备」，CLI 侧仍要求显式 --all-devices。
-          fields(args, ['principal'], ['machine_ids'])
+          fields(args, ['principal', 'machine_ids'])
         } else {
           throw new ManagementServiceError('invalid_arguments')
         }
@@ -202,7 +202,7 @@ export function createManagementResources(options: {
           throw new ManagementServiceError('invalid_arguments')
         }
         if (operation === 'tokens_scope') {
-          const requested = args.machine_ids ?? []
+          const requested = args.machine_ids
           if (
             !Array.isArray(requested) ||
             requested.length > LIMITS.scope_machines ||
