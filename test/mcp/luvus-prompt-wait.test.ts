@@ -12,6 +12,7 @@ test('prompt 等待超时保留原生证据，describe 提供两段式指导而�
   const service = new RuntimeGatewayService({ ...f.mcp, catalog: f.gateway.catalog })
   const http = httpFixture(service, { authentication: { authenticate: () => f.caller } })
   let observed: 'working' | null = null
+  let status = 'idle'
   let original = ''
   const received: unknown[] = []
   try {
@@ -25,7 +26,7 @@ test('prompt 等待超时保留原生证据，describe 提供两段式指导而�
           pane: '3',
           submitted: true,
           matched: false,
-          status: 'idle',
+          status,
           baseline_revision: 10,
           content_revision: 12,
           evidence: 'timeout',
@@ -49,15 +50,27 @@ test('prompt 等待超时保留原生证据，describe 提供两段式指导而�
     assert.equal(help.source, 'rovloom_reviewed_subset')
     assert(help.rules.some((rule) => rule.includes('observed_state:null') && rule.includes('Neither proves')))
     assert(help.rules.some((rule) => rule.includes('without wait') && rule.includes('Do not resend')))
+    assert(
+      help.rules.some(
+        (rule) => rule.includes('fast-completing') && rule.includes('agent.wait') && rule.includes('agent.read')
+      )
+    )
     assert.equal(help.examples[0]!.wait, undefined)
     const epoch = f.connector.transport.status().connection_epoch
-    for (const state of [null, 'working'] as const) {
-      observed = state
+    for (const scenario of [
+      { observed: null, status: 'idle', until: ['idle'] },
+      { observed: 'working', status: 'idle', until: ['idle'] },
+      { observed: null, status: 'done', until: ['idle'] },
+      { observed: null, status: 'done', until: ['done', 'idle'] }
+    ] as const) {
+      observed = scenario.observed
+      status = scenario.status
+      const requestParams = { ...params, until: scenario.until }
       const submitted = await call('runtime_call', {
         ...route,
         contract_ref: f.reference,
         deadline: f.state.store.clock() + 30_000,
-        native_request: { method: 'agent.prompt', params }
+        native_request: { method: 'agent.prompt', params: requestParams }
       })
       assert(!submitted.isError)
       const callId = (submitted.structuredContent!.data as { call_id: string }).call_id
@@ -70,9 +83,11 @@ test('prompt 等待超时保留原生证据，describe 提供两段式指导而�
       const content = Buffer.from((read.structuredContent!.data as { chunk: string }).chunk, 'base64').toString()
       assert.deepEqual(JSON.parse(content), JSON.parse(original))
       assert.equal(JSON.parse(content).result.matched, false)
-      assert.deepEqual(received.at(-1), params)
+      assert.equal(JSON.parse(content).result.evidence, 'timeout')
+      assert.equal(JSON.parse(content).result.status, scenario.status)
+      assert.deepEqual(received.at(-1), requestParams)
     }
-    assert.equal(f.native.state.responses, 2)
+    assert.equal(f.native.state.responses, 4)
     assert.equal(f.connector.transport.status().connection_epoch, epoch)
   } finally {
     await http.close()

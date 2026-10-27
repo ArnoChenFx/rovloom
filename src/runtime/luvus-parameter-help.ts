@@ -30,6 +30,7 @@ const help = {
       'wait:true requires a new working or blocked transition before matching until. A fast reply or missing positive state evidence can leave the wait unmatched.',
       'evidence:timeout with observed_state:null means no qualifying transition was observed; with observed_state:working or blocked it means the requested until state was not matched before the deadline. Neither proves the agent failed to reply.',
       'Prefer submitting without wait, then observing agent.read and pane.status. Use wait.output for an explicitly authorized literal output sentinel; old output and prompt echo can match, so verify the reply separately. Do not resend a submitted prompt on an observation timeout.',
+      'For fast-completing tasks, use two phases: agent.prompt without wait, followed by agent.wait on the resolved pane and agent.read. agent.wait matches current state, so verify the reply belongs to this turn even when matched:true.',
       'submitted/queued does not prove the agent consumed the prompt or finished replying.'
     ],
     examples: [
