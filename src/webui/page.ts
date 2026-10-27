@@ -12,6 +12,7 @@ import { createResourcePanel } from './resource-panel.js'
 import type { ResourceTransport } from './resource-client.js'
 import { copyText } from './clipboard.js'
 import type { ManagementWriteTransport } from './write-contract.js'
+import { PRODUCT_VERSION } from '../mcp/version.js'
 
 /** 接入共享管理读取后的页面投影函数；不是授权接口，不能代替每次后端鉴权。 */
 export type PageRead = (route: Readonly<PageRoute>, signal: AbortSignal) => Promise<TimedSnapshot<PageView>>
@@ -71,7 +72,8 @@ export function mountWebUi(
   const statusValue = element('span', '', 'sidebar-status-value')
   statusCopy.append(statusLabel, statusValue)
   sidebarStatus.append(statusIcon, statusCopy)
-  sidebar.append(brand, sidebarCaption, navHeading, navigation, resourceHeading, docs, sidebarStatus)
+  const version = element('p', `v${PRODUCT_VERSION}`, 'sidebar-version')
+  sidebar.append(brand, sidebarCaption, navHeading, navigation, resourceHeading, docs, sidebarStatus, version)
   const workspace = element('div', '', 'workspace')
   const header = element('header', '', 'topbar')
   const headerLabel = element('div', '', 'header-label')
