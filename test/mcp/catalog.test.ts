@@ -10,6 +10,59 @@ import {
 import { target } from './store-fixture.js'
 import { catalogFixture, catalogMethods } from './catalog-fixture.js'
 import { contractRef } from '../../src/wire/index.js'
+import { secondTarget } from './store-fixture.js'
+
+test('prompt 帮助只推荐当前完整目标可见的输出等待，授权新增与撤销即时生效', async () => {
+  const f = catalogFixture()
+  const route = { target, expected_binding_revision: 1 }
+  const grant = (methods: string[]) => [{ target, methods, actions: ['read' as const] }]
+  const setMethods = (caller: string[], local = caller) => {
+    f.setCaller({
+      id: 'alice',
+      policy: {
+        revision: 'caller_1',
+        grants: [...grant(caller), { target: secondTarget, methods: ['wait.output'], actions: ['read'] }]
+      }
+    })
+    f.setLocal({ revision: 'local_1', grants: grant(local) })
+  }
+  const describePrompt = async () => {
+    const result = await f.service.execute('runtime_describe', { ...route, method: 'agent.prompt' }, context())
+    return (result.data.parameter_help as { rules: string[] }).rules
+  }
+  try {
+    setMethods(['agent.prompt'])
+    assert(
+      (await describePrompt()).some((rule) =>
+        rule.includes('wait.output is not in the current authorized method catalog')
+      )
+    )
+    await assert.rejects(
+      f.service.execute('runtime_describe', { ...route, method: 'wait.output' }, context()),
+      new FacadeServiceError('not_found')
+    )
+    setMethods(['agent.prompt', 'wait.output'])
+    const visible = await f.service.execute('runtime_discover', route, context())
+    assert(visible.data.items.some((row) => row.method === 'wait.output'))
+    const rules = await describePrompt()
+    assert(!rules.some((rule) => rule.includes('wait.output is not in the current authorized method catalog')))
+    assert(rules.some((rule) => rule.includes('dispatch/raw authorization') && rule.includes('prompt echo')))
+    const wait = await f.service.execute('runtime_describe', { ...route, method: 'wait.output' }, context())
+    assert.equal(wait.data.schema_status, 'generic_params_only')
+    assert.equal(wait.data.params_schema, undefined)
+    assert(
+      (wait.data.parameter_help as { rules: string[] }).rules.some((rule) => rule.includes('existing marker can match'))
+    )
+    setMethods(['agent.prompt', 'wait.output'], ['agent.prompt'])
+    assert(
+      (await describePrompt()).some((rule) =>
+        rule.includes('wait.output is not in the current authorized method catalog')
+      )
+    )
+  } finally {
+    f.close()
+  }
+})
 
 // 只构造合成受信caller；业务args没有principal/权限入口。
 function context(): ServiceContext {

@@ -121,7 +121,7 @@ runtime_call {
 
 **6. Query and read the result**
 
-For a Luvus output sentinel, discover and describe `wait.output`, then submit native params `{ "pane": "<observed pane ID>", "match": "<literal marker>", "timeout_s": 35 }` through the same `runtime_call` flow. Give its absolute deadline extra RPC time and poll the original call. It matches existing recent output too; use a fresh marker where needed. `matched:false` is an ordinary native observation result, not proof a command stopped. This read-only method still needs explicit grants; it does not return command stdout or exit code. See [runtime semantics](references/runtimes.md).
+For a Luvus output sentinel, first check that `runtime_discover` lists `wait.output` for the exact target. If absent, it is unavailable for this caller/target: continue with `agent.read` / `pane.status`, and do not probe `runtime_call` or try another identity. If listed, describe it and, when dispatch/raw authorization allows, submit native params `{ "pane": "<observed pane ID>", "match": "<literal marker>", "timeout_s": 35 }` through the same `runtime_call` flow. Give its absolute deadline extra RPC time and poll the original call. It matches existing recent output too; use a fresh marker where needed. `matched:false` is an ordinary native observation result, not proof a command stopped. Old 35-method grants remain unchanged after upgrade; this read-only method still needs explicit grants and does not return command stdout or exit code. See [runtime semantics](references/runtimes.md).
 
 ```
 runtime_call_get { "call_id": "<call_id from step 5>", "wait_ms": 2000 }
@@ -193,6 +193,8 @@ Luvus `host.info` / `host.capabilities` are native host-profile methods, not ses
 
 Most Luvus methods (such as `workspace.list` and `pane.list`) have the validation mode chosen for you by the Gateway, so you never fill in `validation`. The `strict` group is `pane.list`, `agent.prompt`, `agent.send`, `agent.wait` and `agent.keys` — still chosen for you.
 
+Luvus `agent.start` requires `name` and `kind`, both matching `^[a-z][a-z0-9_-]{0,31}$`. `pane` is optional: omit it to create a new pane, or supply an observed pane to use it; optional `anchor` selects a split anchor and cannot be combined with `pane`. Use the returned pane ID for later calls. Invalid names receive `/params/name` with rule `pattern` in `gateway_error.details.issues`; read `runtime_describe.parameter_help` for the full reviewed guide.
+
 ### Reading a terminal
 
 ```json
@@ -211,7 +213,7 @@ For Luvus, `agent.prompt` selects an Agent **`target`**; `agent.wait` selects a 
 
 For fast tasks, use `agent.prompt` without waiting → `agent.wait` on the resolved pane with `statuses:["done","idle"]` → `agent.read` on the same Agent, and verify the actual reply against this turn. An old idle/done state can match immediately. One-step `wait:true` can still time out without a new transition even if its reported `status:"done"` is in `until`; the transport fix does not change this native behavior.
 
-`evidence:"timeout"` with explicit `observed_state:null` means no qualifying transition was observed; with `observed_state:"working"` or `"blocked"` it means the wait did not match before its deadline. Neither proves the Agent failed to reply; a fast answer can already be visible in `agent.read`. Missing `observed_state` in an older response is not explicit null. Treat `state_source:"no_positive_state_evidence"` as unknown even when status says idle; do not turn it into success or resend a submitted prompt. For authorized output sentinels use `wait.output`, but recent text and prompt echo can match, so verify the actual reply separately.
+`evidence:"timeout"` with explicit `observed_state:null` means no qualifying transition was observed; with `observed_state:"working"` or `"blocked"` it means the wait did not match before its deadline. Neither proves the Agent failed to reply; a fast answer can already be visible in `agent.read`. Missing `observed_state` in an older response is not explicit null. Treat `state_source:"no_positive_state_evidence"` as unknown even when status says idle; do not turn it into success or resend a submitted prompt. Use output sentinels only if `wait.output` is listed in the current discovery and dispatch/raw grants allow it; otherwise keep reading state/output. Recent text and prompt echo can match, so verify the actual reply separately.
 
 A two-turn conversation must keep the same complete target, the same pane or alias, the same `terminal_id`, and the known Agent `session`. When checking turn two, verify it recalls turn one's content; terminal echo is not a reply.
 
