@@ -32,10 +32,12 @@ def main():
             page.locator('.token-create-form button').click()
             expect(page.locator(f'[data-token-principal="{name}"]')).to_be_visible()
         token = page.locator('[data-token-principal="claude-desktop"]')
-        original = token.locator('input').input_value()
-        expect(token.locator('input')).to_have_attribute('type','password')
+        # 卡片里还有设备范围的单选/复选框，原文输入框用稳定钩子精确定位。
+        value = token.locator('[data-token-value="claude-desktop"]')
+        original = value.input_value()
+        expect(value).to_have_attribute('type','password')
         token.get_by_role('button', name='显示', exact=True).click()
-        expect(token.locator('input')).to_have_attribute('type','text')
+        expect(value).to_have_attribute('type','text')
         token.locator('[data-copy]').click()
         expect(token.locator('[data-copy]')).to_have_attribute('data-copied','true')
         assert page.evaluate('navigator.clipboard.readText()') == original
@@ -44,8 +46,8 @@ def main():
         page.screenshot(path=str(output / 'tokens-zh.png'), full_page=True)
         page.reload()
         expect(page.locator('.token-card')).to_have_count(2)
-        assert token.locator('input').input_value() == original
-        expect(token.locator('input')).to_have_attribute('type','password')
+        assert value.input_value() == original
+        expect(value).to_have_attribute('type','password')
         page.wait_for_timeout(1200)
         page.locator('[name="token-name"]').fill('pi-agent')
         page.locator('[name="token-days"]').select_option('90')
@@ -58,7 +60,7 @@ def main():
         expect(page.locator('[name="token-days"]')).to_have_value('90')
         page.locator('[data-preference="theme"] button').click()
         expect(page.locator('html')).to_have_attribute('data-theme','dark')
-        assert token.locator('input').input_value() == original
+        assert value.input_value() == original
         page.locator('[data-preference="theme"] button').click()
         page.locator('[data-preference="language"] button').click()
         expect(page.locator('html')).to_have_attribute('lang','zh-CN')
@@ -71,7 +73,64 @@ def main():
             if width == 390:
                 page.evaluate('document.activeElement.blur(); window.scrollTo(0,0)')
                 page.screenshot(path=str(output / 'tokens-mobile-zh.png'), full_page=True)
+        # 设备可见范围：真实写入注册表、卡片徽标更新、重载后仍是 selected，再显式放开回全部设备。
         page.set_viewport_size({'width':1440,'height':1080})
+        scope = token.locator('[data-token-scope="claude-desktop"]')
+        expect(scope).to_be_visible()
+        expect(token.locator('.scope-badge')).to_have_text('全部设备')
+        scope.locator('[data-scope-mode="selected"]').check()
+        first_device = data['devices'][0]
+        device_box = scope.locator(f'[data-scope-device="{first_device["machine_id"]}"]')
+        device_box.check()
+        # 设备标签只显示可读名称，稳定 ID 只留在 title 里，不以可见文本出现。
+        device_label = device_box.locator('xpath=..')
+        expect(device_label).to_have_text(first_device['name'])
+        assert first_device['machine_id'] not in device_label.inner_text()
+        assert device_label.get_attribute('title') == first_device['machine_id']
+        scope.locator('[data-scope-save="selected"]').click()
+        expect(token.locator('.scope-badge')).to_contain_text('1 台设备')
+        expect(token.locator('.scope-badge')).to_contain_text(first_device['name'])
+        assert first_device['machine_id'] not in token.locator('.scope-badge').inner_text()
+        page.reload()
+        expect(token.locator('.scope-badge')).to_contain_text('1 台设备')
+        scope = token.locator('[data-token-scope="claude-desktop"]')
+        expect(scope.locator('[data-scope-mode="selected"]')).to_be_checked()
+        assert scope.locator(f'[data-scope-device="{first_device["machine_id"]}"]').is_checked()
+        # 「指定设备 + 一台都不勾」显式禁用所有设备。
+        scope.locator(f'[data-scope-device="{first_device["machine_id"]}"]').uncheck()
+        scope.locator('[data-scope-save="selected"]').click()
+        expect(token.locator('.scope-badge')).to_contain_text('0 台设备')
+        page.reload()
+        expect(token.locator('.scope-badge')).to_contain_text('0 台设备')
+        scope = token.locator('[data-token-scope="claude-desktop"]')
+        # 放开回全部设备：显式按钮 + 二次确认（先取消，再确认）。
+        scope.locator('[data-scope-mode="all"]').check()
+        expect(scope.locator('[data-scope-save="all"]')).to_be_visible()
+        expect(scope.locator('[data-scope-save="selected"]')).to_be_hidden()
+        page.once('dialog', lambda dialog: dialog.dismiss())
+        scope.locator('[data-scope-save="all"]').click()
+        expect(token.locator('.scope-badge')).to_contain_text('0 台设备')
+        page.once('dialog', lambda dialog: dialog.accept())
+        scope.locator('[data-scope-save="all"]').click()
+        expect(token.locator('.scope-badge')).to_have_text('全部设备')
+        page.reload()
+        expect(token.locator('.scope-badge')).to_have_text('全部设备')
+        scope = token.locator('[data-token-scope="claude-desktop"]')
+        expect(scope.locator('[data-scope-mode="all"]')).to_be_checked()
+        # 中英双语：切到英文后控件文案跟随。
+        page.locator('[data-preference="language"] button').click()
+        expect(page.locator('html')).to_have_attribute('lang','en')
+        expect(token.locator('[data-token-scope="claude-desktop"] legend')).to_have_text('Device visibility')
+        expect(token.locator('[data-scope-save="all"]')).to_have_text('Save as all devices')
+        page.locator('[data-preference="language"] button').click()
+        expect(page.locator('html')).to_have_attribute('lang','zh-CN')
+        for width in [320, 390]:
+            page.set_viewport_size({'width':width,'height':1000})
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            assert scope.evaluate('(node) => node.getBoundingClientRect().right <= innerWidth')
+        page.set_viewport_size({'width':1440,'height':1080})
+        checks.append('device scope: narrow to one device, badge and reload persist, empty selection disables all devices, explicit back-to-all with confirmation, bilingual and 320px')
+
         page.once('dialog', lambda dialog: dialog.dismiss())
         token.get_by_role('button', name='删除', exact=True).click()
         expect(token).to_be_visible()
@@ -132,7 +191,7 @@ def main():
             if locale == 'en':
                 expect(other.locator('.token-create-form button')).to_have_text('Create token')
                 other.locator('.token-card').get_by_role('button', name='Show', exact=True).click()
-                expect(other.locator('.token-card input')).to_have_attribute('type','text')
+                expect(other.locator('[data-token-value="homelab-codex"]')).to_have_attribute('type','text')
                 other.locator('.token-card').get_by_role('button', name='Hide', exact=True).click()
             other.evaluate('document.activeElement.blur(); window.scrollTo(0,0)')
             other.screenshot(path=str(output / f'tokens-{locale}-{theme}.png'), full_page=True)

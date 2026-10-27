@@ -9,6 +9,7 @@ import { openCallerSource } from '../../src/cli/caller-source.js'
 import { configDocument, configTemplate } from '../../src/cli/config.js'
 import type { GatewayConfig } from '../../src/cli/config.js'
 import { handleTokenCommand } from '../../src/cli/token-command.js'
+import { LIMITS } from '../../src/wire/index.js'
 import {
   createCaller,
   digestToken,
@@ -16,6 +17,7 @@ import {
   renewCaller,
   revokeCaller,
   rotateCaller,
+  setDeviceScope,
   setDiscardPermission,
   summarize
 } from '../../src/cli/token-registry.js'
@@ -133,6 +135,87 @@ test('parseRegistry rejects duplicate digests, extra fields and a mismatched res
       callers: [{ ...base.callers[0], previous: { token_sha256: base.callers[0]!.token_sha256, expires_at: 1 } }]
     })
   )
+})
+
+test('device scope defaults to today’s visibility, validates selected lists and survives token operations', () => {
+  const base = registry()
+  // 缺省：不收窄，摘要投影为 all。
+  assert.equal(base.callers[0]!.device_scope, undefined)
+  assert.deepEqual(summarize(base, 1_000)[0]!.device_scope, { mode: 'all' })
+  parseRegistry(base)
+
+  const narrowed = setDeviceScope(base, 'owner', ['m_one', 'm_two'])
+  parseRegistry(narrowed)
+  assert.deepEqual(narrowed.callers[0]!.device_scope, { mode: 'selected', machine_ids: ['m_one', 'm_two'] })
+  assert.deepEqual(summarize(narrowed, 1_000)[0]!.device_scope, { mode: 'selected', machine_ids: ['m_one', 'm_two'] })
+  // 不修改策略修订：范围是可见性过滤器，不是权限授予。
+  assert.equal(narrowed.callers[0]!.principal.policy.revision, base.callers[0]!.principal.policy.revision)
+  assert.equal(narrowed.callers[0]!.token_sha256, base.callers[0]!.token_sha256)
+
+  // 清除必须显式传 null；删除字段后回到缺省语义。
+  const cleared = setDeviceScope(narrowed, 'owner', null)
+  assert.equal(cleared.callers[0]!.device_scope, undefined)
+  assert.deepEqual(summarize(cleared, 1_000)[0]!.device_scope, { mode: 'all' })
+
+  const none = setDeviceScope(base, 'owner', [])
+  assert.deepEqual(parseRegistry(none).callers[0]!.device_scope, { mode: 'selected', machine_ids: [] })
+  // 重复、非法 ID 与超限全部拒绝。
+  for (const ids of [
+    ['m_one', 'm_one'],
+    ['m one'],
+    [''],
+    ['m'.repeat(129)],
+    Array.from({ length: LIMITS.scope_machines + 1 }, (_, index) => 'm_' + index),
+    'm_one' as unknown as string[]
+  ]) {
+    assert.throws(() => setDeviceScope(base, 'owner', ids as string[]), /Rovloom command failed/)
+  }
+  assert.throws(() => setDeviceScope(base, 'ghost', ['m_one']), /Rovloom command failed/)
+  // 上限内允许。
+  parseRegistry(
+    setDeviceScope(
+      base,
+      'owner',
+      Array.from({ length: LIMITS.scope_machines }, (_, i) => 'm_' + i)
+    )
+  )
+
+  // --like 克隆范围，续期/轮换原样保留。
+  const cloned = createCaller(narrowed, 'worker', 'owner', 2_000).registry
+  assert.deepEqual(cloned.callers[1]!.device_scope, { mode: 'selected', machine_ids: ['m_one', 'm_two'] })
+  assert.deepEqual(renewCaller(narrowed, 'owner', 2_000).registry.callers[0]!.device_scope, {
+    mode: 'selected',
+    machine_ids: ['m_one', 'm_two']
+  })
+  assert.deepEqual(rotateCaller(narrowed, 'owner', 2_000).registry.callers[0]!.device_scope, {
+    mode: 'selected',
+    machine_ids: ['m_one', 'm_two']
+  })
+  // 管理页令牌同样可作为纯过滤器收窄；范围不影响管理员授权（Administrator.grants）。
+  const gateway: CallerRegistry = {
+    ...base,
+    callers: [{ ...base.callers[0]!, scope: 'gateway' }]
+  }
+  const scopedGateway = setDeviceScope(gateway, 'owner', ['m_one'])
+  parseRegistry(scopedGateway)
+  assert.deepEqual(scopedGateway.callers[0]!.device_scope, { mode: 'selected', machine_ids: ['m_one'] })
+  assert.equal(scopedGateway.callers[0]!.scope, 'gateway')
+
+  // 严格解析：未知字段、错误 mode、空列表、重复、非法形状一律拒绝。
+  for (const device_scope of [
+    null,
+    {},
+    { mode: 'all' },
+    { mode: 'selected' },
+    { mode: 'selected', machine_ids: ['m_one', 'm_one'] },
+    { mode: 'selected', machine_ids: ['m one'] },
+    { mode: 'selected', machine_ids: ['m_one'], extra: 1 },
+    { mode: 'selected', machine_ids: Array.from({ length: LIMITS.scope_machines + 1 }, (_, i) => 'm_' + i) }
+  ]) {
+    const changed = structuredClone(base)
+    Object.assign(changed.callers[0]!, { device_scope })
+    assert.throws(() => parseRegistry(changed))
+  }
 })
 
 function authenticate(source: ReturnType<typeof openCallerSource>, token: string) {
@@ -253,7 +336,7 @@ test('token CLI manages the registry file and the local client credential end to
 
     let result = await run('list')
     assert.equal(result.code, 0)
-    assert.match(result.out, /^owner\tactive\t/)
+    assert.match(result.out, /^owner\tactive\t[^\t]+\t-\tall$/m)
 
     result = await run('create', '--principal', 'worker', '--like', 'owner', '--ttl-days', '7')
     assert.equal(result.code, 0)
@@ -287,6 +370,37 @@ test('token CLI manages the registry file and the local client credential end to
     result = await run('permissions', '--principal', 'owner', '--discard-response', 'false')
     assert.equal(result.code, 0)
     assert.deepEqual(stored().callers[0]!.principal.permissions, { discard_response: false })
+
+    // 设备范围：收窄、列表列、清除；注册表字节在不合法请求后保持不变。
+    result = await run('scope', '--principal', 'owner', '--devices', 'm_one,m_two')
+    assert.equal(result.code, 0)
+    assert.equal(result.err, 'device scope owner selected(2)\n')
+    assert.deepEqual(stored().callers[0]!.device_scope, { mode: 'selected', machine_ids: ['m_one', 'm_two'] })
+    const beforeBadScope = readFileSync(callers)
+    for (const bad of [
+      ['scope', '--principal', 'owner', '--devices', ''],
+      ['scope', '--principal', 'owner', '--devices', 'm_one,,m_two'],
+      ['scope', '--principal', 'owner', '--devices', 'm_one,m_one'],
+      ['scope', '--principal', 'owner'],
+      ['scope', '--principal', 'owner', '--all-devices', 'yes'],
+      ['scope', '--principal', 'owner', '--devices', 'm_one', '--all-devices', 'true'],
+      ['scope', '--principal', 'ghost', '--devices', 'm_one'],
+      ['scope', '--principal', 'owner', '--devices', 'm_one', '--ttl-days', '30']
+    ]) {
+      result = await run(...bad)
+      assert.equal(result.code, 2, bad.join(' '))
+      assert.equal(result.err, 'invalid_arguments\n')
+    }
+    assert.deepEqual(readFileSync(callers), beforeBadScope)
+    result = await run('list')
+    assert.match(result.out, /^owner\tactive\t[^\t]+\t[^\t]+\tselected\(2\)$/m)
+    result = await run('scope', '--principal', 'owner', '--no-devices', 'true')
+    assert.equal(result.code, 0)
+    assert.deepEqual(stored().callers[0]!.device_scope, { mode: 'selected', machine_ids: [] })
+    result = await run('scope', '--principal', 'owner', '--all-devices', 'true')
+    assert.equal(result.code, 0)
+    assert.equal(result.err, 'device scope owner all\n')
+    assert.equal(stored().callers[0]!.device_scope, undefined)
 
     result = await run('revoke', '--principal', 'worker')
     assert.equal(result.code, 0)

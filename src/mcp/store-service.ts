@@ -4,7 +4,7 @@ import { canonical, digest, GatewayError } from '../contracts.js'
 import type { CallState } from '../contracts.js'
 import { Router, type LocalPolicies, type Principal } from '../router.js'
 import type { Store } from '../store.js'
-import { providerScopeAllowed, validatePolicies } from '../wire/index.js'
+import { LIMITS, providerScopeAllowed, validatePolicies } from '../wire/index.js'
 import type { AttemptBinding, ProviderBinding, ProviderPolicy, V2Target } from '../wire/types.js'
 import { isToolName, parseToolArguments } from './schema.js'
 import { publicCallView } from './call-view.js'
@@ -132,6 +132,19 @@ export function resolveGatewayPrincipal(
   }
   const snapshot = JSON.parse(canonical(principal)) as Principal
   validatePolicies({ caller: snapshot.policy, local: snapshot.policy })
+  // 身份来源交付的范围必须形状正确；缺失即不收窄，任何变形均拒绝。
+  if (
+    snapshot.device_scope !== undefined &&
+    (snapshot.device_scope.mode !== 'selected' ||
+      !Array.isArray(snapshot.device_scope.machine_ids) ||
+      snapshot.device_scope.machine_ids.length > LIMITS.scope_machines ||
+      snapshot.device_scope.machine_ids.some(
+        /* 只接受稳定 machine_id 形状。 */ (item) => typeof item !== 'string' || !idPattern.test(item)
+      ) ||
+      new Set(snapshot.device_scope.machine_ids).size !== snapshot.device_scope.machine_ids.length)
+  ) {
+    throw new FacadeServiceError('unauthenticated')
+  }
   return snapshot
 }
 
@@ -310,6 +323,8 @@ export class StoreGatewayService implements GatewayService {
   // 使用 Wire 的完整 tuple 求交，不把不同 grant 的 machine/provider/session/method 拼成新授权。
   private visibleTargets(principal: Principal): { target: V2Target; local_revision: string }[] {
     const targets = new Map<string, { target: V2Target; local_revision: string }>()
+    // 令牌的设备范围是独立过滤器：在 grants 推导出的集合上再收窄，永不扩大授权。
+    const scope = principal.device_scope?.machine_ids
     if (principal.policy.grants.length > 256) {
       throw new FacadeServiceError('busy')
     }
@@ -317,6 +332,7 @@ export class StoreGatewayService implements GatewayService {
     for (const grant of principal.policy.grants) {
       if (
         !grant.actions.includes('read') ||
+        (scope !== undefined && !scope.includes(grant.target.machine_id)) ||
         !this.options.store.provider(grant.target.machine_id, grant.target.provider_id)
       ) {
         continue
@@ -652,6 +668,8 @@ export class StoreGatewayService implements GatewayService {
     const scope = {
       principal: principal.id,
       policy: principal.policy,
+      // 范围进入游标绑定：改范围后旧游标不再可重放。
+      ...(principal.device_scope === undefined ? {} : { device_scope: principal.device_scope }),
       visible,
       generation: this.options.store.generation(),
       name: request.name,

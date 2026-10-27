@@ -10,13 +10,15 @@ import { runtimeReference, readRuntimeJson } from './runtime-files.js'
 import { readSetupJson, setupFileStamp, writeSetupFile } from './setup-files.js'
 import {
   createGatewayCaller,
+  deviceScopeView,
   digestToken,
   parseRegistry,
   REGISTRY_MAX_BYTES,
   revokeCaller,
-  rotateCaller
+  rotateCaller,
+  setDeviceScope
 } from './token-registry.js'
-import { boundedJson, fields, object, id } from '../wire/index.js'
+import { boundedJson, fields, id, LIMITS, object } from '../wire/index.js'
 
 type Resources = NonNullable<ManagementWriteHttpOptions['resources']>
 export function createManagementResources(options: {
@@ -145,6 +147,9 @@ export function createManagementResources(options: {
           fields(args, ['principal'], ['days'])
         } else if (operation === 'tokens_delete' || operation === 'tokens_rotate') {
           fields(args, ['principal'])
+        } else if (operation === 'tokens_scope') {
+          // 选定列表和全部设备必须显式且互斥。
+          fields(args, ['principal'], ['machine_ids', 'all_devices'])
         } else {
           throw new ManagementServiceError('invalid_arguments')
         }
@@ -154,8 +159,17 @@ export function createManagementResources(options: {
           const client = readSetupJson(runtimeReference(options.config.state_dir, 'mcp-client')) as
             | { principal_id?: string; token?: string }
             | undefined
+          // 设备候选与令牌列表来自同一次读取：有界、按 machine_id 排序，不额外开一条读路径。
+          // Store.resources() 已按 machine_id 排序；超上限时显式交付截断标记，绝不静默丢设备。
+          const all = options.store.resources()
+          const devices = all
+            .slice(0, LIMITS.scope_machines)
+            .map((entry) => ({ machine_id: entry.machine_id, name: options.store.machine(entry.machine_id).name }))
           return {
             resource: registry.resource,
+            devices,
+            devices_total: all.length,
+            devices_truncated: all.length > LIMITS.scope_machines,
             items: registry.callers
               .filter((entry) => !isAdminPlaceholder(entry))
               .map((entry) => ({
@@ -163,6 +177,8 @@ export function createManagementResources(options: {
                 issued_at: entry.issued_at,
                 expires_at: entry.expires_at,
                 scope: entry.scope ?? 'selected_devices',
+                // 设备范围是纯过滤器：管理页令牌同样适用（不影响 Administrator.grants 的管理页可见性）。
+                device_scope: deviceScopeView(entry),
                 token:
                   entry.token ??
                   (client?.principal_id === entry.principal.id &&
@@ -184,6 +200,25 @@ export function createManagementResources(options: {
         }
         if (args.days !== undefined && (typeof args.days !== 'number' || !Number.isInteger(args.days))) {
           throw new ManagementServiceError('invalid_arguments')
+        }
+        if (operation === 'tokens_scope') {
+          const all = args.all_devices === true
+          if ((all && args.machine_ids !== undefined) || (!all && args.all_devices !== undefined)) {
+            throw new ManagementServiceError('invalid_arguments')
+          }
+          const requested = all ? [] : args.machine_ids
+          if (
+            !Array.isArray(requested) ||
+            requested.length > LIMITS.scope_machines ||
+            requested.some(/* 只接受稳定 machine_id 形状；设备名永不参与授权。 */ (item) => typeof item !== 'string') ||
+            new Set(requested).size !== requested.length
+          ) {
+            throw new ManagementServiceError('invalid_arguments')
+          }
+          // 空数组拒绝所有设备；仅明确 all_devices 才清除范围。
+          const scoped = setDeviceScope(registry, args.principal, all ? null : requested)
+          writeSetupFile(path, boundedJson(scoped, REGISTRY_MAX_BYTES), true, stamp)
+          return { saved: true }
         }
         const next =
           operation === 'tokens_create'

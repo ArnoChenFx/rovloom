@@ -161,6 +161,9 @@ rovloom token create --principal worker --like owner [--ttl-days 30]
 rovloom token renew  --principal owner [--ttl-days 30]
 rovloom token rotate --principal owner [--ttl-days 30] [--grace-minutes 10]
 rovloom token revoke --principal worker
+rovloom token scope  --principal worker --devices m_ab12,m_cd34
+rovloom token scope  --principal worker --all-devices true
+rovloom token scope  --principal worker --no-devices true
 ```
 
 The token registry (`managed/mcp-callers.json` under the Gateway state directory)
@@ -173,6 +176,48 @@ invalidates the old token immediately unless `--grace-minutes` gives clients a b
 switch-over window. A local `mcp-client.json` belonging to the same principal is
 updated too. A corrupt registry denies all authentication until it is repaired.
 
+### Device visibility scope
+
+A token can be narrowed to a subset of devices. `device_scope` is an **optional** field on a
+caller entry and does not bump the registry `schema_version`; a registry without it behaves
+exactly as before, so no migration is needed:
+
+```jsonc
+{
+  "principal": { "id": "worker", "policy": { "…": "…" } },
+  "token_sha256": "…",
+  "device_scope": { "mode": "selected", "machine_ids": ["m_ab12", "m_cd34"] },
+  "issued_at": 0,
+  "expires_at": 0
+}
+```
+
+- Absent = today's behaviour: the token sees every device its current grants cover.
+- `mode: "selected"` = only these stable `machine_id`s. Device **names are never accepted**
+  (names can change; renaming a device must not change authorization). Listed IDs that were
+  revoked or no longer exist simply do not match; re-pairing mints a new `machine_id`, so the
+  device drops out of view — deliberately failing closed.
+- A selected list may contain 0–256 unique IDs. An empty list blocks every device; use `--no-devices true` to set it. `--devices ""`, duplicates and empty entries are rejected.
+- Clearing requires the explicit `--all-devices true`; nothing ever silently widens a token.
+
+Scope is a **filter, not a second ACL**: it can only remove devices from what the grants already
+allow. `machines_list`, `machines_get` (including exact-name lookup), `providers_list`,
+`providers_get`, `runtime_discover` and `runtime_describe` all shrink with it, and out-of-scope
+devices keep answering `not_found` — indistinguishable from "not granted", so no device existence
+probe is added. Dispatch, short waits, cancellation, result reads and result deletion are checked
+in the router and answer `forbidden`, exactly like a missing grant.
+
+Scope changes do **not** bump `policy.revision`: the Connector still compares only
+`caller_policy_revision`, so narrowing never makes a native attempt already dispatched stop on
+the device (the same limitation as revoking a token mid-flight). Every subsequent read, short
+wait, cancel and result access is re-checked and refused. The registry is re-read on every
+request, so `rovloom token scope` applies without a restart. `token create --like` clones the
+scope along with the policy, and joining more devices rewrites only policies, leaving
+`device_scope` untouched. `token list` gains an `all` / `selected(N)` column.
+
+Downgrading to a binary that predates this field makes it treat the registry as `invalid_config`
+and deny all authentication: it fails closed instead of silently widening the token.
+
 Management-page tokens (`scope: "gateway"`) retain separate principal IDs and result
 ownership while following the paired caller policy in `gateway_policy`. Pairing and
 joining devices update that policy separately from `local_policy`; their revisions
@@ -180,6 +225,8 @@ must not be interchanged. Existing single-code pairing registries without this f
 use the policy stored on `operator_simple_pairing`, and the next registry write preserves
 it independently. If neither binding exists, Gateway tokens have no method grants.
 Revoking the original pairing token does not revoke separately issued Gateway tokens.
+The device scope applies to these tokens too (the management page offers the same control), but it
+never touches `Administrator.grants`, so management-page visibility is unaffected.
 
 ### Pairing
 

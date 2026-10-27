@@ -6,11 +6,14 @@ import type { JsonObject, ProviderAction, ProviderPolicy, V2Target } from './wir
 import { Store } from './store.js'
 import type { Call, CallOptions, CallAdmissionOptions, CallAdmission } from './store.js'
 
+// 设备可见性收窄：只接受稳定 machine_id，名字可变因此不参与授权；缺省表示不收窄。
+export type DeviceScope = { mode: 'selected'; machine_ids: string[] }
 // 身份与策略来自认证宿主，不能由 runtime_call 的 JSON 参数构造。
 export type Principal = {
   id: string
   policy: ProviderPolicy
   permissions?: { discard_response?: boolean }
+  device_scope?: DeviceScope
 }
 export type LocalPolicies = (target: V2Target) => ProviderPolicy
 export class Router {
@@ -29,6 +32,10 @@ export class Router {
   ): void {
     if (!principal.id.trim()) {
       throw new GatewayError('unauthenticated')
+    }
+    // 范围只是可见性过滤器：不扩大任何 grant，越界目标与无授权同样返回 forbidden。
+    if (principal.device_scope !== undefined && !principal.device_scope.machine_ids.includes(target.machine_id)) {
+      throw new GatewayError('forbidden')
     }
     // 只使用完整 tuple；revision 由 Store 和真实 native gate 另行核对。
     const binding = { target } as Parameters<typeof providerScopeAllowed>[0]
@@ -74,7 +81,14 @@ export class Router {
     }
     const authorize = /* writer 已持锁后重取策略；同次检查只使用一个本地策略快照。 */ () => {
       const local = JSON.parse(canonical(this.localPolicies({ ...snapshot.target }))) as ProviderPolicy
-      const caller = JSON.parse(canonical({ id: principal.id, policy: principal.policy })) as Principal
+      // 快照也携带当前范围：登记与提交之间收窄范围时，提交仍按最新可见性拒绝越界目标。
+      const caller = JSON.parse(
+        canonical({
+          id: principal.id,
+          policy: principal.policy,
+          ...(principal.device_scope === undefined ? {} : { device_scope: principal.device_scope })
+        })
+      ) as Principal
       if (
         caller.id !== snapshot.principal.id ||
         caller.policy.revision !== registered.caller_policy_revision ||

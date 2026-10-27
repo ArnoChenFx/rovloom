@@ -14,6 +14,7 @@ import {
   digestToken,
   parseRegistry,
   revokeCaller,
+  setDeviceScope,
   type CallerRegistry
 } from '../../src/cli/token-registry.js'
 
@@ -180,3 +181,69 @@ test('加入新设备只追加新目标授权，不回溯扩大已批准的旧�
     f.close()
   }
 })
+
+test('device scope is hot-reloaded per request, survives pairing merges and fails closed on a bad registry', () => {
+  const f = fixture()
+  try {
+    f.pair()
+    const machine = f.authorization.policies.caller.grants[0]!.target.machine_id
+    // 配对后的设备令牌（非管理页 gateway 令牌）才参与设备范围。
+    const principal = f.authorization.principal_id
+    // 缺省不收窄。
+    assert.equal(f.principal(principal).device_scope, undefined)
+    // 热改注册表：下一次请求立即看到新范围，不需要重启。
+    f.write(setDeviceScope(f.read(), principal, [machine]))
+    assert.deepEqual(f.principal(principal).device_scope, { mode: 'selected', machine_ids: [machine] })
+    // 真实注册表热重载空范围，克隆不能意外恢复全部设备。
+    f.write(setDeviceScope(f.read(), principal, []))
+    assert.deepEqual(f.principal(principal).device_scope, { mode: 'selected', machine_ids: [] })
+    const emptyClone = createCaller(f.read(), 'empty_scope_clone', principal, Date.now() - 1000).registry
+    assert.deepEqual(emptyClone.callers.find((entry) => entry.principal.id === 'empty_scope_clone')!.device_scope, {
+      mode: 'selected',
+      machine_ids: []
+    })
+    f.write(setDeviceScope(f.read(), principal, [machine]))
+    // 加入新设备只改策略，范围原样保留（不因为授权扩大而放宽可见性）。
+    mergeSetupCallers(f.path, resource, simpleSetupAuthorization('second_machine', ['herdr']))
+    assert.deepEqual(f.principal(principal).device_scope, { mode: 'selected', machine_ids: [machine] })
+    // --like 克隆也带上范围。
+    const cloned = createCaller(f.read(), 'cloned_scoped', principal, Date.now() - 1000).registry
+    f.write(cloned)
+    assert.deepEqual(f.read().callers.find((entry) => entry.principal.id === 'cloned_scoped')!.device_scope, {
+      mode: 'selected',
+      machine_ids: [machine]
+    })
+    // 坏配置整体拒绝并保持库文件字节不变：范围字段不会被静默忽略。
+    const original = readFileSync(f.path)
+    const broken = structuredClone(f.read())
+    Object.assign(
+      broken.callers.find(/* 目标设备令牌。 */ (entry) => entry.principal.id === principal)!,
+      { device_scope: { mode: 'selected', machine_ids: ['bad id'] } }
+    )
+    writeSetupFile(f.path, JSON.stringify(broken), true)
+    const badBytes = readFileSync(f.path)
+    assert.equal(f.source.identities.principal({ principal_id: principal }), null)
+    assert.equal(authenticate(f.source, 'a'.repeat(43)), null)
+    // 修复后下一次读取恢复；构造空范围不会改写输入文件。
+    writeSetupFile(f.path, JSON.stringify(parseRegistry(JSON.parse(original.toString()))), true)
+    assert.equal(f.principal(principal).id, principal)
+    const restored = readFileSync(f.path)
+    assert.deepEqual(
+      setDeviceScope(parseRegistry(JSON.parse(restored.toString())), principal, []).callers.find(
+        (entry) => entry.principal.id === principal
+      )!.device_scope,
+      { mode: 'selected', machine_ids: [] }
+    )
+    assert.deepEqual(readFileSync(f.path), restored)
+    assert.notDeepEqual(badBytes, restored)
+  } finally {
+    f.close()
+  }
+})
+
+function authenticate(source: ReturnType<typeof openCallerSource>, token: string) {
+  return source.authentication.authenticate(
+    new Request(resource, { headers: { authorization: `Bearer ${token}` } }),
+    new AbortController().signal
+  )
+}

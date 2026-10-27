@@ -62,6 +62,7 @@ export async function runtimeFixture(
   }
   const local: ProviderPolicy = { ...structuredClone(caller), revision: 'local1' }
   let authorized = true
+  let deviceScope: string[] | undefined
   let localPolicyRead: (() => void) | undefined
   const contract = {
     wire: { source: native.origin, support_status: 'validated' as const },
@@ -87,7 +88,13 @@ export async function runtimeFixture(
   const identities: GatewayIdentitySource = {
     /** 测试开关可撤销合成 caller；设备凭据不等于 caller 身份。 */
     principal: (identity) =>
-      authorized && identity.principal_id === 'synthetic' ? { id: 'synthetic', policy: caller } : null,
+      authorized && identity.principal_id === 'synthetic'
+        ? {
+            id: 'synthetic',
+            policy: caller,
+            ...(deviceScope ? { device_scope: { mode: 'selected', machine_ids: deviceScope } } : {})
+          }
+        : null,
     /** 本切片不注入管理会话，普通 caller 无法升级管理员。 */
     administrator: () => null
   }
@@ -265,6 +272,9 @@ export async function runtimeFixture(
     /** 切换当前测试主体有效性，结果读取必须即时重新核验。 */
     authorize(value: boolean) {
       authorized = value
+    },
+    deviceScope(value: string[] | undefined) {
+      deviceScope = value
     },
     /** 独立撤销当前 caller 的读取权限，派发权限与身份仍保持有效。 */
     allowRead(value: boolean) {

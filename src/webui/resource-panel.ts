@@ -4,7 +4,15 @@ import type { PageRoute } from './view.js'
 import { copyControl } from './clipboard.js'
 import { ResourceError, type ResourceTransport, type ResourceOperation } from './resource-client.js'
 
-type Token = { principal: string; token: string | null; expires_at: number; scope: string }
+type DeviceScope = { mode: 'all' } | { mode: 'selected'; machine_ids: string[] }
+type Token = {
+  principal: string
+  token: string | null
+  expires_at: number
+  scope: string
+  device_scope: DeviceScope
+}
+type DeviceOption = { machine_id: string; name: string }
 type PairingCode = {
   code_id: string
   machine_id: string
@@ -35,8 +43,18 @@ export function createResourcePanel(options: {
   let pending = false
   let controller = new AbortController()
   let data:
-    | { resource?: string; next_cursor?: number | null; device_port?: number; items: (Token | PairingCode)[] }
+    | {
+        resource?: string
+        next_cursor?: number | null
+        device_port?: number
+        devices?: DeviceOption[]
+        devices_total?: number
+        devices_truncated?: boolean
+        items: (Token | PairingCode)[]
+      }
     | undefined
+  // 面板内未保存的范围选择；保存后由刷新回来的服务端值覆盖。
+  let scopeDraft: { principal: string; machine_ids: string[] } | undefined
   let tokenName = ''
   let tokenDays = '365'
   let codeName = ''
@@ -118,6 +136,9 @@ export function createResourcePanel(options: {
         tokenName = ''
         tokenDays = '365'
       }
+      if (operation === 'tokens_scope') {
+        scopeDraft = undefined
+      }
       if (operation === 'pairing_codes_create') {
         codeName = ''
       }
@@ -140,6 +161,103 @@ export function createResourcePanel(options: {
       }
     }
   }
+  /**
+   * 设备范围控件：默认「全部设备」，切到「指定设备」时展开有界多选。
+   * 两个单选项各有自己的保存按钮，因此「全部设备」始终有一条真正可提交的路径（放开范围不能被藏起来）。
+   */
+  function scopeControl(token: Token, devices: DeviceOption[], onChange: (machineIds: string[] | null) => void) {
+    const { t } = i18n
+    const field = node('fieldset', '', 'token-scope')
+    field.dataset.tokenScope = token.principal
+    const current = token.device_scope
+    const draft =
+      scopeDraft?.principal === token.principal
+        ? scopeDraft.machine_ids
+        : current.mode === 'selected'
+          ? current.machine_ids
+          : []
+    const legend = node('legend', t('resources.scope'))
+    const all = node('input')
+    all.type = 'radio'
+    all.name = 'scope-' + token.principal
+    all.value = 'all'
+    all.dataset.scopeMode = 'all'
+    all.checked = current.mode === 'all'
+    all.disabled = pending
+    const allLabel = node('label', t('resources.scopeAll'))
+    allLabel.prepend(all)
+    const selected = node('input')
+    selected.type = 'radio'
+    selected.name = 'scope-' + token.principal
+    selected.value = 'selected'
+    selected.dataset.scopeMode = 'selected'
+    selected.checked = current.mode === 'selected'
+    selected.disabled = pending
+    const selectedLabel = node('label', t('resources.scopeSelected'))
+    selectedLabel.prepend(selected)
+    // 「全部设备」是一次显式放开，比 CLI 的 --all-devices 更容易误触，因此提交前二次确认。
+    const allPane = node('div', '', 'token-scope-picker')
+    const saveAll = button(t('resources.scopeSaveAll'), () => {
+      if (window.confirm(t('resources.confirmScopeAll', { name: token.principal }))) {
+        onChange(null)
+      }
+    })
+    saveAll.dataset.scopeSave = 'all'
+    allPane.append(saveAll)
+    const picker = node('div', '', 'token-scope-picker')
+    const boxes = new Map<string, HTMLInputElement>()
+    // 列表可能因上限被截断：令牌已选的设备即使不在候选里也要保留复选框，保存时不能被静默丢掉。
+    const candidates = [...devices]
+    for (const machine of draft) {
+      if (!candidates.some((device) => device.machine_id === machine)) {
+        // 已从 Store 移除但仍在范围内的设备：保留可取消的条目，显示占位名而不是 UUID。
+        candidates.push({ machine_id: machine, name: '' })
+      }
+    }
+    for (const device of candidates) {
+      const box = node('input')
+      box.type = 'checkbox'
+      box.value = device.machine_id
+      box.dataset.scopeDevice = device.machine_id
+      box.checked = draft.includes(device.machine_id)
+      box.disabled = pending
+      // 设备名唯一且可读，是给人看的标签；已移除的设备只标固定占位文案，稳定 ID 只进 title 供排查。
+      const label = node('label', device.name || t('resources.scopeRemoved'))
+      label.title = device.machine_id
+      label.prepend(box)
+      boxes.set(device.machine_id, box)
+      picker.append(label)
+    }
+    const save = button(t('resources.scopeSave'), () => {
+      const ids = [...boxes.entries()].filter(([, box]) => box.checked).map(([machine]) => machine)
+      onChange(ids)
+    })
+    save.dataset.scopeSave = 'selected'
+    picker.append(save)
+    const sync = () => {
+      const isSelected = selected.checked
+      allPane.hidden = isSelected
+      picker.hidden = !isSelected
+    }
+    all.addEventListener('change', sync)
+    selected.addEventListener('change', sync)
+    for (const box of boxes.values()) {
+      box.addEventListener('change', () => {
+        if (!selected.checked) {
+          selected.checked = true
+        }
+        scopeDraft = {
+          principal: token.principal,
+          machine_ids: [...boxes.entries()].filter(([, value]) => value.checked).map(([machine]) => machine)
+        }
+        sync()
+      })
+    }
+    sync()
+    field.append(legend, allLabel, selectedLabel, allPane, picker)
+    return field
+  }
+
   function remove(operation: ResourceOperation, args: Record<string, unknown>, message: string) {
     if (window.confirm(message)) {
       void mutate(operation, args)
@@ -218,6 +336,16 @@ export function createResourcePanel(options: {
           )
           body.append(endpoint, node('p', t('resources.endpointNote'), 'muted'))
         }
+        if (data?.devices_truncated) {
+          // 候选被上限截断时明确告知，不静默隐藏设备。
+          body.append(
+            node(
+              'p',
+              t('resources.scopeTruncated', { shown: data.devices?.length ?? 0, total: data.devices_total ?? 0 }),
+              'muted'
+            )
+          )
+        }
         for (const item of data?.items ?? []) {
           const token = item as Token
           const card = node('article', '', 'token-card')
@@ -228,10 +356,35 @@ export function createResourcePanel(options: {
             node('span', t(token.expires_at > Date.now() ? 'resources.active' : 'resources.expired'), 'badge'),
             node('span', t('resources.expiresAt', { time: i18n.timestamp(token.expires_at) }), 'muted')
           )
+          const devices = data?.devices ?? []
+          // 状态展示只用可读设备名；已移除的设备给固定占位文案，稳定 ID 收进 title。
+          const scope = token.device_scope
+          const names =
+            scope.mode === 'selected'
+              ? scope.machine_ids
+                  .map(
+                    (machine) =>
+                      devices.find((entry) => entry.machine_id === machine)?.name || t('resources.scopeRemoved')
+                  )
+                  .join('、')
+              : ''
+          const badge = node(
+            'span',
+            scope.mode === 'all'
+              ? t('resources.scopeAllBadge')
+              : t('resources.scopeSelectedBadge', { count: scope.machine_ids.length }) + (names ? ' · ' + names : ''),
+            'badge scope-badge'
+          )
+          if (scope.mode === 'selected') {
+            badge.title = scope.machine_ids.join(', ')
+          }
+          summary.append(badge)
           const controls = node('div', '', 'token-controls')
           if (token.token) {
             const value = node('input')
             value.type = 'password'
+            // 稳定的定位钩子：卡片里还有范围控件的单选/复选框，验收脚本按此精确定位原文输入框。
+            value.dataset.tokenValue = token.principal
             value.value = token.token
             value.readOnly = true
             value.setAttribute('aria-label', token.principal + ' Token')
@@ -266,6 +419,14 @@ export function createResourcePanel(options: {
             )
           )
           card.append(summary, controls)
+          card.append(
+            scopeControl(token, devices, (machineIds) => {
+              void mutate('tokens_scope', {
+                principal: token.principal,
+                ...(machineIds === null ? { all_devices: true } : { machine_ids: machineIds })
+              })
+            })
+          )
           body.append(card)
         }
       } else {
@@ -348,6 +509,7 @@ export function createResourcePanel(options: {
     active = false
     key = ''
     data = undefined
+    scopeDraft = undefined
     tokenName = ''
     tokenDays = '365'
     codeName = ''
@@ -387,6 +549,7 @@ export function createResourcePanel(options: {
       if (changed) {
         key = nextKey
         data = undefined
+        scopeDraft = undefined
         created = undefined
         version++
         controller.abort()

@@ -75,7 +75,9 @@ export function openCallerSource(
         const principal = found
           ? structuredClone({
               ...found.principal,
-              policy: found.scope === 'gateway' ? gatewayCallerPolicy(registry) : found.principal.policy
+              policy: found.scope === 'gateway' ? gatewayCallerPolicy(registry) : found.principal.policy,
+              // 范围随主体以纯 JSON 值携带；每次请求重新读取，因此 rovloom token scope 热生效。
+              ...(found.device_scope ? { device_scope: found.device_scope } : {})
             })
           : null
         return found && time() < found.expires_at ? principal : null

@@ -5,6 +5,7 @@ export type ResourceOperation =
   | 'tokens_create'
   | 'tokens_delete'
   | 'tokens_rotate'
+  | 'tokens_scope'
   | 'pairing_codes_list'
   | 'pairing_codes_create'
   | 'pairing_codes_revoke'
