@@ -193,6 +193,8 @@ Luvus `host.info` / `host.capabilities` are native host-profile methods, not ses
 
 Most Luvus methods (such as `workspace.list` and `pane.list`) have the validation mode chosen for you by the Gateway, so you never fill in `validation`. The `strict` group is `pane.list`, `agent.prompt`, `agent.send`, `agent.wait` and `agent.keys` — still chosen for you.
 
+Luvus `agent.start` requires `name` and `kind`, both matching `^[a-z][a-z0-9_-]{0,31}$`. `pane` is optional: omit it to create a new pane, or supply an observed pane to use it; optional `anchor` selects a split anchor and cannot be combined with `pane`. Use the returned pane ID for later calls. Invalid names receive `/params/name` with rule `pattern` in `gateway_error.details.issues`; read `runtime_describe.parameter_help` for the full reviewed guide.
+
 ### Reading a terminal
 
 ```json

@@ -128,10 +128,19 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 
 例如 `agent.prompt` 的原生根注释明确说明：等待模式须先观察到新的 working/blocked 转换，再匹配 `until`；`agent.wait` 则只是当前状态匹配器。快速回复或缺少正向状态证据时，前者可能一直未匹配，即使 Agent 实际已答完。MCP 可直接读到原生注释和下面的审核提示。
 
-`runtime_describe` 对 `agent.wait`、`agent.prompt`、`pane.run`、`wait.output` 附带
+`runtime_describe` 对 `agent.start`、`agent.wait`、`agent.prompt`、`pane.run`、`wait.output` 附带
 `parameter_help`：必填/可选字段、依赖规则和示例，来源标记为
 `rovloom_reviewed_subset`。它是 Rovloom 已审核子集的调用指南，原来的
 `schema_status` 仍表示安装版原生 schema 的覆盖情况。`runtime_discover` 不附带这些示例。
+
+`agent.start` 必填 `name` 和 `kind`，两者均须匹配 `^[a-z][a-z0-9_-]{0,31}$`（小写 ASCII 字母开头，最长 32 字符）；格式错误会在登记前定位到 `/params/name` 或 `/params/kind`，规则为 `pattern`。`kind` 还须是原生已安装的 Agent，格式有效不证明该 Agent 可用。`pane` 是可选字段：提供时使用已有 pane，省略时由 Luvus 新建 pane；可用 `anchor` 指定分屏锚点，不能同时传 `pane` 和 `anchor`。启动回包中的 `pane` 是后续应使用的真实标识，`ready:true` 不代表一轮 prompt 已完成。
+
+```json
+{"method":"agent.start","params":{"name":"worker","kind":"pi"}}
+{"method":"agent.start","params":{"name":"worker","kind":"pi","pane":"2"}}
+```
+
+上面分别演示新建 pane 和使用已有 pane，应按意图选一个调用；Rovloom 不替调用方补 pane，也不会为定位参数错误启动 Agent。该方法的原生 `schema_status` 仍为 `generic_params_only`，审核提示不冒充专用原生参数 schema。
 
 两个 Agent 等待入口的参数不同：
 
@@ -195,6 +204,8 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 例如 `status:"idle", matched:false, evidence:"timeout", observed_state:null` 与 Agent 已经输出答案并不矛盾。该回包仍是正常收到的原生响应，Rovloom 调用可为 `responded`；它不同于 Gateway 派发失败或未获得回包。Rovloom 不凭当前 idle 改成 `matched:true`。原生 evidence 的改进跟踪在 [#301](https://github.com/ArnoChenFx/rovloom/issues/301)。
 
 v0.6.8 的部署验收还确认：即使 `until:["done","idle"]` 且原生已回报 `status:"done"`，没有观测到新的 working/blocked 时仍可能返回 `matched:false, evidence:"timeout", observed_state:null`。长阻塞等待的通道修复和两段式可用，不表示这个原生一段式行为已经修复；需要 Luvus 原生层调整等待语义及响应 schema，Rovloom 保留原文。
+
+v0.6.9 现场又报告 `until:["working"]`、`["done"]`、`["done","idle"]` 均等待 20 秒后返回 timeout/null/done。原生在提交时将当前状态记为等待基线；若已是 working，后续 working 采样不构成新的跃迁，直接变为 done 也不产生 working/blocked 跃迁。`observed_state` 不是当前状态镜像，因此 null 与当前 `status:done` 可以并存；不能仅凭 null 断定采样链路未连接。这一基线与跃迁条件需由 Luvus 原生改进，不是已修复的 Rovloom 功能。
 
 ## 验证
 

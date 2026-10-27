@@ -12,7 +12,7 @@ import {
 
 test('描述示例同时通过原 schema 和 Rovloom 审核子集，独立副本不能改变以后返回的提示', () => {
   const preflight = createLuvusRequestPreflight(compiled)
-  for (const method of ['agent.wait', 'agent.prompt', 'pane.run', 'wait.output']) {
+  for (const method of ['agent.start', 'agent.wait', 'agent.prompt', 'pane.run', 'wait.output']) {
     const guide = luvusParameterHelp(method)!
     for (const params of guide.examples as Record<string, unknown>[]) {
       validateLuvusOperationParams(method, params)
@@ -28,6 +28,11 @@ test('常见选择器、wait 依赖与 generic 必填字段在登记前得到固
   const preflight = createLuvusRequestPreflight(compiled)
   const secret = 'PRIVATE_PROMPT_COMMAND_TOKEN'
   for (const [method, params, path, rule] of [
+    ['agent.start', { name: secret, kind: 'pi' }, '/params/name', 'pattern'],
+    ['agent.start', { name: 'worker', kind: secret }, '/params/kind', 'pattern'],
+    ['agent.start', { kind: 'pi' }, '/params/name', 'required'],
+    ['agent.start', { name: 'worker' }, '/params/kind', 'required'],
+    ['agent.start', { name: 'worker', kind: 'pi', pane: '2', anchor: '3' }, '/params/pane', 'one_of'],
     ['agent.wait', { target: secret, until: 'idle' }, '/params/pane', 'required'],
     ['agent.prompt', { target: 'agent', text: secret, until: ['idle'] }, '/params/wait', 'required_true'],
     ['pane.run', { pane: '2', [secret]: secret }, '/params/command', 'required'],
@@ -52,6 +57,7 @@ test('未知字段和非法枚举的真实 preflight 拒绝提供根路径诊断
   const preflight = createLuvusRequestPreflight(compiled)
   const secret = 'PRIVATE_UNKNOWN_FIELD_OR_ENUM'
   for (const [method, params] of [
+    ['agent.start', { name: 'worker', kind: 'pi', [secret]: secret }],
     ['pane.run', { pane: '2', command: 'x', [secret]: secret }],
     ['agent.wait', { pane: '2', status: secret }]
   ] as const) {

@@ -61,6 +61,8 @@ test('prompt 等待超时保留原生证据，describe 提供两段式指导而�
       { observed: null, status: 'idle', until: ['idle'] },
       { observed: 'working', status: 'idle', until: ['idle'] },
       { observed: null, status: 'done', until: ['idle'] },
+      { observed: null, status: 'done', until: ['working'] },
+      { observed: null, status: 'done', until: ['done'] },
       { observed: null, status: 'done', until: ['done', 'idle'] }
     ] as const) {
       observed = scenario.observed
@@ -87,7 +89,7 @@ test('prompt 等待超时保留原生证据，describe 提供两段式指导而�
       assert.equal(JSON.parse(content).result.status, scenario.status)
       assert.deepEqual(received.at(-1), requestParams)
     }
-    assert.equal(f.native.state.responses, 4)
+    assert.equal(f.native.state.responses, 6)
     assert.equal(f.connector.transport.status().connection_epoch, epoch)
   } finally {
     await http.close()
