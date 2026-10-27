@@ -204,18 +204,12 @@ export function createResourcePanel(options: {
     // 「全部设备」是一次显式放开，比 CLI 的 --all-devices 更容易误触，因此提交前二次确认。
     const allPane = node('div', '', 'token-scope-picker')
     const saveAll = button(t('resources.scopeSaveAll'), () => {
-      void confirmDialog
-        .ask({
-          title: t('resources.confirmScopeAllTitle'),
-          message: t('resources.confirmScopeAll', { name: token.principal }),
-          accept: t('confirm.accept'),
-          cancel: t('confirm.cancel')
-        })
-        .then((accepted) => {
-          if (accepted) {
-            onChange(null)
-          }
-        })
+      // 与其它危险操作走同一条路径：接受后还要确认面板仍然有效。
+      void confirmThen(
+        t('resources.confirmScopeAllTitle'),
+        t('resources.confirmScopeAll', { name: token.principal }),
+        () => onChange(null)
+      )
     })
     saveAll.dataset.scopeSave = 'all'
     allPane.append(saveAll)
