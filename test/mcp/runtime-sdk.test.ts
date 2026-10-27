@@ -120,6 +120,25 @@ test(
           assert.equal(Buffer.concat(chunks).byteLength, result.bytes)
           assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString()).error, f.native.response.error)
           assert(firstNext)
+          // 同一已连接 SDK 会话中实时收窄到零设备，既有结果和新调用都必须拒绝。
+          f.deviceScope([])
+          const hidden = data(await invoke({ name: 'machines_list', arguments: {} }))
+          assert.deepEqual(hidden.items, [])
+          for (const request of [
+            { name: 'runtime_call', arguments: { ...args, client_request_key: 'denied_scope' } },
+            { name: 'runtime_call_get', arguments: { call_id: call.call_id } },
+            { name: 'runtime_result_read', arguments: { result_id: result.result_id } },
+            { name: 'runtime_call_cancel', arguments: { call_id: call.call_id } }
+          ]) {
+            const denied = await invoke(request)
+            assert.deepEqual(denied.structuredContent, { gateway_error: { code: 'forbidden' } })
+          }
+          assert.equal(f.native.state.responses, 1)
+          f.deviceScope(undefined)
+          assert.equal(
+            data(await invoke({ name: 'runtime_call_get', arguments: { call_id: call.call_id } })).call_id,
+            call.call_id
+          )
           lifecycle.phase('changed_cursor')
           const changedPage = await invoke({
             name: 'runtime_result_read',

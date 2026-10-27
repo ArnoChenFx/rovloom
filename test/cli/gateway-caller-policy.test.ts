@@ -194,6 +194,15 @@ test('device scope is hot-reloaded per request, survives pairing merges and fail
     // 热改注册表：下一次请求立即看到新范围，不需要重启。
     f.write(setDeviceScope(f.read(), principal, [machine]))
     assert.deepEqual(f.principal(principal).device_scope, { mode: 'selected', machine_ids: [machine] })
+    // 真实注册表热重载空范围，克隆不能意外恢复全部设备。
+    f.write(setDeviceScope(f.read(), principal, []))
+    assert.deepEqual(f.principal(principal).device_scope, { mode: 'selected', machine_ids: [] })
+    const emptyClone = createCaller(f.read(), 'empty_scope_clone', principal, Date.now() - 1000).registry
+    assert.deepEqual(emptyClone.callers.find((entry) => entry.principal.id === 'empty_scope_clone')!.device_scope, {
+      mode: 'selected',
+      machine_ids: []
+    })
+    f.write(setDeviceScope(f.read(), principal, [machine]))
     // 加入新设备只改策略，范围原样保留（不因为授权扩大而放宽可见性）。
     mergeSetupCallers(f.path, resource, simpleSetupAuthorization('second_machine', ['herdr']))
     assert.deepEqual(f.principal(principal).device_scope, { mode: 'selected', machine_ids: [machine] })
@@ -215,7 +224,7 @@ test('device scope is hot-reloaded per request, survives pairing merges and fail
     const badBytes = readFileSync(f.path)
     assert.equal(f.source.identities.principal({ principal_id: principal }), null)
     assert.equal(authenticate(f.source, 'a'.repeat(43)), null)
-    // 修复后下一次读取恢复，且写入路径继续拒绝空范围而不改动字节。
+    // 修复后下一次读取恢复；构造空范围不会改写输入文件。
     writeSetupFile(f.path, JSON.stringify(parseRegistry(JSON.parse(original.toString()))), true)
     assert.equal(f.principal(principal).id, principal)
     const restored = readFileSync(f.path)
