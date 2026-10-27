@@ -1,6 +1,8 @@
 // 经真实HTTP SDK和角色工厂验证MCP接线；身份、策略及自建native listener均是隔离fixture。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { DatabaseSync } from 'node:sqlite'
+import { join } from 'node:path'
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import { RuntimeGatewayService } from '../../src/mcp/runtime-service.js'
 import { httpFixture } from './http-fixture.js'
@@ -80,6 +82,22 @@ test(
             wait_ms: 5000,
             client_request_key: 'mcp_one_intent'
           }
+          lifecycle.phase('stale_contract')
+          const refused = await invoke({
+            name: 'runtime_call',
+            arguments: { ...args, contract_ref: '0'.repeat(64) }
+          })
+          assert.equal(refused.isError, true)
+          assert.deepEqual(refused.structuredContent, { gateway_error: { code: 'contract_unavailable' } })
+          const reader = new DatabaseSync(join(f.native.root, 'gateway/gateway.db'), { readOnly: true })
+          try {
+            assert.equal(reader.prepare('SELECT count(*) AS n FROM calls').get()!.n, 0)
+          } finally {
+            reader.close()
+          }
+          assert.equal(f.claims(), 0)
+          assert.equal(f.native.state.responses, 0)
+          assert.equal(f.connector.transport.status().phase, 'ready')
           lifecycle.phase('call')
           const call = data(await invoke({ name: 'runtime_call', arguments: args }))
           lifecycle.phase('duplicate')

@@ -14,6 +14,7 @@ export function probeHostProfile(agentVersion: string): HostProfileReport | unde
   let kernel: string | null = null
   let container: HostProfileReport['container'] = 'unknown'
   try {
+    // 运行时可能考虑 CPU 亲和性与配额；整数估计不能反推出可见核数或精确的配额核数。
     const count = availableParallelism()
     if (Number.isSafeInteger(count) && count > 0 && count <= 262144) {
       cpus = count

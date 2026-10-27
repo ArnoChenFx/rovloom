@@ -40,6 +40,8 @@ MCP 的 `machines_get` 和管理页 `DeviceSnapshot` 详情可以包含 `host`�
 
 完整 host 只在双方协商能力并上报后出现，旧 Connector 缺报时整块省略。读取不会刷新报告时间；缓存被淘汰、Gateway 重启或恢复代次变化后，host 缺省、时间未知为 null。新认证 epoch 清除旧 host，等待重新上报。该缓存不计入持久备份，不承诺跨重启的在线历史；磁盘平台摘要仍按其独立寿命保留。
 
+采集发生在连接建立时，长连接期间的 provider 版本、内核或资源配置变化不会定时刷新 host；心跳只更新连接观察。需要新报告时，在适当窗口重连 Connector。`cpus` 是运行时 `os.availableParallelism()` 的整数估计，不是可见核数或精确容器 CPU 配额；`memory_bytes` 是系统可见总量，不是容器内存限额。
+
 管理页详情明确显示“连接时上报”、上报接收时间与来源；其中 provider 版本按当前管理员的 `providers_read` 授权过滤。设备列表保持轻量，不携带完整 host。缺报不影响旧设备页面。
 
 ## 重启行为

@@ -102,6 +102,7 @@ export type DevicePlatformPayload = Readonly<{
 export type HostProfileReport = Readonly<{
   os: Readonly<{ family: 'linux' | 'darwin' | 'win32'; distribution: string | null; kernel: string | null }>
   arch: 'x86_64' | 'aarch64'
+  /** os.availableParallelism() 的进程可用并行度估计；不是可见/物理核数或精确 cgroup 配额。 */
   cpus: number | null
   memory_bytes: number | null
   container: 'docker' | 'podman' | 'none' | 'unknown'
