@@ -13,7 +13,7 @@ import {
   sampleManagementTransport,
   type ManagementTransportProjection
 } from './transport-observations.js'
-import type { GatewayTransportObservationSource } from '../transport/observation.js'
+import type { GatewayTransportObservationSource, MachineObservationRequest } from '../transport/observation.js'
 import { authorizedLuvusCatalog, type GatewayCatalog } from './native-catalog.js'
 import { authorizedProviderCatalog } from './provider-catalog.js'
 import {
@@ -21,8 +21,11 @@ import {
   type CallView,
   type GatewayService,
   type MachineView,
+  type MachineDetailsView,
   type Page,
   type ProviderView,
+  type McpProviderView,
+  type ProviderMetadata,
   type ReplyData,
   type ServiceContext,
   type ServiceErrorCode,
@@ -345,15 +348,44 @@ export class StoreGatewayService implements GatewayService {
   private machine(
     machineId: string,
     targets: readonly V2Target[],
-    observed: ManagementTransportProjection
-  ): MachineView {
+    observed: ManagementTransportProjection,
+    detail: true
+  ): MachineDetailsView
+  private machine(
+    machineId: string,
+    targets: readonly V2Target[],
+    observed: ManagementTransportProjection,
+    detail?: false
+  ): MachineView
+  private machine(
+    machineId: string,
+    targets: readonly V2Target[],
+    observed: ManagementTransportProjection,
+    detail = false
+  ): MachineView | MachineDetailsView {
     const machine = this.options.store.machine(machineId)
     if (!persistedStates.has(machine.status)) {
       throw new FacadeServiceError('unavailable')
     }
+    const details = observed.machineDetails(machine.machine_id)
+    const platform = this.options.store.devicePlatform(machine.machine_id)
+    const summary = details.host
+      ? `${details.host.os.family}/${details.host.arch}`
+      : (details.platform ?? (platform ? `${platform.os}/${platform.arch === 'x64' ? 'x86_64' : 'aarch64'}` : null))
+    const providerIds = new Set(targets.map((target) => target.provider_id))
     return {
       machine_id: machine.machine_id,
       name: machine.name,
+      platform: summary,
+      ...(detail ? { last_seen_at: details.last_seen_at, link_since: details.link_since } : {}),
+      ...(detail && details.host
+        ? {
+            host: {
+              ...details.host,
+              providers: details.host.providers.filter((provider) => providerIds.has(provider.provider_id))
+            }
+          }
+        : {}),
       status: machine.status === 'pending' ? 'pending' : machine.status === 'revoked' ? 'revoked' : 'active',
       // pending/revoked 是持久事实；active 设备的连接只取自真实传输观测，无证据时为 unverified。
       link:
@@ -379,6 +411,43 @@ export class StoreGatewayService implements GatewayService {
       // 禁用或无观测时不报告 ready；观测必须匹配当前 binding revision。
       readiness: !enabled ? 'unavailable' : observed.providerReady(machine, provider, binding.binding_revision)
     }
+  }
+
+  /** 只读取同一授权目录的已核验契约，不触发 native RPC，也不从安装常量或 readiness 猜版本。 */
+  private providerMetadata(
+    binding: ProviderBinding,
+    targets: readonly V2Target[],
+    principal: Principal,
+    context: ServiceContext
+  ): ProviderMetadata {
+    if (binding.enabled && this.options.catalog) {
+      for (const target of targets) {
+        try {
+          const provider =
+            this.options.catalog.kind === 'mixed' ? this.options.catalog.select(target) : this.options.catalog
+          if (!provider) {
+            continue
+          }
+          const options = {
+            store: this.options.store,
+            principal,
+            currentPrincipal: () => this.principal(context),
+            localPolicies: this.options.localPolicies,
+            terminalExecutionState: this.options.terminalExecutionState,
+            target,
+            expected_binding_revision: binding.binding_revision
+          }
+          const catalog =
+            provider.kind === 'provider'
+              ? authorizedProviderCatalog({ ...options, provider })
+              : authorizedLuvusCatalog({ ...options, provider })
+          return catalog.metadata
+        } catch {
+          // 缺失、过期或失效目录不妨碍查看 binding；返回前仍重新核对当前 read 授权。
+        }
+      }
+    }
+    return { native_version: null, schema_status: 'unavailable', schema_sha256: null }
   }
 
   // 签名只绑定分页范围和位置，不授予读取权；密钥只存在于当前门面实例，重启后旧游标失效。
@@ -562,7 +631,24 @@ export class StoreGatewayService implements GatewayService {
       ...new Set(visible.map(/* 提取授权目标中的稳定设备 ID，不建立第二份注册表。 */ (row) => row.target.machine_id))
     ].sort()
     // 连接与 provider 就绪来自同一实际传输的只读观测；没有来源时各层保持未核实。
-    const { projection: observed } = this.observe()
+    const detailMachine =
+      request.name === 'machines_get'
+        ? (request.args.machine_id ??
+          machines.find((machine) => this.options.store.machine(machine).name === request.args.name))
+        : undefined
+    const metadata =
+      request.name === 'machines_get'
+        ? { machine_ids: detailMachine && machines.includes(detailMachine) ? [detailMachine] : [], include_host: true }
+        : request.name === 'machines_list'
+          ? { machine_ids: machines, include_host: false }
+          : undefined
+    const { projection: observed } = this.observe(metadata)
+    if (
+      canonical(this.principal(context)) !== canonical(principal) ||
+      canonical(this.visibleTargets(this.principal(context))) !== canonical(visible)
+    ) {
+      throw new FacadeServiceError('forbidden')
+    }
     const scope = {
       principal: principal.id,
       policy: principal.policy,
@@ -586,7 +672,8 @@ export class StoreGatewayService implements GatewayService {
         /* 只回传该设备下当前获授权的完整 tuple。 */ visible
           .filter((row) => row.target.machine_id === machineId)
           .map((row) => row.target),
-        observed
+        observed,
+        true
       )
     }
     if (request.name === 'machines_list') {
@@ -605,6 +692,26 @@ export class StoreGatewayService implements GatewayService {
       )
     }
     if (request.name === 'providers_list' || request.name === 'providers_get') {
+      const project = (provider: string): McpProviderView => {
+        const basic = this.provider(request.args.machine_id, provider, observed)
+        const binding = this.options.store.provider(request.args.machine_id, provider)!
+        const metadata = this.providerMetadata(
+          binding,
+          visible
+            .filter((row) => row.target.machine_id === binding.machine_id && row.target.provider_id === provider)
+            .map((row) => row.target),
+          principal,
+          context
+        )
+        if (
+          canonical(this.principal(context)) !== canonical(principal) ||
+          canonical(this.visibleTargets(this.principal(context))) !== canonical(visible) ||
+          canonical(this.options.store.provider(binding.machine_id, provider)) !== canonical(binding)
+        ) {
+          throw new FacadeServiceError('forbidden')
+        }
+        return { ...basic, ...metadata }
+      }
       const ids = [
         ...new Set(
           visible
@@ -621,13 +728,10 @@ export class StoreGatewayService implements GatewayService {
         if (!ids.includes(request.args.provider_id)) {
           throw new FacadeServiceError('not_found')
         }
-        return this.provider(request.args.machine_id, request.args.provider_id, observed)
+        return project(request.args.provider_id)
       }
       return this.page(
-        ids.map(
-          /* 读取每个当前授权 binding，剔除其内部配置引用。 */ (provider) =>
-            this.provider(request.args.machine_id, provider, observed)
-        ),
+        ids.map(/* 读取每个当前授权 binding，剔除其内部配置引用。 */ (provider) => project(provider)),
         request.args,
         scope,
         now
@@ -674,9 +778,9 @@ export class StoreGatewayService implements GatewayService {
   }
 
   // 构建真实持久设备状态与明确未核实的现场状态，避免从数据库状态推断心跳、认证或设备 revision。
-  private observe() {
+  private observe(metadata?: MachineObservationRequest) {
     // 先取样再读取 Store 时钟：取样中的观测不能因为晚于请求入口一毫秒而被误判为未来。
-    const sample = sampleManagementTransport(this.options.transportObservations)
+    const sample = sampleManagementTransport(this.options.transportObservations, metadata)
     const health = this.options.store.health()
     const now = this.options.store.clock()
     const projection = createManagementTransportProjection(sample, {

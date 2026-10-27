@@ -81,6 +81,19 @@ test(
         catalog: provider
       })
       const context = { caller: { principal_id: 'alice' }, wait_signal: new AbortController().signal }
+      const providerMetadata = (
+        await service.execute(
+          'providers_get',
+          {
+            machine_id: target.machine_id,
+            provider_id: target.provider_id
+          },
+          context
+        )
+      ).data
+      assert.equal(providerMetadata.native_version, '0.9.5')
+      assert.equal(providerMetadata.schema_status, 'validated')
+      assert.equal(providerMetadata.schema_sha256, fixedHerdrSource().schema_sha256)
       const described = (
         await service.execute(
           'runtime_describe',

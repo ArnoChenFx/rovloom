@@ -174,6 +174,12 @@ For supported Luvus methods, `gateway_error.details.issues` contains fixed field
 
 ## Recipes
 
+### Device and native version information
+
+Use `machines_list.platform` for a short OS/architecture summary and `machines_get` for optional `host`, `last_seen_at` and `link_since`. Host data is reported at connection time: always retain `reported_at` and `source:"connector_handshake"`; it is not live probing. Old Connectors omit host, and unknown times are null. Host/timing history is process-local and bounded, so restart or eviction can remove it. CPU/memory describe the OS-visible resources, not container quotas. Provider list/get expose `native_version`, `schema_status` (`validated` / `unavailable`) and `schema_sha256` from an authorized contract; provider-level schema verification is not complete per-method parameter coverage or proof of current runtime readiness. Do not run shell commands in a pane to fabricate these fields.
+
+Luvus `host.info` / `host.capabilities` are native host-profile methods, not session methods. They have reviewed read-only classification, but the independent host stdio execution route is not yet available (tracking [#303](https://github.com/ArnoChenFx/rovloom/issues/303)). Do not send them to a session target or describe them as usable `runtime_call` methods until that route is implemented and explicitly authorized.
+
 ### Listing panes (Luvus)
 
 ```json

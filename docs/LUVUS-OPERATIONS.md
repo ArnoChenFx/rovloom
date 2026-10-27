@@ -137,3 +137,9 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 对真实 Luvus 的端到端验证见 [`e2e/README.md`](../e2e/README.md)。流程按 Quick Start 在真实终端配对后，经官方 MCP SDK 依次执行发现、描述、调用、查询和读取，并覆盖崩溃接管、进程被杀后重建、未知结果不重发和离线撤销。
 
 升级长等待修复需要更新并重启 **Connector**，无需重新配对或换 token；Gateway 更新用于参数指南和字段诊断。
+
+## 主机信息与 host 原生方法
+
+设备固有信息由 machines_get 的可选 host 握手报告提供，machines_list 仅返回平台摘要；reported_at 与 source 必须一起读取。provider 的 native_version、schema_status 和 schema_sha256 由 providers_get / providers_list 提供，不混入原生方法目录。
+
+Luvus 的 host.info / host.capabilities 已核对为只读、幂等、空参数对象的方法，并纳入静态分类。但它们属于独立 host profile / stdio_proxy，不在 session 能力中；当前托管 session 适配器仍明确拒绝 host 传输。独立原生路由在 [#303](https://github.com/ArnoChenFx/rovloom/issues/303) 跟踪。不要把“已审”当作“当前可通过 runtime_call 调用”，也不能为了调用而把 host 方法合成进 session 快照。

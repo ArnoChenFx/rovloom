@@ -9,6 +9,7 @@ import type {
   ProviderSnapshot,
   ProviderBinding,
   DevicePlatformPayload,
+  HostProfileReport,
   WireEnvelope
 } from './types.js'
 import { boundedJson, fields, object, id, uint, sha, text, oneOf, fail, parseJson, LIMITS } from './validation.js'
@@ -42,6 +43,7 @@ const DIRECTIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   provider_snapshot: ['connector_to_gateway'],
   terminal_execution_state: ['connector_to_gateway'],
   device_platform: ['connector_to_gateway'],
+  host_profile: ['connector_to_gateway'],
   provider_fenced: ['gateway_to_connector', 'connector_to_gateway'],
   request: ['gateway_to_connector'],
   accepted: ['connector_to_gateway'],
@@ -182,6 +184,59 @@ export function validateDevicePlatform(value: unknown): asserts value is DeviceP
   // 此时表示"未读到"，既不编造也不因此断连。
   if (p.os !== 'linux' && p.distribution !== null) {
     fail('invalid_device_platform')
+  }
+}
+
+/** 主机声明只接受粗粒度固定字段；来源、上报时间由 Gateway 补充，远端不能自行指定。 */
+export function validateHostProfile(value: unknown): asserts value is HostProfileReport {
+  const p = object(value)
+  fields(p, ['os', 'arch', 'cpus', 'memory_bytes', 'container', 'agent_version', 'providers'])
+  const os = object(p.os)
+  fields(os, ['family', 'distribution', 'kernel'])
+  oneOf(os.family, ['linux', 'darwin', 'win32'])
+  for (const key of ['distribution', 'kernel']) {
+    if (
+      os[key] !== null &&
+      (typeof os[key] !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._+~-]{0,127}$/.test(os[key] as string))
+    ) {
+      fail('invalid_host_profile')
+    }
+  }
+  if (os.family !== 'linux' && os.distribution !== null) {
+    fail('invalid_host_profile')
+  }
+  oneOf(p.arch, ['x86_64', 'aarch64'])
+  for (const key of ['cpus', 'memory_bytes']) {
+    if (p[key] !== null) {
+      uint(p[key], true)
+    }
+  }
+  if (p.cpus !== null && Number(p.cpus) > 262144) {
+    fail('invalid_host_profile')
+  }
+  oneOf(p.container, ['docker', 'podman', 'none', 'unknown'])
+  text(p.agent_version, 128)
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._+~-]{0,127}$/.test(p.agent_version as string)) {
+    fail('invalid_host_profile')
+  }
+  if (!Array.isArray(p.providers) || p.providers.length > 64) {
+    fail('invalid_host_profile')
+  }
+  const seen = new Set<string>()
+  for (const entry of p.providers as unknown[]) {
+    const provider = object(entry)
+    fields(provider, ['provider_id', 'native_version'])
+    id(provider.provider_id)
+    if (seen.has(provider.provider_id as string)) {
+      fail('invalid_host_profile')
+    }
+    seen.add(provider.provider_id as string)
+    if (provider.native_version !== null) {
+      text(provider.native_version, 128)
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9._+~-]{0,127}$/.test(provider.native_version as string)) {
+        fail('invalid_host_profile')
+      }
+    }
   }
 }
 
@@ -386,6 +441,10 @@ function decode(input: string | Uint8Array, context: CodecContext, limit: number
   authenticateEnvelope(frame, context)
 
   switch (frame.type) {
+    case 'host_profile':
+      capability(context, 'host_profile')
+      validateHostProfile(p)
+      break
     case 'device_platform':
       capability(context, 'device_platform')
       validateDevicePlatform(p)

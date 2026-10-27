@@ -46,6 +46,7 @@ export const LUVUS_OPERATION_WRITE = Object.freeze({
 
 /** 已审三项普通编排 RPC（独立 provider）及终端开关/编排相关的其余单请求 RPC；流与控制方法不在表中。 */
 const OTHER_READ = Object.freeze({
+  read: ['host.info', 'host.capabilities'],
   orchestration: ['automation.list', 'task.list', 'task.get'],
   terminal: [
     'terminal.backend.inventory',

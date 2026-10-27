@@ -139,8 +139,20 @@ test(
         )
       )
       const projection = project(f)
-      // MCP 视图复用同一投影的 link/providerReady，管理面只消费 device；公开接口不得扩散其它成员。
-      assert.deepEqual(Object.keys(projection).sort(), ['device', 'link', 'providerReady', 'transport'])
+      // MCP 使用连接、provider 与按范围采样的主机元数据；管理面仍只消费 device。
+      assert.deepEqual(Object.keys(projection).sort(), [
+        'device',
+        'link',
+        'machineDetails',
+        'providerReady',
+        'transport'
+      ])
+      // 未请求机器元数据的普通取样不复制主机报告，也不把连接时间猜成 last_seen。
+      assert.deepEqual(projection.machineDetails(a.machine_id), {
+        platform: null,
+        last_seen_at: null,
+        link_since: null
+      })
       assert.equal(Object.hasOwn(device(f, a.machine_id), 'runtime'), false)
       f.store.setProviderEnabled(a.machine_id, 'provider', 1, false)
       assert.equal(device(f, a.machine_id).connection.verification, 'verified')

@@ -49,8 +49,8 @@ test('os-release 解析只取 ID 与 VERSION_ID，容忍引号、注释与重复
   assert.deepEqual(parseOsRelease('ID=one\nID=two\nVERSION_ID=1\n'), { id: 'two', version_id: '1' })
 })
 
-test('WIRE_MINOR 提升到 1，device_platform 只在双方都广告时协商出来', () => {
-  assert.equal(WIRE_MINOR, 1)
+test('device_platform 从 minor 1 起只在双方都广告时协商出来', () => {
+  assert(WIRE_MINOR >= 1)
   const withCapability = { major: 2, minor: 1, capabilities: ['rpc', 'device_platform'], required: ['rpc'] }
   const oldGateway = { major: 2, minor: 0, capabilities: ['rpc'], required: ['rpc'] }
   assert.deepEqual(negotiate(withCapability, withCapability), {

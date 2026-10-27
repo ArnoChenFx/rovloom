@@ -453,6 +453,57 @@ test(
   }
 )
 
+for (const side of ['connector', 'gateway'] as const) {
+  test(`${side} 组合把 host_profile 作为连接帧处理，不调用 provider adapter`, () => {
+    const a = group('luvus')
+    const b = group('herdr')
+    const active: Connection = {
+      ...connection,
+      negotiated: { major: 2, minor: 2, capabilities: ['rpc', 'host_profile'] }
+    }
+    const compose = side === 'connector' ? composeConnectorSessions : composeGatewaySessions
+    const combined = compose(active, [a.descriptor, b.descriptor], () => 100)
+    const frame = envelope(active, 'host_profile', {
+      os: { family: 'linux', distribution: null, kernel: null },
+      arch: 'x86_64',
+      cpus: null,
+      memory_bytes: null,
+      container: 'unknown',
+      agent_version: '0.6.7',
+      providers: []
+    })
+    try {
+      const raw = combined.adapter.encode(frame, 'connector_to_gateway')
+      assert.deepEqual(combined.adapter.decode(raw, 'connector_to_gateway'), frame)
+      assert.equal(combined.adapter.observeMessage(frame, 'connector_to_gateway'), 'new')
+      assert.equal(combined.adapter.observeMessage(frame, 'connector_to_gateway'), 'duplicate')
+      assert.throws(() =>
+        combined.adapter.encode(
+          { ...frame, payload: { ...frame.payload, env: {} } } as typeof frame,
+          'connector_to_gateway'
+        )
+      )
+      assert.throws(() => combined.adapter.encode(frame, 'gateway_to_connector'))
+    } finally {
+      combined.close()
+    }
+    assert.deepEqual([a.state.calls, b.state.calls], [0, 0])
+    const old = compose(
+      { ...active, negotiated: { major: 2, minor: 1, capabilities: ['rpc', 'provider_fence'] } },
+      [group('luvus').descriptor],
+      () => 100
+    )
+    try {
+      assert.throws(
+        () => old.adapter.encode({ ...frame, protocol_minor: 1 }, 'connector_to_gateway'),
+        /unsupported_capability/
+      )
+    } finally {
+      old.close()
+    }
+  })
+}
+
 test(
   'adapter失败仍逆序释放全部owner，并发和重入不重复调用原close',
   /** 故意失败只用于关闭计量。 */ () => {

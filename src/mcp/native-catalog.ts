@@ -13,7 +13,14 @@ import {
   validatePolicies,
   WireError
 } from '../wire/index.js'
-import type { AttemptBinding, JsonObject, ProviderBinding, ProviderPolicy, V2Target } from '../wire/types.js'
+import type {
+  AttemptBinding,
+  ContractRecord,
+  JsonObject,
+  ProviderBinding,
+  ProviderPolicy,
+  V2Target
+} from '../wire/types.js'
 import { FacadeServiceError } from './types.js'
 import { terminalExecutionCatalog } from '../connector/terminal-execution.js'
 import { luvusParameterHelp } from '../runtime/luvus-parameter-help.js'
@@ -33,6 +40,8 @@ export type ProviderCatalogSource = Readonly<{
   target: V2Target
   local_provider: ProviderBinding
   contract_ref: string
+  /** 可选的原生契约元数据，必须与 contract_ref 一致；旧目录端口缺失时不推断版本。 */
+  contract?: ContractRecord
   capability_revision: string
   expires_at: number
   methods: readonly JsonObject[]
@@ -212,6 +221,17 @@ export function authorizedLuvusCatalog(options: CatalogOptions) {
     } while (cursor)
     return {
       methods,
+      metadata: {
+        schema_sha256:
+          resolved.record.wire.support_status === 'validated' ? resolved.record.wire.source.schema_sha256 : null,
+        native_version:
+          resolved.record.wire.support_status === 'validated' &&
+          resolved.record.wire.source.binary_version !== 'unavailable'
+            ? resolved.record.wire.source.binary_version
+            : null,
+        schema_status:
+          resolved.record.wire.support_status === 'validated' ? ('validated' as const) : ('unavailable' as const)
+      },
       scope: {
         contract_ref: ref,
         source: resolved.source.binding,

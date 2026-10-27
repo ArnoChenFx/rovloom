@@ -1,5 +1,5 @@
 // 定义 MCP 与 CLI 宿主共享的参数、公开 DTO、受信 caller 和服务拒绝契约，不发行身份或权限。
-import type { JsonObject, ProviderKind, V2Target, ValidationMode } from '../wire/types.js'
+import type { HostProfile, JsonObject, ProviderKind, V2Target, ValidationMode } from '../wire/types.js'
 import type { CallerIdentity, Page, ProviderView } from './management.js'
 import type { LuvusParameterDiagnostic } from '../runtime/luvus-parameter-help.js'
 export type { CallerIdentity, Page, ProviderView } from './management.js'
@@ -33,11 +33,25 @@ export type MachineView = {
   name: string
   status: 'pending' | 'active' | 'revoked'
   link: 'offline' | 'unverified' | 'connected' | 'ready'
+  /** 列表只提供一行摘要；更完整的连接时上报只在详情中返回。 */
+  platform: string | null
   // 当前调用方在该设备上被授权的完整 target；runtime_* 工具必须原样回传其中之一。
   targets: TargetView[]
 }
+export type MachineDetailsView = MachineView & {
+  last_seen_at: number | null
+  link_since: number | null
+  host?: HostProfile
+}
 // 只描述调用方已获授权的完整 tuple，让 runtime_* 的 target 参数可以原样回传，不必猜 session 名。
 export type TargetView = V2Target
+export type ProviderMetadata = {
+  /** 已核验原生契约的安装版本；不是 Rovloom 版本，也不为未知版本填默认值。 */
+  native_version: string | null
+  schema_status: 'validated' | 'unavailable'
+  schema_sha256: string | null
+}
+export type McpProviderView = ProviderView & ProviderMetadata
 export type CallView = JsonObject & {
   call_id: string
   target: V2Target
@@ -50,9 +64,9 @@ export type CallView = JsonObject & {
 }
 export type ReplyData = {
   machines_list: Page<MachineView>
-  machines_get: MachineView
-  providers_list: Page<ProviderView>
-  providers_get: ProviderView
+  machines_get: MachineDetailsView
+  providers_list: Page<McpProviderView>
+  providers_get: McpProviderView
   runtime_discover: Page<JsonObject>
   runtime_describe: JsonObject
   runtime_call: CallView

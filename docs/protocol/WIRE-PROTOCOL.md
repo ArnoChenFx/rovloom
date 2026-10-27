@@ -1,6 +1,6 @@
 # Wire v2：Gateway 与 Connector 的消息协议
 
-Wire 当前版本为 major **2** / minor **1**。每条 WebSocket 消息是一个 UTF-8 JSON 信封。编解码在 `src/wire/`，Luvus 原生校验经 `src/integration/luvus-wire.ts` 接入，见 [原生契约](NATIVE-CONTRACT.md)。认证、存储和传输由宿主提供可信实现，见 [通道](../TRANSPORT.md)。总览见 [协议总览](../PROTOCOL.md)。
+Wire 当前版本为 major **2** / minor **2**。每条 WebSocket 消息是一个 UTF-8 JSON 信封。编解码在 `src/wire/`，Luvus 原生校验经 `src/integration/luvus-wire.ts` 接入，见 [原生契约](NATIVE-CONTRACT.md)。认证、存储和传输由宿主提供可信实现，见 [通道](../TRANSPORT.md)。总览见 [协议总览](../PROTOCOL.md)。
 
 Luvus / Herdr 的原生协议、UHP 标识和 fixture 保持原样，Wire 不改写它们。
 
@@ -24,6 +24,7 @@ Luvus / Herdr 的原生协议、UHP 标识和 fixture 保持原样，Wire 不改
 | `provider_fence` | 普通 RPC 的逐 provider 来源永久撤回。依赖 `rpc` |
 | `late_evidence` | 为 `outcome_unknown` 的同一 attempt 补充证据 |
 | `device_platform` | Connector 上报本机 os / arch / Linux 发行版标识。minor ≥ 1 |
+| `host_profile` | Connector 在 welcome 后一次上报最小主机信息；minor ≥ 2，不建立执行许可 |
 
 ## 信封与消息类型
 
@@ -40,6 +41,7 @@ Luvus / Herdr 的原生协议、UHP 标识和 fixture 保持原样，Wire 不改
 | `provider_snapshot` | Connector → Gateway | binding, target, source, capabilities, capability_revision |
 | `terminal_execution_state` | Connector → Gateway | binding, enabled |
 | `device_platform` | Connector → Gateway | os, arch, distribution |
+| `host_profile` | Connector → Gateway | os, arch, cpus, memory_bytes, container, agent_version, providers |
 | `provider_fenced` | 双向 | binding |
 | `request` | Gateway → Connector | attempt, expected_binding_revision, native_request, validation |
 | `accepted` | Connector → Gateway | attempt |
@@ -282,3 +284,11 @@ Connector 不依赖 Gateway 额外交付的 TTL 或上下文。受保护配置�
 `MessageWindow` 只是连接内的内存窗口。窗口之外、重启之后的执行幂等性依赖宿主的持久化，窗口过期不是新的派发许可。
 
 原生契约的编译预算见 [原生契约](NATIVE-CONTRACT.md#契约与内存许可)，编译边界见 [编译 Worker 与生成物接纳](NATIVE-CONTRACT.md#编译-worker-与生成物接纳)。构建与验证命令见 [开发指引](../DEVELOPMENT.md)。
+
+## 主机握手报告
+
+`host_profile` 是连接级消息，必须经双方 minor ≥ 2 能力协商，在 welcome 后由 Connector 发送一次。Gateway 按认证机器、当前恢复代次与 epoch 关联，不接受 payload 自报身份、时间或来源。旧 Gateway 不协商，因此新 Connector 不发送；旧 Connector 也不因缺报而失败。组合会话不得将它路由给某个 provider。
+
+只允许 OS family / 发行版 / 内核、架构、CPU、内存、容器类别、Connector 版本和 provider 版本摘要；未知数值为 null。字段精确列举、字符串和 provider 数量有界，禁止网络、环境、路径及任意扩展字段。Gateway 在接收后添加固定 source 和 reported_at，仅用于 machines_get 的设备属性，不形成原生契约或执行、读取许可。MCP 详情里的 provider 摘要仍须按当前 caller 的完整目标权限过滤。
+
+该报告和有效收包时间在当前 Gateway 进程内有界保留，读取不续期；断开后 link_since 为 null，重启或恢复代次变更后未知。详细字段与边界见[设备详情](../PROTOCOL.md#设备详情与原生版本)。

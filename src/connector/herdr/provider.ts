@@ -33,7 +33,14 @@ import {
   assertBinding,
   WireError
 } from '../../wire/index.js'
-import type { ContractSource, JsonObject, ProviderBinding, ProviderPolicies, V2Target } from '../../wire/types.js'
+import type {
+  ContractRecord,
+  ContractSource,
+  JsonObject,
+  ProviderBinding,
+  ProviderPolicies,
+  V2Target
+} from '../../wire/types.js'
 import { compileHerdrSchemas } from './compiler-api.js'
 import { HerdrInstallation, createHerdrHostServices } from './installation.js'
 import { HerdrLocalError, inspectHerdrPath, pinHerdrConfig } from './local.js'
@@ -90,6 +97,7 @@ export type HerdrProviderCatalogSource = Readonly<{
   target: V2Target
   local_provider: ProviderBinding
   contract_ref: string
+  contract: ContractRecord
   capability_revision: string
   expires_at: number
   methods: readonly JsonObject[]
@@ -404,6 +412,7 @@ export async function createHerdrGatewayResources(
         target: structuredClone(config.target),
         local_provider: { ...binding },
         contract_ref: reference,
+        contract: structuredClone(record.wire),
         capability_revision: config.expected_source.classification_revision ?? config.expected_source.schema_sha256,
         expires_at: expires,
         methods: Object.freeze(visible),
@@ -734,6 +743,12 @@ export async function createHerdrConnectorResources(
           const current = runtime
           session = {
             adapter: connectorAdmissionAdapter(admission, current.adapter),
+            nativeVersions: () => {
+              installed.assert()
+              return [
+                { provider_id: binding.provider_id, native_version: installed.record().wire.source.binary_version }
+              ]
+            },
             executeWire: current.executeWire,
             terminalExecutionState: /** 目录使用同一个本机配置源；最终写入仍由原runtime再检查。 */ () => [
               {

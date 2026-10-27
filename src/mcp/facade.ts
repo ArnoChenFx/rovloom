@@ -10,6 +10,7 @@ import {
 import { canonical, digest } from '../contracts.js'
 import { publicLuvusParameterDiagnostic } from '../runtime/luvus-parameter-help.js'
 import { cliMessages, type CliLanguage } from '../cli/messages.js'
+import { validateHostProfile } from '../wire/index.js'
 import {
   isToolName,
   MAX_MCP_BYTES,
@@ -64,10 +65,43 @@ function pick(data: Record<string, unknown>, keys: string[]): Record<string, unk
 
 // 按工具职责收窄公开视图，只投影允许字段。
 function publicReply(name: ToolName, data: Record<string, unknown>): Record<string, unknown> {
-  const machineKeys = ['machine_id', 'name', 'status', 'link', 'targets']
-  const providerKeys = ['machine_id', 'provider_id', 'kind', 'binding_revision', 'enabled', 'readiness']
+  const machineKeys = ['machine_id', 'name', 'status', 'link', 'platform', 'targets']
+  const providerKeys = [
+    'machine_id',
+    'provider_id',
+    'kind',
+    'binding_revision',
+    'enabled',
+    'readiness',
+    'native_version',
+    'schema_status',
+    'schema_sha256'
+  ]
   if (name === 'machines_get') {
-    return pick(data, machineKeys)
+    const output = pick(data, [...machineKeys, 'last_seen_at', 'link_since'])
+    // host 是新的嵌套公开块：逐层白名单，误带路径、网络、环境等字段也不能穿过门面。
+    try {
+      if (data.host && typeof data.host === 'object') {
+        const host = data.host as Record<string, unknown>
+        const report = pick(host, ['os', 'arch', 'cpus', 'memory_bytes', 'container', 'agent_version', 'providers'])
+        report.os = pick(host.os as Record<string, unknown>, ['family', 'distribution', 'kernel'])
+        const providers = new Set(Array.isArray(data.targets) ? data.targets.map((target) => target.provider_id) : [])
+        report.providers = (host.providers as Record<string, unknown>[])
+          .filter((provider) => providers.has(provider.provider_id))
+          .map((provider) => pick(provider, ['provider_id', 'native_version']))
+        validateHostProfile(report)
+        if (
+          host.source === 'connector_handshake' &&
+          Number.isSafeInteger(host.reported_at) &&
+          Number(host.reported_at) >= 0
+        ) {
+          output.host = { ...report, reported_at: host.reported_at, source: host.source }
+        }
+      }
+    } catch {
+      /* 缺失或非法的可选块不影响旧 Connector 的基础设备视图。 */
+    }
+    return output
   }
   if (name === 'providers_get') {
     return pick(data, providerKeys)
