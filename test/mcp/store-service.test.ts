@@ -183,6 +183,9 @@ test(
         f.service.execute('runtime_discover', { target: secondTarget, expected_binding_revision: 1 }, context()),
         code('not_found')
       )
+      f.setCaller({ ...f.current(), device_scope: { mode: 'selected', machine_ids: [] } })
+      assert.deepEqual((await f.service.execute('machines_list', {}, context())).data.items, [])
+      await assert.rejects(f.service.execute('machines_get', { machine_id: 'machine_a' }, context()), code('not_found'))
       // 恢复全部设备后回到今天的行为（删除字段，不留 undefined）。
       const { device_scope: _cleared, ...unscoped } = f.current()
       f.setCaller(unscoped)
@@ -195,7 +198,6 @@ test(
       // 身份来源交付变形的范围时拒绝，而不是放宽。
       for (const device_scope of [
         { mode: 'all' },
-        { mode: 'selected', machine_ids: [] },
         { mode: 'selected', machine_ids: ['machine_a', 'machine_a'] },
         { mode: 'selected', machine_ids: ['bad id'] }
       ]) {

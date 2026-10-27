@@ -163,6 +163,7 @@ rovloom token rotate --principal owner [--ttl-days 30] [--grace-minutes 10]
 rovloom token revoke --principal worker
 rovloom token scope  --principal worker --devices m_ab12,m_cd34
 rovloom token scope  --principal worker --all-devices true
+rovloom token scope  --principal worker --no-devices true
 ```
 
 The token registry (`managed/mcp-callers.json` under the Gateway state directory)
@@ -196,8 +197,7 @@ exactly as before, so no migration is needed:
   (names can change; renaming a device must not change authorization). Listed IDs that were
   revoked or no longer exist simply do not match; re-pairing mints a new `machine_id`, so the
   device drops out of view — deliberately failing closed.
-- The list must be non-empty (1–256 unique IDs). `--devices ""`, a duplicate or an empty entry
-  is rejected with `invalid_arguments`, and the registry file is left byte-identical.
+- A selected list may contain 0–256 unique IDs. An empty list blocks every device; use `--no-devices true` to set it. `--devices ""`, duplicates and empty entries are rejected.
 - Clearing requires the explicit `--all-devices true`; nothing ever silently widens a token.
 
 Scope is a **filter, not a second ACL**: it can only remove devices from what the grants already

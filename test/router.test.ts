@@ -88,7 +88,7 @@ test(
       const local = policy(d.target, true)
       const router = new Router(s, /* 双端策略不变，只改变范围。 */ () => local)
       const wide = { id: 'alice', policy: policy(d.target) }
-      const outOfScope = { ...wide, device_scope: { mode: 'selected' as const, machine_ids: ['m_other'] } }
+      const outOfScope = { ...wide, device_scope: { mode: 'selected' as const, machine_ids: [] } }
       // 越界设备在登记阶段就 forbidden，且不产生任何调用。
       assert.throws(() => router.create(outOfScope, d.target, { method: 'pane.read' }, options()), /forbidden/)
       // 先在不收窄时登记并派发，再收窄：已派发的 attempt 不会被 Gateway 取消，但后续访问被拒。
@@ -131,7 +131,7 @@ test(
       const router = new Router(s, /* 当前本地策略保持有效。 */ () => policy(d.target, true))
       const wide = { id: 'alice', policy: policy(d.target) }
       const call = router.create(wide, d.target, { method: 'pane.read' }, options())
-      const outOfScope = { ...wide, device_scope: { mode: 'selected' as const, machine_ids: ['m_other'] } }
+      const outOfScope = { ...wide, device_scope: { mode: 'selected' as const, machine_ids: [] } }
       await assert.rejects(/* 短等 */ () => router.wait(outOfScope, call.call_id, 0), /forbidden/)
       assert.equal(router.get(wide, call.call_id).state, 'created')
     } finally {

@@ -126,7 +126,7 @@ test('Dashboard device scope is strictly validated, authorized and applied to th
     })
     list = o.execute('tokens_list')
     assert.deepEqual(list.items[0].device_scope, { mode: 'selected', machine_ids: [device.machine_id] })
-    // 空数组是面板显式的「全部设备」，写回缺省语义。
+    // 空数组禁用所有设备，显式 all_devices 恢复全部设备。
     const narrowed = readFileSync(path)
     assert.notDeepEqual(narrowed, stamp)
     // 缺失或 null 不能隐式放开已收窄的范围；拒绝后注册表必须逐字节不变。
@@ -135,11 +135,20 @@ test('Dashboard device scope is strictly validated, authorized and applied to th
       assert.deepEqual(readFileSync(path), narrowed)
     }
     o.execute('tokens_scope', { principal: 'claude', machine_ids: [] })
+    assert.deepEqual(read().callers.find((entry) => entry.principal.id === 'claude')!.device_scope, {
+      mode: 'selected',
+      machine_ids: []
+    })
+    o.execute('tokens_scope', { principal: 'claude', all_devices: true })
     assert.equal(read().callers.find((entry) => entry.principal.id === 'claude')!.device_scope, undefined)
     assert.deepEqual(o.execute('tokens_list').items[0].device_scope, { mode: 'all' })
     // 严格参数：未知字段、重复 ID、非字符串与超限全部 invalid_arguments，且文件字节不变。
     const before = readFileSync(path)
     for (const args of [
+      { principal: 'claude' },
+      { principal: 'claude', machine_ids: null },
+      { principal: 'claude', all_devices: false },
+      { principal: 'claude', all_devices: true, machine_ids: [] },
       { principal: 'claude', machine_ids: [device.machine_id, device.machine_id] },
       { principal: 'claude', machine_ids: [1] },
       { principal: 'claude', machine_ids: device.machine_id },

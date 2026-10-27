@@ -148,8 +148,8 @@ export function createManagementResources(options: {
         } else if (operation === 'tokens_delete' || operation === 'tokens_rotate') {
           fields(args, ['principal'])
         } else if (operation === 'tokens_scope') {
-          // 面板显式提交整张列表；空数组等价于「全部设备」，CLI 侧仍要求显式 --all-devices。
-          fields(args, ['principal', 'machine_ids'])
+          // 选定列表和全部设备必须显式且互斥。
+          fields(args, ['principal'], ['machine_ids', 'all_devices'])
         } else {
           throw new ManagementServiceError('invalid_arguments')
         }
@@ -202,7 +202,11 @@ export function createManagementResources(options: {
           throw new ManagementServiceError('invalid_arguments')
         }
         if (operation === 'tokens_scope') {
-          const requested = args.machine_ids
+          const all = args.all_devices === true
+          if ((all && args.machine_ids !== undefined) || (!all && args.all_devices !== undefined)) {
+            throw new ManagementServiceError('invalid_arguments')
+          }
+          const requested = all ? [] : args.machine_ids
           if (
             !Array.isArray(requested) ||
             requested.length > LIMITS.scope_machines ||
@@ -211,8 +215,8 @@ export function createManagementResources(options: {
           ) {
             throw new ManagementServiceError('invalid_arguments')
           }
-          // 空数组是面板上「设为全部设备」的显式提交，等价于 CLI 的 --all-devices。
-          const scoped = setDeviceScope(registry, args.principal, requested.length === 0 ? null : requested)
+          // 空数组拒绝所有设备；仅明确 all_devices 才清除范围。
+          const scoped = setDeviceScope(registry, args.principal, all ? null : requested)
           writeSetupFile(path, boundedJson(scoped, REGISTRY_MAX_BYTES), true, stamp)
           return { saved: true }
         }

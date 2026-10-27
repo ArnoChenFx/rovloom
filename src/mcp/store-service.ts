@@ -137,7 +137,6 @@ export function resolveGatewayPrincipal(
     snapshot.device_scope !== undefined &&
     (snapshot.device_scope.mode !== 'selected' ||
       !Array.isArray(snapshot.device_scope.machine_ids) ||
-      snapshot.device_scope.machine_ids.length === 0 ||
       snapshot.device_scope.machine_ids.length > LIMITS.scope_machines ||
       snapshot.device_scope.machine_ids.some(
         /* 只接受稳定 machine_id 形状。 */ (item) => typeof item !== 'string' || !idPattern.test(item)

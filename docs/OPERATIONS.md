@@ -41,7 +41,7 @@ Luvus raw 授权与 Gateway readiness 的修复可先只升级 Gateway，沿用�
 | 要做的事 | 命令 | 备注 |
 |---|---|---|
 | 查看 / 创建 / 续期 / 轮换 / 吊销 MCP 令牌 | `rovloom token list\|create\|renew\|rotate\|revoke` | 原值只在 create / rotate 时在 stdout 显示一次；热生效，无需重启 |
-| 收窄 / 放开令牌的设备可见范围 | `rovloom token scope --principal ID --devices m_x,m_y` / `--all-devices true`，或管理页令牌卡片 | 只做收窄；空列表拒绝、清除须显式 `--all-devices true`；热生效；不推进策略修订（已派发的调用不会停） |
+| 收窄 / 放开令牌的设备可见范围 | `rovloom token scope --principal ID --devices m_x,m_y` / `--all-devices true`，或管理页令牌卡片 | 空列表禁用全部设备（`--no-devices true`），清除须显式 `--all-devices true`；热生效；不推进策略修订（已派发的调用不会停） |
 | 管理页管理员 | `rovloom admin create\|list\|revoke` | 首次配对完成时已自动创建 `admin`；丢了口令就再 create；热生效 |
 | 加入更多设备 | 管理页生成配对码；新机器：`rovloom connector --join <命令>` | 无需终端问答，不停机 |
 | 设备凭据丢失 / 泄漏 | 生成新配对码，该机器重新执行 join 命令 | 本机作为新设备重新配对，本地旧状态自动退役到 `state/retired/` |

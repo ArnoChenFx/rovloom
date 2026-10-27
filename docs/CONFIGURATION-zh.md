@@ -141,6 +141,7 @@ rovloom token rotate --principal owner [--ttl-days 30] [--grace-minutes 10]
 rovloom token revoke --principal worker
 rovloom token scope  --principal worker --devices m_ab12,m_cd34
 rovloom token scope  --principal worker --all-devices true
+rovloom token scope  --principal worker --no-devices true
 ```
 
 令牌注册表（Gateway 状态目录下的 `managed/mcp-callers.json`）保存 SHA-256 摘要、新签发令牌的原文、主体策略和固定到期；
@@ -168,8 +169,7 @@ Gateway 每次认证都重读它，因此创建、续期、轮换和吊销**无�
 - `mode: "selected"` = 只在这些稳定 `machine_id` 上可见。**不接受设备名**（名字可变，改名不应
   改变授权）。列表里已撤销或不存在的 `machine_id` 按不匹配处理；重新配对会生成新的
   `machine_id`，该设备因此自动不可见——有意失败关闭。
-- 列表必须非空（1–256 个去重 ID）。`--devices ""`、重复项或空项一律 `invalid_arguments`，注册表
-  文件字节不变。
+- 指定列表可包含 0–256 个去重 ID；空列表禁用全部设备，可通过 `--no-devices true` 设置。`--devices ""`、重复项或空项仍被拒绝。
 - 清除必须显式 `--all-devices true`；不存在静默放开令牌的路径。
 
 范围是**过滤器，不是第二套 ACL**：只能从 grants 已允许的设备中再减去，不可能扩大。

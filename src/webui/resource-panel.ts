@@ -165,7 +165,7 @@ export function createResourcePanel(options: {
    * 设备范围控件：默认「全部设备」，切到「指定设备」时展开有界多选。
    * 两个单选项各有自己的保存按钮，因此「全部设备」始终有一条真正可提交的路径（放开范围不能被藏起来）。
    */
-  function scopeControl(token: Token, devices: DeviceOption[], onChange: (machineIds: string[]) => void) {
+  function scopeControl(token: Token, devices: DeviceOption[], onChange: (machineIds: string[] | null) => void) {
     const { t } = i18n
     const field = node('fieldset', '', 'token-scope')
     field.dataset.tokenScope = token.principal
@@ -199,7 +199,7 @@ export function createResourcePanel(options: {
     const allPane = node('div', '', 'token-scope-picker')
     const saveAll = button(t('resources.scopeSaveAll'), () => {
       if (window.confirm(t('resources.confirmScopeAll', { name: token.principal }))) {
-        onChange([])
+        onChange(null)
       }
     })
     saveAll.dataset.scopeSave = 'all'
@@ -230,11 +230,6 @@ export function createResourcePanel(options: {
     }
     const save = button(t('resources.scopeSave'), () => {
       const ids = [...boxes.entries()].filter(([, box]) => box.checked).map(([machine]) => machine)
-      // 空列表不是「全部设备」的委婉写法：放开必须走上面的显式按钮。
-      if (ids.length === 0) {
-        feedback.textContent = t('resources.scopeEmpty')
-        return
-      }
       onChange(ids)
     })
     save.dataset.scopeSave = 'selected'
@@ -377,7 +372,7 @@ export function createResourcePanel(options: {
             'span',
             scope.mode === 'all'
               ? t('resources.scopeAllBadge')
-              : t('resources.scopeSelectedBadge', { count: scope.machine_ids.length }) + ' · ' + names,
+              : t('resources.scopeSelectedBadge', { count: scope.machine_ids.length }) + (names ? ' · ' + names : ''),
             'badge scope-badge'
           )
           if (scope.mode === 'selected') {
@@ -426,7 +421,10 @@ export function createResourcePanel(options: {
           card.append(summary, controls)
           card.append(
             scopeControl(token, devices, (machineIds) => {
-              void mutate('tokens_scope', { principal: token.principal, machine_ids: machineIds })
+              void mutate('tokens_scope', {
+                principal: token.principal,
+                ...(machineIds === null ? { all_devices: true } : { machine_ids: machineIds })
+              })
             })
           )
           body.append(card)

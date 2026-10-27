@@ -31,6 +31,7 @@ type Flags = {
   discard?: boolean
   devices?: string[]
   allDevices?: boolean
+  noDevices?: boolean
 }
 
 const SUBCOMMANDS = ['list', 'create', 'renew', 'rotate', 'revoke', 'permissions', 'scope'] as const
@@ -65,6 +66,8 @@ function parse(args: readonly string[]): Flags {
         throw new CliError('invalid_arguments')
       }
       flags.devices = value.split(',')
+    } else if (name === '--no-devices' && flags.noDevices === undefined && value === 'true') {
+      flags.noDevices = true
     } else if (name === '--all-devices' && flags.allDevices === undefined && value === 'true') {
       flags.allDevices = true
     } else if (name === '--discard-response' && flags.discard === undefined && ['true', 'false'].includes(value)) {
@@ -84,7 +87,7 @@ function parse(args: readonly string[]): Flags {
     rotate: ['principal', 'days', 'grace'],
     revoke: ['principal'],
     permissions: ['principal', 'discard'],
-    scope: ['principal', 'devices', 'allDevices']
+    scope: ['principal', 'devices', 'allDevices', 'noDevices']
   }
   const required: Record<string, readonly (keyof Flags)[]> = {
     list: [],
@@ -95,7 +98,7 @@ function parse(args: readonly string[]): Flags {
     permissions: ['principal', 'discard'],
     scope: ['principal']
   }
-  for (const key of ['principal', 'like', 'days', 'grace', 'discard', 'devices', 'allDevices'] as const) {
+  for (const key of ['principal', 'like', 'days', 'grace', 'discard', 'devices', 'allDevices', 'noDevices'] as const) {
     if (flags[key] !== undefined && !allowed[sub]!.includes(key)) {
       throw new CliError('invalid_arguments')
     }
@@ -104,7 +107,10 @@ function parse(args: readonly string[]): Flags {
     throw new CliError('invalid_arguments')
   }
   // 收窄与清除必须二选一，不提供隐含默认。
-  if (sub === 'scope' && (flags.devices === undefined) === (flags.allDevices === undefined)) {
+  if (
+    sub === 'scope' &&
+    [flags.devices, flags.allDevices, flags.noDevices].filter((value) => value !== undefined).length !== 1
+  ) {
     throw new CliError('invalid_arguments')
   }
   // --devices 去重后仍须非空；--all-devices 必须显式写 true。
@@ -187,7 +193,11 @@ export async function handleTokenCommand(
       return 0
     }
     if (flags.sub === 'scope') {
-      const changed = setDeviceScope(registry, flags.principal!, flags.allDevices ? null : flags.devices!)
+      const changed = setDeviceScope(
+        registry,
+        flags.principal!,
+        flags.allDevices ? null : flags.noDevices ? [] : flags.devices!
+      )
       next = changed
       const view = deviceScopeView(
         changed.callers.find(/* 取目标主体的新范围。 */ (entry) => entry.principal.id === flags.principal)!

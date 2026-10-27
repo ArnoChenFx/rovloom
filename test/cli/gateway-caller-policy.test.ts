@@ -209,7 +209,7 @@ test('device scope is hot-reloaded per request, survives pairing merges and fail
     const broken = structuredClone(f.read())
     Object.assign(
       broken.callers.find(/* 目标设备令牌。 */ (entry) => entry.principal.id === principal)!,
-      { device_scope: { mode: 'selected', machine_ids: [] } }
+      { device_scope: { mode: 'selected', machine_ids: ['bad id'] } }
     )
     writeSetupFile(f.path, JSON.stringify(broken), true)
     const badBytes = readFileSync(f.path)
@@ -219,7 +219,12 @@ test('device scope is hot-reloaded per request, survives pairing merges and fail
     writeSetupFile(f.path, JSON.stringify(parseRegistry(JSON.parse(original.toString()))), true)
     assert.equal(f.principal(principal).id, principal)
     const restored = readFileSync(f.path)
-    assert.throws(() => setDeviceScope(parseRegistry(JSON.parse(restored.toString())), principal, []))
+    assert.deepEqual(
+      setDeviceScope(parseRegistry(JSON.parse(restored.toString())), principal, []).callers.find(
+        (entry) => entry.principal.id === principal
+      )!.device_scope,
+      { mode: 'selected', machine_ids: [] }
+    )
     assert.deepEqual(readFileSync(f.path), restored)
     assert.notDeepEqual(badBytes, restored)
   } finally {

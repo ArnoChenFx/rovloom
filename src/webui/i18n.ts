@@ -48,7 +48,6 @@ export const chinese = Object.freeze({
   'resources.scopeSaveAll': '保存为全部设备',
   'resources.scopeAllBadge': '全部设备',
   'resources.scopeSelectedBadge': '{count} 台设备',
-  'resources.scopeEmpty': '至少选择一台设备；要放开全部设备，请选「全部设备」并点「保存为全部设备」。',
   'resources.confirmScopeAll': '把 Token「{name}」改为全部设备？它将能访问当前和之后配对的设备。',
   'resources.scopeTruncated': '设备过多：这里只列出前 {shown} / {total} 台，其余设备可用 CLI 指定。',
   'resources.scopeRemoved': '已移除的设备',
@@ -439,7 +438,6 @@ export const english = Object.freeze({
   'resources.scopeSaveAll': 'Save as all devices',
   'resources.scopeAllBadge': 'All devices',
   'resources.scopeSelectedBadge': '{count} devices',
-  'resources.scopeEmpty': 'Select at least one device, or choose “All devices” and press “Save as all devices”.',
   'resources.confirmScopeAll': 'Change token “{name}” to all devices? It will reach current and future paired devices.',
   'resources.scopeTruncated':
     'Too many devices: only the first {shown} of {total} are listed here; use the CLI for the rest.',

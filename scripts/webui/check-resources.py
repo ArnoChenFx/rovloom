@@ -96,18 +96,20 @@ def main():
         scope = token.locator('[data-token-scope="claude-desktop"]')
         expect(scope.locator('[data-scope-mode="selected"]')).to_be_checked()
         assert scope.locator(f'[data-scope-device="{first_device["machine_id"]}"]').is_checked()
-        # 「指定设备 + 一台都不勾」被拒绝，且不会把令牌锁死。
+        # 「指定设备 + 一台都不勾」显式禁用所有设备。
         scope.locator(f'[data-scope-device="{first_device["machine_id"]}"]').uncheck()
         scope.locator('[data-scope-save="selected"]').click()
-        expect(page.locator('.resource-feedback')).to_contain_text('至少选择一台设备')
-        expect(token.locator('.scope-badge')).to_contain_text('1 台设备')
+        expect(token.locator('.scope-badge')).to_contain_text('0 台设备')
+        page.reload()
+        expect(token.locator('.scope-badge')).to_contain_text('0 台设备')
+        scope = token.locator('[data-token-scope="claude-desktop"]')
         # 放开回全部设备：显式按钮 + 二次确认（先取消，再确认）。
         scope.locator('[data-scope-mode="all"]').check()
         expect(scope.locator('[data-scope-save="all"]')).to_be_visible()
         expect(scope.locator('[data-scope-save="selected"]')).to_be_hidden()
         page.once('dialog', lambda dialog: dialog.dismiss())
         scope.locator('[data-scope-save="all"]').click()
-        expect(token.locator('.scope-badge')).to_contain_text('1 台设备')
+        expect(token.locator('.scope-badge')).to_contain_text('0 台设备')
         page.once('dialog', lambda dialog: dialog.accept())
         scope.locator('[data-scope-save="all"]').click()
         expect(token.locator('.scope-badge')).to_have_text('全部设备')
@@ -127,7 +129,7 @@ def main():
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             assert scope.evaluate('(node) => node.getBoundingClientRect().right <= innerWidth')
         page.set_viewport_size({'width':1440,'height':1080})
-        checks.append('device scope: narrow to one device, badge and reload persist, empty selection refused, explicit back-to-all with confirmation, bilingual and 320px')
+        checks.append('device scope: narrow to one device, badge and reload persist, empty selection disables all devices, explicit back-to-all with confirmation, bilingual and 320px')
 
         page.once('dialog', lambda dialog: dialog.dismiss())
         token.get_by_role('button', name='删除', exact=True).click()

@@ -157,9 +157,10 @@ test('device scope defaults to today’s visibility, validates selected lists an
   assert.equal(cleared.callers[0]!.device_scope, undefined)
   assert.deepEqual(summarize(cleared, 1_000)[0]!.device_scope, { mode: 'all' })
 
-  // 空列表、重复、非法 ID 与超限全部拒绝。
+  const none = setDeviceScope(base, 'owner', [])
+  assert.deepEqual(parseRegistry(none).callers[0]!.device_scope, { mode: 'selected', machine_ids: [] })
+  // 重复、非法 ID 与超限全部拒绝。
   for (const ids of [
-    [],
     ['m_one', 'm_one'],
     ['m one'],
     [''],
@@ -206,7 +207,6 @@ test('device scope defaults to today’s visibility, validates selected lists an
     {},
     { mode: 'all' },
     { mode: 'selected' },
-    { mode: 'selected', machine_ids: [] },
     { mode: 'selected', machine_ids: ['m_one', 'm_one'] },
     { mode: 'selected', machine_ids: ['m one'] },
     { mode: 'selected', machine_ids: ['m_one'], extra: 1 },
@@ -394,6 +394,9 @@ test('token CLI manages the registry file and the local client credential end to
     assert.deepEqual(readFileSync(callers), beforeBadScope)
     result = await run('list')
     assert.match(result.out, /^owner\tactive\t[^\t]+\t[^\t]+\tselected\(2\)$/m)
+    result = await run('scope', '--principal', 'owner', '--no-devices', 'true')
+    assert.equal(result.code, 0)
+    assert.deepEqual(stored().callers[0]!.device_scope, { mode: 'selected', machine_ids: [] })
     result = await run('scope', '--principal', 'owner', '--all-devices', 'true')
     assert.equal(result.code, 0)
     assert.equal(result.err, 'device scope owner all\n')

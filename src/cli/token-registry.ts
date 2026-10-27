@@ -51,7 +51,7 @@ function invalid(): never {
   throw new CliError('invalid_config')
 }
 
-/** 严格校验设备范围：只允许非空的 selected 列表，元素须为去重的 machine_id 形状。 */
+/** 严格校验设备范围：允许空的 selected 列表，元素须为去重的 machine_id 形状。 */
 function deviceScope(value: unknown): DeviceScope {
   const scope = object(value)
   fields(scope, ['mode', 'machine_ids'])
@@ -59,7 +59,6 @@ function deviceScope(value: unknown): DeviceScope {
   if (
     scope.mode !== 'selected' ||
     !Array.isArray(ids) ||
-    ids.length === 0 ||
     ids.length > LIMITS.scope_machines ||
     ids.some(
       /* 只接受稳定 ID 形状，不接受设备名或路径。 */ (item) => typeof item !== 'string' || !MACHINE.test(item)
@@ -239,10 +238,9 @@ export function setDeviceScope(
   const index = find(registry, principal)
   let device_scope: DeviceScope | undefined
   if (machineIds !== null) {
-    // 空列表不能含蓄地表示「全部设备」；清除必须显式传 null（CLI 的 --all-devices）。
+    // 空列表拒绝全部设备；null 明确清除过滤器。
     if (
       !Array.isArray(machineIds) ||
-      machineIds.length === 0 ||
       machineIds.length > LIMITS.scope_machines ||
       machineIds.some(
         /* 只接受稳定 machine_id，不接受设备名。 */ (item) => typeof item !== 'string' || !MACHINE.test(item)
