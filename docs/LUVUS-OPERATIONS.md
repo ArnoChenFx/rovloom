@@ -10,17 +10,13 @@
 - 原有的调用、结果句柄和未确认的响应不会迁移到新连接，也不会自动重发。
 - 通用的 `raw-contract` 参数契约由已审核的方法子集限制，不等于完整的参数 schema。
 
-### Caller 与 raw 授权
+### MCP token 与设备范围
 
-配对生成的 Gateway raw 授权绑定 `caller_policy_revision` 和精确方法集合。
-使用同一已批准策略的 gateway 范围 token 可以调用这些方法；实际 raw grant 每次按
-真实 caller 签发，并绑定当前连接、契约、目标和本次调用的固定 deadline。
-撤权、方法范围和 caller/local 双端策略检查继续生效。手动配置的
-`raw_grant.principal_id` 仍只允许该主体；它与 `caller_policy_revision` 互斥。
+有效 MCP token 可以发现、描述和调用其可见设备上 provider 已暴露的全部方法，不再设置逐 token、caller/local 或配对时的逐方法白名单。设备范围由 token 的 `device_scope` 控制；吊销、过期、设备撤销和 provider 启用状态继续生效。
 
-旧单码配对的完整标准授权在 Gateway 启动时迁移内存副本，无需重新配对、更换 token
-或修改 Connector；这是 caller 绑定格式的迁移。输出等待的完整默认预设升级还须同时更新并重启 Connector。显式自定义 raw 主体、方法子集、会话、修订和 binding 不自动扩大范围；按默认策略派生的 test 等 caller 仍继承默认预设的兼容升级。
-先升级 Gateway；新 Connector 的策略格式清单需要新版 Gateway 接纳。
+新配对使用全方法标志，不保存当时的 35/36 项方法快照，也不再生成持久化 `raw_grant`。旧配置中的方法列表与 raw grant 仅兼容读取，不再限制 MCP 方法；无需按新增方法迁移授权。原生 raw 校验所需的许可由可信运行时按实际 caller、方法、来源、连接和固定 deadline 逐次生成，不是用户需要维护的权限列表。
+
+升级并重启 Gateway 与 Connector 后，原 token 和配对继续使用，不需要手改多份文件。provider 目录只暴露当前后端实际实现的契约；设备运行开关与原生参数校验仍决定方法/参数是否可用。
 
 Gateway 在编码阶段拒绝请求时，尚未写入设备通道；调用账本记录
 `not_dispatched` 和 Gateway 的 `dispatch_refused` 审计（含固定错误码），释放该次调用的
@@ -71,17 +67,15 @@ Luvus 0.14.3 的数字 `pane` 是进程级递增分配的 ID，不是布局中�
 - 例如等待 35 秒时把 `deadline` 设为当前时间加 45–60 秒，`wait_ms:0` 取得 call_id 后查询同一调用；HTTP 短等结束不重提调用。它仍是一条阻塞 native RPC，会占执行槽，不是异步 job。
 - 原生先检查已有 recent 输出，旧标记可能立即命中。需要区分执行时使用每次不同的标记；匹配不证明标记来自本轮命令，更不证明 exit code。不会自动插入 shell wrapper。
 - 命中回包形如 `{"type":"wait","matched":true,"pane":"2"}`；未命中或 pane 关闭时可为 `{"type":"wait","matched":false}`。Rovloom 原样保留，`matched:false` 不是 Gateway 派发失败，也不代表命令已经停止。
-- 只读等待不需要打开终端输入开关，但双方 dispatch/read ACL、原生权限和 raw 授权仍须允许 `wait.output`。原生 schema 对此方法是 generic，`runtime_describe` 提供明确标记来源的 `parameter_help`，不伪造完整原生参数 schema。
+- 只读等待不需要打开终端输入开关，使用可见设备的有效 MCP token 即可调用，原生来源和参数仍逐次核验。原生 schema 对此方法是 generic，`runtime_describe` 提供明确标记来源的 `parameter_help`，不伪造完整原生参数 schema。
 
-升级并重启 Gateway 与 Connector 后，旧单码配对的完整默认 35 方法预设会自动补齐 `wait.output`：覆盖 Gateway caller/local、旧或新格式的 raw grant，以及 Connector caller/local。沿用原 token、设备凭据、配对记录和策略修订，不需要重新配对或手改多份文件；只改受保护配置的有效内存副本。升级只增加这个只读方法，不增加终端执行权限，也不改变设备范围或 Herdr。显式自定义的子集、修订、目标或 raw 主体保持原范围；这些自定义配置仍按其授权结果处理。新配对本来就包含该方法。
+升级并重启两端即可沿用原 token 调用 `wait.output`。没有额外的方法授权配置；新方法进入 provider 暴露面后自动对可见设备的有效 token 可用。
 
-### 先确认当前调用方可见
+### 先确认当前 provider 已暴露
 
-先对实际完整 target 运行 `runtime_discover`。只有结果列出 `wait.output` 时，才继续 describe 和提交；未列出时，对当前 caller/target 就不可用，不要因为原生 `uhp schema` 中存在或其他方法的提示提到它就尝试调用。继续用 `agent.read` / `pane.status` 读取，或由所有者明确补齐上述授权后重新发现。只授予另一个设备、provider 或 session 的权限不能使用；read 可见也不替代 dispatch 和 raw 授权。
+先对实际 target 运行 `runtime_discover`，再 describe 和调用。未列出表示当前 provider 未暴露该方法，可能是后端未实现、原生契约/能力未提供或运行设置不允许；不需要编辑 caller/local/raw 方法清单。`agent.prompt.parameter_help` 根据当前目录给出可用性提示，原生 generic 参数仍以 `generic_params_only` 和 `parameter_help` 展示，不合成专用原生 schema。
 
-`agent.prompt.parameter_help` 按这次已授权目录生成：未列出输出等待时明确说明当前不可用；不含目录上下文的参数拒绝提示则要求先发现。方法白名单和透传已实现，本次进一步补齐旧完整默认授权的升级；若两端已升级却仍不可见，需检查是否属于自定义范围或当前原生能力未提供。授权与实际契约都允许后，describe 可返回它的 `parameter_help`；原生参数 schema 为 generic 时继续报告 `generic_params_only`，不合成专用 `params_schema`。
-
-`runtime_describe` 的 `not_found` 表示方法不在当前授权目录，也可用于不存在或未审核的方法，不是全局原生方法存在性查询；不会为了区分这些情况而暴露隐藏方法。`runtime_call` 的 `forbidden` 则表示本次派发权限未通过。原生包含但尚未审核的其它 `agent.*` 方法不因此自动开放。
+`runtime_describe not_found` 是当前目录不存在该方法，不是整个原生安装的全局查询。`forbidden` 仍可表示 token 不可见的设备或原生权限拒绝，不再用于 token 方法白名单。
 
 原生语义依据：[0.14.3 wait.output 接口](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/ipc/api.rs)与[已有输出检查和等待器](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/app/dispatch/agent_workflow.rs)。`pane.run` 的 stdout / exit code 派生执行能力继续在 [#292](https://github.com/ArnoChenFx/rovloom/issues/292) 跟踪，不包含在此等待接口中。
 
@@ -176,7 +170,7 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 1. 从 `agent.get` / `pane.get` 确认选定 Agent、pane、`terminal_id` 和 session，并读取一次输出作为基线。
 2. 调用 `agent.prompt`，省略 `wait`、`until` 和 `timeout_s`，带上已观察的 `terminal_id` 与 `strict:true`。保留返回的提交证据和同一 `call_id`，不要因观察超时重发 prompt。
 3. 用短调用轮询 `agent.read` / `pane.status`，核对终端与 session 仍相同。输出或 `content_revision` 变化只证明活动；状态为 `idle` 且 `state_source:"no_positive_state_evidence"` 时按未知处理。读到与本轮请求相关的真实 Agent 回复后再向用户交付结果，不能用终端输入回显替代。
-4. 如果当前 `runtime_discover` 已列出 `wait.output`、所有者已授予派发/raw 权限，且任务约定了可验证的输出标记，可调用该方法，随后读取并核对内容。未列出时继续读取 `agent.read` / `pane.status`，不要尝试调用。已有 recent 输出或本次 prompt 的输入回显都可能命中；不要把原样写在 prompt 中的标记当作回复完成证据。没有约定可验证标记时，继续有界轮询输出，不制造通用完成保证。
+4. 如果当前 `runtime_discover` 已列出 `wait.output`，且任务约定了可验证的输出标记，可调用该方法，随后读取并核对内容。未列出时继续读取 `agent.read` / `pane.status`，不要尝试调用。已有 recent 输出或本次 prompt 的输入回显都可能命中；不要把原样写在 prompt 中的标记当作回复完成证据。没有约定可验证标记时，继续有界轮询输出，不制造通用完成保证。
 
 无等待提交示例（使用实际观察到的选择器）：
 

@@ -1,6 +1,4 @@
-// 首次本机批准只覆盖该次完整设备/provider/session；两端共享修订和已审核普通方法，不生成笛卡尔权限。
-import { LUVUS_OPERATION_METHODS } from '../runtime/luvus-operations.js'
-import { HERDR_WORKFLOW_METHODS } from '../connector/herdr/methods.js'
+// 首次本机批准只覆盖该次完整设备/provider/session；两端共享修订，不保存逐方法权限。
 import { CliError, luvusMode, type ConnectorConfig, type NativeProviderKind } from './config.js'
 import type { ProviderPolicies, ProviderPolicy, V2Target } from '../wire/types.js'
 
@@ -15,89 +13,16 @@ export type SetupPlanFacts = Readonly<{
 export const SIMPLE_SETUP_ACTOR = 'operator_simple_pairing'
 export const SIMPLE_SETUP_LINEAGE = 'simple'
 
-// 已发布的首代引导方法集合是兼容边界，不能随当前方法表增长而扩大旧清单或 raw 授权。
-const LUVUS_SETUP_METHODS_V1 = Object.freeze([
-  'session.snapshot',
-  'workspace.list',
-  'workspace.get',
-  'tab.list',
-  'tab.get',
-  'pane.list',
-  'pane.get',
-  'pane.current',
-  'pane.status',
-  'pane.read',
-  'agent.list',
-  'agent.get',
-  'agent.explain',
-  'agent.read',
-  'agent.sessions',
-  'agent.wait',
-  'workspace.new',
-  'workspace.open',
-  'workspace.focus',
-  'workspace.rename',
-  'workspace.close',
-  'tab.new',
-  'tab.focus',
-  'tab.rename',
-  'tab.close',
-  'pane.split',
-  'pane.focus',
-  'pane.rename',
-  'pane.close',
-  'pane.run',
-  'agent.start',
-  'agent.prompt',
-  'agent.send',
-  'agent.keys',
-  'agent.resume'
-])
-
-// 这一步只补齐输出等待，不随未来静态方法表增长而扩大已安装的完整预设。
-const LUVUS_SETUP_METHODS_OUTPUT_WAIT = Object.freeze([
-  LUVUS_SETUP_METHODS_V1[0]!,
-  'wait.output',
-  ...LUVUS_SETUP_METHODS_V1.slice(1)
-])
-
-/** 已发布的完整旧预设升级为含输出等待的预设；自定义子集、次序或范围保持原样。 */
-export function upgradeSetupLuvusMethods(methods: readonly string[]): readonly string[] {
-  return methods.length === LUVUS_SETUP_METHODS_V1.length &&
-    methods.every((method, index) => method === LUVUS_SETUP_METHODS_V1[index])
-    ? LUVUS_SETUP_METHODS_OUTPUT_WAIT
-    : methods
-}
-
-/** 只升级单码配对默认修订和 Luvus 完整目标；保留动作、设备范围及所有其它 provider。 */
-export function upgradeSetupLuvusPolicy(policy: ProviderPolicy): ProviderPolicy {
-  if (!['setup_caller_simple', 'setup_local_simple'].includes(policy.revision)) {
-    return policy
+/** MCP token 按设备范围授权；内部 Wire 使用全方法标志，不持久化配对时的方法快照。 */
+export function allExposedMethods(policy: ProviderPolicy): ProviderPolicy {
+  return {
+    ...policy,
+    grants: policy.grants.map((grant) => ({
+      ...grant,
+      methods: ['*'],
+      actions: ['dispatch', 'read', 'cancel']
+    }))
   }
-  let changed = false
-  const grants = policy.grants.map((grant) => {
-    if (
-      grant.target.provider_id !== 'luvus' ||
-      grant.target.profile !== 'session' ||
-      !['default', 'rovloom'].includes(grant.target.session)
-    ) {
-      return grant
-    }
-    const methods = upgradeSetupLuvusMethods(grant.methods)
-    if (methods === grant.methods) {
-      return grant
-    }
-    changed = true
-    return { ...grant, methods: [...methods] }
-  })
-  return changed ? { ...policy, grants } : policy
-}
-
-/** 只接纳程序实际发布过的完整集合，保持次序、方法子集和显式自定义授权的边界。 */
-export function isSetupLuvusMethods(methods: readonly string[]): boolean {
-  return [LUVUS_OPERATION_METHODS, LUVUS_SETUP_METHODS_V1, LUVUS_SETUP_METHODS_OUTPUT_WAIT].some(
-    (expected) => methods.length === expected.length && methods.every((method, index) => method === expected[index])
-  )
 }
 
 // Luvus 会话名随运行方式确定：附着用户真实的 default 会话，或 managed 隔离实例的 rovloom；Herdr 固定 default。
@@ -147,7 +72,7 @@ export function setupProviderKinds(input: unknown): readonly NativeProviderKind[
   return Object.freeze([...input])
 }
 
-// 两个来源各有精确Target和各自已审方法，不把provider、session和方法做笛卡尔授权。
+// 两个来源各有精确 Target；方法由当前 provider 的暴露面决定，不在配对时冻结。
 // 修订标签取自 lineage（首台设备那次引导的 attempt）：所有设备的本机策略共用同一修订，Gateway 才能同时就绪；
 // 标签只是命名这一代引导，策略内容（授权集合）随加入的设备增长。
 export function selectedSetupPolicies(
@@ -159,7 +84,7 @@ export function selectedSetupPolicies(
   const grants = setupProviderKinds(kinds).map(
     /* 每条授权只覆盖该来源的固定首次session。 */ (kind) => ({
       target: setupTarget(machine, kind, sessions),
-      methods: [...(kind === 'luvus' ? LUVUS_OPERATION_METHODS : HERDR_WORKFLOW_METHODS)],
+      methods: ['*'],
       actions: ['dispatch', 'read', 'cancel'] as ('dispatch' | 'read' | 'cancel')[]
     })
   )

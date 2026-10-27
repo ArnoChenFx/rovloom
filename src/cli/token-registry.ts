@@ -4,7 +4,7 @@ import type { DeviceScope, Principal } from '../router.js'
 import type { ProviderPolicy } from '../wire/types.js'
 import { fields, id, LIMITS, object, validatePolicies } from '../wire/index.js'
 import { CliError } from './config.js'
-import { SIMPLE_SETUP_ACTOR } from './setup-policy.js'
+import { SIMPLE_SETUP_ACTOR, allExposedMethods } from './setup-policy.js'
 
 export const REGISTRY_MAX_BYTES = 262_144
 export const MAX_CALLERS = 64
@@ -158,9 +158,19 @@ export function parseRegistry(value: unknown, resource?: string): CallerRegistry
     const paired = registry.callers.find(
       (entry) => entry.scope === undefined && entry.principal.id === SIMPLE_SETUP_ACTOR
     )
-    return registry.gateway_policy === undefined && paired
-      ? { ...registry, gateway_policy: structuredClone(paired.principal.policy) }
-      : registry
+    const current =
+      registry.gateway_policy === undefined && paired
+        ? { ...registry, gateway_policy: structuredClone(paired.principal.policy) }
+        : registry
+    return {
+      ...current,
+      local_policy: allExposedMethods(current.local_policy),
+      ...(current.gateway_policy ? { gateway_policy: allExposedMethods(current.gateway_policy) } : {}),
+      callers: current.callers.map((entry) => ({
+        ...entry,
+        principal: { ...entry.principal, policy: allExposedMethods(entry.principal.policy) }
+      }))
+    }
   } catch {
     throw new CliError('invalid_config')
   }
@@ -355,9 +365,16 @@ export function summarize(registry: CallerRegistry, now: number): CallerSummary[
   )
 }
 
-/** Full Gateway tokens follow the paired caller policy, independently of the local policy and token identity. */
+/** All MCP tokens follow current paired targets; device_scope narrows visibility, never a method snapshot. */
 export function gatewayCallerPolicy(registry: CallerRegistry): ProviderPolicy {
-  return registry.gateway_policy ?? { revision: 'rovloom_unpaired', grants: [] }
+  if (registry.gateway_policy) {
+    return allExposedMethods(registry.gateway_policy)
+  }
+  const revision = registry.local_policy.revision.startsWith('setup_local_')
+    ? registry.local_policy.revision.replace('setup_local_', 'setup_caller_')
+    : (registry.callers.find((entry) => entry.principal.policy.grants.length > 0)?.principal.policy.revision ??
+      registry.local_policy.revision)
+  return allExposedMethods({ revision, grants: registry.local_policy.grants })
 }
 
 export function createGatewayCaller(registry: CallerRegistry, principal: string, now: number, days = 365) {

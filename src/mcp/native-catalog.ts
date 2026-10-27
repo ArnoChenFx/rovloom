@@ -30,6 +30,7 @@ export type GatewayCatalogSource = Readonly<{
   source: TrustedNativeContext
   local_provider: ProviderBinding
   expires_at: number
+  supported_methods?: readonly string[]
 }>
 export interface GatewayCatalogProvider {
   kind?: 'luvus'
@@ -129,6 +130,7 @@ export function authorizedLuvusCatalog(options: CatalogOptions) {
           capabilities: resolved.record.capabilities,
           capability_revision: resolved.record.capability_revision,
           compiled: resolved.record.compiled.identity,
+          supported_methods: resolved.supported_methods ?? null,
           expires_at: resolved.expires_at
         },
         LIMITS.object_bytes
@@ -203,6 +205,7 @@ export function authorizedLuvusCatalog(options: CatalogOptions) {
       for (const method of page.methods) {
         const entry = terminalExecutionCatalog('luvus', method.method, terminal)
         if (
+          (resolved.supported_methods === undefined || resolved.supported_methods.includes(method.method)) &&
           entry.visible &&
           providerScopeAllowed({ target } as AttemptBinding, method.method, 'read', { caller: principal.policy, local })
         ) {

@@ -32,11 +32,7 @@ test('prompt 帮助只推荐当前完整目标可见的输出等待，授权新�
   }
   try {
     setMethods(['agent.prompt'])
-    assert(
-      (await describePrompt()).some((rule) =>
-        rule.includes('wait.output is not in the current authorized method catalog')
-      )
-    )
+    assert((await describePrompt()).some((rule) => rule.includes('wait.output is not exposed for this target')))
     await assert.rejects(
       f.service.execute('runtime_describe', { ...route, method: 'wait.output' }, context()),
       new FacadeServiceError('not_found')
@@ -45,8 +41,8 @@ test('prompt 帮助只推荐当前完整目标可见的输出等待，授权新�
     const visible = await f.service.execute('runtime_discover', route, context())
     assert(visible.data.items.some((row) => row.method === 'wait.output'))
     const rules = await describePrompt()
-    assert(!rules.some((rule) => rule.includes('wait.output is not in the current authorized method catalog')))
-    assert(rules.some((rule) => rule.includes('dispatch/raw authorization') && rule.includes('prompt echo')))
+    assert(!rules.some((rule) => rule.includes('wait.output is not exposed for this target')))
+    assert(rules.some((rule) => rule.includes('runtime_discover') && rule.includes('prompt echo')))
     const wait = await f.service.execute('runtime_describe', { ...route, method: 'wait.output' }, context())
     assert.equal(wait.data.schema_status, 'generic_params_only')
     assert.equal(wait.data.params_schema, undefined)
@@ -54,11 +50,7 @@ test('prompt 帮助只推荐当前完整目标可见的输出等待，授权新�
       (wait.data.parameter_help as { rules: string[] }).rules.some((rule) => rule.includes('existing marker can match'))
     )
     setMethods(['agent.prompt', 'wait.output'], ['agent.prompt'])
-    assert(
-      (await describePrompt()).some((rule) =>
-        rule.includes('wait.output is not in the current authorized method catalog')
-      )
-    )
+    assert((await describePrompt()).some((rule) => rule.includes('wait.output is not exposed for this target')))
   } finally {
     f.close()
   }

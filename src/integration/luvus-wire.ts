@@ -716,7 +716,10 @@ export function createLuvusWireAdapter(
           /* 只保留目标完全相同且含 dispatch 动作的当前 grant。 */ (g) =>
             boundedJson(g.target) === boundedJson(attempt.binding.target) && g.actions.includes('dispatch')
         )
-        .flatMap(/* 展开当前目标已授权的原生方法，供双端方法集合校验。 */ (g) => g.methods)
+        .flatMap(
+          /* 全方法授权只为本次实际方法生成原生门禁输入。 */ (g) =>
+            g.methods.includes('*') ? [attempt.method] : g.methods
+        )
         .filter(/* 去除双端策略投影中的重复方法，保持方法集合稳定。 */ (m, i, all) => all.indexOf(m) === i),
       host: binding.target.profile === 'host'
     })

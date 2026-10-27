@@ -292,3 +292,5 @@ Connector 不依赖 Gateway 额外交付的 TTL 或上下文。受保护配置�
 只允许 OS family / 发行版 / 内核、架构、CPU、内存、容器类别、Connector 版本和 provider 版本摘要；未知数值为 null。字段精确列举、字符串和 provider 数量有界，禁止网络、环境、路径及任意扩展字段。Gateway 在接收后添加固定 source 和 reported_at，仅用于 machines_get 的设备属性，不形成原生契约或执行、读取许可。MCP 详情里的 provider 摘要仍须按当前 caller 的完整目标权限过滤。
 
 该报告和有效收包时间在当前 Gateway 进程内有界保留，读取不续期；断开后 link_since 为 null，重启或恢复代次变更后未知。详细字段与边界见[设备详情](../PROTOCOL.md#设备详情与原生版本)。
+
+MCP 产品使用 `methods:["*"]` 表示目标上的全部当前暴露方法，不在配对时枚举方法名。该标志在受保护配置中解析；送入原生校验的逐次许可仍只绑定本次实际方法、caller、连接与 deadline。

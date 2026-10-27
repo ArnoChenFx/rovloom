@@ -1,8 +1,8 @@
 // 已审核子集的调用提示与固定字段诊断；不冒充安装版原生 JSON Schema，不返回请求值。
 const sentinelAdvice =
-  'Use wait.output only if runtime_discover lists it for this exact target and dispatch/raw authorization also allows it. If it is not listed, it is unavailable for this caller/target; do not probe runtime_call. Old output and prompt echo can match, so verify the reply separately.'
+  'Use wait.output when runtime_discover lists it for this target. If it is not listed, it is not exposed by this provider; do not probe runtime_call. Old output and prompt echo can match, so verify the reply separately.'
 const sentinelUnavailable =
-  'wait.output is not in the current authorized method catalog and is unavailable for this caller/target. Do not call it; continue observing agent.read and pane.status. Its presence in the native schema does not grant access.'
+  'wait.output is not exposed for this target and is unavailable. Do not call it; continue observing agent.read and pane.status. Its presence in the native schema does not mean this provider implements it.'
 const help = {
   'agent.start': {
     required: ['name', 'kind'],

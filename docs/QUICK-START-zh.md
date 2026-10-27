@@ -215,7 +215,7 @@ Rovloom 不是 stdio MCP 服务。
 | 任务 | 做法 |
 |---|---|
 | 再次启动 | Gateway 机器运行 `rovloom gateway --non-interactive`，Connector 机器运行 `rovloom connector --non-interactive`；已保存的配对状态会复用。Docker Gateway 使用 `docker compose up -d`。 |
-| 加入更多设备 | Gateway 保持运行，在管理页生成新配对码（或 `rovloom gateway --issue-code`），新设备执行显示的加入命令。原始 MCP caller 的授权会扩展到新设备；用 `rovloom token create --like` 克隆的令牌需要重新克隆。 |
+| 加入更多设备 | Gateway 保持运行，在管理页生成新配对码（或 `rovloom gateway --issue-code`），新设备执行显示的加入命令。所有有效 MCP token（包括 `--like` 创建的 token）都能访问其 `device_scope` 范围内的设备及 provider 已暴露的全部方法，无需重新克隆或补方法清单。 |
 | 凭据丢失或泄漏 | 在管理页删除该设备并生成新配对码，在该机器上重新执行加入命令即可；本地配对状态自动退役，设备以新身份重新配对。进行中的调用结果变为未知。 |
 | 换到另一台 Gateway | 先停该 Connector，机器上直接执行新 Gateway 的加入命令（旧状态自动退役）；或先 `rovloom connector --unpair` 得到干净起点。 |
 | 开机自启 | `rovloom service install --role gateway`（或 `connector`），见[开机服务](SERVICE.md)。 |

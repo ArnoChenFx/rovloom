@@ -95,7 +95,7 @@ Returns `{ items: MethodEntry[], next_cursor? }`. Each entry carries:
 - `native_contract`: native method metadata
 - `terminal_execution?`: `{ local_state: "enabled"|"disabled"|"unknown", request_parameters_checked?, requires_explicit_strict? }`
 
-The catalog contains only methods you are currently authorized for **and** that the terminal switch allows to be visible. Discovery is not execution permission.
+The catalog contains the provider's exposed methods on visible devices, filtered by native capabilities and the terminal switch. Valid tokens have no separate method whitelist. Discovery does not bypass native validation or device operating settings.
 
 ## 6. runtime_describe
 
@@ -112,7 +112,7 @@ Returns the available native description plus `method`, `contract_ref` and `term
 
 Herdr exposes native schemas for its supported methods. In Luvus 0.14.3, the reviewed ordinary methods with native parameter branches are `pane.list` and `agent.prompt/send/wait/keys`. Other methods remain `generic_params_only`; no native `params_schema` is fabricated. A conditional branch whose extra envelope conditions cannot be accurately projected can also omit `params_schema`.
 
-Describe addresses the current authorized catalog, not the complete native schema. `not_found` may mean missing, unreviewed or not visible under the exact target's read grants. `agent.prompt.parameter_help` checks this same catalog before suggesting `wait.output`: if absent, it explicitly marks it unavailable for this caller/target and recommends state/output reads. With no catalog context, error hints require checking discovery first. The complete legacy simple-pairing 35-method preset gains sentinel grants after both Gateway and Connector are upgraded and restarted; the same token and pairing remain valid. Custom subsets/revisions are not expanded. Even when discovery lists a read-only method, dispatch and raw authorization remain required.
+A valid MCP token can discover, describe and call all methods exposed by the provider on devices visible under device_scope. There is no token method whitelist or persisted pairing-time method snapshot; legacy caller/local/raw lists do not constrain MCP. Native parameter validation and device operating settings still apply. Missing methods are outside the current exposed provider catalog, not a reason to edit an ACL. Read visibility does not certify that arbitrary native parameters will execute successfully.
 
 Use `params_schema` when present, read native annotations for behavioral semantics, and use the reviewed guide/runtime reference for coverage gaps. Document-root annotations apply to the source document, not necessarily only this method. A guide does not change `schema_status` or authorize execution. Luvus and Herdr often use different parameter names for the same idea. Discovery summaries do not include these schemas, notes or examples.
 
@@ -208,7 +208,7 @@ Verify `sha256` and `total_bytes` after concatenating every page; otherwise repo
 
 Parameters: `call_id`. Returns `{ call_id, content_status: "discarded" }`.
 
-A standalone action: it requires ownership, the method's current read policy, and a dedicated `discard_response` permission. Callers cannot declare `discard_response` in parameters.
+A standalone action: it requires ownership, current device access, and a dedicated `discard_response` permission. Callers cannot declare `discard_response` in parameters.
 
 ## Transport and limits
 
@@ -240,7 +240,7 @@ Cursors for `machines_list`, `providers_list` and `runtime_discover` are generat
 
 ## Semantic boundaries
 
-- Every list, count and description is filtered by the caller's grants.
+- Every list, count and description respects the caller's device scope and current provider exposure; tokens do not have per-method grants.
 - No streaming, no Host-privileged shortcut, no provider management, no `luvus_*` aliases.
 - Callers cannot submit a principal, admin, `discard_response`, or a native `id` or `auth` inside `native_request`.
 - Device registration/rename/revoke, provider enable/disable, and token management happen only in the management listener and the CLI, never over MCP.

@@ -28,7 +28,7 @@ import { SimplePairingHttp, PairingReplayCache } from './simple-pairing.js'
 import type { CliSetup } from './setup-runtime.js'
 import { boundedJson, object, fields, WIRE_MAJOR, WIRE_MINOR } from '../wire/index.js'
 import { readRuntimeConfig } from './runtime-config.js'
-import { migrateSetupLuvusConnector, migrateSetupLuvusGrant } from './setup-luvus-grant.js'
+import { allExposedConnectorMethods } from './setup-connector-policy.js'
 import { canonicalLoopbackHost } from '../mcp/listen.js'
 import { createManagementResources } from './management-resources.js'
 import { loadProductManagementAssets } from './management-assets.js'
@@ -281,7 +281,7 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
         return closing
       }
       try {
-        provider = await sources.gateway?.(config, settings.providers.map(migrateSetupLuvusGrant), authority)
+        provider = await sources.gateway?.(config, settings.providers, authority)
         if (sources.gateway && !provider) {
           throw new CliError('invalid_config')
         }
@@ -539,7 +539,7 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
       try {
         resource = await sources.connector(
           isolated ? { ...config, state_dir: control } : config,
-          settings.providers.map(migrateSetupLuvusConnector)
+          settings.providers.map(allExposedConnectorMethods)
         )
       } catch (error) {
         try {

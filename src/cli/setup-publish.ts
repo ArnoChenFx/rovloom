@@ -7,6 +7,7 @@ import type { CallerRegistry } from './token-registry.js'
 import { REGISTRY_MAX_BYTES, parseRegistry } from './token-registry.js'
 import { readSetupJson, setupFileStamp, writeSetupFile, writeSetupJson } from './setup-files.js'
 import { readRuntimeJson } from './runtime-files.js'
+import { allExposedMethods } from './setup-policy.js'
 
 // 相同计划的重入只接纳完全相同的程序数据；未知条目、部分内容或外部改动不被覆盖。
 export function publish(path: string, value: unknown, maximum = 16_384): void {
@@ -48,6 +49,14 @@ export function publishFirstCallers(
   authorization: { principal_id: string; policies: { caller: ProviderPolicy; local: ProviderPolicy } },
   caller: SetupCallerEntry
 ): void {
+  authorization = {
+    ...authorization,
+    policies: {
+      caller: allExposedMethods(authorization.policies.caller),
+      local: allExposedMethods(authorization.policies.local)
+    }
+  }
+  caller = { ...caller, principal: { ...caller.principal, policy: allExposedMethods(caller.principal.policy) } }
   const previous = readSetupJson(path, REGISTRY_MAX_BYTES)
   const created: CallerRegistry = {
     schema_version: 1,
@@ -90,6 +99,13 @@ export function mergeSetupCallers(
   resource: string,
   authorization: { principal_id: string; policies: { caller: ProviderPolicy; local: ProviderPolicy } }
 ): void {
+  authorization = {
+    ...authorization,
+    policies: {
+      caller: allExposedMethods(authorization.policies.caller),
+      local: allExposedMethods(authorization.policies.local)
+    }
+  }
   const stamp = setupFileStamp(path)
   // parseRegistry 返回冻结对象；在深拷贝上并入授权。
   const registry = structuredClone(parseRegistry(readRuntimeJson(path, REGISTRY_MAX_BYTES), resource)) as ReturnType<

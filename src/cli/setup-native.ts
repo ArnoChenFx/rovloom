@@ -213,11 +213,7 @@ export async function prepareSetupNative(
       classification_revision: MANAGED_LUVUS_CLASSIFICATION,
       schema_bundle: schema.stdout.toString('utf8')
     },
-    peer_policy_revision: authorization.policies.local.revision,
-    raw_grant: {
-      caller_policy_revision: authorization.policies.caller.revision,
-      methods: [...authorization.policies.caller.grants[0]!.methods]
-    }
+    peer_policy_revision: authorization.policies.local.revision
   }
   boundedJson(remote, 1_048_576)
   console.assertOwner()

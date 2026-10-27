@@ -93,10 +93,11 @@ export function checkedRemoteLuvusConfig(reference: string, input: unknown): Luv
     id(grant[subject])
     if (
       !Array.isArray(grant.methods) ||
-      grant.methods.length > LUVUS_OPERATION_METHODS.length ||
+      grant.methods.length > 256 ||
       new Set(grant.methods).size !== grant.methods.length ||
       grant.methods.some(
-        /** raw 许可不能扩大已审普通方法集合。 */ (method) => !LUVUS_OPERATION_METHODS.includes(method)
+        /** 兼容旧字段只检查格式，不再作为 MCP 方法授权。 */ (method) =>
+          typeof method !== 'string' || method.length < 1 || method.length > 256
       )
     ) {
       throw new LuvusAdapterError('remote_luvus_raw_grant_invalid')
@@ -310,6 +311,7 @@ export async function createPinnedRemoteLuvus(config: LuvusProductionRemoteConfi
             return nativeBinding(epoch, binding.registration)
           }
           const live: RuntimeProvider = Object.freeze({
+            catalog_methods: LUVUS_OPERATION_METHODS,
             binding: config.binding,
             target: config.target,
             peer_policy_revision: config.peer_policy_revision,
@@ -325,17 +327,8 @@ export async function createPinnedRemoteLuvus(config: LuvusProductionRemoteConfi
             authority: createLuvusOperationsAuthority(
               record,
               sourceFor,
-              /** 策略授权服务于共享策略的 caller；签出的 grant 始终绑定真实调用主体，而非配对主体。 */
-              (attempt) => {
-                const grant = config.raw_grant
-                return (
-                  !!grant &&
-                  grant.methods.includes(attempt.method) &&
-                  (grant.principal_id !== undefined
-                    ? grant.principal_id === attempt.principal_id
-                    : grant.caller_policy_revision === attempt.binding.registration.caller_policy_revision)
-                )
-              }
+              /** MCP 认证及设备范围已由 Gateway 复核；原 authority 仍逐次核对已暴露方法和真实来源。 */
+              () => true
             ),
             /** 旧 live 对象即使仍被原句柄引用，也只能检查其原 epoch。 */
             ready() {

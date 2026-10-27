@@ -447,7 +447,7 @@ test(
   }
 )
 
-test('同一真实 mixed 通道中 Luvus raw 拒绝不打断已接受的 Herdr 调用', { timeout: 45000 }, async () => {
+test('无静态 raw 清单也能派发，mixed 通道保留并发 Herdr 调用', { timeout: 45000 }, async () => {
   const f = await fixture({ mixed: true, isolated: true })
   try {
     for (const policy of [f.caller, f.local]) {
@@ -471,7 +471,7 @@ test('同一真实 mixed 通道中 Luvus raw 拒绝不打断已接受的 Herdr �
     )
     await until(() => f.state.store.call('remote_reader', first.call.call_id).state === 'connector_accepted')
     const epoch = peer.connection.connection_epoch
-    const refused = await f.runtime.runAuthenticated({ principal_id: 'remote_reader' }, () =>
+    const second = await f.runtime.runAuthenticated({ principal_id: 'remote_reader' }, () =>
       f.runtime.admit({
         target: f.target,
         native_request: { method: 'workspace.rename', params: { workspace_id: 'synthetic', name: 'literal' } },
@@ -482,11 +482,13 @@ test('同一真实 mixed 通道中 Luvus raw 拒绝不打断已接受的 Herdr �
         }
       })
     )
-    assert.equal(refused.call.state, 'not_dispatched')
-    assert.equal(f.writes(), 1)
+    await until(() => f.state.store.call('remote_reader', second.call.call_id).state === 'connector_accepted')
+    assert.equal(f.writes(), 2)
     assert.equal(f.runtime.transport.currentConnection(f.target.machine_id)!.connection_epoch, epoch)
     assert.equal(f.state.store.call('remote_reader', first.call.call_id).state, 'connector_accepted')
     peer.reply(peer.requests[0]!)
+    peer.reply(peer.requests[1]!)
+    await until(() => f.state.store.call('remote_reader', second.call.call_id).state === 'responded')
     await until(() => f.state.store.call('remote_reader', first.call.call_id).state === 'responded')
     await f.runtime.runAuthenticated({ principal_id: 'remote_reader' }, () => {
       const result = f.runtime.results.open(first.call.call_id)

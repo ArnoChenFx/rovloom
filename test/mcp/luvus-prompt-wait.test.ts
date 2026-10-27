@@ -56,7 +56,7 @@ test('prompt 等待超时保留原生证据，describe 提供两段式指导而�
       )
     )
     assert.equal(help.examples[0]!.wait, undefined)
-    assert(help.rules.some((rule) => rule.includes('wait.output is not in the current authorized method catalog')))
+    assert(help.rules.some((rule) => rule.includes('wait.output is not exposed for this target')))
     const listed = await call('runtime_discover', route)
     assert.deepEqual(
       (listed.structuredContent!.data as { items: { method: string }[] }).items.map((row) => row.method),

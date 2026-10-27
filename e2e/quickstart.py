@@ -253,13 +253,16 @@ def main():
             registry = json.load(open(os.path.join(managed_g, 'mcp-callers.json')))
             grant = next(g for g in registry['local_policy']['grants'] if g['target']['provider_id'] == 'luvus')
             methods = set(grant['methods'])
-            assert len(methods) == 36 and 'wait.output' in methods
+            assert methods == {'*'}, 'new pairing still persists a method snapshot'
             def downgrade(value):
                 changed = 0
                 if isinstance(value, dict):
+                    if value.get('kind') == 'luvus' and value.get('authentication') == 'remote_connector':
+                        value['raw_grant'] = {'principal_id': 'operator_simple_pairing', 'methods': ['session.snapshot']}
+                        changed += 1
                     for key, item in value.items():
                         if key == 'methods' and isinstance(item, list) and all(isinstance(method, str) for method in item) and set(item) == methods:
-                            value[key] = [method for method in item if method != 'wait.output']
+                            value[key] = ['pane.list']
                             changed += 1
                         else:
                             changed += downgrade(item)

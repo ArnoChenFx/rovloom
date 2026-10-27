@@ -4,6 +4,7 @@ import { id, object } from '../wire/index.js'
 import { assertLocalOwnerLuvus } from './native-source.js'
 import type { LocalOwnerLuvusInstance } from './native-source.js'
 import { assertLuvusOperationsContract, createLuvusOperationsAuthority } from './luvus-operations-authority.js'
+import { LUVUS_OPERATION_METHODS } from './luvus-operations.js'
 import type { RuntimeProvider } from './types.js'
 
 /** 只有原受控进程交付的真实 Owner 句柄可装配；普通 JSON、缺 token 或 ready 自报不能成为来源。 */
@@ -30,6 +31,7 @@ export function createLuvusOperationsProvider(
     /** 此工厂的受信宿主已显式选择真实 local_owner；缺 token 或任意 JSON 不能进入此闭包。 */ () => true
   )
   return Object.freeze({
+    catalog_methods: LUVUS_OPERATION_METHODS,
     binding: Object.freeze({
       machine_id: config.target.machine_id,
       provider_id: config.target.provider_id,

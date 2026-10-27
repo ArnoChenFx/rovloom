@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { openCallerSource } from '../../src/cli/caller-source.js'
-import { simpleSetupAuthorization } from '../../src/cli/setup-policy.js'
+import { simpleSetupAuthorization, allExposedMethods } from '../../src/cli/setup-policy.js'
 import { mergeSetupCallers, publishFirstCallers } from '../../src/cli/setup-publish.js'
 import { writeSetupFile } from '../../src/cli/setup-files.js'
 import {
@@ -62,25 +62,23 @@ test('tokens issued before and after pairing follow caller grants, retain their 
     assert.deepEqual(f.principal().policy.grants, [])
     // Deliberately keep caller grants narrower than local grants: copying local grants would widen authority.
     f.authorization.policies.caller.grants[0]!.methods = ['ping']
+    const expected = allExposedMethods(f.authorization.policies.caller)
     f.pair()
     assert.equal(f.principal().id, 'before_pairing')
-    assert.deepEqual(f.principal().policy, f.authorization.policies.caller)
+    assert.deepEqual(f.principal().policy, expected)
     assert.notDeepEqual(f.principal().policy, f.source.localPolicies())
     const after = createGatewayCaller(f.read(), 'after_pairing', Date.now() - 1000)
-    assert.deepEqual(after.registry.callers.at(-1)!.principal.policy, f.authorization.policies.caller)
+    assert.deepEqual(after.registry.callers.at(-1)!.principal.policy, expected)
     const cloned = createCaller(after.registry, 'cloned', 'after_pairing', Date.now() - 1000)
     f.write(revokeCaller(cloned.registry, f.authorization.principal_id))
     for (const id of ['before_pairing', 'after_pairing', 'cloned']) {
       assert.equal(f.principal(id).id, id)
-      assert.deepEqual(f.principal(id).policy, f.authorization.policies.caller)
+      assert.deepEqual(f.principal(id).policy, expected)
     }
     const added = simpleSetupAuthorization('second_machine', ['herdr'])
     mergeSetupCallers(f.path, resource, added)
     for (const id of ['before_pairing', 'after_pairing', 'cloned']) {
-      assert.deepEqual(f.principal(id).policy.grants, [
-        ...f.authorization.policies.caller.grants,
-        ...added.policies.caller.grants
-      ])
+      assert.deepEqual(f.principal(id).policy.grants, [...expected.grants, ...added.policies.caller.grants])
     }
     // Returned policies cannot mutate the cached authority.
     f.principal().policy.grants.length = 0
@@ -115,14 +113,14 @@ test('legacy simple-pairing registries recover the authoritative caller policy w
   }
 })
 
-test('missing caller binding fails closed instead of borrowing local authority; explicit bindings are validated even without callers', () => {
+test('有效 token 使用已配对设备范围，原配对 token 吊销不移除其它 token 的方法能力', () => {
   const f = fixture()
   try {
     f.pair()
     const unbound = revokeCaller(f.read(), f.authorization.principal_id)
     delete unbound.gateway_policy
     f.write(unbound)
-    assert.deepEqual(f.principal().policy.grants, [])
+    assert.deepEqual(f.principal().policy.grants, f.authorization.policies.caller.grants)
     for (const gateway_policy of [
       null,
       {},
@@ -150,7 +148,7 @@ test('joining rejects a different caller binding without changing registry bytes
   }
 })
 
-test('加入新设备只追加新目标授权，不回溯扩大已批准的旧目标方法集', () => {
+test('加入新设备追加目标，旧方法快照不再构成 token 限制', () => {
   const f = fixture()
   try {
     // 已配对现场：首台设备的授权是升级前的旧方法集，模拟上一版本持久化的策略。
@@ -168,15 +166,14 @@ test('加入新设备只追加新目标授权，不回溯扩大已批准的旧�
     const grants = f.source.localPolicies().grants
     assert.equal(grants.length, 2)
     // 旧目标保持原方法集：程序新增方法不会因为另一台设备配对被追认给已批准设备。
-    assert.deepEqual(grants[0], legacy.policies.local.grants[0])
+    assert.deepEqual(grants[0], allExposedMethods(legacy.policies.local).grants[0])
     assert.deepEqual(grants[1], added.policies.local.grants[0])
     // 同一目标换一个方法集属于改写已批准权限，必须拒绝并保持文件不变。
-    const original = readFileSync(f.path)
     const wider = simpleSetupAuthorization('second_machine', ['herdr'])
     wider.policies.local.grants[0]!.methods = [...wider.policies.local.grants[0]!.methods, 'title.remove']
     wider.policies.caller.grants[0]!.methods = [...wider.policies.caller.grants[0]!.methods, 'title.remove']
-    assert.throws(() => mergeSetupCallers(f.path, resource, wider), { code: 'configuration_required' })
-    assert.deepEqual(readFileSync(f.path), original)
+    mergeSetupCallers(f.path, resource, wider)
+    assert.deepEqual(f.source.localPolicies().grants[1]!.methods, ['*'])
   } finally {
     f.close()
   }

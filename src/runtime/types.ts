@@ -36,6 +36,8 @@ export type RuntimeProviderBinding = Readonly<{
 export type RuntimeProvider = RuntimeProviderBinding &
   Readonly<{
     contract: NativeContractRecord
+    /** 本 provider 实际实现的目录；它是后端暴露面，不是 caller 权限清单。 */
+    catalog_methods?: readonly string[]
     // Connector 复核本机实例；远端 Gateway 复核受保护 pin 和实际认证 epoch，不由广告 JSON 自证。
     source(binding: AttemptBinding): TrustedNativeContext | undefined
     // 目录直接绑定当前实际连接，不编造完整 attempt；旧有限 custody provider 可省略。
@@ -67,6 +69,7 @@ export type RuntimeCatalogProvider = Readonly<{
         source: TrustedNativeContext
         local_provider: ProviderBinding
         expires_at: number
+        supported_methods?: readonly string[]
       }>
     | undefined
 }>

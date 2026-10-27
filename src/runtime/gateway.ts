@@ -804,7 +804,8 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
           source: native,
           local_provider: binding,
           // 该字段满足既有目录有限整数格式；它不建立委托寿命，真实 Owner/epoch 失效即拒绝。
-          expires_at: Number.MAX_SAFE_INTEGER
+          expires_at: Number.MAX_SAFE_INTEGER,
+          ...(provider.catalog_methods ? { supported_methods: provider.catalog_methods } : {})
         })
       }
     })

@@ -9,7 +9,6 @@ import { CliError, type NativeProviderKind } from './config.js'
 import type { SetupPlanFacts } from './setup-policy.js'
 import {
   selectedSetupPolicies,
-  isSetupLuvusMethods,
   setupProviderKinds,
   setupReference,
   setupSessions,
@@ -93,30 +92,17 @@ export async function reviewSetupManifest(
       throw new CliError('configuration_required')
     }
     if (kind === 'luvus') {
-      const remote = checkedRemoteLuvusConfig(reference, entry.value)
-      const expectedGrant = authorization.policies.caller.grants.find(
-        /* 每份native只获得本来源Target对应的方法。 */ (grant) => boundedJson(grant.target) === boundedJson(target)
-      )!
-      const raw = remote.raw_grant
+      const remote = { ...checkedRemoteLuvusConfig(reference, entry.value) }
+      // 旧字段只为读取兼容；新发布的配对记录不再包含逐方法 raw 授权。
+      delete remote.raw_grant
       if (
         boundedJson(remote.target) !== boundedJson(target) ||
         remote.binding.binding_revision !== 1 ||
         !remote.binding.enabled ||
-        remote.peer_policy_revision !== authorization.policies.local.revision ||
-        !raw ||
-        !isSetupLuvusMethods(raw.methods) ||
-        ![
-          { caller_policy_revision: authorization.policies.caller.revision, methods: raw.methods },
-          // 旧 Connector 的清单仍可配对和原样重入；已配对授权在 Gateway 装配时迁移。
-          { principal_id: authorization.principal_id, methods: raw.methods }
-        ].some((grant) => boundedJson(raw) === boundedJson(grant))
+        remote.peer_policy_revision !== authorization.policies.local.revision
       ) {
         throw new CliError('configuration_required')
       }
-      // 旧 Connector 的获准清单仍只有旧方法；新 Gateway 不在批准或重入时悄悄添加新方法。
-      expectedGrant.methods = [...raw.methods]
-      authorization.policies.local.grants.find((grant) => boundedJson(grant.target) === boundedJson(target))!.methods =
-        [...raw.methods]
       const verified = await createPinnedRemoteLuvus(remote)
       verified.close()
       reviewed.push({

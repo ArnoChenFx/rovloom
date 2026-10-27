@@ -1,29 +1,24 @@
-// 用真实注册表热读取核对旧默认授权升级；不创建原生进程，token 为本用例合成值。
+// 用真实注册表热读取核对 token 不受旧方法清单限制；不创建原生进程，token 为本用例合成值。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  simpleSetupAuthorization,
-  upgradeSetupLuvusMethods,
-  upgradeSetupLuvusPolicy
-} from '../../src/cli/setup-policy.js'
+import { simpleSetupAuthorization, allExposedMethods } from '../../src/cli/setup-policy.js'
 import { openCallerSource } from '../../src/cli/caller-source.js'
 import { writeSetupFile } from '../../src/cli/setup-files.js'
 import { digestToken } from '../../src/cli/token-registry.js'
-import { migrateSetupLuvusConnector } from '../../src/cli/setup-luvus-grant.js'
+import { allExposedConnectorMethods } from '../../src/cli/setup-connector-policy.js'
 
 function legacy() {
   const authorization = simpleSetupAuthorization('legacy_machine', ['luvus', 'herdr'], { luvus: 'default' })
   for (const policy of [authorization.policies.caller, authorization.policies.local]) {
-    policy.grants[0]!.methods = policy.grants[0]!.methods.filter((method) => method !== 'wait.output')
-    assert.equal(policy.grants[0]!.methods.length, 35)
+    policy.grants[0]!.methods = ['pane.list']
   }
   return authorization
 }
 
-test('同一个旧 test token 获得输出等待，有效升级不重写文件、不改变设备范围或 Herdr', () => {
+test('同一个 token 使用全方法，旧方法限制失效且设备范围保持不变', () => {
   const root = mkdtempSync(join(tmpdir(), 'rovloom-wait-upgrade-'))
   const path = join(root, 'callers.json')
   const authorization = legacy()
@@ -63,27 +58,30 @@ test('同一个旧 test token 获得输出等待，有效升级不重写文件�
     assert.deepEqual(caller, { principal_id: 'test' })
     for (const id of ['test', 'gateway_test']) {
       const current = source.identities.principal({ principal_id: id })!
-      assert(current.policy.grants[0]!.methods.includes('wait.output'))
-      assert.equal(current.policy.grants[0]!.methods.length, 36)
+      assert.deepEqual(current.policy.grants[0]!.methods, ['*'])
       assert.deepEqual(current.policy.grants[1], authorization.policies.caller.grants[1])
     }
     assert.deepEqual(
       source.identities.principal({ principal_id: 'test' })!.device_scope,
       registry.callers[0]!.device_scope
     )
-    assert(source.localPolicies().grants[0]!.methods.includes('wait.output'))
+    assert.deepEqual(source.localPolicies().grants[0]!.methods, ['*'])
     assert.deepEqual(readFileSync(path), original)
     registry.callers[0]!.principal.policy = structuredClone(authorization.policies.caller)
     registry.callers[0]!.principal.policy.grants[0]!.methods = ['pane.read']
     writeSetupFile(path, JSON.stringify(registry), true)
-    assert.deepEqual(source.identities.principal({ principal_id: 'test' })!.policy.grants[0]!.methods, ['pane.read'])
+    assert.deepEqual(source.identities.principal({ principal_id: 'test' })!.policy.grants[0]!.methods, ['*'])
+    registry.callers[0]!.principal.policy = { revision: 'old_per_token_policy', grants: [] }
+    writeSetupFile(path, JSON.stringify(registry), true)
+    assert.deepEqual(source.identities.principal({ principal_id: 'test' })!.policy.grants[0]!.methods, ['*'])
+    assert.equal(source.identities.principal({ principal_id: 'test' })!.policy.revision, 'setup_caller_simple')
   } finally {
     source.close()
     rmSync(root, { recursive: true, force: true })
   }
 })
 
-test('Connector 双端默认预设升级，安装记录原文及自定义策略保持不变', () => {
+test('Connector 的旧逐方法策略不再限制调用，原安装与目标不变', () => {
   const authorization = legacy()
   const entry = {
     reference: 'luvus_legacy',
@@ -97,13 +95,13 @@ test('Connector 双端默认预设升级，安装记录原文及自定义策略�
     }
   }
   const original = structuredClone(entry)
-  const result = migrateSetupLuvusConnector(entry)
+  const result = allExposedConnectorMethods(entry)
   const value = result.value as typeof entry.value
-  assert(value.policies.caller.grants[0]!.methods.includes('wait.output'))
-  assert(value.policies.local.grants[0]!.methods.includes('wait.output'))
+  assert.deepEqual(value.policies.caller.grants[0]!.methods, ['*'])
+  assert.deepEqual(value.policies.local.grants[0]!.methods, ['*'])
   assert.deepEqual(value.native, original.value.native)
   assert.deepEqual(entry, original)
-  assert.deepEqual(migrateSetupLuvusConnector(result), result)
+  assert.deepEqual(allExposedConnectorMethods(result), result)
   const narrow = {
     revision: authorization.policies.caller.revision,
     grants: [
@@ -113,9 +111,7 @@ test('Connector 双端默认预设升级，安装记录原文及自定义策略�
       }
     ]
   }
-  assert.equal(upgradeSetupLuvusPolicy(narrow), narrow)
+  assert.deepEqual(allExposedMethods(narrow).grants[0]!.methods, ['*'])
   const custom = { ...authorization.policies.caller, revision: 'custom_policy' }
-  assert.equal(upgradeSetupLuvusPolicy(custom), custom)
-  const methods = ['pane.read']
-  assert.equal(upgradeSetupLuvusMethods(methods), methods)
+  assert.deepEqual(allExposedMethods(custom).grants[0]!.methods, ['*'])
 })

@@ -6,6 +6,7 @@
 // 已有固定 pin 的 herdr 时可用 ROVLOOM_HERDR_BIN=<路径> 免下载；未提供则按 fixture 的官方 pin 下载。
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { setTimeout as pause } from 'node:timers/promises'
 import { createDualRoleFixture } from '../release/dual-role-fixture.mjs'
 import { createConnectorOutput } from './connector-output.mjs'
@@ -96,6 +97,45 @@ async function verifyHostProfile() {
     await client.close()
   }
 }
+/** fixture 两端旧策略只列 ping；有效 MCP token 仍须能发现并调用已暴露的 pane.list。 */
+async function verifyExposedMethods() {
+  const client = new Client({ name: 'all-exposed-methods-e2e', version: '1' })
+  const tool = async (name, args) => {
+    const reply = await client.callTool({ name, arguments: args }, CallToolResultSchema)
+    assert(!reply.isError, 'e2e_exposed_method_failed:' + name)
+    return reply.structuredContent.data
+  }
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(f.resource), {
+        requestInit: { headers: { authorization: `Bearer ${f.proof}` } }
+      })
+    )
+    const route = { target: f.target, expected_binding_revision: 1 }
+    const catalog = await tool('runtime_discover', { ...route, limit: 100 })
+    const method = catalog.items.find((item) => item.method === 'pane.list')
+    assert(method, 'e2e_herdr_legacy_method_snapshot_still_filters_catalog')
+    let call = await tool('runtime_call', {
+      ...route,
+      contract_ref: method.contract_ref,
+      native_request: { method: 'pane.list', params: {} },
+      deadline: Date.now() + 20_000,
+      wait_ms: 500
+    })
+    while (['created', 'dispatching', 'connector_accepted'].includes(call.state)) {
+      call = await tool('runtime_call_get', { call_id: call.call_id, wait_ms: 500 })
+    }
+    assert.equal(call.state, 'responded', 'e2e_herdr_legacy_method_snapshot_still_blocks_dispatch')
+    const page = await tool('runtime_result_read', { result_id: call.result.result_id, max_bytes: 16384 })
+    assert.equal(page.eof, true)
+    const bytes = Buffer.from(page.chunk, 'base64')
+    assert.equal(createHash('sha256').update(bytes).digest('hex'), page.sha256)
+    assert(!JSON.parse(bytes.toString()).error, 'e2e_herdr_native_pane_list_error')
+    report('legacy_herdr_method_scope=ignored native_call=pane.list')
+  } finally {
+    await client.close()
+  }
+}
 let gateway
 let connector
 try {
@@ -142,6 +182,7 @@ try {
   assert(ready, 'e2e_connector_not_ready:' + connector.stderr)
   report('connector=ready')
   const firstReport = await verifyHostProfile()
+  await verifyExposedMethods()
   report('baseline_stderr=' + JSON.stringify(connector.stderr.split('\n').filter(Boolean)))
 
   // SIGTERM 停网关进程：这是运维真实停服路径。

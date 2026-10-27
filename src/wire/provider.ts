@@ -188,7 +188,9 @@ export function providerScopeAllowed(
     /* 检查这一端是否存在完整覆盖目标、方法和动作的授权。 */ (side) =>
       side.grants.some(
         /* 匹配单条授权的完整目标、方法和动作，避免跨条目拼接权限。 */ (g) =>
-          boundedJson(g.target) === target && g.methods.includes(method) && g.actions.includes(action)
+          boundedJson(g.target) === target &&
+          (g.methods.includes('*') || g.methods.includes(method)) &&
+          g.actions.includes(action)
       )
   )
 }
