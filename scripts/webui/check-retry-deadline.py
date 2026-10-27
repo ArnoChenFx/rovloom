@@ -25,7 +25,7 @@ def retained(page, retry, phase):
     retry.evaluate('''/* 旧 DOM 事件不能用展示属性覆盖当前操作阶段。 */ button => {
         button.hidden = false; button.disabled = false; button.click();
     }''')
-    expect(page.locator('dialog')).to_have_attribute('data-phase', phase)
+    expect(page.locator('dialog.operation-dialog')).to_have_attribute('data-phase', phase)
     expect(page.locator('.operation-form')).not_to_be_visible()
     retry.evaluate('''/* 恢复测试修改的展示属性，保持后续用户控件真实布局。 */ button => {
         button.hidden = true; button.disabled = true;
@@ -80,7 +80,7 @@ def main():
                 expect(refresh).to_be_enabled()
                 expect(page.locator('.read-indicator')).to_have_attribute('data-state', 'current')
                 retry = page.get_by_role('button', name='Prepare again' if language == 'en' else '重新准备', exact=True, include_hidden=True)
-                expect(page.locator('dialog')).to_have_attribute('data-phase', 'submitting')
+                expect(page.locator('dialog.operation-dialog')).to_have_attribute('data-phase', 'submitting')
                 retained(page, retry, 'submitting')
                 if reconcile:
                     page.get_by_role('button', name='Cancel wait' if language == 'en' else '取消等待', exact=True).click()
@@ -94,7 +94,7 @@ def main():
                     }''')
                     retained(page, retry, 'checking')
                 control(context, base, mode='release')
-                page.locator('dialog[data-phase="committed"]').wait_for()
+                page.locator('dialog.operation-dialog[data-phase="committed"]').wait_for()
                 expect(page.locator('.operation-facts')).to_contain_text(original['request_id'])
                 data = metadata(context, base)
                 assert writes(context, base) == ['devices_rename']

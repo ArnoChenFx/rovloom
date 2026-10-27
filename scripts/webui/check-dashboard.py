@@ -136,8 +136,11 @@ def main():
         assert page.evaluate('navigator.clipboard.readText()') == command
         assert context.request.get(actions + '/__fixture').json()['calls'].count('pairing_codes_create') == 1
         page.screenshot(path=str(output / 'pairing-waiting-zh.png'), full_page=True)
-        page.once('dialog', lambda dialog: dialog.accept())
         entry.get_by_role('button', name='作废', exact=True).click()
+        dialog = page.locator('dialog[data-confirm-dialog]')
+        expect(dialog).to_be_visible()
+        dialog.locator('[data-confirm-accept]').click()
+        expect(dialog).not_to_be_visible()
         expect(entry).to_contain_text('已作废')
         expect(entry.locator('[data-copy]')).to_have_count(0)
         page.set_viewport_size({'width':320,'height':900})

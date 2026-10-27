@@ -22,15 +22,15 @@ def metadata(context, base):
 
 def confirm(page):
     """快速重复点击仍只提交原确认一次。"""
-    page.locator('dialog[data-phase="awaiting_confirmation"]').wait_for()
+    page.locator('dialog.operation-dialog[data-phase="awaiting_confirmation"]').wait_for()
     page.locator('.operation-confirm').evaluate('''/* 重复人工事件不能形成第二次提交。 */ button => {button.click(); button.click()}''')
-    page.locator('dialog[data-phase="committed"]').wait_for()
+    page.locator('dialog.operation-dialog[data-phase="committed"]').wait_for()
 
 
 def close(page):
     """关闭原状态机对话框并保留页面进度面板。"""
     page.locator('.operation-controls button').last.click()
-    expect(page.locator('dialog')).not_to_be_visible()
+    expect(page.locator('dialog.operation-dialog')).not_to_be_visible()
 
 
 def main():
@@ -63,7 +63,7 @@ def main():
                     page.goto(base + '/fixtures/#machine=' + machine)
                     page.locator('[data-provider-action="disable"]:enabled').wait_for()
                     page.locator('[data-provider-action="disable"]').click()
-                    page.locator('dialog[data-phase="awaiting_confirmation"]').wait_for()
+                    page.locator('dialog.operation-dialog[data-phase="awaiting_confirmation"]').wait_for()
                     assert 'fixture-provider' in page.locator('.operation-facts').inner_text()
                     page.screenshot(path=str(output / f'{language}-{theme}-{width}-provider.png'))
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')

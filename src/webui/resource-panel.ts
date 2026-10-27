@@ -2,6 +2,7 @@
 import type { Localizer } from './i18n.js'
 import type { PageRoute } from './view.js'
 import { copyControl } from './clipboard.js'
+import { createConfirmDialog } from './confirm.js'
 import { ResourceError, type ResourceTransport, type ResourceOperation } from './resource-client.js'
 
 type DeviceScope = { mode: 'all' } | { mode: 'selected'; machine_ids: string[] }
@@ -35,6 +36,11 @@ export function createResourcePanel(options: {
   authorizationLost(problem: 'forbidden' | 'unauthenticated'): void
 }) {
   const region = node('section', '', 'resource-panel')
+  // 二次确认走页面内模态对话框：原生 confirm 阻塞脚本、语言和样式都跟不上界面。
+  const confirmDialog = createConfirmDialog()
+  // 面板内容每次重建，对话框节点固定挂载，避免重建时把打开的模态从文档里拽出去。
+  const surface = node('div', '', 'resource-surface')
+  region.append(surface, confirmDialog.element)
   const feedback = node('p', '', 'resource-feedback')
   feedback.setAttribute('role', 'status')
   let i18n: Localizer
@@ -198,9 +204,12 @@ export function createResourcePanel(options: {
     // 「全部设备」是一次显式放开，比 CLI 的 --all-devices 更容易误触，因此提交前二次确认。
     const allPane = node('div', '', 'token-scope-picker')
     const saveAll = button(t('resources.scopeSaveAll'), () => {
-      if (window.confirm(t('resources.confirmScopeAll', { name: token.principal }))) {
-        onChange(null)
-      }
+      // 与其它危险操作走同一条路径：接受后还要确认面板仍然有效。
+      void confirmThen(
+        t('resources.confirmScopeAllTitle'),
+        t('resources.confirmScopeAll', { name: token.principal }),
+        () => onChange(null)
+      )
     })
     saveAll.dataset.scopeSave = 'all'
     allPane.append(saveAll)
@@ -258,10 +267,20 @@ export function createResourcePanel(options: {
     return field
   }
 
-  function remove(operation: ResourceOperation, args: Record<string, unknown>, message: string) {
-    if (window.confirm(message)) {
-      void mutate(operation, args)
+  /** 危险操作先经页面内模态确认；接受才提交，取消/Escape 都算不提交。 */
+  async function confirmThen(title: string, message: string, run: () => void) {
+    const accepted = await confirmDialog.ask({
+      title,
+      message,
+      accept: i18n.t('confirm.accept'),
+      cancel: i18n.t('confirm.cancel')
+    })
+    if (accepted && active) {
+      run()
     }
+  }
+  function remove(operation: ResourceOperation, args: Record<string, unknown>, title: string, message: string) {
+    void confirmThen(title, message, () => void mutate(operation, args))
   }
   function render() {
     if (!active) {
@@ -275,7 +294,13 @@ export function createResourcePanel(options: {
         node('div', t('resources.deleteDeviceNote'), 'muted'),
         button(
           t('resources.deleteDevice'),
-          () => remove('devices_delete', { machine_id: route.machineId }, t('resources.confirmDevice')),
+          () =>
+            remove(
+              'devices_delete',
+              { machine_id: route.machineId },
+              t('resources.confirmDeleteDeviceTitle'),
+              t('resources.confirmDevice')
+            ),
           true
         )
       )
@@ -400,9 +425,11 @@ export function createResourcePanel(options: {
             controls.append(
               node('span', t('resources.legacy'), 'muted'),
               button(t('resources.reissue'), () => {
-                if (window.confirm(t('resources.confirmReissue'))) {
-                  void mutate('tokens_rotate', { principal: token.principal })
-                }
+                void confirmThen(
+                  t('resources.confirmReissueTitle'),
+                  t('resources.confirmReissue'),
+                  () => void mutate('tokens_rotate', { principal: token.principal })
+                )
               })
             )
           }
@@ -413,6 +440,7 @@ export function createResourcePanel(options: {
                 remove(
                   'tokens_delete',
                   { principal: token.principal },
+                  t('resources.confirmDeleteTokenTitle'),
                   t('resources.confirmToken', { name: token.principal })
                 ),
               true
@@ -491,7 +519,13 @@ export function createResourcePanel(options: {
             card.append(
               button(
                 t('resources.revokeCode'),
-                () => remove('pairing_codes_revoke', { code_id: entry.code_id }, t('resources.confirmRevokeCode')),
+                () =>
+                  remove(
+                    'pairing_codes_revoke',
+                    { code_id: entry.code_id },
+                    t('resources.confirmRevokeCodeTitle'),
+                    t('resources.confirmRevokeCode')
+                  ),
                 true
               )
             )
@@ -503,10 +537,12 @@ export function createResourcePanel(options: {
         body.append(node('p', t('resources.emptyTokens'), 'empty'))
       }
     }
-    region.replaceChildren(body, feedback)
+    surface.replaceChildren(body, feedback)
   }
   function clear() {
     active = false
+    // 页面切换时按取消结算未决确认，不留悬挂的对话框。
+    confirmDialog.dismiss()
     key = ''
     data = undefined
     scopeDraft = undefined
@@ -517,7 +553,8 @@ export function createResourcePanel(options: {
     version++
     controller.abort()
     pending = false
-    region.replaceChildren()
+    // 只清空内容；模态对话框节点留在原位，下次打开不需要重新挂载。
+    surface.replaceChildren()
     region.hidden = true
   }
   return {

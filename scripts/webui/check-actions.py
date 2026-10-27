@@ -40,13 +40,13 @@ def prepare(page, action, name=None):
     if name:
         page.locator('input[name="device-name"]').fill(name)
         page.locator('.operation-form button').click()
-    page.locator('dialog[data-phase="awaiting_confirmation"]').wait_for()
+    page.locator('dialog.operation-dialog[data-phase="awaiting_confirmation"]').wait_for()
 
 
 def close_dialog(page):
     """正常关闭已完成或取消的对话框。"""
     page.locator('.operation-controls button').last.click()
-    expect(page.locator('dialog')).not_to_be_visible()
+    expect(page.locator('dialog.operation-dialog')).not_to_be_visible()
 
 
 def main():
@@ -94,21 +94,21 @@ def main():
                     prepares = metadata(context, base)['calls'].count('confirmations_create')
                     page.locator('[data-device-action="device_rename"]').evaluate('''/* 重复后台入口事件不能覆盖正在复核的流程。 */
                         button => {button.click(); button.click()}''')
-                    assert page.locator('dialog').get_attribute('data-phase') == 'awaiting_confirmation'
+                    assert page.locator('dialog.operation-dialog').get_attribute('data-phase') == 'awaiting_confirmation'
                     assert metadata(context, base)['calls'].count('confirmations_create') == prepares
                     assert page.locator('.operation-facts').inner_text().find(new_name) >= 0
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-                    box = page.locator('dialog').bounding_box()
+                    box = page.locator('dialog.operation-dialog').bounding_box()
                     assert box['x'] >= 0 and box['x'] + box['width'] <= width
                     if width == 320:
-                        assert page.locator('dialog button:visible').evaluate_all('''/* 窄屏按钮保持触控高度。 */ nodes => nodes.every(
+                        assert page.locator('dialog.operation-dialog button:visible').evaluate_all('''/* 窄屏按钮保持触控高度。 */ nodes => nodes.every(
                             /* 从实际命中区域读取尺寸。 */ node => node.getBoundingClientRect().height >= 48)''')
                     page.screenshot(path=str(output / f'{language}-{theme}-{width}-review.png'))
                     page.locator('.operation-confirm').evaluate('''/* 验证快速重复事件不能形成第二次提交。 */ button => {button.click(); button.click()}''')
-                    page.locator('dialog[data-phase="committed"]').wait_for()
+                    page.locator('dialog.operation-dialog[data-phase="committed"]').wait_for()
                     assert writes(context, base) == ['devices_rename']
                     assert metadata(context, base)['devices'][0]['name'] == new_name
-                    assert ('原生工作' if language == 'zh-CN' else 'native work') in page.locator('dialog').inner_text()
+                    assert ('原生工作' if language == 'zh-CN' else 'native work') in page.locator('dialog.operation-dialog').inner_text()
                     close_dialog(page)
                     expect(page.locator('main h1')).to_have_text(new_name)
                     checks.append(f'{language}/{theme}/{width}: stable entry, duplicate entry/confirm protection, explicit review, one real Store rename, receipt, refresh, responsive layout')
@@ -121,11 +121,11 @@ def main():
             prepare(page, action)
             assert writes(context, base) == []
             if action == 'device_disconnect':
-                assert 'Connection epoch' in page.locator('dialog').inner_text()
+                assert 'Connection epoch' in page.locator('dialog.operation-dialog').inner_text()
             else:
-                assert 'fixture-provider' in page.locator('dialog').inner_text()
+                assert 'fixture-provider' in page.locator('dialog.operation-dialog').inner_text()
             page.locator('.operation-confirm').click()
-            page.locator('dialog[data-phase="committed"]').wait_for()
+            page.locator('dialog.operation-dialog[data-phase="committed"]').wait_for()
             data = metadata(context, base)
             assert data['devices'][0]['status'] == ('offline' if action == 'device_disconnect' else 'revoked')
             assert data['devices'][1]['status'] == 'online'
@@ -138,7 +138,7 @@ def main():
         prepare(page, 'device_rename', 'owned_cancelled')
         page.get_by_role('button', name='Cancel wait', exact=True).click()
         assert writes(context, base) == []
-        assert page.locator('dialog').get_attribute('data-phase') == 'cancelled'
+        assert page.locator('dialog.operation-dialog').get_attribute('data-phase') == 'cancelled'
         close_dialog(page)
         checks.append('cancel before confirm never writes')
         page.close()
@@ -146,7 +146,7 @@ def main():
         page, devices = open_page(context, base)
         prepare(page, 'device_revoke')
         page.keyboard.press('Escape')
-        expect(page.locator('dialog')).not_to_be_visible()
+        expect(page.locator('dialog.operation-dialog')).not_to_be_visible()
         assert writes(context, base) == []
         assert page.evaluate('''/* Esc 后焦点回到仍可用入口或稳定主内容。 */ () =>
             document.activeElement === document.querySelector('main') || document.activeElement.matches('[data-device-action]')''')
@@ -181,7 +181,7 @@ def main():
         assert metadata(context, base)['held']
         prepare(page, 'device_rename', 'owned_after_old_read')
         page.locator('.operation-confirm').click()
-        page.locator('dialog[data-phase="committed"]').wait_for()
+        page.locator('dialog.operation-dialog[data-phase="committed"]').wait_for()
         close_dialog(page)
         expect(page.locator('main h1')).to_have_text('owned_after_old_read')
         control(context, base, mode='release')
@@ -196,13 +196,13 @@ def main():
         page.locator('[data-device-action="device_rename"]').click()
         page.locator('input[name="device-name"]').fill('owned_recovered')
         page.locator('.operation-form button').click()
-        page.locator('dialog[data-phase="failed"]').wait_for()
+        page.locator('dialog.operation-dialog[data-phase="failed"]').wait_for()
         assert writes(context, base) == []
         control(context, base, mode='normal')
         page.get_by_role('button', name='Prepare again', exact=True).click()
         assert page.locator('input[name="device-name"]').input_value() == 'owned_recovered'
         page.locator('.operation-form button').click()
-        page.locator('dialog[data-phase="awaiting_confirmation"]').wait_for()
+        page.locator('dialog.operation-dialog[data-phase="awaiting_confirmation"]').wait_for()
         close_dialog(page)
         checks.append('prepare error recovery requires explicit new preparation and preserves input')
         page.close()
@@ -218,15 +218,15 @@ def main():
                 control(context, base, mode='release')
                 page.wait_for_timeout(250)
                 assert writes(context, base) == []
-                assert page.locator('dialog').get_attribute('data-phase') == 'cancelled'
+                assert page.locator('dialog.operation-dialog').get_attribute('data-phase') == 'cancelled'
             else:
                 page.evaluate('''/* 模拟用户切换设备详情，旧请求仍由状态机隔离。 */ id => {location.hash = '#machine=' + id}''', devices[1]['machine_id'])
-                expect(page.locator('dialog')).not_to_be_visible()
+                expect(page.locator('dialog.operation-dialog')).not_to_be_visible()
                 page.locator('.operation-resume:visible').wait_for()
                 control(context, base, mode='release')
                 page.locator('.operation-resume').click()
                 page.get_by_role('button', name='Check original receipt', exact=True).click()
-                page.locator('dialog[data-phase="committed"]').wait_for()
+                page.locator('dialog.operation-dialog[data-phase="committed"]').wait_for()
                 assert writes(context, base) == ['devices_rename']
                 assert metadata(context, base)['devices'][1]['name'] == 'owned_page_b'
             checks.append(mode + ': cancel/navigation rejects late submission or reconciles only the original receipt')
@@ -236,11 +236,11 @@ def main():
         prepare(page, 'device_rename', 'owned_lost_reply')
         control(context, base, mode='lost_reply')
         page.locator('.operation-confirm').click()
-        page.locator('dialog[data-phase="unconfirmed"]').wait_for()
+        page.locator('dialog.operation-dialog[data-phase="unconfirmed"]').wait_for()
         assert metadata(context, base)['devices'][0]['name'] == 'owned_lost_reply'
         control(context, base, mode='normal')
         page.get_by_role('button', name='Check original receipt', exact=True).click()
-        page.locator('dialog[data-phase="committed"]').wait_for()
+        page.locator('dialog.operation-dialog[data-phase="committed"]').wait_for()
         assert writes(context, base) == ['devices_rename']
         checks.append('lost committed reply only checks original durable receipt and never resends')
         page.close()
@@ -265,7 +265,7 @@ def main():
         page.locator('input[name="device-name"]').fill('owned_after_auth_loss')
         page.locator('.operation-form button').click()
         # 认证失败会清空操作流并关闭对话框，不进入 failed 相位。
-        expect(page.locator('dialog')).not_to_be_visible()
+        expect(page.locator('dialog.operation-dialog')).not_to_be_visible()
         assert writes(context, base) == []
         # 旧授权数据已清空（写入口全部禁用），但刷新按钮可用。
         assert page.locator('[data-device-action]:enabled').count() == 0
@@ -295,7 +295,7 @@ def main():
         prepare(page, 'device_rename', 'owned_session_lost')
         control(context, base, mode='401')
         page.locator('.operation-confirm').click()
-        expect(page.locator('dialog')).not_to_be_visible()
+        expect(page.locator('dialog.operation-dialog')).not_to_be_visible()
         expect(page.locator('main .device-detail')).to_have_count(0)
         assert page.locator('input[name="device-name"]').input_value() == ''
         assert writes(context, base) == []
@@ -313,8 +313,12 @@ def main():
         expect(entry).to_be_visible()
         expect(entry).to_contain_text('Unused')
         assert entry.locator('.command-snippet code').inner_text().startswith('rovloom connector --join ws://')
-        page.once('dialog', lambda dialog: dialog.accept())
         entry.get_by_role('button', name='Revoke', exact=True).click()
+        dialog = page.locator('dialog[data-confirm-dialog]')
+        expect(dialog).to_be_visible()
+        assert 'Revoke this pairing code?' in dialog.inner_text()
+        dialog.locator('[data-confirm-accept]').click()
+        expect(dialog).not_to_be_visible()
         expect(entry).to_contain_text('Revoked')
         expect(entry.locator('[data-copy]')).to_have_count(0)
         checks.append('pairing: one command creates a code; revocation removes the secret command')
