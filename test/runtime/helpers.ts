@@ -31,9 +31,10 @@ export async function runtimeFixture(
     local: ProviderPolicy
     target: import('../../src/wire/types.js').V2Target
     root: string
-  }) => Promise<{ hosted: readonly GatewayHostedProviders[]; release(): Promise<void> }>
+  }) => Promise<{ hosted: readonly GatewayHostedProviders[]; release(): Promise<void> }>,
+  operation?: { method: string; params: Record<string, unknown>; validation: 'strict' | 'raw-contract' }
 ) {
-  const native = await localFixture()
+  const native = await localFixture('ipc', operation?.method, operation?.params, operation?.validation)
   const stateDirectory = join(native.root, 'gateway')
   mkdirSync(stateDirectory, { mode: 0o700 })
   const state = openGatewayState({
@@ -57,7 +58,7 @@ export async function runtimeFixture(
   state.store.defineProvider(binding)
   const caller: ProviderPolicy = {
     revision: 'caller1',
-    grants: [{ target, methods: ['task.add'], actions: ['dispatch', 'read', 'cancel'] }]
+    grants: [{ target, methods: [native.row.method], actions: ['dispatch', 'read', 'cancel'] }]
   }
   const local: ProviderPolicy = { ...structuredClone(caller), revision: 'local1' }
   let authorized = true

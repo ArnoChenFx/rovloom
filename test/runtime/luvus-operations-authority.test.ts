@@ -201,9 +201,27 @@ test(
     input.wire.source.binary_version = 'future-diagnostic-version'
     input.wire.source.server_version = 'different-server-version'
     assert.doesNotThrow(/** 版本标签不参与接口兼容判断。 */ () => assertLuvusOperationsContract(input))
-    assert.equal(LUVUS_OPERATION_METHODS.length, 35)
+    assert.equal(LUVUS_OPERATION_METHODS.length, 36)
   }
 )
+
+test('输出等待核对只读能力与独立 raw 授权，拒绝权限缺失和原生能力变化', () => {
+  const input = fixture('wait.output', { pane: '1', match: 'fresh_marker', timeout_s: 35 })
+  assert.equal(dispatch(input, true).ok, true)
+  const rejected = dispatch(input, false)
+  assert(!rejected.ok)
+  assert.equal(rejected.error.code, 'raw_contract_not_authorized')
+  for (const change of [{ access: 'write' }, { scope: 'admin' }, { idempotent: false }]) {
+    const changed = fixture('wait.output', { pane: '1', match: 'fresh_marker', timeout_s: 35 })
+    const rows = (changed.contract.capabilities as { result: { method_contracts: Record<string, unknown>[] } }).result
+      .method_contracts
+    Object.assign(
+      rows.find((row) => row.method === 'wait.output')!,
+      change
+    )
+    assert.throws(() => dispatch(changed, true), /luvus_operations_contract_mismatch/)
+  }
+})
 
 test(
   'shared Luvus authority ignores diagnostic fields while preserving native grant checks',

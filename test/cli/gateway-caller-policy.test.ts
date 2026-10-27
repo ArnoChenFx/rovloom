@@ -148,3 +148,35 @@ test('joining rejects a different caller binding without changing registry bytes
     f.close()
   }
 })
+
+test('加入新设备只追加新目标授权，不回溯扩大已批准的旧目标方法集', () => {
+  const f = fixture()
+  try {
+    // 已配对现场：首台设备的授权是升级前的旧方法集，模拟上一版本持久化的策略。
+    const legacy = simpleSetupAuthorization('first_machine', ['herdr'])
+    legacy.policies.caller.grants[0]!.methods = ['title.add']
+    legacy.policies.local.grants[0]!.methods = ['title.add']
+    publishFirstCallers(f.path, resource, legacy, {
+      principal: { id: legacy.principal_id, policy: legacy.policies.caller },
+      token_sha256: digestToken('b'.repeat(43)),
+      issued_at: Date.now() - 1000,
+      expires_at: Date.now() + 86_400_000
+    })
+    const added = simpleSetupAuthorization('second_machine', ['herdr'])
+    mergeSetupCallers(f.path, resource, added)
+    const grants = f.source.localPolicies().grants
+    assert.equal(grants.length, 2)
+    // 旧目标保持原方法集：程序新增方法不会因为另一台设备配对被追认给已批准设备。
+    assert.deepEqual(grants[0], legacy.policies.local.grants[0])
+    assert.deepEqual(grants[1], added.policies.local.grants[0])
+    // 同一目标换一个方法集属于改写已批准权限，必须拒绝并保持文件不变。
+    const original = readFileSync(f.path)
+    const wider = simpleSetupAuthorization('second_machine', ['herdr'])
+    wider.policies.local.grants[0]!.methods = [...wider.policies.local.grants[0]!.methods, 'title.remove']
+    wider.policies.caller.grants[0]!.methods = [...wider.policies.caller.grants[0]!.methods, 'title.remove']
+    assert.throws(() => mergeSetupCallers(f.path, resource, wider), { code: 'configuration_required' })
+    assert.deepEqual(readFileSync(f.path), original)
+  } finally {
+    f.close()
+  }
+})

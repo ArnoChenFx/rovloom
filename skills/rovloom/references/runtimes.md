@@ -10,7 +10,7 @@ Corresponds to Luvus 0.14.3. The authoritative method list is `src/runtime/luvus
 
 `runtime_describe.params_schema`, when present, comes from the same verified installed schema as execution validation. For the ordinary reviewed methods, native branches exist for `pane.list`, `agent.prompt`, `agent.send`, `agent.wait` and `agent.keys`; the returned closure preserves native constraints and annotations. Most other methods, including `agent.start` and `workspace.list`, remain `generic_params_only`. Extra conditions that cannot be accurately projected are not discarded to invent a complete parameter schema.
 
-Read `schema_annotations` as well: each note carries its original `document_uri`, JSON Pointer and text. The native request document's `$comment` explains prompt waiting transitions and current-state matching; document-root notes retain that scope. `parameter_help` for `agent.wait`, `agent.prompt` and `pane.run` is separately marked `rovloom_reviewed_subset`, with field rules and examples. It supplements native coverage, rather than replacing it. These details appear in describe, not discovery summaries.
+Read `schema_annotations` as well: each note carries its original `document_uri`, JSON Pointer and text. The native request document's `$comment` explains prompt waiting transitions and current-state matching; document-root notes retain that scope. `parameter_help` for `agent.wait`, `agent.prompt`, `pane.run` and `wait.output` is separately marked `rovloom_reviewed_subset`, with field rules and examples. It supplements native coverage, rather than replacing it. These details appear in describe, not discovery summaries.
 
 ### There is no `window.*`
 
@@ -28,6 +28,8 @@ Luvus uses three levels: workspace → tab → pane. Discover those actual metho
 `pane.list` accepts only the optional `all_tabs` (boolean, default `true`) and takes **no** workspace or tab selector. To filter by workspace, `workspace.focus` first, or read the hierarchy from `session.snapshot` and then `pane.get` each pane. `pane.get` takes a `pane` argument.
 
 Prefer saving **stable IDs** such as `workspace_id`, `tab_id` and `terminal_id`; do not rely on titles, positions or "the most recent object".
+
+Every reviewed `pane` selector, including `agent.start.anchor`, accepts a canonical decimal string from `"1"` through `"4294967295"` (native positive `u32`). Numbers, leading zeros and larger values are rejected before registration.
 
 The decimal `pane` returned by Luvus 0.14.3 is a process-wide allocated ID, not a layout position. It stays with the pane across splits and moves, so you can reuse it across calls within the same running instance. It is reallocated when the runtime restores panes after a restart; never treat the same number in a new instance as proof of the same terminal.
 
@@ -76,7 +78,8 @@ Position parameters may be a number or a decimal string and are forwarded unchan
 - `pane.read` takes `pane` and `lines`; `agent.read` takes `target`, `lines` and `source`. `lines` caps at 1000 and returns only trailing lines. `text`, `content_revision` and `terminal_id` are Luvus's own values.
 - `agent.prompt` selects an Agent `target`. Its `until` and `timeout_s` require `wait:true`; `timeout_s` is seconds. Without waiting it returns queue admission immediately. In waiting mode, native semantics require a **new working or blocked transition** before matching `until` (native timeout default: 300 seconds).
 - `agent.wait` selects a `pane`, requires exactly one of `status` or `statuses`, and accepts `timeout_s` in seconds. It has **no `wait` flag** and matches the **current state**. Multiple states match any listed state, not an ordered sequence. An immediate idle match can refer to an old idle state and does not prove a new prompt was consumed.
-- `submitted`, `queued`, `ready: true` and `observed_state` only mean **the input was submitted or recognized as ready** — not that the prompt was consumed or that the model replied. Read real state and output separately.
+- `wait.output` selects a `pane` and waits for a literal `match` substring (1–4096 UTF-8 bytes, no NUL), with optional `timeout_s` in seconds (0..3600, fractions allowed). It first checks recent output, so an old marker can match immediately. Use a different marker for each execution when needed; no regex or implicit command wrapper is supported. A native `type:"wait", matched:false` response can mean timeout or pane closure, not a Gateway failure or proof that a command stopped.
+- `submitted`, `queued` and `ready: true` mean input admission or recognized readiness. `observed_state` records the first new working/blocked transition in a prompt wait. None proves the prompt was consumed or the model replied. Read real state and output separately.
 - Present `status` together with `authority` / `state_source`. Without positive evidence treat it as unknown; do not read idle, queued or TUI text as completion.
 - An upstream model failure triggers no resend and no switch to a paid model.
 - A two-turn conversation keeps the same complete target, the same pane or alias, the same `terminal_id`, and the known Agent `session`. When checking turn two, verify it recalls turn one's random content; terminal echo is not a reply.
@@ -85,12 +88,20 @@ Native request examples (use observed selectors and the user's actual message):
 
 ```json
 {"method":"agent.wait","params":{"pane":"2","status":"idle","timeout_s":35}}
+{"method":"wait.output","params":{"pane":"2","match":"unique_marker_for_this_execution","timeout_s":35}}
+{"method":"agent.prompt","params":{"target":"selected-agent","text":"Hello","strict":true}}
 {"method":"agent.prompt","params":{"target":"selected-agent","text":"Hello","strict":true,"wait":true,"until":["idle"],"timeout_s":120}}
 ```
 
+Prefer two phases for conversation: read the baseline and terminal/session identity, submit without `wait`/`until`/`timeout_s`, then poll `agent.read` and `pane.status` with short calls on that same target. Retrieve the submission through the original call; do not resend on an observation timeout. `state_source:"no_positive_state_evidence"` makes idle unconfirmed, and output/revision changes alone only show activity. A sentinel can supplement reading when explicitly authorized, but old text and prompt echo may match; verify the reply against this turn.
+
+For prompt waits, `evidence:"timeout"` plus explicit `observed_state:null` means no qualifying transition was observed. With `observed_state:"working"` or `"blocked"`, a transition was observed but the wait did not match before its deadline. Neither means the Agent failed to reply: fast replies may already be in `agent.read`. A missing field in a legacy response cannot be classified as explicit null. Even `matched:true` reports native state matching rather than a durable per-turn completion receipt. Rovloom preserves the original response and does not fall back to success on current idle. See [the native semantic issue](https://github.com/ArnoChenFx/rovloom/issues/301).
+
 The enclosing `runtime_call.deadline` must cover the native wait plus RPC overhead; a 120-second wait can use a deadline roughly 150 seconds in the future. It remains a fixed absolute Unix millisecond timestamp, at most 10 minutes out at registration. Luvus RPC defaults to a local 10-minute cap, while endpoint discovery/schema preparation remain capped at 30 seconds; explicit shorter local settings still apply. Native `timeout_s` may allow up to 3600 seconds, but it cannot raise Rovloom's call or local deadlines. `wait_ms` only controls one short HTTP wait: poll the original call rather than replaying the prompt.
 
-For common parameter failures on the three guided methods, read `gateway_error.details.issues` and `details.parameter_help`. `/params/pane` with `required` indicates a missing pane selector; `/params/wait` with `required_true` identifies the prompt-wait dependency. When the rejected parameter cannot be safely located, `/params` with `invalid_value` is a general diagnostic, not a specific field diagnosis. The error still carries `native_request_invalid` and `outcome:"not_dispatched"`; diagnostics omit user values and raw native errors and are not exhaustive.
+For common parameter failures on the four guided methods, read `gateway_error.details.issues` and `details.parameter_help`. `/params/pane` with `required` indicates a missing pane selector; `/params/wait` with `required_true` identifies the prompt-wait dependency. When the rejected parameter cannot be safely located, `/params` with `invalid_value` is a general diagnostic, not a specific field diagnosis. The error still carries `native_request_invalid` and `outcome:"not_dispatched"`; diagnostics omit user values and raw native errors and are not exhaustive.
+
+Set `timeout_s` explicitly for output waits (35 seconds can use a deadline 45–60 seconds in the future). Waiting remains a blocking native RPC and occupies an execution slot; `wait_ms:0` only releases the HTTP wait. Both Gateway and Connector must support this method, and existing 35-method grants are preserved. The owner must explicitly authorize `wait.output` on both ends and in the provider raw grant; never bypass a refusal. New pairing includes it. The terminal-input switch can remain off for this read-only operation.
 
 ### Terminal command submission
 

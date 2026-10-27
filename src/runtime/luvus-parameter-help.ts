@@ -1,11 +1,23 @@
 // 已审核子集的调用提示与固定字段诊断；不冒充安装版原生 JSON Schema，不返回请求值。
 const help = {
+  'wait.output': {
+    required: ['pane', 'match'],
+    optional: ['timeout_s'],
+    rules: [
+      'Wait for a literal substring in the selected pane. match is non-empty text, at most 4096 UTF-8 bytes; it is not a regex.',
+      'The native runtime first checks recent output, so an existing marker can match immediately. Use a fresh per-execution marker when appropriate.',
+      'timeout_s is seconds (0..3600). Set it explicitly and leave RPC overhead before the absolute runtime_call deadline.',
+      'A native type:wait response with matched:false means the observation ended without a match; it does not prove a command stopped or failed. No stdout or exit code is returned.'
+    ],
+    examples: [{ pane: '2', match: 'unique_marker_for_this_execution', timeout_s: 35 }]
+  },
   'agent.wait': {
     required: ['pane'],
     optional: ['status', 'statuses', 'timeout_s'],
     rules: [
       'Select a pane, not an agent target. Supply exactly one of status or statuses.',
-      'statuses matches any listed state. timeout_s is seconds (0..3600). No wait flag is used here.'
+      'statuses matches any listed state. timeout_s is seconds (0..3600). No wait flag is used here.',
+      'This matches current state, including an old idle state. A state_source of no_positive_state_evidence is not evidence that a new prompt completed.'
     ],
     examples: [{ pane: '2', status: 'idle', timeout_s: 35 }]
   },
@@ -15,9 +27,15 @@ const help = {
     rules: [
       'Select an agent target. until or timeout_s requires wait:true.',
       'timeout_s is seconds (0..3600). The runtime_call deadline must cover the requested wait and RPC overhead.',
+      'wait:true requires a new working or blocked transition before matching until. A fast reply or missing positive state evidence can leave the wait unmatched.',
+      'evidence:timeout with observed_state:null means no qualifying transition was observed; with observed_state:working or blocked it means the requested until state was not matched before the deadline. Neither proves the agent failed to reply.',
+      'Prefer submitting without wait, then observing agent.read and pane.status. Use wait.output for an explicitly authorized literal output sentinel; old output and prompt echo can match, so verify the reply separately. Do not resend a submitted prompt on an observation timeout.',
       'submitted/queued does not prove the agent consumed the prompt or finished replying.'
     ],
-    examples: [{ target: 'selected-agent', text: 'Hello', strict: true, wait: true, until: ['idle'], timeout_s: 120 }]
+    examples: [
+      { target: 'selected-agent', text: 'Hello', strict: true },
+      { target: 'selected-agent', text: 'Hello', strict: true, wait: true, until: ['idle'], timeout_s: 120 }
+    ]
   },
   'pane.run': {
     required: ['pane', 'command'],
