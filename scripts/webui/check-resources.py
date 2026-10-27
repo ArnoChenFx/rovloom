@@ -80,10 +80,17 @@ def main():
         expect(token.locator('.scope-badge')).to_have_text('全部设备')
         scope.locator('[data-scope-mode="selected"]').check()
         first_device = data['devices'][0]
-        scope.locator(f'[data-scope-device="{first_device["machine_id"]}"]').check()
+        device_box = scope.locator(f'[data-scope-device="{first_device["machine_id"]}"]')
+        device_box.check()
+        # 设备标签只显示可读名称，稳定 ID 只留在 title 里，不以可见文本出现。
+        device_label = device_box.locator('xpath=..')
+        expect(device_label).to_have_text(first_device['name'])
+        assert first_device['machine_id'] not in device_label.inner_text()
+        assert device_label.get_attribute('title') == first_device['machine_id']
         scope.locator('[data-scope-save="selected"]').click()
         expect(token.locator('.scope-badge')).to_contain_text('1 台设备')
         expect(token.locator('.scope-badge')).to_contain_text(first_device['name'])
+        assert first_device['machine_id'] not in token.locator('.scope-badge').inner_text()
         page.reload()
         expect(token.locator('.scope-badge')).to_contain_text('1 台设备')
         scope = token.locator('[data-token-scope="claude-desktop"]')

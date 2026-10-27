@@ -210,7 +210,8 @@ export function createResourcePanel(options: {
     const candidates = [...devices]
     for (const machine of draft) {
       if (!candidates.some((device) => device.machine_id === machine)) {
-        candidates.push({ machine_id: machine, name: machine })
+        // 已从 Store 移除但仍在范围内的设备：保留可取消的条目，显示占位名而不是 UUID。
+        candidates.push({ machine_id: machine, name: '' })
       }
     }
     for (const device of candidates) {
@@ -220,10 +221,9 @@ export function createResourcePanel(options: {
       box.dataset.scopeDevice = device.machine_id
       box.checked = draft.includes(device.machine_id)
       box.disabled = pending
-      const label = node(
-        'label',
-        device.name === device.machine_id ? device.machine_id : device.name + ' · ' + device.machine_id
-      )
+      // 设备名唯一且可读，是给人看的标签；已移除的设备只标固定占位文案，稳定 ID 只进 title 供排查。
+      const label = node('label', device.name || t('resources.scopeRemoved'))
+      label.title = device.machine_id
       label.prepend(box)
       boxes.set(device.machine_id, box)
       picker.append(label)
@@ -362,23 +362,28 @@ export function createResourcePanel(options: {
             node('span', t('resources.expiresAt', { time: i18n.timestamp(token.expires_at) }), 'muted')
           )
           const devices = data?.devices ?? []
-          // 状态展示：全部设备 / N 台设备 + 具体名称（设备已删除时保留稳定 ID）。
+          // 状态展示只用可读设备名；已移除的设备给固定占位文案，稳定 ID 收进 title。
           const scope = token.device_scope
           const names =
             scope.mode === 'selected'
               ? scope.machine_ids
-                  .map((machine) => devices.find((entry) => entry.machine_id === machine)?.name ?? machine)
+                  .map(
+                    (machine) =>
+                      devices.find((entry) => entry.machine_id === machine)?.name || t('resources.scopeRemoved')
+                  )
                   .join('、')
               : ''
-          summary.append(
-            node(
-              'span',
-              scope.mode === 'all'
-                ? t('resources.scopeAllBadge')
-                : t('resources.scopeSelectedBadge', { count: scope.machine_ids.length }) + ' · ' + names,
-              'badge scope-badge'
-            )
+          const badge = node(
+            'span',
+            scope.mode === 'all'
+              ? t('resources.scopeAllBadge')
+              : t('resources.scopeSelectedBadge', { count: scope.machine_ids.length }) + ' · ' + names,
+            'badge scope-badge'
           )
+          if (scope.mode === 'selected') {
+            badge.title = scope.machine_ids.join(', ')
+          }
+          summary.append(badge)
           const controls = node('div', '', 'token-controls')
           if (token.token) {
             const value = node('input')
