@@ -86,6 +86,21 @@ def main():
                 language_control, theme_control = controls(page)
                 language_control.choose(language)
                 theme_control.choose(theme)
+                # 侧栏版本号与导航、网关状态同一块内容区居中，不能偏向任何一侧。
+                sidebar = page.evaluate('''/* 同帧比较侧栏三块内容的水平中心与文本对齐。 */ () => {
+                    const center = selector => {
+                        const box = document.querySelector(selector).getBoundingClientRect()
+                        return {left: box.left, right: box.right, middle: (box.left + box.right) / 2}
+                    }
+                    return {
+                        nav: center('.sidebar-nav'), status: center('.sidebar-status'),
+                        version: center('.sidebar-version'),
+                        align: getComputedStyle(document.querySelector('.sidebar-version')).textAlign
+                    }
+                }''')
+                assert abs(sidebar['version']['middle'] - sidebar['nav']['middle']) <= 1
+                assert abs(sidebar['version']['middle'] - sidebar['status']['middle']) <= 1
+                assert sidebar['align'] == 'center'
                 # 概览页检查标题在网关卡之上；列对齐与行高属于设备页。
                 heading = bounds(page, '.page-heading')
                 gateway = bounds(page, '.gateway')
