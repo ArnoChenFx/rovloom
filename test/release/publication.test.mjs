@@ -18,7 +18,7 @@ import {
 } from '../../scripts/release/metadata.mjs'
 import { productSmokePath } from '../../scripts/release/package.mjs'
 import { githubClient, verifyRemoteTag } from '../../scripts/release/github.mjs'
-import { publish } from '../../scripts/release/publish.mjs'
+import { publish, releaseBody } from '../../scripts/release/publish.mjs'
 
 const context = { tag: 'v0.1.1', version: '0.1.1', commit: 'a'.repeat(40) }
 
@@ -461,3 +461,23 @@ test(
     )
   }
 )
+
+test('Release 说明按版本生成：没有该版本条目就不带升级提示，不同版本不沿用彼此要点', () => {
+  // 0.6.7 是真正删除 public_url 的版本，提示只属于它。
+  const legacy = releaseBody({ tag: 'v0.6.7', version: '0.6.7', commit: 'a'.repeat(40) })
+  assert.match(legacy, /Upgrade note:\*\* Remove `mcp\.public_url`/u)
+  assert(!legacy.includes('wait.output'))
+  // 0.6.8 不再重复 public_url 提示，改说自己版本的变更。
+  const current = releaseBody({ tag: 'v0.6.8', version: '0.6.8', commit: 'a'.repeat(40) })
+  assert(!current.includes('mcp.public_url'))
+  assert.match(current, /wait\.output/u)
+  assert.match(current, /host_profile/u)
+  assert.match(current, /35-method Luvus grants keep their original scope/u)
+  // 未登记的版本不继承任何旧提示，只保留固定的公共段落与契约标记。
+  const future = releaseBody({ tag: 'v0.9.9', version: '0.9.9', commit: 'b'.repeat(40) })
+  assert(!future.includes('Upgrade note'))
+  assert(!future.includes('mcp.public_url'))
+  assert.match(future, /Binaries are not publisher-signed or notarized/u)
+  assert.match(future, /rovloom-0\.9\.9\.tgz/u)
+  assert(future.trimEnd().endsWith('<!-- rovloom-release:1 v0.9.9 ' + 'b'.repeat(40) + ' -->'))
+})
