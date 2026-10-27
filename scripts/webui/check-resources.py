@@ -8,6 +8,11 @@ from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright, expect
 
 
+def confirm_dialog(page):
+    """面板二次确认是页面内模态对话框；原生 window.confirm 不该再出现。"""
+    return page.locator('dialog[data-confirm-dialog]')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--url', required=True)
@@ -103,15 +108,18 @@ def main():
         page.reload()
         expect(token.locator('.scope-badge')).to_contain_text('0 台设备')
         scope = token.locator('[data-token-scope="claude-desktop"]')
-        # 放开回全部设备：显式按钮 + 二次确认（先取消，再确认）。
+        # 放开回全部设备：显式按钮 + 页面内模态二次确认（先取消，再确认）。
         scope.locator('[data-scope-mode="all"]').check()
         expect(scope.locator('[data-scope-save="all"]')).to_be_visible()
         expect(scope.locator('[data-scope-save="selected"]')).to_be_hidden()
-        page.once('dialog', lambda dialog: dialog.dismiss())
         scope.locator('[data-scope-save="all"]').click()
+        expect(confirm_dialog(page)).to_be_visible()
+        confirm_dialog(page).locator('[data-confirm-cancel]').click()
+        expect(confirm_dialog(page)).not_to_be_visible()
         expect(token.locator('.scope-badge')).to_contain_text('0 台设备')
-        page.once('dialog', lambda dialog: dialog.accept())
         scope.locator('[data-scope-save="all"]').click()
+        confirm_dialog(page).locator('[data-confirm-accept]').click()
+        expect(confirm_dialog(page)).not_to_be_visible()
         expect(token.locator('.scope-badge')).to_have_text('全部设备')
         page.reload()
         expect(token.locator('.scope-badge')).to_have_text('全部设备')
@@ -129,13 +137,26 @@ def main():
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             assert scope.evaluate('(node) => node.getBoundingClientRect().right <= innerWidth')
         page.set_viewport_size({'width':1440,'height':1080})
+        # 确认必须走页面内模态，且焦点落在确认按钮上、关闭后回到触发按钮。
+        token.get_by_role('button', name='删除', exact=True).click()
+        modal = confirm_dialog(page)
+        expect(modal).to_be_visible()
+        expect(modal.locator('.confirm-heading')).to_have_text('删除 Token')
+        assert modal.evaluate('el => el.matches(":modal")')
+        assert modal.evaluate('el => el.contains(document.activeElement)')
+        page.keyboard.press('Escape')
+        expect(modal).not_to_be_visible()
+        expect(token.get_by_role('button', name='删除', exact=True)).to_be_focused()
         checks.append('device scope: narrow to one device, badge and reload persist, empty selection disables all devices, explicit back-to-all with confirmation, bilingual and 320px')
+        checks.append('confirmations use an in-page modal dialog with focus in and back, never a native window dialog')
 
-        page.once('dialog', lambda dialog: dialog.dismiss())
         token.get_by_role('button', name='删除', exact=True).click()
+        expect(confirm_dialog(page)).to_be_visible()
+        confirm_dialog(page).locator('[data-confirm-cancel]').click()
+        expect(confirm_dialog(page)).not_to_be_visible()
         expect(token).to_be_visible()
-        page.once('dialog', lambda dialog: dialog.accept())
         token.get_by_role('button', name='删除', exact=True).click()
+        confirm_dialog(page).locator('[data-confirm-accept]').click()
         expect(token).to_have_count(0)
         page.reload()
         expect(page.locator('.token-card')).to_have_count(1)
@@ -151,11 +172,14 @@ def main():
         page.screenshot(path=str(output / 'pairing-records-zh.png'), full_page=True)
         page.reload()
         expect(entry.locator('.command-snippet code')).to_have_text(command)
-        page.once('dialog', lambda dialog: dialog.dismiss())
         entry.get_by_role('button', name='作废', exact=True).click()
+        expect(confirm_dialog(page)).to_be_visible()
+        # Escape 等同取消，绝不能提交。
+        page.keyboard.press('Escape')
+        expect(confirm_dialog(page)).not_to_be_visible()
         expect(entry.locator('.command-snippet code')).to_have_text(command)
-        page.once('dialog', lambda dialog: dialog.accept())
         entry.get_by_role('button', name='作废', exact=True).click()
+        confirm_dialog(page).locator('[data-confirm-accept]').click()
         expect(entry).to_contain_text('已作废')
         expect(entry.locator('[data-copy]')).to_have_count(0)
         page.reload()
@@ -166,8 +190,9 @@ def main():
         expect(page.locator('.resource-delete-card')).to_be_visible()
         page.evaluate('document.activeElement.blur(); window.scrollTo(0,0)')
         page.screenshot(path=str(output / 'device-delete-zh.png'), full_page=True)
-        page.once('dialog', lambda dialog: dialog.accept())
         page.locator('.resource-delete-card button').click()
+        expect(confirm_dialog(page)).to_be_visible()
+        confirm_dialog(page).locator('[data-confirm-accept]').click()
         expect(page.locator('main')).to_have_attribute('data-section','devices')
         expect(page.locator('.device-card').filter(has_text='owned_page_a')).to_have_count(0)
         page.reload()

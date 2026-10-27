@@ -94,12 +94,12 @@ def main():
                     page.locator('input[name="device-name"]').fill('owned_production_entry')
                     page.locator('.operation-form button').click()
                     if variant == 'valid':
-                        page.locator('dialog[data-phase="awaiting_confirmation"]').wait_for()
+                        page.locator('dialog.operation-dialog[data-phase="awaiting_confirmation"]').wait_for()
                         page.screenshot(path=str(output / 'production-entry-review.png'))
                         page.locator('.operation-confirm').click()
-                        page.locator('dialog[data-phase="committed"]').wait_for()
+                        page.locator('dialog.operation-dialog[data-phase="committed"]').wait_for()
                     else:
-                        expect(page.locator('dialog')).not_to_be_visible()
+                        expect(page.locator('dialog.operation-dialog')).not_to_be_visible()
                         expect(page.locator('main .device-detail')).to_have_count(0)
             data = context.request.get(base + '/__fixture').json()
             writes = [call for call in data['calls'] if call in ['devices_rename', 'devices_disconnect', 'devices_revoke']]
