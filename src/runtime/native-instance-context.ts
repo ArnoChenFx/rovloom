@@ -69,14 +69,11 @@ export abstract class NativeInstanceContext {
     ) {
       throw new LuvusAdapterError('owned_binding_mismatch')
     }
-    return this.#nativeBinding(binding, binding.registration)
+    return this.#nativeBinding(binding)
   }
 
   /** 目录使用宿主当前认证连接，复用相同实际实例核验；不编造调用 ID 或原请求。 */
-  catalogSource(
-    connection: Connection,
-    policies: Readonly<{ caller_policy_revision: string; local_policy_revision: string }>
-  ): TrustedNativeContext {
+  catalogSource(connection: Connection): TrustedNativeContext {
     this.assertInstance()
     if (
       connection.authenticated !== true ||
@@ -85,20 +82,12 @@ export abstract class NativeInstanceContext {
     ) {
       throw new LuvusAdapterError('owned_binding_mismatch')
     }
-    return this.#nativeBinding(connection, policies)
+    return this.#nativeBinding(connection)
   }
 
   /** 从已核验的 attempt 或当前连接复制共同来源字段，不伪造另一种认证或请求对象。 */
-  #nativeBinding(
-    connection: Pick<Connection, 'connection_epoch' | 'recovery_generation'>,
-    policies: Readonly<{ caller_policy_revision: string; local_policy_revision: string }>
-  ): TrustedNativeContext {
-    for (const value of [
-      connection.connection_epoch,
-      connection.recovery_generation,
-      policies.caller_policy_revision,
-      policies.local_policy_revision
-    ]) {
+  #nativeBinding(connection: Pick<Connection, 'connection_epoch' | 'recovery_generation'>): TrustedNativeContext {
+    for (const value of [connection.connection_epoch, connection.recovery_generation]) {
       id(value)
     }
     const source = this.contract.wire.source
@@ -116,8 +105,6 @@ export abstract class NativeInstanceContext {
       connection_epoch: connection.connection_epoch,
       recovery_generation: connection.recovery_generation,
       capability_revision: this.contract.capability_revision,
-      caller_policy_revision: policies.caller_policy_revision,
-      local_policy_revision: policies.local_policy_revision,
       classification_revision: source.classification_revision!,
       contract: this.contract.compiled.identity
     })

@@ -478,7 +478,6 @@ function compose(
     readiness: /** 每组只报告自己的canonical binding，政策修订必须属于同一全局配置。 */ () =>
       invoke(
         /** 逐组核对路由覆盖与全局政策修订后合并原健康观测。 */ () => {
-          const live: Readiness[] = []
           for (const group of groups) {
             if (fenced.has(group)) {
               continue
@@ -508,9 +507,7 @@ function compose(
                 /** 双端原配置、策略和 native readiness 同时有效才记录首次就绪。 */ (provider) =>
                   provider.native_ready === true &&
                   provider.expected.enabled &&
-                  boundedJson(provider.expected) === boundedJson(provider.local) &&
-                  !!state.policy_revision &&
-                  state.policy_revision === state.peer_policy_revision
+                  boundedJson(provider.expected) === boundedJson(provider.local)
               )
               if (ready) {
                 wasReady.add(group)
@@ -519,7 +516,6 @@ function compose(
                 fenceGroup(group)
                 continue
               }
-              live.push(state)
             } catch (error) {
               if (!isolated) {
                 throw error
@@ -527,19 +523,7 @@ function compose(
               fenceGroup(group)
             }
           }
-          if (
-            live.some(
-              /** 同一连接仍禁止混用不同全局政策修订。 */ (state) =>
-                state.policy_revision !== live[0]!.policy_revision ||
-                state.peer_policy_revision !== live[0]!.peer_policy_revision
-            )
-          ) {
-            fail('policy_revision_conflict')
-          }
-          const policy = live[0] ?? observed.values().next().value
           return {
-            policy_revision: policy?.policy_revision ?? '',
-            peer_policy_revision: policy?.peer_policy_revision ?? '',
             providers: [
               ...groups.flatMap(
                 /** 失效 provider 保留原配置与最后已验证状态，只收紧 readiness，不重新调用原 owner。 */ (group) => {

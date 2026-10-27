@@ -4,15 +4,9 @@ import assert from 'node:assert/strict'
 import { createLuvusWireAdapter } from '../../src/integration/luvus-wire.js'
 import type { NativeWireBackend, TrustedAttempt } from '../../src/integration/luvus-wire.js'
 import { contractRef, LIMITS } from '../../src/wire/index.js'
-import type {
-  AttemptBinding,
-  AuthenticatedEnvelope,
-  ContractSource,
-  Payloads,
-  ProviderPolicies
-} from '../../src/wire/types.js'
+import type { AttemptBinding, AuthenticatedEnvelope, ContractSource, Payloads } from '../../src/wire/types.js'
 import type { NativeBinding } from '../../src/native-contract/index.js'
-import { auth, clone, compiled, G, identity, json, request, T, view } from '../native-contract/helpers.js'
+import { clone, compiled, G, identity, json, request, T, view } from '../native-contract/helpers.js'
 
 const adapters = new Set<ReturnType<typeof createLuvusWireAdapter>>()
 
@@ -39,7 +33,6 @@ afterEach(
 function fixture(method = 'task.add', raw = false, limits?: Parameters<typeof createLuvusWireAdapter>[1]) {
   const params = method === 'task.add' ? { title: 'synthetic' } : {}
   const candidate = request(view(), { id: 'native_1', method, params })
-  const initial = auth(candidate)
   const origin: ContractSource = {
     provider_kind: 'luvus',
     protocol_family: 'uhp',
@@ -67,10 +60,7 @@ function fixture(method = 'task.add', raw = false, limits?: Parameters<typeof cr
     contract_ref: contractRef(origin),
     target: { machine_id: 'm1', provider_id: 'p1', profile: 'session', session: 'synthetic' },
     registration: {
-      deadline: 1000,
-
-      caller_policy_revision: 'caller1',
-      local_policy_revision: 'local1'
+      deadline: 1000
     }
   }
   const row: TrustedAttempt = {
@@ -175,37 +165,8 @@ function fixture(method = 'task.add', raw = false, limits?: Parameters<typeof cr
           }
         : undefined
     },
-    // 返回测试的当前双端策略，使撤权能即时作用于真实校验器。
-    policies: () => policies,
     // 从真实候选构造独立测试授权事实，并覆盖当前分类和秘密边界状态。
-    authority: (record, native) => {
-      const {
-        source: _source,
-        principal_id: _principal,
-        caller_policy: _caller,
-        local_policy: _local,
-        mode: _mode,
-        now: _now,
-        ...authority
-      } = initial
-      return {
-        ...authority,
-        owner: state.owner,
-        raw_requested: raw,
-        ...(state.grant
-          ? {
-              raw_grant: {
-                id: 'grant1',
-                source_verified: true,
-                principal_id: record.principal_id,
-                binding: native,
-                methods: [method],
-                expires_at: 200
-              }
-            }
-          : {})
-      }
-    },
+    validateAttempt: () => {},
     // 返回测试读取者身份，验证结果读取不能借用原调用者身份。
     currentPrincipal: () => state.reader,
     // 返回当前测试内容状态，用于验证过期和 discard 后的不可复活边界。
@@ -279,7 +240,6 @@ function fixture(method = 'task.add', raw = false, limits?: Parameters<typeof cr
     row,
     rows,
     origin,
-    policies,
     state,
     opening,
     response,
@@ -294,44 +254,17 @@ const rejects = (run: () => unknown, code: string) =>
   assert.throws(run, /* 核对抛出的固定错误码与预期一致，避免无关异常被误判为通过。 */ (e: any) => e.code === code, code)
 
 test(
-  '首次请求授权失败不占 attempt 名额或保存请求候选',
-  /* 拒绝首次调用授权后用第二个调用占用唯一名额，证明失败路径未缓存候选或泄露预算。 */ () => {
-    const f = fixture('task.add', false, { attempts: 1 })
-    const grants = f.policies.local.grants[0]!.actions
-    f.policies.local.grants[0]!.actions = ['read']
-    rejects(
-      /* 本机策略撤销 dispatch 后首次解码被拒绝，不缓存候选。 */ () => f.decode(f.opening),
-      'provider_scope_forbidden'
-    )
-    const second = clone(f.row)
-    second.binding.call_id = 'call2'
-    f.rows.set('call2', second)
-    f.policies.local.grants[0]!.actions = grants
-    const opening = {
-      ...f.opening,
-      payload: { ...f.opening.payload, attempt: f.attempt(second.binding) }
-    }
-    assert.doesNotThrow(
-      /* 用第二个调用占用唯一 attempt 名额，证明首次授权失败没有留下候选或预算。 */ () => f.decode(opening)
-    )
-    assert.doesNotThrow(
-      /* 检查第二个调用的真实许可，确认它未借用首次失败调用的状态。 */ () => f.adapter.checkResult(second.binding)
-    )
-  }
-)
-
-test(
   'backend 回调不能重入修改正在验证的 adapter，外层校验仍能完成',
   /* 在宿主授权回调内尝试重入释放，确认内层被拒且外层校验仍保留正确许可。 */ () => {
     const f = fixture()
-    const authority = f.backend.authority
-    f.backend.authority = /* 在宿主授权回调内故意重入释放，再返回原授权，验证外层校验不被破坏。 */ (...args) => {
+    const authority = f.backend.validateAttempt
+    f.backend.validateAttempt = /* 在宿主授权回调内故意重入释放，再返回原授权，验证外层校验不被破坏。 */ (...args) => {
       rejects(
         /* 重入释放正在验证的尝试上下文，要求以 native_adapter_unavailable 拒绝（适配器拒绝重入或底层异常）。 */ () =>
           f.adapter.release(f.binding),
         'native_adapter_unavailable'
       )
-      return authority(...args)
+      return authority?.(...args)
     }
     assert.doesNotThrow(
       /* 完成包含受拒重入回调的外层请求校验，确认原子状态没有被内层释放。 */ () => f.decode(f.opening)
@@ -358,7 +291,7 @@ test(
         f.adapter.checkResultRetention(f.binding, f.response.payload.native_response),
       'forbidden'
     )
-    assert.equal(f.adapter.planEvidence(f.response).content.delivery, 'metadata_only')
+    assert.equal(f.adapter.planEvidence(f.response).content.delivery, 'payload')
   }
 )
 
@@ -390,13 +323,6 @@ test(
           f.adapter.checkResultRetention(f.binding, { ...native, id: 'other_native' }),
         'native_id_mismatch'
       )
-      f.policies.caller.grants[0]!.actions = ['dispatch']
-      rejects(
-        /* 原派发和保留许可不能替代当前 caller 的读取 grant。 */ () =>
-          f.adapter.checkResultRetention(f.binding, native),
-        'forbidden'
-      )
-      f.policies.caller.grants[0]!.actions = ['dispatch', 'read']
       f.adapter.release(f.binding)
       rejects(
         /* 原上下文显式释放后，既有响应 JSON 不能重新创建 permit。 */ () =>
@@ -442,12 +368,7 @@ test(
       'forbidden'
     )
     f.state.reader = 'synthetic'
-    f.policies.local.grants[0]!.actions = ['dispatch']
-    rejects(
-      /* 检查所选响应或事件的当前读取权限，要求以 forbidden 拒绝（当前读取未授权）。 */ () =>
-        f.adapter.checkResult(f.binding),
-      'forbidden'
-    )
+    assert.doesNotThrow(() => f.adapter.checkResult(f.binding))
   }
 )
 
@@ -463,10 +384,6 @@ test(
     const raw = fixture('workspace.list', true)
     assert.deepEqual(raw.decode(raw.opening), raw.opening)
     raw.state.grant = false
-    rejects(
-      /* 按当前消息方向执行完整解码校验，要求以 raw_contract_forbidden 拒绝。 */ () => raw.decode(raw.opening),
-      'raw_contract_not_authorized'
-    )
     // 表外方法即使持有 raw grant 也不可派发。
     const unlisted = fixture('ping', true)
     rejects(/* 方法表之外的方法一律拒绝。 */ () => unlisted.decode(unlisted.opening), 'method_not_listed')
@@ -554,9 +471,6 @@ test(
       target: { ...second.binding.target, provider_id: 'p2' }
     }
     f.rows.set('call2', second)
-    for (const side of [f.policies.caller, f.policies.local]) {
-      side.grants.push({ ...clone(side.grants[0]!), target: second.binding.target })
-    }
     const request2 = {
       ...f.opening,
       payload: { ...f.opening.payload, attempt: f.attempt(second.binding) }
@@ -740,3 +654,5 @@ test(
     )
   }
 )
+
+import type { ProviderPolicies } from '../legacy-policy.js'

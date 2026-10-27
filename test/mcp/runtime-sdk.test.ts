@@ -43,11 +43,7 @@ test(
               return principal.id === caller.principal_id ? principal : null
             },
             administrator: /* 普通测试caller没有管理会话，不能通过此组合获得管理权限。 */ () => null
-          },
-          localPolicies: /* 明确的fixture政策，与原runtime固定tuple相同，不代表生产策略来源。 */ () => ({
-            revision: 'local1',
-            grants: [{ target: f.target, methods: ['task.add'], actions: ['dispatch', 'read', 'cancel'] }]
-          })
+          }
         })
         await lifecycle.own('service', /** facade service只关闭自己的等待/游标。 */ () => service.close())
         const http = httpFixture(lifecycle.service(service), {
@@ -172,7 +168,7 @@ test(
           )
           assert.equal(cancelled.cancellation, 'unsupported')
           assert.equal(f.native.state.responses, 1)
-          f.allowRead(false)
+          f.deviceScope([])
           assert.equal(
             await f.gateway.runAuthenticated(
               f.caller,
@@ -182,7 +178,7 @@ test(
           )
           const unreadable = await invoke({ name: 'runtime_result_read', arguments: { result_id: result.result_id } })
           assert.deepEqual(unreadable.structuredContent, { gateway_error: { code: 'forbidden' } })
-          f.allowRead(true)
+          f.deviceScope(undefined)
           f.authorize(false)
           lifecycle.phase('revoked_read')
           const denied = await invoke({

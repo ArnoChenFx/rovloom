@@ -7,7 +7,7 @@
 
 用法：python3 e2e/quickstart.py --binary /path/rovloom --herdr /path/herdr-0.9.5 [--work DIR] [--then 'cmd ...']
 """
-import argparse, fcntl, getpass, json, os, pty, re, select, shlex, shutil, signal, subprocess, sys, tempfile, termios, time
+import argparse, socket, fcntl, getpass, json, os, pty, re, select, shlex, shutil, signal, subprocess, sys, tempfile, termios, time
 
 ANSI = re.compile(rb'\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]|\r')
 CODE = re.compile(r'm_[0-9a-f-]{36}\.[0-9a-f-]{36}\.[A-Za-z0-9_-]+')
@@ -194,6 +194,21 @@ def main():
             existing = luvus_servers(herdr_dir)
             assert len(existing) == 1, f'pre-existing server not found: {existing}'
             print('PRE_EXISTING', existing, flush=True)
+        # 每轮使用独立端口，避免与同机已有 Gateway 或其它验收进程冲突。
+        initialized_gateway = subprocess.run([rov, 'config', 'init', 'gateway'],
+                                            env=env_g, cwd=home_g, capture_output=True, text=True, timeout=10)
+        assert initialized_gateway.returncode == 0, 'gateway_init_failed'
+        gateway_path = os.path.join(home_g, '.config', 'rovloom', 'gateway.json')
+        gateway_cfg = json.load(open(gateway_path))
+        reserved = [socket.socket() for _ in range(3)]
+        try:
+            for listener, bound in zip(('devices', 'mcp', 'management'), reserved):
+                bound.bind(('127.0.0.1', 0))
+                gateway_cfg[listener]['port'] = bound.getsockname()[1]
+            open(gateway_path, 'w').write(json.dumps(gateway_cfg, indent=2) + '\n')
+        finally:
+            for bound in reserved:
+                bound.close()
         def issue_join():
             """（重）启动 Gateway 签发一张一机一码，返回完整 join 命令值（ws://...#m...）。"""
             nonlocal gateway
@@ -228,7 +243,7 @@ def main():
         if created.returncode == 0:
             password = re.search(r'(\S{20,})', created.stdout)
             if password:
-                info['admin'] = {'user': 'admin', 'password': password.group(1), 'url': 'http://127.0.0.1:9445/'}
+                info['admin'] = {'user': 'admin', 'password': password.group(1), 'url': f"http://127.0.0.1:{gateway_cfg['management']['port']}/"}
         out = os.path.join(work, 'mcp.json')
         open(out, 'w').write(json.dumps(info)); os.chmod(out, 0o600)
         print('READY', json.dumps({'mcp_url': info['url'], 'targets': info['targets'], 'config': out}), flush=True)
@@ -251,21 +266,30 @@ def main():
             connector_state = cfg.get('data', {}).get('directory') or os.path.join(home_c, '.local', 'share', 'rovloom', 'connector')
             managed_c = os.path.join(connector_state, 'managed')
             registry = json.load(open(os.path.join(managed_g, 'mcp-callers.json')))
-            grant = next(g for g in registry['local_policy']['grants'] if g['target']['provider_id'] == 'luvus')
-            methods = set(grant['methods'])
-            assert methods == {'*'}, 'new pairing still persists a method snapshot'
+            assert registry['schema_version'] == 2
+            assert 'local_policy' not in registry and 'gateway_policy' not in registry
+            assert all('policy' not in entry['principal'] for entry in registry['callers'])
             def downgrade(value):
                 changed = 0
                 if isinstance(value, dict):
+                    if value.get('kind') == 'mcp-caller-source':
+                        value['local_policy'] = {'revision': 'legacy_local', 'grants': []}
+                        value['gateway_policy'] = {'revision': 'legacy_caller', 'grants': []}
+                        for entry in value['callers']:
+                            entry['principal']['policy'] = {'revision': 'legacy_caller', 'grants': []}
+                        changed += 1
+                    if value.get('kind') == 'luvus' and value.get('authentication') == 'local_owner':
+                        value['policies'] = {'caller': {'revision': 'legacy_caller', 'grants': []}, 'local': {'revision': 'legacy_local', 'grants': []}}
+                        value['peer_policy_revision'] = 'legacy_different'
+                        changed += 1
                     if value.get('kind') == 'luvus' and value.get('authentication') == 'remote_connector':
                         value['raw_grant'] = {'principal_id': 'operator_simple_pairing', 'methods': ['session.snapshot']}
                         changed += 1
-                    for key, item in value.items():
-                        if key == 'methods' and isinstance(item, list) and all(isinstance(method, str) for method in item) and set(item) == methods:
-                            value[key] = ['pane.list']
-                            changed += 1
-                        else:
-                            changed += downgrade(item)
+                    if 'target' in value and isinstance(value.get('actions'), list):
+                        value['methods'] = ['pane.list']
+                        changed += 1
+                    for item in value.values():
+                        changed += downgrade(item)
                 elif isinstance(value, list):
                     changed += sum(downgrade(item) for item in value)
                 return changed

@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Store } from '../src/store.js'
 import { Router } from '../src/router.js'
-import { connected, management, options, policy, respond } from './storage/helpers.js'
+import { connected, management, options, respond } from './storage/helpers.js'
 
 test(
   'results enforce ownership, policy, quota, TTL and byte-perfect pagination',
@@ -19,9 +19,8 @@ test(
     })
     try {
       const d = connected(s)
-      let local = policy(d.target, true)
-      const router = new Router(s, /* 每次读取当前本地授权，验证已有句柄不能绕过策略撤销。 */ () => local)
-      const p = { id: 'alice', policy: policy(d.target) }
+      const router = new Router(s)
+      const p: import('../src/router.js').Principal = { id: 'alice' }
       const c = router.create(p, d.target, { method: 'pane.read' }, options())
       assert.throws(
         /* 对尚未收到响应的调用申请句柄，要求拒绝。 */ () => router.saveResult(p, c.call_id),
@@ -53,12 +52,12 @@ test(
         /* 传入负字节游标，要求分页边界校验拒绝。 */ () => router.readResult(p, meta.result_id, -1),
         /invalid_result_cursor/
       )
-      local = { ...local, grants: [] }
+      p.device_scope = { mode: 'selected', machine_ids: [] }
       assert.throws(
         /* 撤销本地授权后读取已有结果，要求重新授权失败。 */ () => router.readResult(p, meta.result_id),
         /forbidden/
       )
-      local = policy(d.target, true)
+      delete p.device_scope
       now = 200
       assert.throws(
         /* 推进到句柄到期时刻后读取，要求句柄不存在。 */ () => router.readResult(p, meta.result_id),

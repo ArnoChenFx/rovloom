@@ -23,7 +23,7 @@ function fixture(resultTtl = 10) {
   })
   const device = connected(store)
   const state = { local: policy(device.target, true) }
-  const router = new Router(store, /* 每次读取都取得当前本地授权，不缓存既有句柄的历史授权。 */ () => state.local)
+  const router = new Router(store)
   const principal = { id: 'alice', policy: policy(device.target) }
   const call = router.create(principal, device.target, { method: 'pane.read' }, options())
   const binding = router.dispatch(principal, call.call_id, device.epoch)
@@ -158,7 +158,7 @@ for (const action of ['discard', 'revoke', 'provider_disabled'] as const) {
   )
 }
 
-for (const side of ['caller', 'local'] as const) {
+for (const side of ['device_scope'] as const) {
   test(
     `${side} 撤回读取授权后不返回含 expires 的结果页，其他 principal 也不能探测元数据`,
     // Router 仍逐次核验双端策略，新增字段不能成为独立的未授权 metadata 读取路径。
@@ -172,11 +172,7 @@ for (const side of ['caller', 'local'] as const) {
             f.router.readResult({ ...f.principal, id: 'other' }, f.handle.result_id),
           /call_not_found/
         )
-        const principal =
-          side === 'caller' ? { ...f.principal, policy: { ...f.principal.policy, grants: [] } } : f.principal
-        if (side === 'local') {
-          f.state.local = { ...f.state.local, grants: [] }
-        }
+        const principal = { ...f.principal, device_scope: { mode: 'selected' as const, machine_ids: [] } }
         assert.throws(
           /* 先前已经读过的句柄也必须经过本次双端授权。 */ () => f.router.readResult(principal, f.handle.result_id),
           /forbidden/

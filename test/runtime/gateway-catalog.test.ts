@@ -2,7 +2,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createLuvusCatalog } from '../../src/connector/luvus/index.js'
-import { GatewayError } from '../../src/contracts.js'
 import { runtimeFixture } from './helpers.js'
 import { until } from '../transport/helpers.js'
 
@@ -30,7 +29,7 @@ test(
           assert.equal(resolved.source.binding.recovery_generation, connection.recovery_generation)
           assert.equal(resolved.source.binding.target.machine_id, fixture.target.machine_id)
           assert.equal(resolved.source.binding.provider_id, fixture.target.provider_id)
-          assert.equal(resolved.source.binding.caller_policy_revision, principal.policy.revision)
+          assert(!Object.hasOwn(resolved.source.binding, 'caller_policy_revision'))
           const catalog = createLuvusCatalog(resolved.record.compiled, resolved.record.capabilities, resolved.source, {
             now: Date.now,
             expires_at: resolved.expires_at,
@@ -76,39 +75,16 @@ test(
   }
 )
 
-test(
-  'Gateway catalog rejects a provider disabled by its final local policy callback',
-  /** 策略内容保持原样仍不能返回回调前已启用的旧 binding，最终完整 canonical 复核必须拒绝。 */ async () => {
-    const fixture = await runtimeFixture()
-    let reads = 0
-    try {
-      await fixture.ready()
-      fixture.onLocalPolicyRead(
-        /** 第二次查询正好发生在 provider source 返回后，重现原实现最后返回窗口中的禁用。 */ () => {
-          if (++reads === 2) {
-            fixture.state.store.setProviderEnabled(fixture.target.machine_id, fixture.target.provider_id, 1, false)
-          }
-        }
-      )
-      await fixture.gateway.runAuthenticated(
-        fixture.caller,
-        /** 只公开固定不可用错误，不返回旧来源、binding 或目录条目。 */ () => {
-          assert.throws(
-            /** 使用同一当前主体，排除身份错误掩盖 canonical binding 漏检。 */ () =>
-              fixture.gateway.catalog.resolve(fixture.target, fixture.gateway.principal()),
-            /** 错误来源必须是最终目录 fence，而不是原生环境或身份建立失败。 */ (error: unknown) =>
-              error instanceof GatewayError && error.message === 'runtime_catalog_unavailable'
-          )
-        }
-      )
-      assert.equal(reads, 2)
-      assert.equal(fixture.state.store.provider(fixture.target.machine_id, fixture.target.provider_id)!.enabled, false)
-      assert.equal(fixture.gateway.transport.currentConnection(fixture.target.machine_id)?.active, true)
-      assert.equal(fixture.claims(), 0)
-      assert.equal(fixture.native.state.responses, 0)
-    } finally {
-      fixture.onLocalPolicyRead()
-      await fixture.close()
-    }
+test('Gateway catalog rejects a disabled canonical provider', async () => {
+  const f = await runtimeFixture()
+  try {
+    await f.ready()
+    f.state.store.setProviderEnabled(f.target.machine_id, f.target.provider_id, 1, false)
+    await f.gateway.runAuthenticated(f.caller, () => {
+      assert.equal(f.gateway.catalog.resolve(f.target, f.gateway.principal()), undefined)
+    })
+    assert.equal(f.native.state.responses, 0)
+  } finally {
+    await f.close()
   }
-)
+})

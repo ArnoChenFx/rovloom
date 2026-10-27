@@ -4,9 +4,7 @@ import type {
   AuthenticatedContext,
   ContractSource,
   NativePayloadValidator,
-  ProviderAction,
   ProviderBinding,
-  ProviderPolicies,
   V2Target
 } from './types.js'
 import { boundedJson, fail, fields, hash, id, object, oneOf, sha, text, uint } from './validation.js'
@@ -138,72 +136,4 @@ export function validatorFor(binding: AttemptBinding, ctx: AuthenticatedContext)
     fail('native_validator_unavailable')
   }
   return validator
-}
-
-// 校验双端策略及每条完整目标授权，限制条目规模并拒绝重复权限。
-export function validatePolicies(policies: ProviderPolicies): void {
-  const pair = object(policies)
-  fields(pair, ['caller', 'local'])
-  for (const side of [policies.caller, policies.local]) {
-    fields(object(side), ['revision', 'grants'])
-    id(side.revision)
-    if (!Array.isArray(side.grants) || side.grants.length > 4096) {
-      fail('invalid_provider_policy')
-    }
-    for (const grant of side.grants) {
-      fields(object(grant), ['target', 'methods', 'actions'])
-      validateTarget(grant.target)
-      if (
-        !Array.isArray(grant.methods) ||
-        grant.methods.length > 256 ||
-        !Array.isArray(grant.actions) ||
-        grant.actions.length > 4 ||
-        new Set(grant.methods).size !== grant.methods.length ||
-        new Set(grant.actions).size !== grant.actions.length
-      ) {
-        fail('invalid_provider_policy')
-      }
-      grant.methods.forEach(/* 校验授权条目中的方法名称及字节长度。 */ (m) => text(m, 256))
-      grant.actions.forEach(
-        /* 限制授权动作仅使用协议允许的三种操作。 */ (a) => oneOf(a, ['dispatch', 'read', 'cancel'])
-      )
-    }
-  }
-}
-
-// 要求调用方和本地策略各有一条完整匹配的授权；缺策略时返回 false。
-export function providerScopeAllowed(
-  binding: Pick<AttemptBinding, 'target'>,
-  method: string,
-  action: ProviderAction,
-  policies?: ProviderPolicies
-): boolean {
-  if (!policies) {
-    return false
-  }
-  validatePolicies(policies)
-  const target = boundedJson(binding.target)
-  // 每一端都须有一条完整匹配的 grant；不能拼接不同目标或不同 grant 的权限。
-  return [policies.caller, policies.local].every(
-    /* 检查这一端是否存在完整覆盖目标、方法和动作的授权。 */ (side) =>
-      side.grants.some(
-        /* 匹配单条授权的完整目标、方法和动作，避免跨条目拼接权限。 */ (g) =>
-          boundedJson(g.target) === target &&
-          (g.methods.includes('*') || g.methods.includes(method)) &&
-          g.actions.includes(action)
-      )
-  )
-}
-
-// 校验 provider 当前可用性，并拒绝双端策略未共同允许的操作。
-export function assertProviderAccess(
-  binding: AttemptBinding,
-  method: string,
-  action: ProviderAction,
-  ctx: AuthenticatedContext
-): void {
-  providerFor(binding, ctx)
-  if (!providerScopeAllowed(binding, method, action, ctx.policies)) {
-    fail('provider_scope_forbidden')
-  }
 }

@@ -143,7 +143,7 @@ These are not style advice. Violating them loses data or repeats side effects.
 2. **A `wait_ms` timeout is not a failure.** It only means this short wait ended; `call_id` is still valid. Keep querying the original call with `runtime_call_get`.
 3. **`contract_ref` and `binding_revision` do not transfer across providers.** A revision mismatch returns `binding_revision_conflict`; a stale contract on a new call returns `contract_unavailable` before registration. Refresh `providers_get` and `runtime_discover/describe` after upgrades or either mismatch. An existing request key still refers to its original call; changing its contract is a different intent and returns `conflict`. Never resend an existing unknown call with a fresh key just to use a newer contract.
 4. **Never guess a session name.** `providers_list` returns neither `profile` nor `session`; only `targets` on `machines_*` has them. Without an authorized tuple, do not construct a target.
-5. **Use the current provider contract.** Method names do not form a token ACL. Approved targets and read/dispatch/cancel actions remain in force; read-only access never becomes dispatch access. Device scope, provider availability, native parameters and device operating settings still apply. Missing Gateway caller binding fails closed. Do not invent an unexposed method or resend an unknown call.
+5. **Use the current provider contract.** For both Herdr and Luvus, tokens control visible devices and the Connector controls direct terminal execution. Every exposed method on a visible device is callable; there are no method, provider, action or policy-revision grants. Identity, original result ownership, provider availability, native parameters, binding, deadlines and idempotency still apply. Do not invent an unexposed method or resend an unknown call.
 6. **Result handles expire.** A `runtime_result_read` cursor is bound to the caller, result, page size and deadline; paging and retries never extend it. After expiry, call `runtime_call_get` again for a fresh handle (content still obeys the original deadline).
 7. **Do not manage devices over MCP.** You also cannot supply a principal, admin, `discard_response`, or a native `id` or `auth` through parameters; the schema rejects them.
 8. **Terminal input is off by default.** A device's `allow_terminal_execution` defaults to `false`. With it off, `agent.prompt` / `agent.send` must carry an explicit `strict: true`, and `agent.keys` plus custom launch arguments are refused outright. The device owner configures that switch locally; you cannot turn it on remotely.
@@ -155,11 +155,11 @@ A Gateway refusal returns `isError: true` with `gateway_error: { code }`.
 | Code | Meaning | Action |
 |---|---|---|
 | `unauthenticated` | Bearer missing, invalid or expired | Ask the user to renew or reissue; do not retry the same token |
-| `forbidden` | Approved target/action boundaries, device scope, native permissions or a device operating setting rejects the request; MCP has no per-method token ACL | Report the refusal and check the device/provider state; do not edit method lists or hunt for another target |
+| `forbidden` | Token device scope or the Connector terminal switch rejects the request | Report the refusal and check the device/provider state; do not edit method lists or hunt for another target |
 | `not_found` | The target tuple is outside your visible devices, the method is not exposed, or the object is gone | Re-run `machines_list` and `runtime_discover`; do not fuzzy-match |
 | `binding_revision_conflict` | The revision changed | Re-run `providers_get` and `runtime_discover` |
 | `unavailable` / `backend_unavailable` | Device offline or backend unavailable | Check `link` from `machines_get`; do not hammer it |
-| `contract_unavailable` | Native contract, capabilities or policy changed mid-read | Re-run discover and describe |
+| `contract_unavailable` | Native contract, capabilities or binding changed mid-read | Re-run discover and describe |
 | `native_request_invalid` | Native schema or reviewed parameter checks rejected the request before registration; **definitely not dispatched** | Read optional `details.issues` / `details.parameter_help` and `runtime_describe`, correct the parameters, then resubmit |
 | `invalid_arguments` | MCP parameter shape is wrong | Fix against the schema |
 | `conflict` | One `client_request_key` used for a different intent | Use a new key for the new intent; keep the old key for the same intent |
@@ -247,3 +247,11 @@ The script performs `initialize` → `notifications/initialized` → call → `D
 - [references/tools.md](references/tools.md): full parameters, returned fields, limits and cursor rules for all 11 tools.
 - [references/runtimes.md](references/runtimes.md): the Luvus method families, selectors, coordinate traps and `if_revision`; Herdr contrast; what the terminal-execution switch covers.
 - In-repo authorities: `docs/protocol/MCP-HTTP.md`, `docs/LUVUS-OPERATIONS.md`, `docs/TERMINAL-EXECUTION.md`. The authoritative parameter definition is `src/mcp/schema.ts`.
+
+### Authorization model and upgrades
+
+Herdr, Luvus and mixed installations use the same two authorization controls: token device visibility and Connector `allow_terminal_execution`. No caller/local/gateway policy snapshots, per-method lists, action grants, raw grants or policy revision agreement are required. The current backend still defines which native methods it implements and exposes; discovery does not promise every method in the native schema is implemented.
+
+Upgrade and restart both roles while preserving tokens and pairing credentials; re-pairing is unnecessary. Legacy ordinary tokens keep their existing device boundary through migration to `device_scope`; new registry writes use version 2. Restore complete matching pre-upgrade config/data backups when rolling back to an older release.
+
+Validated results are stored when they arrive. Read their original handles after a disconnect within the fixed TTL; do not resend the native operation. Result pages and explicit discard check current identity, device scope and original principal ownership, without requiring the original Wire or a separate discard permission.

@@ -34,7 +34,7 @@ export function projectionFixture(settings: ProjectionFixtureOptions = {}) {
     f.store.connect(target.machine_id, syntheticCredential)
   }
   const scope = createTrustedRequestScope(f.identities)
-  const router = new Router(f.store, f.localPolicies)
+  const router = new Router(f.store)
   const calls: Parameters<RuntimeGateway['admit']>[0][] = []
   const registered: string[] = []
   let admitted!: () => void
@@ -47,8 +47,8 @@ export function projectionFixture(settings: ProjectionFixtureOptions = {}) {
   let override: Partial<ReturnType<RuntimeGateway['get']>> = {}
   let readFailure: Error | undefined
   let openFailure: (() => Error) | undefined
-  let originalFailure: (() => Error) | undefined
   const runtime: RuntimeGatewayPort = {
+    targets: f.targets,
     store: f.store,
     router,
     runAuthenticated: scope.runAuthenticated,
@@ -72,12 +72,6 @@ export function projectionFixture(settings: ProjectionFixtureOptions = {}) {
       cancelled++
       return { ...router.cancel(scope.principal(), id), ...override }
     },
-    originalAttempt: /* 本投影stub没有原Wire许可，不从人工历史补造attempt。 */ () => {
-      if (originalFailure) {
-        throw originalFailure()
-      }
-      return undefined
-    },
     results: {
       open: /* 人工历史的Store句柄仅供分页投影，不代表真实原生读取许可。 */ (id: string) => {
         if (openFailure) {
@@ -99,7 +93,7 @@ export function projectionFixture(settings: ProjectionFixtureOptions = {}) {
         router.discardResponse(scope.principal(), id)
     }
   }
-  const service = new RuntimeGatewayService({ runtime, identities: f.identities, localPolicies: f.localPolicies })
+  const service = new RuntimeGatewayService({ runtime, identities: f.identities })
   const context: ServiceContext = { caller: { principal_id: 'alice' }, wait_signal: new AbortController().signal }
   const args: ToolArguments['runtime_call'] = {
     target,
@@ -126,9 +120,6 @@ export function projectionFixture(settings: ProjectionFixtureOptions = {}) {
     },
     openFailure: /* 模拟正文句柄失败而不改动真实Store准入/状态机。 */ (failure: () => Error) => {
       openFailure = failure
-    },
-    originalFailure: /* 模拟原连接查找失败，保留只读runtime端口的实际契约。 */ (failure: () => Error) => {
-      originalFailure = failure
     },
     close: /* 回收门面、作用域及本例真实临时库。 */ () => {
       service.close()

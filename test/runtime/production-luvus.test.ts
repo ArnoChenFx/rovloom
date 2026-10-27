@@ -35,7 +35,6 @@ test(
           enabled: true
         },
         target: { ...f.config.target, provider_id: 'remote_provider' },
-        peer_policy_revision: 'gateway_policy',
         contract: {
           binary_version: '0.14.3',
           binary_sha256: FIXED_LUVUS_SHA256,
@@ -115,12 +114,7 @@ function fixture(agentDirectory?: string) {
     kind: 'luvus',
     authentication: 'local_owner',
     native: { mode: 'managed', root_record: record, expected_root_id: 'root1', expected_root_revision: 1 },
-    peer_policy_revision: 'gateway_policy',
     principal_id: 'caller1',
-    policies: {
-      caller: { revision: 'caller_policy', grants: [] },
-      local: { revision: 'local_policy', grants: [] }
-    },
     storage_mode: 'create'
   }
   return {
@@ -252,11 +246,6 @@ test(
       const incomplete = f.refs()
       delete (incomplete[0]!.value as unknown as Record<string, unknown>).storage_mode
       await assert.rejects(sources.connector({ state_dir: f.state }, incomplete), /production_reference_invalid/)
-      const wrongPolicy = f.refs()
-      wrongPolicy[0]!.value.policies.local.grants = [
-        { target: f.config.target, methods: ['agent.read'], actions: ['unknown' as never] }
-      ]
-      await assert.rejects(sources.connector({ state_dir: f.state }, wrongPolicy), /production_reference_invalid/)
       assert.equal(existsSync(join(f.state, 'luvus-claims.db')), false)
     } finally {
       f.close()

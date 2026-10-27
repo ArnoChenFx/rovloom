@@ -223,9 +223,6 @@ test(
   /** snapshot 使用原有权限和完整 schema；普通请求成功不建立事件恢复或被动读取保证。 */ () => {
     const fixture = backendFixture()
     fixture.record.method = fixture.record.native_request.method = 'session.snapshot'
-    for (const side of [fixture.context.policies!.caller, fixture.context.policies!.local]) {
-      side.grants[0]!.methods = ['session.snapshot']
-    }
     const adapter = createHerdrReadonlyAdapter(fixture.backend)
     try {
       const context = adapter.resolve(fixture.identity)

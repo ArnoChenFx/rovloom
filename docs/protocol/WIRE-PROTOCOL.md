@@ -105,11 +105,11 @@ Luvus / Herdr 的原生协议、UHP 标识和 fixture 保持原样，Wire 不改
 | `target`、`provider_kind`、`binding_revision` | 完整目标与 provider 绑定 |
 | `contract_ref` | 见上节 |
 | `registration.deadline` | 正安全整数，绝对毫秒。codec 不读取设备时钟 |
-| `registration.caller_policy_revision`、`registration.local_policy_revision` | 登记时双方策略的修订 |
+| 旧 `registration.*_policy_revision` | 只兼容解码旧帧，不校验、不在新登记中生成 |
 
 - `request.payload.expected_binding_revision` 是独立的调用字段，必须与 `attempt.binding_revision` 和可信的当前 binding 一致。
 - 每个 attempt 帧（包括 `request`）都要经独立的 `resolveAttempt` 取回登记的锚点，核对 machine、provider、revision、kind、profile / session、`recovery_generation`、epoch、call / attempt / native ID、`contract_ref` 与 registration。不能用 payload 自己构造预期锚点。不能换目标、契约、范围或登记条件，也不能用新 revision 接纳旧执行。
-- 新派发还核对当前双方的 policy revision 与登记时一致。已有响应只能进入受保护的接收与证据路径，读取要重新授权。
+- 新派发核对当前来源、完整 binding、契约、期限与参数，不核对 caller/local 策略 revision。结果提交后按 token 设备范围与原主体归属读取。
 - 实际写出前，宿主原子地核对 deadline 与预算，并提交 `dispatching` 锚点。
 - `native_request` 只含 `method` 与 `params`，调用方提交的 `id` 或 `auth` 被拒绝。`validation` 取 `strict` 或 `raw-contract`，必须与登记时的模式一致。
 
@@ -214,18 +214,18 @@ Connector 不依赖 Gateway 额外交付的 TTL 或上下文。受保护配置�
 
 - 相同 call / attempt 的精确重复请求是幂等的，不刷新期限。请求摘要或绑定有任何变化，都按冲突拒绝。
 - 准入层拒绝只在 attempt 未进入执行时生成：已执行中（running）或已观察（seen）的 attempt 重发时，Connector 静默丢弃重复帧，不另发拒绝证明；账本状态由原执行路径收敛。
-- 请求到达时核对认证连接、完整 attempt、provider 与契约、双方 policy revision 和 deadline。主体来自 Connector 受保护的完整 Target 路由，不采信消息自报。
+- 请求到达时核对认证连接、完整 attempt、provider 与契约、deadline。主体来自 Connector 受保护的完整 Target 路由，不采信消息自报。
 - claim 与 attempt book 跨 epoch 共享。断连只释放该 epoch 的请求正文，不提前清除墓碑、不续期、不重放。deadline 到达后回收防重记录；原完整意图仍被期限检查拒绝。回收与持久时钟推进在同一事务完成，时钟回退不允许再次 claim。
-- 执行许可仍由 Wire、双方策略和 provider 自己的原生校验器建立。
+- 执行许可仍由 Wire 来源/binding 与 provider 自己的原生校验器建立。
 
 ## dispatch_refused
 
-`dispatch_refused` 只在双方协商 `dispatch_refusal` 后由 Connector 发送，须经当前认证连接和独立登记的完整 attempt 校验。准入层（revision 漂移）拒绝发生在执行锚点登记之前，Connector 编码拒绝帧只绑定当前认证连接与 attempt 结构，锚点、策略与 revision 的全量复核由 Gateway 接收端在其自身账本完成；执行器拒绝仍经原 adapter 完整校验。
+`dispatch_refused` 只在双方协商 `dispatch_refusal` 后由 Connector 发送，须经当前认证连接和独立登记的完整 attempt 校验。旧版准入层的 revision 拒绝仅为兼容输入，Connector 编码拒绝帧只绑定当前认证连接与 attempt 结构，锚点、策略与 revision 的全量复核由 Gateway 接收端在其自身账本完成；执行器拒绝仍经原 adapter 完整校验。
 
 - `code` 目前允许 `terminal_execution_disabled` 与 `policy_revision_stale`，不承载原生响应、异常正文或任意字符串。
-- 它只接受真实的本机 adapter 明确报告 `not_dispatched` 的终端最终门禁拒绝，或准入层在写出任何原生字节前即确定的策略 revision 漂移（网关盖章的 `caller/local_policy_revision` 与 Connector 受保护快照不一致）。`accepted` 之后仍可确证未写出。普通异常、原生 error、超时和 `outcome_unknown` 都不能生成此证明。
+- 新版仅由本机 adapter 的终端最终开关拒绝生成 `not_dispatched` 证明；不再生成 policy_revision_stale。旧版拒绝帧保留解码兼容。`accepted` 之后仍可确证未写出。普通异常、原生 error、超时和 `outcome_unknown` 都不能生成此证明。
 - Gateway 先在账本事务中核对原 tuple、当前 provider 与 epoch、固定 deadline，提交拒绝和必要审计，之后才清理该 call 的在途与读取上下文。
-- 只有尚未到期的 `dispatching` / `connector_accepted` 可变为 `not_dispatched`（执行器可能在 accepted 后、原生写入前才复核策略并报告真实未写出）。重放帧的防御在 Connector 的 running/seen 守卫：已进入执行的 attempt 重发不生成拒绝证明。已 unknown、已响应或已拒绝的状态保持不变，不续期，不重派。合法的拒绝不关闭连接，不取消其它在途调用。
+- 只有尚未到期的 `dispatching` / `connector_accepted` 可变为 `not_dispatched`（执行器可能在 accepted 后、原生写入前才复核终端开关并报告真实未写出）。重放帧的防御在 Connector 的 running/seen 守卫：已进入执行的 attempt 重发不生成拒绝证明。已 unknown、已响应或已拒绝的状态保持不变，不续期，不重派。合法的拒绝不关闭连接，不取消其它在途调用。
 - 未协商、认证或锚点错误、存储提交失败都保守拒绝，不发布虚假终态。
 - Store 须提供 `commitDispatchRefusal(binding, code)`，否则 Gateway 不广告该能力。若配置要求此能力，则以 `dispatch_refusal_backend_unavailable` 拒绝启动。该事务只在真正提交 `not_dispatched` 时返回 true。对 unknown、responded 或已拒绝的状态返回 false，此时 Gateway 不释放上下文，response 之后到达的拒绝不会驱逐仍有效的结果读取许可。
 
@@ -240,19 +240,15 @@ Connector 不依赖 Gateway 额外交付的 TTL 或上下文。受保护配置�
 3. `raw-contract` 在原生薄适配中映射为原生的 `raw_contract`。原生检查失败转为只含 code 的 `WireError`。异常的 message 与原始 data 被清除，只保留合法 code 或通用的 `native_*` 错误。成功的校验必须实际返回 undefined。
 4. 响应必须有该 attempt 的 opaque `native_handle`，以及 `resolveNativeSource` 当前返回的独立可信来源，缺失即拒绝。handle 由原生校验流程生成，按完整 AttemptBinding 保存在受信进程内，不能从响应内容重建。
 
-授权只有一个入口：`validateRequest` 内的静态方法表、双端策略和 raw 授权检查，没有独立的逐帧 gate。表外方法一律拒绝。`strict` 对 generic / unavailable 的方法分别报参数契约不完整或不可用。只有独立、显式的 raw 授权可以放宽参数 schema，原生 permit 中的 generic / unavailable 状态必须保留，不映射为 complete。Owner 身份、raw 选择或未来方法都不能绕过方法表。
+`validateRequest` 校验后端暴露方法、原生参数、实际来源和完整 binding。`strict` 对 generic / unavailable 分别报参数契约不完整或不可用；`raw-contract` 只标记原生参数 schema 覆盖程度，不是额外授权，也不产生 raw grant。
 
 `createLuvusWireAdapter` 实现 Luvus 的 Check / handle 适配：从 backend 取得登记的请求、双端 provider 和独立的 `nativeSource`，私有保存最初的 `DispatchPermit`，并逐次重新授权结果读取。精确签名见 [原生契约](NATIVE-CONTRACT.md)。
 
 ## Provider scope 权限
 
-策略由两个独立的 `ProviderPolicy {revision, grants}` 组成：`caller` 与 `local`。每个 grant 是 `{target, methods, actions}`，`actions` 取 `dispatch`、`read`、`cancel`。
+Herdr、Luvus 与混合模式采用相同权限模型：Gateway 核对 token 的设备范围，Connector 核对直接终端执行开关。没有 ProviderPolicy、caller/local grants、methods/actions 或策略修订比对。
 
-- 授权必须在 caller 与 local **分别存在同一完整 Target + method + action 的 grant**。没有通配符，不把 machines / providers / sessions / methods 平铺成笛卡尔积，未知旧字段被拒绝。
-- 一方授权 `(machine_1, provider_2, session A)`、另一方授权 `(machine_1, provider_1, session B)`，不能拼成 `provider_1 / session A`。
-- 每边至多 4096 个 grant。每个 grant 至多 256 个方法、4 个 action，且无重复。空列表自然拒绝。
-- `assertProviderAccess(binding, method, action, context)` 供宿主判断当前 binding、禁用状态和 provider scope，不替代各入口对调用方与设备身份的认证。派发、取消用对应的 action。
-- 响应的接收只是内部关联与验证，不等于读取授权。晚到 payload 的保存还要求当前的 read scope 与受信的内容保存策略。调用方被撤权后仍可有最小的接收审计，但不能据此交付内容。provider 被禁用时，连原 attempt 的补证也被拒绝。
+响应按完整原尝试关联并在入库时核验来源与结构。保存原文只服从内容状态、固定期限和唯一 Store 预算；已撤销 token 不能读取，旧执行无需重发。provider 禁用、撤销和 binding 漂移属于实例生命周期校验。
 
 ## 登记与迟到响应
 
@@ -261,7 +257,7 @@ Connector 不依赖 Gateway 额外交付的 TTL 或上下文。受保护配置�
 | `registeredRequestDigest(payload, callerId)` | 来自已认证的调用方。摘要绑定完整 Target、provider、revision、kind、契约、登记条件、validation 和 native request，不含新分配的 call / attempt / native ID |
 | `resolveAttempt` | 返回原完整 AttemptBinding、method、mode、transport、feature，以及存在时的原 native handle。不从消息补建 |
 | `assertProviderAccess` | 当前可信的 provider snapshot 与双方完整 scope |
-| `planResponseEvidence(frame, context, anchor, now, policy?)` | 持久的派发锚点、固定的内容与墓碑期限、当前分类与内容权限。事务成功后才发布状态 |
+| `planResponseEvidence(frame, context, anchor, now)` | 持久的派发锚点、固定的内容与墓碑期限、内容状态。事务成功后才发布状态 |
 
 - `registeredRequestDigest` 是已登记意图的规范摘要，不是自动迁移或重签旧 key 的授权。重试必须继续使用原 `client_request_key` 和原登记数据，不能因发现新的 provider revision 或契约而重算、重派。同一主体在窗口内，同 key 同摘要只返回原 call，摘要不同报 conflict。key 只由 Gateway Store 处理，不进入 Wire。
 - 迟到响应必须仍在有效认证的连接上，当前 provider 启用，revision、contract 与全部 attempt 精确匹配，原 native handle / source 与完整原生响应通过校验。对 `outcome_unknown` 的补证需要 `late_evidence` 能力。缺锚点、旧 attempt、墓碑已删、冲突、旧 revision 一律拒绝，不创建执行。
@@ -289,8 +285,8 @@ Connector 不依赖 Gateway 额外交付的 TTL 或上下文。受保护配置�
 
 `host_profile` 是连接级消息，必须经双方 minor ≥ 2 能力协商，在 welcome 后由 Connector 发送一次。Gateway 按认证机器、当前恢复代次与 epoch 关联，不接受 payload 自报身份、时间或来源。旧 Gateway 不协商，因此新 Connector 不发送；旧 Connector 也不因缺报而失败。组合会话不得将它路由给某个 provider。
 
-只允许 OS family / 发行版 / 内核、架构、CPU、内存、容器类别、Connector 版本和 provider 版本摘要；未知数值为 null。字段精确列举、字符串和 provider 数量有界，禁止网络、环境、路径及任意扩展字段。Gateway 在接收后添加固定 source 和 reported_at，仅用于 machines_get 的设备属性，不形成原生契约或执行、读取许可。MCP 详情里的 provider 摘要仍须按当前 caller 的完整目标权限过滤。
+只允许 OS family / 发行版 / 内核、架构、CPU、内存、容器类别、Connector 版本和 provider 版本摘要；未知数值为 null。字段精确列举、字符串和 provider 数量有界，禁止网络、环境、路径及任意扩展字段。Gateway 在接收后添加固定 source 和 reported_at，仅用于 machines_get 的设备属性，不形成原生契约或执行、读取许可。MCP 详情只向 token 范围内设备公开其 provider 摘要。
 
 该报告和有效收包时间在当前 Gateway 进程内有界保留，读取不续期；断开后 link_since 为 null，重启或恢复代次变更后未知。详细字段与边界见[设备详情](../PROTOCOL.md#设备详情与原生版本)。
 
-MCP 产品使用 `methods:["*"]` 表示目标上的全部当前暴露方法，不在配对时枚举方法名。该标志在受保护配置中解析；送入原生校验的逐次许可仍只绑定本次实际方法、caller、连接与 deadline。
+新配对与登记不保存 methods/actions 或 caller/local/gateway 策略；旧字段只在兼容解码边界接纳并忽略。

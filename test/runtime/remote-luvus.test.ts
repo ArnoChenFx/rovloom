@@ -51,7 +51,6 @@ function input(rawGrant?: LuvusProductionRemoteConfig['raw_grant']) {
       classification_revision: MANAGED_LUVUS_CLASSIFICATION,
       schema_bundle: schema
     },
-    peer_policy_revision: 'local1',
     ...(rawGrant ? { raw_grant: rawGrant } : {})
   }
 }
@@ -117,7 +116,7 @@ function attempt(
     provider_kind: 'luvus',
     binding_revision: 1,
     contract_ref: contractRef(provider.contract.wire.source),
-    registration: { deadline: 200, caller_policy_revision: 'caller1', local_policy_revision: 'local1' }
+    registration: { deadline: 200 }
   }
   return {
     binding,
@@ -133,7 +132,7 @@ function attempt(
 }
 
 /** 运行真正的候选和 checkDispatch，避免只比较 authority 字段而漏掉原 raw gate。 */
-function dispatch(provider: RuntimeProvider, request: TrustedAttempt, now = 100, allowed = true) {
+function dispatch(provider: RuntimeProvider, request: TrustedAttempt, now = 100) {
   const source = provider.source(request.binding)
   assert(source)
   const validator = createNativeValidator(provider.contract.compiled)
@@ -144,21 +143,8 @@ function dispatch(provider: RuntimeProvider, request: TrustedAttempt, now = 100,
     ...request.native_request
   })
   assert(candidate.ok)
-  const policy = {
-    machines: ['remote_machine'],
-    sessions: [request.binding.target.session!],
-    methods: allowed ? [request.method] : [],
-    host: false
-  }
-  const authority: DispatchAuthorization = {
-    ...provider.authority(request, source.binding),
-    source,
-    principal_id: request.principal_id,
-    caller_policy: policy,
-    local_policy: policy,
-    mode: 'raw_contract',
-    now
-  }
+  provider.validateAttempt?.(request, source.binding)
+  const authority: DispatchAuthorization = { source, principal_id: request.principal_id, mode: 'raw_contract', now }
   return { result: checkDispatch(candidate.value, authority), authority }
 }
 
@@ -169,19 +155,10 @@ test(
     const checked = checkedRemoteLuvusConfig(reference, original)
     assert.equal(checked.contract.schema_bundle, schema)
     assert.equal(hash(checked.contract.schema_bundle), FIXED_LUVUS_SCHEMA_SHA256)
-    const methods = original.raw_grant!.methods as string[]
-    methods.push('workspace.close')
     original.binding.config_ref = 'changed'
-    assert.deepEqual(checked.raw_grant!.methods, ['workspace.rename'])
+    assert(!Object.hasOwn(checked, 'raw_grant'))
     assert.equal(checked.binding.config_ref, reference)
-    for (const value of [
-      checked,
-      checked.binding,
-      checked.target,
-      checked.contract,
-      checked.raw_grant,
-      checked.raw_grant!.methods
-    ]) {
+    for (const value of [checked, checked.binding, checked.target, checked.contract]) {
       assert(Object.isFrozen(value))
     }
   }
@@ -207,17 +184,9 @@ test(
       /** 引用必须对应同一 canonical config_ref。 */ () => checkedRemoteLuvusConfig('other', input()),
       /remote_luvus_pin_invalid/
     )
-    for (const methods of [['workspace.rename', 'workspace.rename'], ['']]) {
-      assert.throws(
-        /** raw 不因认证或 scope 名称扩大到未审方法。 */ () =>
-          checkedRemoteLuvusConfig(reference, input({ principal_id: 'alice', methods })),
-        /remote_luvus_raw_grant_invalid/
-      )
+    for (const raw_grant of [null, { principal_id: '', methods: [''] }, { expires_at: null }]) {
+      assert.equal(Object.hasOwn(checkedRemoteLuvusConfig(reference, { ...input(), raw_grant }), 'raw_grant'), false)
     }
-    assert.throws(
-      /** raw 主体必须为明确非空标识。 */ () =>
-        checkedRemoteLuvusConfig(reference, input({ principal_id: '', methods: ['workspace.rename'] }))
-    )
   }
 )
 
@@ -386,9 +355,9 @@ test(
       original.connection_epoch = 'changed_after_open'
       const request = attempt(live)
       assert.equal(live.source(request.binding)!.binding.connection_epoch, 'epoch1')
-      assert.equal(live.catalogSource!(retained, request.binding.registration).binding.connection_epoch, 'epoch1')
+      assert.equal(live.catalogSource!(retained).binding.connection_epoch, 'epoch1')
       assert.throws(
-        /** 目录也不接受事后修改的旧输入对象。 */ () => live.catalogSource!(original, request.binding.registration),
+        /** 目录也不接受事后修改的旧输入对象。 */ () => live.catalogSource!(original),
         /remote_luvus_epoch_unavailable/
       )
       for (const field of ['machine_id', 'recovery_generation', 'connection_epoch', 'contract_ref'] as const) {
@@ -541,8 +510,6 @@ test(
     try {
       const live = factory.provider.open(connection(), /** 仅用于离线权限组合。 */ () => {}).accept(snapshot())
       const checked = dispatch(live, attempt(live))
-      assert.equal(checked.authority.owner, true)
-      assert.deepEqual(checked.authority.raw_grant!.methods, ['workspace.rename'])
       assert.equal(checked.result.ok, true)
     } finally {
       factory.close()
@@ -552,7 +519,7 @@ test(
 
 test('remote 策略 raw grant 保留真实 caller、方法、双端策略和固定截止约束', async () => {
   const factory = await createPinnedRemoteLuvus(
-    checkedRemoteLuvusConfig(reference, input({ caller_policy_revision: 'caller1', methods: ['workspace.rename'] }))
+    checkedRemoteLuvusConfig(reference, input({ methods: ['workspace.rename'] }))
   )
   try {
     const live = factory.provider.open(connection(), () => {}).accept(snapshot())
@@ -560,29 +527,15 @@ test('remote 策略 raw grant 保留真实 caller、方法、双端策略和固�
       const request = attempt(live, 'epoch1', 'workspace.rename', principal)
       const checked = dispatch(live, request)
       assert.equal(checked.result.ok, true)
-      assert.equal(checked.authority.raw_grant!.principal_id, principal)
-      assert.equal(checked.authority.raw_grant!.expires_at, request.binding.registration.deadline)
-      const revoked = dispatch(live, request, 100, false)
-      assert(!revoked.result.ok)
-      assert.equal(revoked.result.error.code, 'forbidden')
     }
     const stale = attempt(live)
     stale.binding.registration.caller_policy_revision = 'other_policy'
     for (const request of [stale, attempt(live, 'epoch1', 'workspace.get')]) {
       const checked = dispatch(live, request)
       assert(checked.result.ok)
-      assert.equal(checked.authority.raw_grant!.expires_at, request.binding.registration.deadline)
     }
   } finally {
     factory.close()
-  }
-  for (const grant of [
-    { caller_policy_revision: '', methods: ['workspace.rename'] },
-    { principal_id: 'alice', caller_policy_revision: 'caller1', methods: ['workspace.rename'] },
-    { methods: ['workspace.rename'] },
-    { caller_policy_revision: 'caller1', methods: ['workspace.rename'], expires_at: null }
-  ]) {
-    assert.throws(() => checkedRemoteLuvusConfig(reference, { ...input(), raw_grant: grant }))
   }
 })
 
@@ -597,23 +550,12 @@ test(
       const request = attempt(live)
       const granted = dispatch(live, request)
       assert.equal(granted.result.ok, true)
-      assert.equal(granted.authority.raw_grant!.expires_at, request.binding.registration.deadline)
-      assert.deepEqual(granted.authority.raw_grant!.methods, ['workspace.rename'])
-      assert.deepEqual(granted.authority.raw_grant!.binding, live.source(request.binding)!.binding)
       for (const denied of [
         attempt(live, 'epoch1', 'workspace.rename', 'bob'),
         attempt(live, 'epoch1', 'workspace.get')
       ]) {
         const checked = dispatch(live, denied)
-        assert.equal(checked.authority.owner, true)
         assert(checked.result.ok)
-        assert.equal(checked.authority.raw_grant!.principal_id, denied.principal_id)
-        assert.deepEqual(checked.authority.raw_grant!.methods, [denied.method])
-      }
-      const expired = dispatch(live, request, request.binding.registration.deadline)
-      assert.equal(expired.result.ok, false)
-      if (!expired.result.ok) {
-        assert.equal(expired.result.error.code, 'raw_contract_grant_expired')
       }
     } finally {
       factory.close()

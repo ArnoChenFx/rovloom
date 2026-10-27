@@ -1,10 +1,8 @@
 // MCP Bearer registry: authentication uses hashes; newly issued tokens remain available to administrators.
 import { createHash, randomBytes } from 'node:crypto'
 import type { DeviceScope, Principal } from '../router.js'
-import type { ProviderPolicy } from '../wire/types.js'
-import { fields, id, LIMITS, object, validatePolicies } from '../wire/index.js'
+import { fields, id, LIMITS, object } from '../wire/index.js'
 import { CliError } from './config.js'
-import { SIMPLE_SETUP_ACTOR } from './setup-policy.js'
 
 export const REGISTRY_MAX_BYTES = 262_144
 export const MAX_CALLERS = 64
@@ -16,7 +14,8 @@ export type CallerEntry = {
   token_sha256: string
   token?: string
   scope?: 'gateway'
-  // 可选可见性收窄：缺省表示今天的行为（当前 grants 覆盖的全部设备）。
+  management_only?: true
+  // 可选设备范围；缺省为全部活跃设备。
   device_scope?: DeviceScope
   issued_at: number
   expires_at: number
@@ -24,11 +23,11 @@ export type CallerEntry = {
   previous?: { token_sha256: string; expires_at: number }
 }
 export type CallerRegistry = {
-  schema_version: 1
+  schema_version: 1 | 2
   kind: 'mcp-caller-source'
   resource: string
-  local_policy: ProviderPolicy
-  gateway_policy?: ProviderPolicy
+  local_policy?: unknown
+  gateway_policy?: unknown
   callers: CallerEntry[]
 }
 
@@ -74,9 +73,9 @@ function deviceScope(value: unknown): DeviceScope {
 export function parseRegistry(value: unknown, resource?: string): CallerRegistry {
   try {
     const source = object(value)
-    fields(source, ['schema_version', 'kind', 'resource', 'local_policy', 'callers'], ['gateway_policy'])
+    fields(source, ['schema_version', 'kind', 'resource', 'callers'], ['local_policy', 'gateway_policy'])
     if (
-      source.schema_version !== 1 ||
+      ![1, 2].includes(source.schema_version as number) ||
       source.kind !== 'mcp-caller-source' ||
       typeof source.resource !== 'string' ||
       (resource !== undefined && source.resource !== resource) ||
@@ -85,10 +84,6 @@ export function parseRegistry(value: unknown, resource?: string): CallerRegistry
     ) {
       invalid()
     }
-    const local = source.local_policy as ProviderPolicy
-    if (source.gateway_policy !== undefined) {
-      validatePolicies({ caller: source.gateway_policy as ProviderPolicy, local })
-    }
     const principals = new Set<string>()
     const digests = new Set<string>()
     for (const input of source.callers) {
@@ -96,7 +91,7 @@ export function parseRegistry(value: unknown, resource?: string): CallerRegistry
       fields(
         caller,
         ['principal', 'token_sha256', 'issued_at', 'expires_at'],
-        ['previous', 'token', 'scope', 'device_scope']
+        ['previous', 'token', 'scope', 'device_scope', 'management_only']
       )
       if (
         (caller.scope !== undefined && caller.scope !== 'gateway') ||
@@ -108,14 +103,7 @@ export function parseRegistry(value: unknown, resource?: string): CallerRegistry
         invalid()
       }
       const principal = object(caller.principal)
-      fields(principal, ['id', 'policy'], ['permissions'])
-      if (principal.permissions !== undefined) {
-        const permissions = object(principal.permissions)
-        fields(permissions, ['discard_response'])
-        if (typeof permissions.discard_response !== 'boolean') {
-          invalid()
-        }
-      }
+      fields(principal, ['id'], ['policy', 'permissions'])
       id(principal.id)
       if (
         !PRINCIPAL.test(principal.id as string) ||
@@ -144,7 +132,9 @@ export function parseRegistry(value: unknown, resource?: string): CallerRegistry
         }
         digests.add(previous.token_sha256)
       }
-      validatePolicies({ caller: principal.policy as ProviderPolicy, local })
+      if (caller.management_only !== undefined && caller.management_only !== true) {
+        invalid()
+      }
       // 范围只校验形状；已撤销或不存在的 machine_id 按不匹配处理，不视为配置错误。
       if (caller.device_scope !== undefined) {
         deviceScope(caller.device_scope)
@@ -152,15 +142,41 @@ export function parseRegistry(value: unknown, resource?: string): CallerRegistry
       principals.add(principal.id as string)
       digests.add(caller.token_sha256)
     }
-    const registry = source as unknown as CallerRegistry
-    // Older simple-pairing registries keep the authoritative caller policy on the pairing actor.
-    // Persist it independently on the next registry write so revoking that token does not revoke other tokens.
-    const paired = registry.callers.find(
-      (entry) => entry.scope === undefined && entry.principal.id === SIMPLE_SETUP_ACTOR
-    )
-    return registry.gateway_policy === undefined && paired
-      ? { ...registry, gateway_policy: structuredClone(paired.principal.policy) }
-      : registry
+    const upgraded = (
+      source.callers as unknown as (CallerEntry & {
+        principal: Principal & { policy?: { revision?: string; grants: { target: { machine_id: string } }[] } }
+      })[]
+    ).map((entry): CallerEntry => {
+      let scope = entry.device_scope
+      // 旧普通 token 的设备边界曾藏在 caller grant 中；仅迁移设备维度，绝不借 local 策略扩大范围。
+      if (
+        scope === undefined &&
+        source.schema_version === 1 &&
+        entry.scope !== 'gateway' &&
+        entry.principal.id !== 'operator_simple_pairing' &&
+        entry.principal.policy
+      ) {
+        const grants = entry.principal.policy.grants
+        if (!Array.isArray(grants)) {
+          invalid()
+        }
+        const machines = [...new Set(grants.map((grant) => grant.target.machine_id))]
+        scope = deviceScope({ mode: 'selected', machine_ids: machines })
+      }
+      return {
+        principal: { id: entry.principal.id },
+        token_sha256: entry.token_sha256,
+        issued_at: entry.issued_at,
+        expires_at: entry.expires_at,
+        ...(entry.token ? { token: entry.token } : {}),
+        ...(entry.previous ? { previous: structuredClone(entry.previous) } : {}),
+        ...(scope ? { device_scope: structuredClone(scope) } : {}),
+        ...(entry.management_only || entry.principal.policy?.revision === 'rovloom_admin_v1'
+          ? { management_only: true as const }
+          : {})
+      }
+    })
+    return { schema_version: 2, kind: 'mcp-caller-source', resource: source.resource as string, callers: upgraded }
   } catch {
     throw new CliError('invalid_config')
   }
@@ -182,7 +198,7 @@ function find(registry: CallerRegistry, principal: string): number {
   return index
 }
 
-/** 新主体：策略克隆自已有主体，防止 CLI 凭空扩大权限；保留原文供管理员后续查看。 */
+/** 新主体继承模板的设备范围；新凭据保留原文供管理员查看。 */
 export function createCaller(
   registry: CallerRegistry,
   principal: string,
@@ -200,9 +216,8 @@ export function createCaller(
   const token = newToken()
   const expires_at = now + ttl(days)
   const entry: CallerEntry = {
-    principal: { ...structuredClone(template.principal), id: principal },
-    ...(template.scope ? { scope: template.scope } : {}),
-    // 克隆范围与克隆策略同源，同样不会扩大权限；--like 的收窄一并继承。
+    principal: { id: principal },
+    // --like 的设备范围原样继承。
     ...(template.device_scope ? { device_scope: structuredClone(template.device_scope) } : {}),
     token_sha256: digestToken(token),
     token,
@@ -212,24 +227,7 @@ export function createCaller(
   return { registry: { ...registry, callers: [...registry.callers, entry] }, token, expires_at }
 }
 
-/** 本机操作员显式授予/撤回结果删除权限；不改变调用方法策略、令牌或到期时间。 */
-export function setDiscardPermission(registry: CallerRegistry, principal: string, allowed: boolean): CallerRegistry {
-  const index = find(registry, principal)
-  if (typeof allowed !== 'boolean') {
-    throw new CliError('invalid_arguments')
-  }
-  return {
-    ...registry,
-    callers: registry.callers.map(
-      /* 只修改选定主体，旧注册表缺省仍为无权。 */ (entry, at) =>
-        at === index
-          ? { ...entry, principal: { ...entry.principal, permissions: { discard_response: allowed } } }
-          : entry
-    )
-  }
-}
-
-/** 本机操作员显式收窄/清除设备可见性；不改变策略修订、方法授权、令牌或到期时间。 */
+/** 本机操作员显式收窄/清除设备可见性；不改变令牌或到期时间。 */
 export function setDeviceScope(
   registry: CallerRegistry,
   principal: string,
@@ -355,11 +353,6 @@ export function summarize(registry: CallerRegistry, now: number): CallerSummary[
   )
 }
 
-/** Full Gateway tokens require an authoritative caller binding; local grants never substitute for it. */
-export function gatewayCallerPolicy(registry: CallerRegistry): ProviderPolicy {
-  return registry.gateway_policy ?? { revision: 'rovloom_unpaired', grants: [] }
-}
-
 export function createGatewayCaller(registry: CallerRegistry, principal: string, now: number, days = 365) {
   if (
     !PRINCIPAL.test(principal) ||
@@ -371,8 +364,7 @@ export function createGatewayCaller(registry: CallerRegistry, principal: string,
   const token = newToken()
   const expires_at = now + ttl(days)
   const entry: CallerEntry = {
-    principal: { id: principal, policy: structuredClone(gatewayCallerPolicy(registry)) },
-    scope: 'gateway',
+    principal: { id: principal },
     token,
     token_sha256: digestToken(token),
     issued_at: now,

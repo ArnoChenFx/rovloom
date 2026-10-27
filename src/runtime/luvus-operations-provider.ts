@@ -1,19 +1,15 @@
 /** 为实际受控本机 Owner 装配普通 Luvus 窗口与 Agent 操作，复用原 Wire、当前政策、来源与固定派发期限。 */
 import { LuvusAdapterError } from '../connector/luvus/types.js'
-import { id, object } from '../wire/index.js'
+import { object } from '../wire/index.js'
 import { assertLocalOwnerLuvus } from './native-source.js'
 import type { LocalOwnerLuvusInstance } from './native-source.js'
-import { assertLuvusOperationsContract, createLuvusOperationsAuthority } from './luvus-operations-authority.js'
+import { assertLuvusOperationsContract, createLuvusOperationsValidation } from './luvus-operations-validation.js'
 import { LUVUS_OPERATION_METHODS } from './luvus-operations.js'
 import type { RuntimeProvider } from './types.js'
 
 /** 只有原受控进程交付的真实 Owner 句柄可装配；普通 JSON、缺 token 或 ready 自报不能成为来源。 */
-export function createLuvusOperationsProvider(
-  owner: LocalOwnerLuvusInstance,
-  peerPolicyRevision: string
-): RuntimeProvider {
+export function createLuvusOperationsProvider(owner: LocalOwnerLuvusInstance): RuntimeProvider {
   assertLocalOwnerLuvus(owner)
-  id(peerPolicyRevision)
   const config = owner.config
   const contract = owner.contract
   const source = contract.wire.source
@@ -22,13 +18,12 @@ export function createLuvusOperationsProvider(
   if (source.runtime_generation !== capabilities.server_generation || capabilities.session !== config.target.session) {
     throw new LuvusAdapterError('luvus_operations_source_mismatch')
   }
-  const authority = createLuvusOperationsAuthority(
+  const validateAttempt = createLuvusOperationsValidation(
     contract,
     /** 本机 authority 仍逐次要求真实 Owner，并由同一实例核对完整 attempt。 */ (binding) => {
       assertLocalOwnerLuvus(owner)
       return owner.source(binding)
-    },
-    /** 此工厂的受信宿主已显式选择真实 local_owner；缺 token 或任意 JSON 不能进入此闭包。 */ () => true
+    }
   )
   return Object.freeze({
     catalog_methods: LUVUS_OPERATION_METHODS,
@@ -41,7 +36,6 @@ export function createLuvusOperationsProvider(
       enabled: true
     }),
     target: config.target,
-    peer_policy_revision: peerPolicyRevision,
     contract,
     /** 每个调用都复核原真实 child/root/session/generation，不能复用另一实例的许可。 */
     source(binding) {
@@ -49,11 +43,11 @@ export function createLuvusOperationsProvider(
       return owner.source(binding)
     },
     /** 目录只使用当前实际认证连接及当前 caller/local 政策，不创建虚构请求。 */
-    catalogSource(connection, policies) {
+    catalogSource(connection) {
       assertLocalOwnerLuvus(owner)
-      return owner.catalogSource(connection, policies)
+      return owner.catalogSource(connection)
     },
-    authority,
+    validateAttempt,
     /** 就绪只取真实受控来源，失效后不把旧 Owner 句柄自报为永久可用。 */
     ready() {
       try {

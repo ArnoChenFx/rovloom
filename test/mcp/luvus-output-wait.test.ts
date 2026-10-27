@@ -89,7 +89,7 @@ test(
       }
       assert.equal(f.claims(), 2)
       assert.equal(f.connector.transport.status().connection_epoch, epoch)
-      f.allowRead(false)
+      f.deviceScope([])
       const revoked = await call('runtime_result_read', { result_id: resultId })
       assert.equal(revoked.isError, true)
       assert.equal((revoked.structuredContent!.gateway_error as { code: string }).code, 'forbidden')

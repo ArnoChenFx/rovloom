@@ -5,9 +5,9 @@ import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { hash } from '../../src/wire/index.js'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
-import { selectedSetupPolicies, setupProviderKinds, setupReference, setupTarget } from '../../src/cli/setup-policy.js'
+import { setupProviderKinds, setupReference, setupTarget } from '../../src/cli/setup-targets.js'
 import { publishSetupSchemas, reviewSetupManifest } from '../../src/cli/setup-manifest.js'
-import type { SetupPlanFacts } from '../../src/cli/setup-policy.js'
+import type { SetupPlanFacts } from '../../src/cli/setup-targets.js'
 import { privateHerdrTestRoot } from '../connector/herdr/private-root.js'
 import { privateDirectory } from '../../src/cli/first-config.js'
 import { createProductionCliRuntime } from '../../src/cli/production.js'
@@ -62,8 +62,8 @@ const plan: SetupPlanFacts = {
 
 test('Luvus 配对清单兼容旧主体授权与新策略授权，拒绝额外方法或错误授权范围', async () => {
   const root = privateHerdrTestRoot('.setup-luvus-grant-')
-  const authorization = selectedSetupPolicies(plan, 'synthetic_machine', ['luvus'])
-  const grant = authorization.policies.caller.grants[0]!
+  const authorization = { principal_id: plan.actor }
+  const grant = { target: setupTarget('synthetic_machine', 'luvus'), methods: ['pane.list'] }
   const schema = readFileSync(new URL('../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8')
   const reference = setupReference(plan.attempt_id)
   const value = {
@@ -78,7 +78,6 @@ test('Luvus 配对清单兼容旧主体授权与新策略授权，拒绝额外�
       binding_revision: 1,
       enabled: true
     },
-    peer_policy_revision: authorization.policies.local.revision,
     contract: {
       binary_version: 'synthetic_future',
       binary_sha256: 'f'.repeat(64),
@@ -90,10 +89,7 @@ test('Luvus 配对清单兼容旧主体授权与新策略授权，拒绝额外�
   }
   try {
     for (const methods of [grant.methods, publishedLuvusSetupMethods]) {
-      for (const subject of [
-        { principal_id: authorization.principal_id },
-        { caller_policy_revision: authorization.policies.caller.revision }
-      ]) {
+      for (const subject of [{ principal_id: authorization.principal_id }, {}]) {
         const remote = { ...value, raw_grant: { ...subject, methods } }
         const reviewed = await reviewSetupManifest(
           { installations: [{ reference, value: remote }] },
@@ -103,8 +99,7 @@ test('Luvus 配对清单兼容旧主体授权与新策略授权，拒绝额外�
           new AbortController().signal
         )
         assert.equal((reviewed.reviewed[0]!.value as { raw_grant?: unknown }).raw_grant, undefined)
-        assert.deepEqual(reviewed.authorization.policies.caller.grants[0]!.methods, ['*'])
-        assert.deepEqual(reviewed.authorization.policies.local.grants[0]!.methods, ['*'])
+        assert.deepEqual(reviewed.authorization, { principal_id: plan.actor })
       }
     }
     const noGrant = await reviewSetupManifest(
@@ -114,7 +109,7 @@ test('Luvus 配对清单兼容旧主体授权与新策略授权，拒绝额外�
       root,
       new AbortController().signal
     )
-    assert.deepEqual(noGrant.authorization.policies.caller.grants[0]!.methods, ['*'])
+    assert.deepEqual(noGrant.authorization, { principal_id: plan.actor })
     assert.deepEqual(readdirSync(root), [])
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -136,7 +131,6 @@ function manifest() {
             target: setupTarget('synthetic_machine', 'herdr'),
             binding_revision: 1,
             config_ref: setupReference(plan.attempt_id, 'herdr'),
-            peer_policy_revision: 'setup_local_' + plan.attempt_id,
             expected_source: {
               ...fixedHerdrSource(),
               binary_version: 'synthetic-future',
@@ -163,14 +157,7 @@ test(
     ]) {
       assert.throws(/* 空、重复、逆序及对象均不是合法固定选择。 */ () => setupProviderKinds(value))
     }
-    const selected = selectedSetupPolicies(plan, 'synthetic_machine', ['luvus', 'herdr'])
-    const [luvus, herdr] = selected.policies.caller.grants
-    assert.deepEqual(luvus!.target, setupTarget('synthetic_machine', 'luvus'))
-    assert.deepEqual(herdr!.target, setupTarget('synthetic_machine', 'herdr'))
-    assert.deepEqual(luvus!.methods, ['*'])
-    assert.deepEqual(herdr!.methods, ['*'])
-    assert.deepEqual(selected.policies.local.grants, selected.policies.caller.grants)
-    assert.equal(selectedSetupPolicies(plan, 'synthetic_machine', ['herdr']).policies.caller.grants.length, 1)
+    assert.notDeepEqual(setupTarget('synthetic_machine', 'luvus'), setupTarget('synthetic_machine', 'herdr'))
   }
 )
 

@@ -10,14 +10,14 @@ import { observedHerdrSource } from '../connector/herdr/review.js'
 import { parseHerdrProviderRefConfig } from '../connector/herdr/provider.js'
 import type { HerdrProviderRefConfig } from '../connector/herdr/provider.js'
 import { LuvusDispatchClaims } from '../connector/luvus/claims.js'
-import type { ProviderPolicies } from '../wire/types.js'
+
 import { boundedJson, fields, hash, object } from '../wire/index.js'
 import { CliCancelled, CliError, herdrMode, type ConnectorConfig } from './config.js'
 import { privateDirectory } from './first-config.js'
 import type { HerdrProductionOwnerConfig } from './production-herdr.js'
 import { readSetupJson, writeSetupFile, writeSetupJson } from './setup-files.js'
 import { assertSetupNativePath, setupAgentDirectories, setupBinary } from './setup-native.js'
-import { setupReference, setupTarget } from './setup-policy.js'
+import { setupReference, setupTarget } from './setup-targets.js'
 import { runtimeReference } from './runtime-files.js'
 import type { SetupConsole } from './setup-console.js'
 import { cliMessages, formatMessage } from './messages.js'
@@ -122,7 +122,7 @@ export async function prepareSetupHerdr(
   console: SetupConsole,
   machine: string,
   attempt: string,
-  authorization: Readonly<{ principal_id: string; policies: ProviderPolicies }>
+  authorization: Readonly<{ principal_id: string }>
 ): Promise<PreparedSetupHerdr> {
   console.assertOwner()
   const path = runtimeReference(config.state_dir, 'herdr-setup')
@@ -204,8 +204,7 @@ export async function prepareSetupHerdr(
     target,
     binding_revision: 1,
     config_ref: reference,
-    expected_source: source,
-    peer_policy_revision: authorization.policies.local.revision
+    expected_source: source
   }
   const control = join(root, 'control')
   const schemaPath = join(control, 'schema.json')
@@ -248,8 +247,7 @@ export async function prepareSetupHerdr(
     local: {
       kind: 'herdr',
       config: provider as HerdrProductionOwnerConfig['config'],
-      native: { mode: attach ? 'attach' : 'managed' },
-      policies: authorization.policies
+      native: { mode: attach ? 'attach' : 'managed' }
     },
     remote: { kind: 'herdr', config: shared, schema_bundle: raw.toString('utf8') }
   }

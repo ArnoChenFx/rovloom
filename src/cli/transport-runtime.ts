@@ -1,6 +1,7 @@
+import type { V2Target } from '../wire/types.js'
 // 将CLI生命周期接到已验证transport；状态、身份及原生适配器均由受信宿主显式交付，不补造默认权限。
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { Router, type LocalPolicies, type Principal } from '../router.js'
+import { Router, type Principal } from '../router.js'
 import type { Store } from '../store.js'
 import type { TrustedAttempt } from '../integration/luvus-wire.js'
 import {
@@ -23,7 +24,7 @@ export type GatewayTransportPorts = Readonly<{
   store: Store
   router: Router
   transport: ReturnType<typeof createGateway>
-  localPolicies: LocalPolicies
+  targets?(): readonly V2Target[]
   // 与transport派发共享当前请求的受保护caller作用域，逐次重读身份；作用域外和关闭后拒绝。
   principal(): Principal
   // 只读取当前caller所属且仍有原文的实际Store尝试，不生成原生许可或另一份请求缓存。
@@ -34,7 +35,7 @@ export type GatewayTransportPorts = Readonly<{
 export type GatewayTransportResources = {
   store: Store
   identities: GatewayIdentitySource
-  localPolicies: LocalPolicies
+  targets?(): readonly V2Target[]
   authentication: HttpAuthenticationProvider
   catalog?: GatewayCatalogProvider
   transport: Omit<GatewayOptions, 'store' | 'router' | 'principal'>
@@ -78,7 +79,7 @@ export function createTransportCliRuntime(host: TransportCliHost): CliRuntime {
         return closing
       }
       try {
-        const router = new Router(owned.store, owned.localPolicies)
+        const router = new Router(owned.store)
         const principal = /* 为派发、结果读取及原请求索引提供同一当前身份，禁止全局最近caller。 */ (): Principal => {
           if (closing) {
             throw new FacadeServiceError('unavailable')
@@ -100,7 +101,6 @@ export function createTransportCliRuntime(host: TransportCliHost): CliRuntime {
               store: owned.store,
               router,
               transport,
-              localPolicies: owned.localPolicies,
               principal,
               resolveOriginalRead: transport.resolveOriginalRead,
               originalAttempt: /* 原请求仅供可信结果接线核对原绑定；归属和当前read政策仍先经Router。 */ (
@@ -111,7 +111,7 @@ export function createTransportCliRuntime(host: TransportCliHost): CliRuntime {
                 return call.attempt_id === attemptId ? owned.store.attempt(callId, attemptId) : undefined
               }
             })
-          : new StoreGatewayService({ ...owned, router })
+          : new StoreGatewayService({ ...owned, router, targets: owned.targets ?? (() => []) })
         return {
           authentication: owned.authentication,
           service: {

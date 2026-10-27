@@ -37,8 +37,7 @@ test(
               binding_revision: 1,
               config_ref: 'mixed_herdr',
               expected_source: fixedHerdrSource(),
-              schema_path: schema,
-              peer_policy_revision: context.local.revision
+              schema_path: schema
             }
           })
           context.state.store.defineProvider(herdr.providers[0]!.binding)
@@ -128,9 +127,10 @@ test(
       )
       await fixture.responded(first.data.call_id)
       revoke()
-      await assert.rejects(
-        service.execute('runtime_describe', { target, expected_binding_revision: 1, method: 'ping' }, context),
-        { code: 'not_found' }
+      assert.equal(
+        (await service.execute('runtime_describe', { target, expected_binding_revision: 1, method: 'ping' }, context))
+          .data.method,
+        'ping'
       )
       assert.equal(
         (

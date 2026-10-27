@@ -11,8 +11,8 @@ import type { GatewayConfig } from './config.js'
 import { canonicalLoopbackHost } from '../mcp/listen.js'
 import { PairingCodes } from './pairing-codes.js'
 import { publishSetupSchemas, reviewSetupManifest } from './setup-manifest.js'
-import { mergeSetupCallers, mergeSetupProviders, publish, publishFirstCallers } from './setup-publish.js'
-import { SIMPLE_SETUP_ACTOR, SIMPLE_SETUP_LINEAGE } from './setup-policy.js'
+import { mergeSetupProviders, publish, publishSetupCaller } from './setup-publish.js'
+import { SIMPLE_SETUP_ACTOR, SIMPLE_SETUP_LINEAGE } from './setup-targets.js'
 import { readSetupJson } from './setup-files.js'
 import { runtimeReference } from './runtime-files.js'
 import { readRuntimeConfig } from './runtime-config.js'
@@ -337,8 +337,8 @@ export class SimplePairingHttp {
       })
     )
     if (!additional) {
-      publishFirstCallers(callersPath, resource, authorization, {
-        principal: { id: authorization.principal_id, policy: authorization.policies.caller },
+      publishSetupCaller(callersPath, resource, {
+        principal: { id: authorization.principal_id },
         token_sha256: createHash('sha256')
           .update(client.token as string)
           .digest('hex'),
@@ -347,7 +347,6 @@ export class SimplePairingHttp {
       })
       publish(providersPath, { schema_version: 1, role: 'gateway', providers: reviewedEntries }, 1_048_576)
     } else {
-      mergeSetupCallers(callersPath, resource, authorization)
       mergeSetupProviders(providersPath, reviewedEntries)
     }
     for (const entry of reviewed.reviewed) {

@@ -16,10 +16,9 @@ import type { HerdrLocalConfig } from '../../../src/connector/herdr/local.js'
 import { herdrDeadline, runHerdrCommand } from '../../../src/connector/herdr/io.js'
 import { createHerdrGatewayResources, createHerdrConnectorResources } from '../../../src/connector/herdr/provider.js'
 import { HERDR_WORKFLOW_METHODS } from '../../../src/connector/herdr/methods.js'
-import { boundedJson, contractRef, fail, object } from '../../../src/wire/index.js'
-import type { JsonObject, ProviderPolicy } from '../../../src/wire/types.js'
+import { contractRef, object } from '../../../src/wire/index.js'
+import type { JsonObject } from '../../../src/wire/types.js'
 import type { GatewayIdentitySource } from '../../../src/mcp/management.js'
-import type { LocalPolicies } from '../../../src/router.js'
 import { management } from '../../storage/helpers.js'
 import { until } from '../../transport/helpers.js'
 import { createOwnedHerdrProcesses } from './owned-processes.js'
@@ -198,9 +197,6 @@ export async function createHerdrWorkflowHost(options: HerdrWorkflowHostOptions)
       revision: 'owned_caller_policy_1',
       grants: [{ target, methods: [...HERDR_WORKFLOW_METHODS], actions: ['dispatch', 'read', 'cancel'] }]
     }
-    const local: ProviderPolicy = { ...structuredClone(caller), revision: 'owned_local_policy_1' }
-    const connectorCaller = structuredClone(caller)
-    const connectorLocal = structuredClone(local)
     const binary = join(root, 'herdr')
     copyFileSync(options.binary, binary, constants.COPYFILE_EXCL)
     chmodSync(binary, 0o700)
@@ -274,7 +270,6 @@ export async function createHerdrWorkflowHost(options: HerdrWorkflowHostOptions)
       config_ref,
       expected_source: source,
       schema_path: schemaPath,
-      peer_policy_revision: local.revision,
       connector: {
         local: config,
         principal_id: callerId,
@@ -300,18 +295,11 @@ export async function createHerdrWorkflowHost(options: HerdrWorkflowHostOptions)
       principal: (identity) => (identity.principal_id === callerId ? { id: callerId, policy: caller } : null),
       /** 普通 caller 不获得生产管理员或会话管理权。 */ administrator: () => null
     }
-    const localPolicies: LocalPolicies = /** 完整目标必须来自受保护固定配置。 */ (selected) => {
-      if (boundedJson(selected) !== boundedJson(target)) {
-        fail('provider_binding_mismatch')
-      }
-      return local
-    }
     runtime = await createProviderGatewayRuntime({
       ...gatewayOwned,
       lifecycle: opened.lifecycle,
       channels: opened.channels,
       identities,
-      localPolicies,
       listener: {
         hostname: '127.0.0.1',
         port: 0,
@@ -332,12 +320,6 @@ export async function createHerdrWorkflowHost(options: HerdrWorkflowHostOptions)
       config: providerRef,
       installation: installed,
       now,
-      policies: /** 仅交付独立本机受保护政策，不查询 Gateway Store 或消息自报主体。 */ (principal) => {
-        if (principal !== callerId) {
-          fail('admission_principal_mismatch')
-        }
-        return { caller: connectorCaller, local: connectorLocal }
-      },
       /** 工厂拥有 writer 和安装关闭；直接进程仍归 fixture，在两个角色关闭后统一回收。 */
       async releaseOwner() {
         ownerReleaseCalls++
@@ -395,7 +377,7 @@ export async function createHerdrWorkflowHost(options: HerdrWorkflowHostOptions)
       caller_identity: callerIdentity,
       provider_ref: providerRef,
       // 统一MCP服务必须复用创建runtime时同一来源及原owner目录，不从describe重建权限或schema。
-      mcp: { runtime: activeRuntime, identities, localPolicies, catalog: gatewayOwned.catalog },
+      mcp: { runtime: activeRuntime, identities, catalog: gatewayOwned.catalog },
       describe: gatewayOwned.describe,
       connector: activeConnector,
       /** 仅统计 Connector 自己的真实发送墓碑，不读取 Gateway 请求或响应锚点。 */
@@ -418,3 +400,5 @@ export async function createHerdrWorkflowHost(options: HerdrWorkflowHostOptions)
     throw error
   }
 }
+
+import type { ProviderPolicy } from '../../legacy-policy.js'

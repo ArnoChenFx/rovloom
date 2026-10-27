@@ -12,9 +12,7 @@ export { catalogMethods } from './fixture-values.js'
 export function catalogFixture() {
   const f = storeFixture()
   const epoch = f.store.connect(target.machine_id, syntheticCredential)
-  const policy = { revision: 'caller_1', grants: [{ target, methods: catalogMethods, actions: ['read'] as const }] }
-  f.setCaller({ id: 'alice', policy: JSON.parse(JSON.stringify(policy)) })
-  f.setLocal({ ...JSON.parse(JSON.stringify(policy)), revision: 'local_1' })
+  f.setCaller({ id: 'alice' })
   const capabilities = json('session-capabilities.json')
   capabilities.result.session = target.session
   capabilities.result.server_generation = G
@@ -36,6 +34,7 @@ export function catalogFixture() {
   }
   const initial = nativeSource()
   let source: GatewayCatalogSource | undefined = {
+    supported_methods: catalogMethods,
     local_provider: f.store.provider(target.machine_id, target.provider_id)!,
     record: {
       wire: { source: origin, support_status: 'validated' },
@@ -56,9 +55,7 @@ export function catalogFixture() {
         binding_revision: 1,
         contract_source_ref: contractRef(origin),
         connection_epoch: epoch,
-        recovery_generation: f.store.generation(),
-        caller_policy_revision: 'caller_1',
-        local_policy_revision: 'local_1'
+        recovery_generation: f.store.generation()
       }
     },
     expires_at: f.store.clock() + 30_000
@@ -71,9 +68,9 @@ export function catalogFixture() {
     }
   }
   const service = new StoreGatewayService({
+    targets: f.targets,
     store: f.store,
     identities: f.identities,
-    localPolicies: f.localPolicies,
     catalog
   })
   return {

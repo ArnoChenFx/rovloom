@@ -43,50 +43,13 @@ test(
   }
 )
 test(
-  'router reauthorizes reads, dispatch and cancellation against both current policies',
-  /* 验证读取、派发和取消都按当前完整 provider 目标重新检查双端授权。 */ () => {
-    const s = new Store(':memory:', /* 固定存储时钟，排除截止时间对授权测试的干扰。 */ () => 100, { management })
-    try {
-      const d = connected(s)
-      const caller = policy(d.target)
-      let local = policy(d.target, true)
-      const router = new Router(s, /* 读取可即时替换的本地策略，验证已有调用不会沿用旧许可。 */ () => local)
-      const principal = { id: 'alice', policy: caller }
-      const c = router.create(principal, d.target, { method: 'pane.read' }, options())
-      assert.deepEqual(JSON.parse(c.target_json), d.target)
-      assert.equal(c.method, 'pane.read')
-      assert.throws(
-        /* 请求白名单外的原生方法，要求在登记调用前拒绝。 */ () =>
-          router.create(principal, d.target, { method: 'pane.run' }, options()),
-        /forbidden/
-      )
-      local = { ...local, grants: [] }
-      assert.throws(/* 撤销本地许可后读取调用，要求拒绝。 */ () => router.get(principal, c.call_id), /forbidden/)
-      assert.throws(
-        /* 撤销本地许可后派发调用，要求拒绝。 */ () => router.dispatch(principal, c.call_id, d.epoch),
-        /forbidden/
-      )
-      assert.throws(/* 撤销本地许可后取消调用，要求拒绝。 */ () => router.cancel(principal, c.call_id), /forbidden/)
-      local = policy(d.target, true)
-      assert.equal(router.cancel(principal, c.call_id).state, 'not_dispatched')
-      assert.throws(
-        /* 其他主体读取调用，要求隐藏原主体的记录。 */ () => router.get({ ...principal, id: 'bob' }, c.call_id),
-        /call_not_found/
-      )
-    } finally {
-      s.close()
-    }
-  }
-)
-test(
   'device scope gates dispatch, reads, cancellation and result access on the execution surface',
   /* 范围是过滤器：越界设备 forbidden，收窄后既有调用同样被拒，但策略修订不变。 */ () => {
     const now = 100
     const s = new Store(':memory:', /* 可控时钟，避免期限干扰授权断言。 */ () => now, { management })
     try {
       const d = connected(s)
-      const local = policy(d.target, true)
-      const router = new Router(s, /* 双端策略不变，只改变范围。 */ () => local)
+      const router = new Router(s)
       const wide = { id: 'alice', policy: policy(d.target) }
       const outOfScope = { ...wide, device_scope: { mode: 'selected' as const, machine_ids: [] } }
       // 越界设备在登记阶段就 forbidden，且不产生任何调用。
@@ -101,21 +64,14 @@ test(
       const meta = router.saveResult(wide, call.call_id)
       assert.throws(/* 结果分块 */ () => router.readResult(outOfScope, meta.result_id), /forbidden/)
       assert.throws(/* 结果预检 */ () => router.checkResultRead(outOfScope, meta.result_id), /forbidden/)
-      assert.throws(
-        /* 结果删除 */ () =>
-          router.discardResponse({ ...outOfScope, permissions: { discard_response: true } }, call.call_id),
-        /forbidden/
-      )
+      assert.throws(/* 结果删除 */ () => router.discardResponse({ ...outOfScope }, call.call_id), /forbidden/)
       // 范围内照常可读；范围不改变已登记的调用目标与归属。
       const inScope = { ...wide, device_scope: { mode: 'selected' as const, machine_ids: [d.target.machine_id] } }
       assert.equal(router.get(inScope, call.call_id).call_id, call.call_id)
       assert.equal(JSON.parse(s.call(wide.id, call.call_id).target_json).machine_id, d.target.machine_id)
       assert.equal(router.saveResult(inScope, call.call_id).result_id, meta.result_id)
       assert.equal(router.readResult(inScope, meta.result_id).eof, true)
-      assert.equal(
-        router.discardResponse({ ...inScope, permissions: { discard_response: true } }, call.call_id),
-        undefined
-      )
+      assert.equal(router.discardResponse({ ...inScope }, call.call_id), undefined)
     } finally {
       s.close()
     }
@@ -128,7 +84,7 @@ test(
     const s = new Store(':memory:', /* 固定时钟，等待只受 waitMs 约束。 */ () => 100, { management })
     try {
       const d = connected(s)
-      const router = new Router(s, /* 当前本地策略保持有效。 */ () => policy(d.target, true))
+      const router = new Router(s)
       const wide = { id: 'alice', policy: policy(d.target) }
       const call = router.create(wide, d.target, { method: 'pane.read' }, options())
       const outOfScope = { ...wide, device_scope: { mode: 'selected' as const, machine_ids: [] } }

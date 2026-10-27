@@ -338,11 +338,7 @@ test(
         'attempt_binding_mismatch'
       )
     }
-    for (const [key, value] of [
-      ['deadline', 2000],
-      ['caller_policy_revision', 'other'],
-      ['local_policy_revision', 'other']
-    ] as const) {
+    for (const [key, value] of [['deadline', 2000]] as const) {
       rejects(
         /* 提交该用例输入，确认消息与独立调用锚点不匹配时被拒绝。 */ () =>
           decode(

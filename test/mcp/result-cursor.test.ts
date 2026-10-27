@@ -546,19 +546,12 @@ test(
       const args = { result_id: 'result_fixture', cursor: first.next_cursor! }
       const second = (await f.service.execute('runtime_result_read', args, f.context)).data
       const principal = f.current()
-      const local = f.localPolicies()
-      f.setCaller({ ...principal, policy: { ...principal.policy, grants: [] } })
+      f.setCaller({ ...principal, device_scope: { mode: 'selected', machine_ids: [] } })
       await assert.rejects(
         /** caller撤权立即拒绝已有cursor重试。 */ () => f.service.execute('runtime_result_read', args, f.context),
         { code: 'forbidden' }
       )
       f.setCaller(principal)
-      f.setLocal({ ...local, grants: [] })
-      await assert.rejects(
-        /** 本地撤权也立即拒绝已有cursor重试。 */ () => f.service.execute('runtime_result_read', args, f.context),
-        { code: 'forbidden' }
-      )
-      f.setLocal(local)
       assert.deepEqual((await f.service.execute('runtime_result_read', args, f.context)).data, second)
       await f.service.execute('runtime_response_discard', { call_id: 'call_fixture' }, f.context)
       await assert.rejects(

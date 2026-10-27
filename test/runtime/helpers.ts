@@ -16,7 +16,7 @@ import {
 import type { LuvusConnectorAdmissionSource } from '../../src/runtime/connector-attempts.js'
 import { LuvusDispatchClaims, readLinuxLuvusPeer } from '../../src/connector/luvus/index.js'
 import { contractRef, assertBinding, fail } from '../../src/wire/index.js'
-import type { AttemptBinding, ProviderPolicy } from '../../src/wire/types.js'
+import type { AttemptBinding } from '../../src/wire/types.js'
 import type { NativeBinding, TrustedNativeContext } from '../../src/native-contract/index.js'
 import type { GatewayIdentitySource } from '../../src/mcp/management.js'
 import type { GatewayHostedProviders } from '../../src/runtime/types.js'
@@ -63,7 +63,6 @@ export async function runtimeFixture(
   const local: ProviderPolicy = { ...structuredClone(caller), revision: 'local1' }
   let authorized = true
   let deviceScope: string[] | undefined
-  let localPolicyRead: (() => void) | undefined
   const contract = {
     wire: { source: native.origin, support_status: 'validated' as const },
     compiled: native.compiled,
@@ -98,11 +97,6 @@ export async function runtimeFixture(
     /** 本切片不注入管理会话，普通 caller 无法升级管理员。 */
     administrator: () => null
   }
-  /** 每次操作读取同一当前fixture策略；没有缓存或第二份caller。 */
-  const localPolicies = () => {
-    localPolicyRead?.()
-    return local
-  }
   let extension: Awaited<ReturnType<NonNullable<typeof extend>>> | undefined
   try {
     extension = await extend?.({ state, caller, local, target, root: native.root })
@@ -115,24 +109,23 @@ export async function runtimeFixture(
     lifecycle: state.lifecycle,
     channels: state.channels,
     identities,
-    localPolicies,
     hosted: extension?.hosted,
     providers: [
       {
+        catalog_methods: Object.freeze(caller.grants.flatMap((grant) => grant.methods ?? [])),
         binding,
         target,
-        peer_policy_revision: local.revision,
         contract,
         source,
         /** 目录来源只投影已认证连接及当前双方政策，不编造 attempt 或发行真实原生权限。 */
-        catalogSource(connection, policies) {
+        catalogSource(connection) {
           return {
             authenticated: true,
             source_verified: native.state.trusted,
-            binding: { ...nativeBinding(connection), ...policies }
+            binding: nativeBinding(connection)
           }
         },
-        authority: native.host.backend.authority,
+        validateAttempt: native.host.backend.validateAttempt,
         ready: /** 仅代表此自建 listener 的测试健康。 */ () => native.state.active
       }
     ],
@@ -189,8 +182,7 @@ export async function runtimeFixture(
           const entry = backend.attempt(call, attempt)
           return entry ? source(entry.binding) : undefined
         },
-        policies: /** 固定路由主体与本机政策，不采信请求 JSON principal。 */ () => ({ caller, local }),
-        authority: native.host.backend.authority,
+        validateAttempt: native.host.backend.validateAttempt,
         now: Date.now
       }
       const backend: ReturnType<typeof createConnectorAdmissionBackend<LuvusConnectorAdmissionSource>> =
@@ -222,8 +214,6 @@ export async function runtimeFixture(
           assertBinding(attempt, backend.attempt(attempt.call_id, attempt.attempt_id)!.binding)
         },
         readiness: /** 使用独立配置的相同 revision，并保持 native fixture 健康可撤销。 */ () => ({
-          policy_revision: local.revision,
-          peer_policy_revision: 'local1',
           providers: [{ expected: binding, local: binding, native_ready: native.state.active }]
         }),
         close: /** 关闭 epoch 正文，不动长期 claims 墓碑。 */ () => backend.close()
@@ -236,17 +226,13 @@ export async function runtimeFixture(
   })
   return {
     gateway: active,
-    mcp: { runtime: active, identities, localPolicies },
+    mcp: { runtime: active, identities },
     connector,
     state,
     native,
     target,
     reference,
     caller: { principal_id: 'synthetic' },
-    /** 为目录最终复核设置同步策略回调，测试结束须清除；不能用于产品宿主。 */
-    onLocalPolicyRead(callback?: () => void) {
-      localPolicyRead = callback
-    },
     /** 等待双方实际认证且完成 provider readiness。 */
     async ready(signal?: AbortSignal) {
       await until(
@@ -275,14 +261,6 @@ export async function runtimeFixture(
     },
     deviceScope(value: string[] | undefined) {
       deviceScope = value
-    },
-    /** 独立撤销当前 caller 的读取权限，派发权限与身份仍保持有效。 */
-    allowRead(value: boolean) {
-      const grant = caller.grants[0]!
-      grant.actions = grant.actions.filter(/** 不重复追加或保留已撤销 read。 */ (action) => action !== 'read')
-      if (value) {
-        grant.actions.push('read')
-      }
     },
     /** 有界等待真实 Gateway 账本回应；回调不授予读取原文权限。 */
     async responded(call: string) {
@@ -316,3 +294,5 @@ export async function runtimeFixture(
     }
   }
 }
+
+import type { ProviderPolicy } from '../legacy-policy.js'

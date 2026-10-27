@@ -19,14 +19,7 @@ import {
   connectorAdmissionAdapter,
   createConnectorAdmissionBackend
 } from '../../src/runtime/connector-attempts.js'
-import type {
-  ContractSource,
-  ProviderBinding,
-  ProviderPolicies,
-  ProviderPolicy,
-  V2Target,
-  VersionOffer
-} from '../../src/wire/types.js'
+import type { ContractSource, ProviderBinding, V2Target, VersionOffer } from '../../src/wire/types.js'
 import { contractRef } from '../../src/wire/index.js'
 import { compiled, G, identity, json } from '../native-contract/helpers.js'
 import { source } from '../wire/helpers.js'
@@ -99,17 +92,14 @@ export function fixture(
     }
   })
   const grants: ProviderPolicy['grants'] = []
-  const principal = { id: 'synthetic', policy: { revision: 'caller1', grants } }
+  const principal: import('../../src/router.js').Principal & { policy: ProviderPolicy } = {
+    id: 'synthetic',
+    policy: { revision: 'caller1', grants }
+  }
   const local: ProviderPolicy = { revision: 'local1', grants }
   /** Connector 侧准入快照；与 gateway 的 local 分开维护，供测试制造双侧 revision 漂移。 */
   const connectorSnapshot: ProviderPolicy = { revision: 'local1', grants }
-  /** gateway 侧实时注册表；默认与 connector 快照一致。 */
-  const gatewayPolicies: ProviderPolicies = { caller: principal.policy, local }
-  const router = new Router(
-    store,
-    /** 向 Router 提供 fixture 的本地策略，用于双端 grant 交集测试。 */
-    () => local
-  )
+  const router = new Router(store)
   const origin = host.contract?.source ?? { ...source, runtime_generation: G, classification_revision: 'review1' }
   const installedIdentity = host.contract?.identity ?? identity
   const capabilities = json('session-capabilities.json')
@@ -155,8 +145,6 @@ export function fixture(
         connection_epoch: b.connection_epoch,
         recovery_generation: b.recovery_generation,
         capability_revision: capabilityRevision,
-        caller_policy_revision: b.registration.caller_policy_revision,
-        local_policy_revision: b.registration.local_policy_revision,
         classification_revision: origin.classification_revision ?? 'review1',
         contract: installedIdentity
       }
@@ -166,10 +154,8 @@ export function fixture(
         binding: native
       }
     },
-    /** 返回 fixture 当前 caller 与 local 策略，允许测试即时撤权行为。 */
-    policies: () => ({ caller: principal.policy, local: connectorSnapshot }),
     /** 提供离线测试分类权限，不在生产入口创建默认授权。 */
-    authority: () => ({ owner: false, raw_requested: false }),
+    validateAttempt: () => ({ owner: false, raw_requested: false }),
     /** 取得测试当前 reader ID，验证读取与派发身份分别受控。 */
     currentPrincipal: () => principal.id
   })
@@ -179,8 +165,7 @@ export function fixture(
     /** gateway 侧会话（带 channel）用实时注册表；connector 侧会话用固定的准入快照，模拟双侧漂移。 */
     const services = channel
       ? {
-          ...backendServices(connection),
-          policies: () => ({ caller: gatewayPolicies.caller, local: gatewayPolicies.local })
+          ...backendServices(connection)
         }
       : backendServices(connection)
     const backend = persistentBackend(store, services)
@@ -205,7 +190,6 @@ export function fixture(
           ),
         book,
         source: {
-          policies: () => ({ caller: principal.policy, local: connectorSnapshot }),
           now: () => now
         }
       })
@@ -233,8 +217,6 @@ export function fixture(
       adapter,
       /** 组合双端 fixture binding 与本机健康，提供逐 provider 的可信 readiness 输入。 */
       readiness: () => ({
-        policy_revision: 'trusted_policy1',
-        peer_policy_revision: configs.get(connection.machine_id)!.peerPolicy,
         providers: [...localBindings.values()]
           .filter(
             /** 只选属于当前模拟设备的本地 binding。 */
@@ -454,3 +436,5 @@ export function rawConnect(
     }
   }
 }
+
+import type { ProviderPolicy } from '../legacy-policy.js'

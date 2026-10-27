@@ -58,8 +58,6 @@ export function source(profile: 'session' | 'host' = 'session', generation = G):
       connection_epoch: 'e1',
       recovery_generation: 'recovery1',
       capability_revision: 'caps1',
-      caller_policy_revision: 'caller1',
-      local_policy_revision: 'local1',
       classification_revision: 'review1',
       contract: clone(identity)
     }
@@ -89,39 +87,16 @@ export function candidateView(candidate: DispatchCandidate): CapabilityView {
 }
 // 构造仅覆盖当前目标与方法的双方策略和默认严格授权上下文。
 export function auth(candidate: DispatchCandidate): DispatchAuthorization {
-  const policy = {
-    machines: [candidate.binding.target.machine_id],
-    sessions: candidate.binding.target.profile === 'session' ? [candidate.binding.target.session] : [],
-    methods: [candidate.method],
-    host: candidate.binding.target.profile === 'host'
-  }
   return {
     source: { authenticated: true, source_verified: true, binding: candidate.binding },
     principal_id: 'synthetic',
-    caller_policy: clone(policy),
-    local_policy: clone(policy),
-    owner: false,
     mode: 'strict',
-    raw_requested: false,
     now: 100
   }
 }
 // 在默认上下文上开启 Owner 显式 raw 模式，并授予当前候选范围的限时 grant。
 export function raw(candidate: DispatchCandidate): DispatchAuthorization {
-  return {
-    ...auth(candidate),
-    owner: true,
-    mode: 'raw_contract',
-    raw_requested: true,
-    raw_grant: {
-      id: 'raw-test',
-      source_verified: true,
-      principal_id: 'synthetic',
-      binding: clone(candidate.binding),
-      methods: [candidate.method],
-      expires_at: 200
-    }
-  }
+  return { ...auth(candidate), mode: 'raw_contract' }
 }
 export function request(from: CapabilityView, value: unknown): CheckedRequest
 export function request(from: CapabilityView, value: unknown, rawCandidate: true): CheckedRequest | RawRequestCandidate

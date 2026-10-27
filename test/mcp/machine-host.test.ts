@@ -74,9 +74,11 @@ test(
     })
     f.localBindings.set(paired.machine_id + '/hidden_provider', hidden)
     const service = new StoreGatewayService({
+      targets: () => [
+        { machine_id: paired.machine_id, provider_id: 'provider', profile: 'session', session: 'default' }
+      ],
       store: f.store,
       router: f.router,
-      localPolicies: () => f.local,
       identities: {
         principal: () => f.principal,
         administrator: (_caller, ref) => (ref === 'fixture_admin' ? admin : null)
@@ -129,8 +131,7 @@ test(
         management_session_ref: 'fixture_admin',
         wait_signal: new AbortController().signal
       }
-      const visibleGrants = [...f.principal.policy.grants]
-      f.principal.policy.grants.length = 0
+      f.principal.device_scope = { mode: 'selected', machine_ids: [] }
       const managed = await service.management.execute(
         'devices_get',
         { machine_id: paired.machine_id },
@@ -146,7 +147,7 @@ test(
         managementContext
       )
       assert.deepEqual(reduced.host!.providers, [])
-      f.principal.policy.grants.push(...visibleGrants)
+      delete f.principal.device_scope
       client.stop()
       await until(() => f.store.machine(paired.machine_id).status === 'offline')
       const offline = await call('machines_get', { machine_id: paired.machine_id })
@@ -165,7 +166,7 @@ test(
       assert.equal('host' in legacy, false)
       assert.equal(legacy.link_since, 1020)
       assert.equal('native_version' in legacy, false)
-      f.principal.policy.grants.length = 0
+      f.principal.device_scope = { mode: 'selected', machine_ids: [] }
       const denied = await http.client.callTool(
         { name: 'machines_get', arguments: { machine_id: paired.machine_id } },
         CallToolResultSchema

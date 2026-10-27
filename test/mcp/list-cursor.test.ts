@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { digest } from '../../src/contracts.js'
 import { StoreGatewayService, type AdminContext, type ServiceContext } from '../../src/mcp/index.js'
 import type { ServiceReply } from '../../src/mcp/types.js'
-import { policy, storeFixture } from './store-fixture.js'
+import { storeFixture } from './store-fixture.js'
 import { projectionFixture } from './runtime-service-fixture.js'
 
 // 构造受信上下文；身份和管理会话不从列表参数中接受。
@@ -50,12 +50,14 @@ function listFixture(count = 3) {
       }
     }
   )
-  f.setCaller({ id: 'alice', policy: policy(targets) })
+  f.setCaller({
+    id: 'alice',
+    device_scope: { mode: 'selected', machine_ids: targets.map((target) => target.machine_id) }
+  })
   const service = new StoreGatewayService({
+    targets: () => targets,
     store: f.store,
-    identities: f.identities,
-    /** 每次由当前目标生成精确本地授权，不保存授权结果或跳过Wire求交。 */ localPolicies: (target) =>
-      policy([target], 'local_list')
+    identities: f.identities
   })
   return {
     ...f,
@@ -279,13 +281,13 @@ test(
       await assert.rejects(f.service.management.execute('devices_list', args, adminContext()), {
         code: 'invalid_cursor'
       })
-      f.setCaller({ id: 'bob', policy: policy(f.targets) })
+      f.setCaller({ id: 'bob' })
       await assert.rejects(f.service.execute('machines_list', args, context('bob')), { code: 'invalid_cursor' })
-      f.setCaller({ id: 'alice', policy: policy(f.targets, 'caller_changed') })
+      f.setCaller({ id: 'alice' })
       await assert.rejects(f.service.execute('machines_list', args, context()), { code: 'invalid_cursor' })
-      f.setCaller({ id: 'alice', policy: policy([]) })
+      f.setCaller({ id: 'alice' })
       await assert.rejects(f.service.execute('machines_list', args, context()), { code: 'invalid_cursor' })
-      f.setCaller({ id: 'alice', policy: policy(f.targets) })
+      f.setCaller({ id: 'alice' })
       const admin = await f.service.management.execute('devices_list', { limit: 1 }, adminContext())
       assert(admin.next_cursor)
       await assert.rejects(

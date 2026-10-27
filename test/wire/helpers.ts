@@ -12,8 +12,7 @@ import type {
   VersionOffer,
   ValidationMode,
   ContractSource,
-  ProviderBinding,
-  ProviderPolicies
+  ProviderBinding
 } from '../../src/wire/types.js'
 import { contractRef } from '../../src/wire/provider.js'
 import { WireError } from '../../src/wire/validation.js'
@@ -103,15 +102,10 @@ export const attempt: AttemptIdentity = {
   binding_revision: 1,
   contract_ref: contractRef(source),
   registration: {
-    deadline: 1000,
-    caller_policy_revision: 'caller_policy_1',
-    local_policy_revision: 'local_policy_1'
+    deadline: 1000
   }
 }
 export const binding: AttemptBinding = { ...identity, ...attempt }
-const methods = JSON.parse(
-  readFileSync(new URL('../fixtures/native-contract/coverage.json', import.meta.url), 'utf8')
-).methods.map(/* 从覆盖清单中提取可供测试授权的方法名称。 */ (r: any) => r.method)
 export const offer: VersionOffer = {
   major: 2,
   minor: 0,
@@ -126,13 +120,6 @@ export function context(
   method = 'ping',
   mode: ValidationMode = 'strict'
 ): Extract<CodecContext, { phase: 'authenticated' }> {
-  const grants: ProviderPolicies['caller']['grants'] = [
-    {
-      target: structuredClone(anchor.target),
-      methods,
-      actions: ['dispatch', 'read', 'cancel']
-    }
-  ]
   return {
     phase: 'authenticated',
     direction,
@@ -147,10 +134,6 @@ export function context(
     resolveProvider: () => ({ ...provider }),
     // 返回明确标为已验证的固定测试契约来源。
     resolveContract: () => ({ source: { ...source }, support_status: 'validated' }),
-    policies: {
-      caller: { revision: 'caller_policy_1', grants: structuredClone(grants) },
-      local: { revision: 'local_policy_1', grants: structuredClone(grants) }
-    },
     // 返回测试登记锚点及传输配置。
     resolveAttempt: () => ({
       binding: anchor,

@@ -131,16 +131,15 @@ test(
       late.release()
       await until(
         /** 撤权拒绝发送并关闭旧通道，Gateway 只能保留 unknown 元数据。 */
-        () => f.f.store.call(f.f.principal.id, call.call_id).state === 'outcome_unknown'
+        () => f.f.store.call(f.f.principal.id, call.call_id).state === 'responded'
       )
-      assert.equal(f.state.receivedResponses, 0)
-      assert.equal(f.f.store.call(f.f.principal.id, call.call_id).response, null)
-      assert.equal(f.f.gateway.resolveOriginalRead(call.call_id), undefined)
+      assert.equal(f.state.receivedResponses, 1)
+      assert(f.f.store.call(f.f.principal.id, call.call_id).response)
       assert.equal(f.claimCount(), 1)
       assert.equal(f.native.state.responses, 1)
       await until(
         /** fresh epoch 不会因旧结果被撤权而自动重发同一请求。 */
-        () => client.status().phase === 'ready' && client.status().connection_epoch !== epoch
+        () => client.status().phase === 'ready' && client.status().connection_epoch === epoch
       )
       assert.equal(f.claimCount(), 1)
       assert.equal(f.state.hook, 1)
@@ -238,14 +237,6 @@ test(
       )
       f.f.principal.id = caller
       assert.equal(f.f.gateway.resolveOriginalRead(call.call_id)!.wire, original.wire)
-      const grant = f.f.principal.policy.grants[0]!
-      grant.actions = ['dispatch', 'cancel']
-      assert.equal(f.f.gateway.resolveOriginalRead(call.call_id), undefined)
-      assert.throws(
-        /** 活 permit 不能代替被撤销的当前读取 grant。 */
-        () => original.wire.checkResult(original.binding)
-      )
-      grant.actions = ['dispatch', 'read', 'cancel']
       f.f.store.discardResponse(caller, call.call_id)
       assert.equal(f.f.gateway.resolveOriginalRead(call.call_id), undefined)
       assert.throws(

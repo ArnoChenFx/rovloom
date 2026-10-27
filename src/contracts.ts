@@ -50,20 +50,6 @@ export function validateRequest(request: NativeRequest): void {
   canonical(request)
 }
 
-// 方法采用精确白名单，未知方法默认拒绝；调用方与本地策略必须同时允许。
-export function authorize(target: Target, method: string, caller: Policy, local: Policy): void {
-  validateTarget(target)
-  for (const policy of [caller, local]) {
-    if (
-      !policy.machines.includes(target.machine_id) ||
-      !policy.methods.includes(method) ||
-      (target.profile === 'host' ? !policy.host : !policy.sessions.includes(target.session))
-    ) {
-      throw new GatewayError('forbidden')
-    }
-  }
-}
-
 // 按键排序输出确定性 JSON；拒绝循环、访问器和非 JSON 值，并限制深度、节点数及字节数。
 export function canonical(value: unknown): string {
   // 只跟踪当前递归链：共享子对象可重复编码，真正的循环引用必须拒绝。

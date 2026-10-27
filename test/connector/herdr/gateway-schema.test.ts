@@ -33,8 +33,7 @@ function schemaFixture() {
       binding_revision: 1,
       config_ref: 'owned-herdr',
       expected_source: source,
-      schema_path: schema,
-      peer_policy_revision: 'local1'
+      schema_path: schema
     }
   }
 }

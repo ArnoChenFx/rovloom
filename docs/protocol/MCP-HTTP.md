@@ -81,12 +81,12 @@
 - `runtime_result_read` 以页为单位交付原始响应字节，`encoding` 为 `utf8` 或 `base64`。原生 `error.code / message / data` 保持原文，不改成网关错误。每页带 `total_bytes`、`sha256`、`expires_at` 和 `eof`。
 - `max_bytes` 默认 4096，上限 16384。结果按 UTF-8 或编码边界切页。
 - `runtime_call_cancel` 的 `cancellation` 取 `waiting_stopped`、`bridge_stopped`、`native_confirmed`、`unsupported`、`outcome_unknown`，只报告实际能确认的程度。
-- `runtime_response_discard` 是独立动作，要求验证归属、原方法当前的读取策略和专门的 `discard_response` 权限。
+- `runtime_response_discard` 是独立动作，核对当前身份、设备范围与原主体归属，没有额外删除权限。
 
 ### 错误
 
 - 网关拒绝返回 `isError: true` 与 `gateway_error: {code}`。`code` 取下列之一：`backend_unavailable`、`invalid_arguments`、`native_request_invalid`、`internal_error`、`unauthenticated`、`forbidden`、`unavailable`、`not_found`、`conflict`、`invalid_cursor`、`binding_revision_conflict`、`contract_unavailable`、`unsupported`、`confirmation_required`、`storage_exhausted`、`storage_degraded`、`content_unavailable`、`deadline_exceeded`、`busy`。
-- 有效 token 在原有目标及动作边界内使用 provider 的全部已暴露方法，不再逐方法取 caller/local 授权交集；运行时展开不增加 actions，也不借用本机目标。`runtime_describe not_found` 表示不在该授权目录，不能区分不存在、未审核和不可见的方法，也不能据此断言原生 schema 中没有它；不泄露隐藏方法的存在性。调用时的 `forbidden` 可表示设备范围或原生权限拒绝；MCP 不再存在额外的方法白名单。
+- 有效 token 可调用其可见设备上 provider 的全部已暴露方法，Connector 的终端执行开关控制直接终端操作。没有逐方法、provider、read/dispatch/cancel、caller/local/gateway 策略或 raw grant。未知或未实现方法不在暴露目录内；`runtime_describe not_found` 不区分原生不存在或后端未适配。
 - 新调用的 `contract_ref` 与当前批准契约不符时，授权后的登记预检返回 `gateway_error: {code: "contract_unavailable"}`，不建立 call、不占用请求 key、不发送 Wire 帧，也不关闭设备连接。重新 `runtime_discover/describe` 获取当前引用后才能提交新意图；不要将拒绝理解为原生执行失败。已存在的同 key、同请求仍查询原调用，不因契约变化而重新派发；同 key 换契约引用是不同请求，返回 `conflict`。
 - `native_request_invalid` 在 Luvus 或 Herdr 的完整请求 schema 于登记预检阶段被拒时附带 `outcome: "not_dispatched"`：此时还没有建立 call 或派发锚点，坏请求不占用 key，不发送 Wire 帧，不关闭设备连接。已有 key 仍返回原调用的真实状态，旧的 unknown 不会倒退或重派。预检通过不授予执行权限，网关不返回参数或 schema 的错误正文。
 - 响应超过 64 KiB 时，只返回 `response_too_large`、`truncated`、字节数、hash 和适用的 `call_id`，不制造句柄，也不再次执行。
@@ -142,3 +142,5 @@ rovloom service --help
 读取窗口时，先调用 `workspace.list`，再用该 provider 描述的 tab、pane 列表方法。Luvus 的通用方法使用 `validation: "raw-contract"`，省略时由 Gateway 选择。不得复用其它 provider 的 ID、revision 或契约摘要。
 
 对话前，先描述 `agent.list / get / explain / read`，再选择实际观察到的 Agent 和窗格。启动已安装的 Agent 时，Luvus 的 `agent.start` 接受 `pane`，Herdr 接受 `pane_id`，其余字段按各自的原生 schema 填写。Luvus 的 `agent.prompt` 使用 `target`、`text`、观察到的 `terminal_id` 和 `strict: true`。Herdr 使用 `target`、`text` 和可选的对象型 `wait`。按已描述的 `agent.get / wait / read` 读取真实回复，保持同一段原生会话。不得用任意可执行参数或环境变量绕过已禁用的终端执行。
+
+已提交的原生结果按固定 TTL 保存。断连后仍可通过原句柄读取，逐页检查当前身份、设备范围与结果归属；不要求原 Wire/permit 存活，也不重跑 schema 校验或重发请求。

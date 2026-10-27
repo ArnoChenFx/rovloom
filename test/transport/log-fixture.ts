@@ -84,7 +84,7 @@ try {
       }
     }
     const principal = { id: 'synthetic', policy: { revision: 'caller1', grants: [] } }
-    const router = new Router(store, /* 本反例没有任何业务授权。 */ () => ({ revision: 'local1', grants: [] }))
+    const router = new Router(store)
     gateway = createGateway({
       hostname: '127.0.0.1',
       port: 0,

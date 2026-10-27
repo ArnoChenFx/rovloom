@@ -4,16 +4,14 @@ import { test } from 'node:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PassThrough } from 'node:stream'
 import { openCallerSource } from '../../src/cli/caller-source.js'
 import { configDocument, configTemplate, type GatewayConfig } from '../../src/cli/config.js'
-import { handleTokenCommand } from '../../src/cli/token-command.js'
 import { digestToken } from '../../src/cli/token-registry.js'
 import { createProviderResultAccess } from '../../src/runtime/results.js'
 import { fixture, until } from '../transport/helpers.js'
 
 test(
-  'production discard permission permits cumulative calls beyond 128 without evicting retained results',
+  'production token can explicitly discard owned results and release capacity beyond 128 calls',
   { timeout: 30_000 },
   /** 默认读取容量不扩大；EOF 不回收，只有显式授权删除才能释放。 */ async () => {
     const f = fixture({ retainOriginalRead: true, limits: { heartbeat_ms: 100, idle_ms: 20_000, handshake_ms: 1000 } })
@@ -34,13 +32,12 @@ test(
       writeFileSync(
         registryPath,
         JSON.stringify({
-          schema_version: 1,
+          schema_version: 2,
           kind: 'mcp-caller-source',
           resource: 'http://127.0.0.1:9/mcp',
-          local_policy: f.local,
           callers: [
             {
-              principal: f.principal,
+              principal: { id: f.principal.id },
               token_sha256: digestToken('a'.repeat(43)),
               issued_at: Date.now() - 1000,
               expires_at: Date.now() + 60_000
@@ -53,14 +50,7 @@ test(
       const access = createProviderResultAccess({
         store: f.store,
         principal: /** 生产热读来源，权限不在测试闭包中伪造。 */ () =>
-          source!.identities.principal({ principal_id: f.principal.id })!,
-        localPolicies: /** 每次读取当前双端策略。 */ () => source!.localPolicies(),
-        resolveOriginalRead: /** 原 Wire 上下文保持真实，由 transport 管理。 */ (call) =>
-          f.gateway.resolveOriginalRead(call, false),
-        provider: /** 仅返回本次配对的受保护完整 provider。 */ () => ({
-          binding: f.store.provider(device.target.machine_id, device.target.provider_id)!,
-          max_response_bytes: 1_048_576
-        })
+          source!.identities.principal({ principal_id: f.principal.id })!
       })
       const calls: string[] = []
       for (let index = 0; index < 128; index++) {
@@ -80,28 +70,6 @@ test(
         /transport_concurrency_limit/
       )
       assert.equal(f.store.call(f.principal.id, blocked.call_id).state, 'created')
-      assert.throws(/** 旧注册表没有自动获得删除权。 */ () => access.discard(calls[0]!), /discard_forbidden/)
-      const permission = async (allowed: boolean) => {
-        const output = new PassThrough()
-        output.resume()
-        assert.equal(
-          await handleTokenCommand(
-            [
-              'token',
-              'permissions',
-              '--principal',
-              f.principal.id,
-              '--discard-response',
-              String(allowed),
-              '--config',
-              configPath
-            ],
-            { stdout: output, stderr: output }
-          ),
-          0
-        )
-      }
-      await permission(true)
       access.discard(calls[0]!)
       for (let index = 0; index < 5; index++) {
         const call = index === 0 ? blocked : f.call(device.target)
@@ -123,9 +91,8 @@ test(
       assert.equal(f.executions, 133)
       assert.equal(client.status().phase, 'ready')
       assert.equal(access.read(retained.result_id, 0, 16384).eof, true)
-      await permission(false)
-      assert.throws(/** 同一已建立主体的撤权立即生效。 */ () => access.discard(calls[1]!), /discard_forbidden/)
-      assert.equal(access.read(retained.result_id, 0, 16384).eof, true)
+      access.discard(calls[1]!)
+      assert.throws(() => access.read(retained.result_id), /result_not_found/)
     } finally {
       source?.close()
       f.stop()

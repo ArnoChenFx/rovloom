@@ -44,11 +44,11 @@ test(
         const denied = f.router.create(
           f.principal,
           device.target,
-          { method: 'task.add', params: { title: 'synthetic' } },
+          { method: 'agent.prompt', params: { pane: 99, text: 'synthetic' } },
           {
             binding_revision: 1,
             contract_ref: pendingBinding.contract_ref,
-            validation: 'raw-contract',
+            validation: 'strict',
             timeoutMs: 1000
           }
         )

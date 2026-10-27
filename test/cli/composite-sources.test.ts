@@ -35,7 +35,6 @@ function resource(kind: 'luvus' | 'herdr', events: string[]): ProductionGatewayR
   const provider = {
     binding,
     target,
-    peer_policy_revision: 'local',
     max_response_bytes: 65536,
     ready: /** 资源探针从不声称native已就绪。 */ () => false,
     preflightRequest: /** 意外准入明确失败，不允许缺后端mock成功。 */ () => {

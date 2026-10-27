@@ -132,11 +132,11 @@ export class ConnectorAttemptBook {
 }
 
 /** 准入只依赖策略与时钟；其余端口由调用方按协议（Luvus/Herdr）原样并入后端。 */
-export type ConnectorAdmissionSource = Pick<NativeWireBackend, 'policies' | 'now'>
+export type ConnectorAdmissionSource = Pick<NativeWireBackend, 'now'>
 /** Luvus Connector 的完整来源端口。 */
 export type LuvusConnectorAdmissionSource = Pick<
   NativeWireBackend,
-  'provider' | 'localProvider' | 'contract' | 'nativeSource' | 'policies' | 'authority' | 'now'
+  'provider' | 'localProvider' | 'contract' | 'nativeSource' | 'validateAttempt' | 'now'
 >
 export type ConnectorAdmissionOptions<S extends ConnectorAdmissionSource = ConnectorAdmissionSource> = Readonly<{
   // 必须直接使用 transport.session 实际认证后交付的连接，不能从请求 JSON 建立身份。
@@ -272,13 +272,8 @@ export function createConnectorAdmissionBackend<S extends ConnectorAdmissionSour
       if (!selected) {
         fail('connector_route_unavailable')
       }
-      const policies = options.source.policies(selected)
-      if (
-        payload.expected_binding_revision !== binding.binding_revision ||
-        policies.caller.revision !== binding.registration.caller_policy_revision ||
-        policies.local.revision !== binding.registration.local_policy_revision
-      ) {
-        fail('policy_revision_stale')
+      if (payload.expected_binding_revision !== binding.binding_revision) {
+        fail('provider_binding_mismatch')
       }
       const native = object(payload.native_request)
       const candidate: TrustedAttempt = {

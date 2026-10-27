@@ -39,8 +39,7 @@ test(
           binding_revision: 1,
           config_ref: 'safe_ref',
           expected_source: fixedHerdrSource(),
-          schema_path: schemaPath,
-          peer_policy_revision: 'fixture_local'
+          schema_path: schemaPath
         },
         now: /** 与MCP共用单调fixture时钟，实际resolver每次形成now+5000的新观察视图。 */ () => f.store.clock()
       })
@@ -50,9 +49,7 @@ test(
         .methods.slice(0, 3)
         .map(/** 精确使用真实Herdr schema中的三个方法，不猜测或扩大授权集合。 */ (entry) => entry.method)
       assert.equal(methods.length, 3)
-      const grants = [{ target, methods: [...methods, 'agent.prompt'], actions: ['read' as const] }]
-      f.setCaller({ id: 'alice', policy: { revision: 'caller_catalog', grants } })
-      f.setLocal({ revision: 'local_catalog', grants })
+      f.setCaller({ id: 'alice' })
       let resolutions = 0
       const provider: ProviderCatalogProvider = {
         kind: 'provider',
@@ -66,7 +63,6 @@ test(
         store: f.store,
         principal: f.current(),
         currentPrincipal: f.current,
-        localPolicies: f.localPolicies,
         target,
         expected_binding_revision: 1,
         provider
@@ -77,7 +73,6 @@ test(
       service = new RuntimeGatewayService({
         runtime: f.runtime,
         identities: f.identities,
-        localPolicies: f.localPolicies,
         catalog: provider
       })
       const context = { caller: { principal_id: 'alice' }, wait_signal: new AbortController().signal }
@@ -190,7 +185,7 @@ test(
                       f.advance(5001)
                     }
                     if (drift === 'revoke') {
-                      f.setLocal({ revision: 'revoked', grants: [] })
+                      f.setCaller({ id: 'alice', device_scope: { mode: 'selected', machine_ids: [] } })
                     }
                     return description
                   }

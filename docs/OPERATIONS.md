@@ -13,20 +13,19 @@
 
 每个角色只有一份用户配置：`~/.config/rovloom/gateway.json` / `connector.json`（Windows 同样用用户 home）。参数全集见[配置参考](CONFIGURATION.md)。程序自己的数据在 `data.directory`（默认 `~/.local/share/rovloom/<role>`），**整个目录一起保留**，不要手改里面的文件。
 
-> 加入更多设备：Gateway 保持运行，在管理页生成新配对码（或 `rovloom gateway --issue-code`），新机器执行显示的加入命令（见[快速开始](QUICK-START-zh.md)）。现有 MCP Bearer 自动覆盖新设备；用 `token create --like` 克隆出的令牌需重新克隆。
+> 加入更多设备：Gateway 保持运行，在管理页生成新配对码（或 `rovloom gateway --issue-code`），新机器执行显示的加入命令（见[快速开始](QUICK-START-zh.md)）。现有 MCP Bearer 自动覆盖新设备；不设 device_scope 的其他 token 同样可见新设备；selected 范围须由操作员显式更新。
 
 ### 升级与回滚
 
 Gateway 与 Connector 一同升级。升级前停止两端进程，离线备份两端完整 `data.directory` 与配置，保留私有文件权限；脱敏数据库快照不能代替包含配对及 token 的完整备份。
 
-移除方法清单后，新配对会保存 `methods:["*"]`。0.6.9 把 `*` 当普通方法名，直接用旧二进制读取这种状态会拒绝读与派发。回滚时须停止两端并恢复同一升级前备份及对应二进制；仅替换镜像不足以回滚。这也会撤去备份之后的配对、token 和调用状态。已有旧策略的范围/创建 token 操作不会自动写入 `*` 或增加 `actions`，但不能据此假定整个当前状态都兼容旧版本。
+两端升级并重启后沿用原 token 和设备凭据，不用重新配对，也不用补充方法授权。Herdr、Luvus 和混合模式均只保留 token 设备范围和 Connector 终端执行开关。旧普通 caller 从自己的 grants 提取设备范围，显式 device_scope 优先；不从 local_policy 借用设备。新注册表写入 v2，去掉旧策略、methods/actions、revision 和单独的结果删除权限；旧 Connector policy/raw 字段仅兼容读取，不参与授权。
+
+回滚须停止两端，并恢复同一升级前完整备份及对应二进制。旧版不兼容新注册表与无策略配置，不能只换回镜像；恢复备份也会撤去备份后的配对、token 与调用状态。
 
 ## 2. 安装与升级
 
-Luvus raw 授权与 Gateway readiness 的修复可先只升级 Gateway，沿用现有 Connector、
-配对凭据和 MCP token。旧单码配对的标准 raw 授权在 Gateway 装配时迁移，磁盘原文件
-保留；手动收窄过的授权不自动放宽。新配对 Connector 使用策略修订格式，因此混合
-版本部署应先更新 Gateway。
+安装说明见[快速开始](QUICK-START-zh.md)。升级务必覆盖 Gateway 与所有 Connector；只更新 Gateway 不能移除旧 Connector 自己的策略门禁。
 
 `state/retired/` 当前没有自动清理策略。它包含原配对凭据和 managed 原生根、HOME、
 工作目录，可能保存实际工作数据，不能仅按 schema 缓存计算容量或直接轮转删除。

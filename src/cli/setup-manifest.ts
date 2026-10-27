@@ -6,14 +6,8 @@ import { checkedRemoteLuvusConfig, createPinnedRemoteLuvus } from '../runtime/re
 import { boundedJson, fields, hash, object } from '../wire/index.js'
 import type { ProviderBinding, V2Target } from '../wire/types.js'
 import { CliError, type NativeProviderKind } from './config.js'
-import type { SetupPlanFacts } from './setup-policy.js'
-import {
-  selectedSetupPolicies,
-  setupProviderKinds,
-  setupReference,
-  setupSessions,
-  setupTarget
-} from './setup-policy.js'
+import type { SetupPlanFacts } from './setup-targets.js'
+import { setupProviderKinds, setupReference, setupSessions, setupTarget } from './setup-targets.js'
 import { readRuntimeFile, runtimeReference } from './runtime-files.js'
 import { writeSetupFile } from './setup-files.js'
 
@@ -80,7 +74,7 @@ export async function reviewSetupManifest(
   const sessions = setupSessions(
     luvusIndex < 0 ? undefined : { luvus: object(object(object(entries[luvusIndex]).value).target).session }
   )
-  const authorization = selectedSetupPolicies(plan, machine, kinds, sessions)
+  const authorization = { principal_id: plan.actor }
   const reviewed: ReviewedSetupInstallation[] = []
   for (let index = 0; index < entries.length; index++) {
     const kind = kinds[index]!
@@ -98,8 +92,7 @@ export async function reviewSetupManifest(
       if (
         boundedJson(remote.target) !== boundedJson(target) ||
         remote.binding.binding_revision !== 1 ||
-        !remote.binding.enabled ||
-        remote.peer_policy_revision !== authorization.policies.local.revision
+        !remote.binding.enabled
       ) {
         throw new CliError('configuration_required')
       }
@@ -118,7 +111,11 @@ export async function reviewSetupManifest(
       const remote = object(entry.value)
       fields(remote, ['kind', 'config', 'schema_bundle'])
       const config = object(remote.config)
-      fields(config, ['version', 'target', 'binding_revision', 'config_ref', 'expected_source', 'peer_policy_revision'])
+      fields(
+        config,
+        ['version', 'target', 'binding_revision', 'config_ref', 'expected_source'],
+        ['peer_policy_revision']
+      )
       if (
         remote.kind !== 'herdr' ||
         typeof remote.schema_bundle !== 'string' ||
@@ -133,7 +130,6 @@ export async function reviewSetupManifest(
         parsed.config_ref !== reference ||
         parsed.binding_revision !== 1 ||
         boundedJson(parsed.target) !== boundedJson(target) ||
-        parsed.peer_policy_revision !== authorization.policies.local.revision ||
         hash(bytes) !== parsed.expected_source.schema_sha256
       ) {
         throw new CliError('configuration_required')

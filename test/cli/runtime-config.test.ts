@@ -48,8 +48,7 @@ test(
           adapter_revision: MANAGED_LUVUS_REVISION,
           classification_revision: MANAGED_LUVUS_CLASSIFICATION,
           schema_bundle: schema
-        },
-        peer_policy_revision: 'synthetic_policy'
+        }
       }
       writeFileSync(
         join(directory, 'managed', 'providers.json'),

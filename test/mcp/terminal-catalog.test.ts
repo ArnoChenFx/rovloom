@@ -17,12 +17,12 @@ test(
     const f = catalogFixture()
     let enabled: boolean | undefined = false
     const grants = [{ target, methods, actions: ['read' as const] }]
-    f.setCaller({ id: 'alice', policy: { revision: 'caller_1', grants } })
-    f.setLocal({ revision: 'local_1', grants })
+    f.setCaller({ id: 'alice' })
+    f.setSource({ ...f.source(), supported_methods: grants[0]!.methods })
     const service = new StoreGatewayService({
+      targets: f.targets,
       store: f.store,
       identities: f.identities,
-      localPolicies: f.localPolicies,
       catalog: f.catalog,
       terminalExecutionState: /** 只注入本测试的受信同步观察源。 */ () => enabled
     })
@@ -92,12 +92,12 @@ test(
     const f = catalogFixture()
     let enabled = false
     const grants = [{ target, methods: ['pane.run', 'pane.read'], actions: ['read' as const] }]
-    f.setCaller({ id: 'alice', policy: { revision: 'caller_1', grants } })
-    f.setLocal({ revision: 'local_1', grants })
+    f.setCaller({ id: 'alice' })
+    f.setSource({ ...f.source(), supported_methods: grants[0]!.methods })
     const service = new StoreGatewayService({
+      targets: f.targets,
       store: f.store,
       identities: f.identities,
-      localPolicies: f.localPolicies,
       catalog: f.catalog,
       terminalExecutionState: /** 本测试仅模拟本机观察，不签发派发许可。 */ () => enabled
     })
@@ -155,9 +155,8 @@ test(
     )
     let enabled: boolean | undefined
     const entries = [{ method: 'pane.send_text' }, { method: 'pane.read' }, { method: 'agent.start' }]
-    const grants = [{ target, methods: ['pane.send_text', 'pane.read', 'agent.start'], actions: ['read' as const] }]
-    f.setCaller({ id: 'alice', policy: { revision: 'caller_1', grants } })
-    f.setLocal({ revision: 'local_1', grants })
+    f.setCaller({ id: 'alice' })
+
     const schema = { type: 'object', properties: { text: { type: 'string' } } }
     const source = {
       target,
@@ -176,7 +175,6 @@ test(
         store: f.store,
         principal: f.current(),
         currentPrincipal: f.current,
-        localPolicies: f.localPolicies,
         target,
         expected_binding_revision: 1,
         provider: { kind: 'provider', resolve: /** 只交付本例固定合成来源。 */ () => source },

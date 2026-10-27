@@ -36,7 +36,6 @@ function resources(f: ReturnType<typeof storeFixture>): GatewayTransportResource
   return {
     store: f.store,
     identities: f.identities,
-    localPolicies: f.localPolicies,
     authentication: { authenticate: /* 此合成caller仅用于测试已有Store授权查询。 */ () => ({ principal_id: 'alice' }) },
     transport: {
       hostname: '127.0.0.1',
@@ -130,7 +129,7 @@ test(
         ...resources(f),
         service: /* 复用同一Router构造真实Store服务并观察所属transport。 */ (value) => {
           ports = value
-          return new StoreGatewayService({ ...resources(f), router: value.router })
+          return new StoreGatewayService({ ...resources(f), router: value.router, targets: f.targets })
         },
         close: /* 必须先停止真实listener再释放Store，重复关闭不得多次进入。 */ async () => {
           closes++
@@ -212,7 +211,6 @@ test(
             ) => {
               await (pending ?? gates[context.caller.principal_id as keyof typeof gates]).promise
               readers.push(ports.principal().id)
-              assert.equal(ports.localPolicies, f.localPolicies)
               ports.originalAttempt('call_fixture', 'attempt_fixture')
               ports.transport.dispatch('call_fixture')
               throw new Error('unexpected_dispatch')

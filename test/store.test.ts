@@ -5,8 +5,8 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from '../src/store.js'
-import { authorize, canonical, validateRequest, validateTarget } from '../src/contracts.js'
-import type { Target, Policy } from '../src/contracts.js'
+import { canonical, validateRequest, validateTarget } from '../src/contracts.js'
+import type { Target } from '../src/contracts.js'
 import { connected, management, options, respond } from './storage/helpers.js'
 
 test(
@@ -215,30 +215,6 @@ test(
     assert.throws(
       /* 规范化含 undefined 的属性，要求拒绝非 JSON 值。 */ () => canonical({ value: undefined }),
       /invalid_json/
-    )
-  }
-)
-test(
-  'caller and local policies intersect; unknown methods and Host default to deny',
-  /* 验证原生 profile 策略仍取双端交集，未知方法和未授权 host 默认拒绝。 */ () => {
-    // Native 层仍显式投影旧 profile Target，provider 隔离由 Router/Wire 独立校验。
-    const target: Target = { machine_id: 'm', profile: 'session', session: 'test' }
-    const allow: Policy = {
-      machines: ['m'],
-      sessions: ['test'],
-      methods: ['pane.read'],
-      host: false
-    }
-    authorize(target, 'pane.read', allow, allow)
-    assert.throws(/* 调用白名单外原生方法，要求拒绝。 */ () => authorize(target, 'pane.run', allow, allow), /forbidden/)
-    assert.throws(
-      /* 撤销本地方法许可，要求双端交集拒绝。 */ () => authorize(target, 'pane.read', allow, { ...allow, methods: [] }),
-      /forbidden/
-    )
-    assert.throws(
-      /* 未获 host 许可时请求 host 目标，要求拒绝。 */ () =>
-        authorize({ machine_id: 'm', profile: 'host' }, 'pane.read', allow, allow),
-      /forbidden/
     )
   }
 )

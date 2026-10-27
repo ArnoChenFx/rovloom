@@ -11,8 +11,8 @@ import { localLimits, verifyInstallation } from '../connector/luvus/local.js'
 import { effectiveBinDirectories } from '../connector/local/agent-path.js'
 import { runFixedProcess } from '../connector/luvus/io.js'
 import { LuvusDispatchClaims } from '../connector/luvus/claims.js'
-import { boundedJson, fields, hash, id, object, validatePolicies } from '../wire/index.js'
-import type { ProviderPolicies } from '../wire/types.js'
+import { boundedJson, fields, hash, id, object } from '../wire/index.js'
+
 import {
   CliError,
   herdrMode,
@@ -24,7 +24,7 @@ import {
 import { privateDirectory } from './first-config.js'
 import { readSetupJson, writeSetupJson } from './setup-files.js'
 import { runtimeReference } from './runtime-files.js'
-import { setupReference, setupSessionsFor, setupTarget } from './setup-policy.js'
+import { setupReference, setupSessionsFor, setupTarget } from './setup-targets.js'
 import type { SetupConsole } from './setup-console.js'
 import { cliMessages, formatMessage } from './messages.js'
 
@@ -114,13 +114,12 @@ export async function prepareSetupNative(
   console: SetupConsole,
   machine: string,
   attempt: string,
-  authorization: Readonly<{ principal_id: string; policies: ProviderPolicies }>
+  authorization: Readonly<{ principal_id: string }>
 ): Promise<PreparedSetupNative> {
   console.assertOwner()
   id(attempt)
   id(machine)
   id(authorization.principal_id)
-  validatePolicies(authorization.policies)
   const path = runtimeReference(config.state_dir, 'native-setup')
   const existing = readSetupJson(path, 1_048_576)
   if (existing !== undefined) {
@@ -212,8 +211,7 @@ export async function prepareSetupNative(
       adapter_revision: MANAGED_LUVUS_REVISION,
       classification_revision: MANAGED_LUVUS_CLASSIFICATION,
       schema_bundle: schema.stdout.toString('utf8')
-    },
-    peer_policy_revision: authorization.policies.local.revision
+    }
   }
   boundedJson(remote, 1_048_576)
   console.assertOwner()
@@ -245,9 +243,7 @@ export async function prepareSetupNative(
         kind: 'luvus',
         authentication: 'local_owner',
         native: { mode: 'user', config: discovered.config },
-        peer_policy_revision: remote.peer_policy_revision,
         principal_id: authorization.principal_id,
-        policies: authorization.policies,
         storage_mode: 'open'
       },
       remote
@@ -286,9 +282,7 @@ export async function prepareSetupNative(
           expected_root_id: root.root_id,
           expected_root_revision: root.root_revision
         },
-        peer_policy_revision: remote.peer_policy_revision,
         principal_id: authorization.principal_id,
-        policies: authorization.policies,
         storage_mode: 'open'
       },
       remote

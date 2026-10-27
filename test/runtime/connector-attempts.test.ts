@@ -105,12 +105,6 @@ test(
         new RegExp('connector_route_unavailable')
       )
       changed.payload.attempt.target.provider_id = 'p1'
-      changed.payload.attempt.registration.caller_policy_revision = 'other'
-      assert.throws(
-        /** Wire 登记 revision 必须匹配当前双端策略。 */ () =>
-          a.adapter.decode(JSON.stringify(changed), 'gateway_to_connector'),
-        new RegExp('policy_revision_stale')
-      )
       const spoof = { ...a.f.envelope, principal_id: 'owner' }
       assert.throws(
         /** 自报主体作为未声明字段由原 codec 拒绝。 */ () =>

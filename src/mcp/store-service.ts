@@ -1,11 +1,12 @@
+import { validateTarget } from '../wire/index.js'
 // 将门面查询、调用元数据和独立清理接到实际 Store/Router；缺执行、管理审计或通道后端时拒绝写入。
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { canonical, digest, GatewayError } from '../contracts.js'
 import type { CallState } from '../contracts.js'
-import { Router, type LocalPolicies, type Principal } from '../router.js'
+import { Router, type Principal } from '../router.js'
 import type { Store } from '../store.js'
-import { LIMITS, providerScopeAllowed, validatePolicies } from '../wire/index.js'
-import type { AttemptBinding, ProviderBinding, ProviderPolicy, V2Target } from '../wire/types.js'
+import { LIMITS } from '../wire/index.js'
+import type { ProviderBinding, V2Target } from '../wire/types.js'
 import { isToolName, parseToolArguments } from './schema.js'
 import { publicCallView } from './call-view.js'
 import {
@@ -56,7 +57,7 @@ type ToolRequest = { [K in ToolName]: { name: K; args: ToolArguments[K] } }[Tool
 export type StoreGatewayOptions = {
   store: Store
   identities: GatewayIdentitySource
-  localPolicies: LocalPolicies
+  targets(): readonly V2Target[]
   router?: Router
   catalog?: GatewayCatalog
   /** 仅观察当前连接报告的本地开关；缺失为未知，不授予调用或读取权。 */
@@ -130,8 +131,9 @@ export function resolveGatewayPrincipal(
   ) {
     throw new FacadeServiceError('unauthenticated')
   }
-  const snapshot = JSON.parse(canonical(principal)) as Principal
-  validatePolicies({ caller: snapshot.policy, local: snapshot.policy })
+  const snapshot = JSON.parse(
+    canonical({ id: principal.id, ...(principal.device_scope ? { device_scope: principal.device_scope } : {}) })
+  ) as Principal
   // 身份来源交付的范围必须形状正确；缺失即不收窄，任何变形均拒绝。
   if (
     snapshot.device_scope !== undefined &&
@@ -294,7 +296,7 @@ export class StoreGatewayService implements GatewayService {
 
   // 只组合现有 Store、Router 和同一身份政策来源；资源关闭及真实 transport/native 仍由宿主持有。
   constructor(private readonly options: StoreGatewayOptions) {
-    this.router = options.router ?? new Router(options.store, options.localPolicies)
+    this.router = options.router ?? new Router(options.store)
     this.management = {
       execute: /* 共享同一 Store 与身份服务；独立管理会话每次重新验证。 */ (name, args, context) =>
         this.adminExecute(name, args, context)
@@ -321,41 +323,17 @@ export class StoreGatewayService implements GatewayService {
   }
 
   // 使用 Wire 的完整 tuple 求交，不把不同 grant 的 machine/provider/session/method 拼成新授权。
-  private visibleTargets(principal: Principal): { target: V2Target; local_revision: string }[] {
-    const targets = new Map<string, { target: V2Target; local_revision: string }>()
-    // 令牌的设备范围是独立过滤器：在 grants 推导出的集合上再收窄，永不扩大授权。
-    const scope = principal.device_scope?.machine_ids
-    if (principal.policy.grants.length > 256) {
-      throw new FacadeServiceError('busy')
-    }
-    let evaluations = 0
-    for (const grant of principal.policy.grants) {
-      if (
-        !grant.actions.includes('read') ||
-        (scope !== undefined && !scope.includes(grant.target.machine_id)) ||
-        !this.options.store.provider(grant.target.machine_id, grant.target.provider_id)
-      ) {
+  private visibleTargets(principal: Principal): { target: V2Target }[] {
+    const targets = new Map<string, { target: V2Target }>()
+    for (const target of this.options.targets()) {
+      validateTarget(target)
+      if (principal.device_scope && !principal.device_scope.machine_ids.includes(target.machine_id)) {
         continue
       }
-      const local = JSON.parse(canonical(this.options.localPolicies(grant.target))) as ProviderPolicy
-      if (local.grants.length > 256) {
-        throw new FacadeServiceError('busy')
+      if (!this.options.store.provider(target.machine_id, target.provider_id)) {
+        continue
       }
-      if (
-        grant.methods.some(
-          /* 仅有双方同一完整目标和精确方法的 read 授权时，才能展示该 route 的设备/provider 元数据。 */ (method) => {
-            if (++evaluations > 256) {
-              throw new FacadeServiceError('busy')
-            }
-            return providerScopeAllowed({ target: grant.target } as AttemptBinding, method, 'read', {
-              caller: principal.policy,
-              local
-            })
-          }
-        )
-      ) {
-        targets.set(canonical(grant.target), { target: grant.target, local_revision: local.revision })
-      }
+      targets.set(canonical(target), { target })
     }
     return [...targets.values()]
   }
@@ -388,7 +366,9 @@ export class StoreGatewayService implements GatewayService {
     const summary = details.host
       ? `${details.host.os.family}/${details.host.arch}`
       : (details.platform ?? (platform ? `${platform.os}/${platform.arch === 'x64' ? 'x86_64' : 'aarch64'}` : null))
-    const providerIds = new Set(targets.map((target) => target.provider_id))
+    const providerIds = new Set(
+      this.options.store.resources().find((entry) => entry.machine_id === machineId)?.provider_ids ?? []
+    )
     return {
       machine_id: machine.machine_id,
       name: machine.name,
@@ -448,7 +428,6 @@ export class StoreGatewayService implements GatewayService {
             store: this.options.store,
             principal,
             currentPrincipal: () => this.principal(context),
-            localPolicies: this.options.localPolicies,
             terminalExecutionState: this.options.terminalExecutionState,
             target,
             expected_binding_revision: binding.binding_revision
@@ -607,7 +586,6 @@ export class StoreGatewayService implements GatewayService {
         principal,
         currentPrincipal: /* 扫描和描述期间仍从同一受信身份来源复验，不借用旧principal。 */ () =>
           this.principal(context),
-        localPolicies: this.options.localPolicies,
         terminalExecutionState: this.options.terminalExecutionState,
         target: request.args.target,
         expected_binding_revision: request.args.expected_binding_revision
@@ -629,7 +607,6 @@ export class StoreGatewayService implements GatewayService {
         request.args,
         {
           principal: principal.id,
-          policy: principal.policy,
           target: request.args.target,
           name: request.name,
           catalog: catalog.scope,
@@ -643,9 +620,11 @@ export class StoreGatewayService implements GatewayService {
       throw new FacadeServiceError('backend_unavailable')
     }
     const visible = this.visibleTargets(principal)
-    const machines = [
-      ...new Set(visible.map(/* 提取授权目标中的稳定设备 ID，不建立第二份注册表。 */ (row) => row.target.machine_id))
-    ].sort()
+    const resources = this.options.store.resources()
+    const machines = resources
+      .filter((entry) => !principal.device_scope || principal.device_scope.machine_ids.includes(entry.machine_id))
+      .map((entry) => entry.machine_id)
+      .sort()
     // 连接与 provider 就绪来自同一实际传输的只读观测；没有来源时各层保持未核实。
     const detailMachine =
       request.name === 'machines_get'
@@ -667,10 +646,10 @@ export class StoreGatewayService implements GatewayService {
     }
     const scope = {
       principal: principal.id,
-      policy: principal.policy,
       // 范围进入游标绑定：改范围后旧游标不再可重放。
       ...(principal.device_scope === undefined ? {} : { device_scope: principal.device_scope }),
       visible,
+      machines,
       generation: this.options.store.generation(),
       name: request.name,
       args: queryArguments(request.args)
@@ -731,13 +710,7 @@ export class StoreGatewayService implements GatewayService {
         return { ...basic, ...metadata }
       }
       const ids = [
-        ...new Set(
-          visible
-            .filter(
-              /* 仅保留请求显式设备下获授权的 provider。 */ (row) => row.target.machine_id === request.args.machine_id
-            )
-            .map(/* 提取同一 tuple 中的 provider，不复用其它实例授权。 */ (row) => row.target.provider_id)
-        )
+        ...(resources.find((entry) => entry.machine_id === request.args.machine_id)?.provider_ids ?? [])
       ].sort()
       if (!machines.includes(request.args.machine_id)) {
         throw new FacadeServiceError('not_found')
@@ -894,8 +867,6 @@ export class StoreGatewayService implements GatewayService {
       target,
       principal_id: principal.id,
       policy_revision: admin.policy_revision,
-      caller_policy_revision: principal.policy.revision,
-      local_policy_revision: null,
       recovery_generation: this.options.store.generation(),
       observed_at: now,
       expires_at: now + 5000,

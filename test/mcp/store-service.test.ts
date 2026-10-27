@@ -12,7 +12,7 @@ import {
   type ManagementOperation,
   type ServiceContext
 } from '../../src/mcp/index.js'
-import { policy, secondTarget, storeFixture, syntheticCredential, syntheticSecret, target } from './store-fixture.js'
+import { secondTarget, storeFixture, syntheticCredential, syntheticSecret, target } from './store-fixture.js'
 import { clockWrites } from '../storage/clock-write-helpers.js'
 
 // 生成受信宿主context，既不来自MCP参数，也不携带设备凭据或管理员会话。
@@ -62,7 +62,7 @@ for (const change of ['clock', 'owner'] as const) {
     /** 第二轮身份读取时交错改变真实存储事实，不能跨轮沿用入口的时钟或归属快照。 */ async () => {
       const f = storeFixture()
       f.store.connect('machine_a', syntheticCredential)
-      const call = new Router(f.store, f.localPolicies).create(
+      const call = new Router(f.store).create(
         f.current(),
         target,
         { method: 'pane.read' },
@@ -70,8 +70,8 @@ for (const change of ['clock', 'owner'] as const) {
       )
       let snapshots = 0
       const service = new StoreGatewayService({
+        targets: f.targets,
         store: f.store,
-        localPolicies: f.localPolicies,
         identities: {
           ...f.identities,
           /** 第三次身份快照是等待后的第二轮，之后仍由原 Store/Router 完成实际拒绝。 */ principal(caller) {
@@ -121,11 +121,12 @@ test(
           .readiness,
         'unverified'
       )
-      await assert.rejects(
-        f.service.execute('providers_get', { machine_id: 'machine_a', provider_id: 'herdr_a' }, context()),
-        code('not_found')
+      assert.equal(
+        (await f.service.execute('providers_get', { machine_id: 'machine_a', provider_id: 'herdr_a' }, context())).data
+          .kind,
+        'herdr'
       )
-      f.setLocal(policy([secondTarget], 'local_2'))
+      f.setCaller({ id: 'alice', device_scope: { mode: 'selected', machine_ids: ['machine_b'] } })
       assert.deepEqual(
         (await f.service.execute('machines_list', {}, context())).data.items.map(
           /* 当前政策只保留第二个完整目标。 */ (item) => item.machine_id
@@ -133,7 +134,7 @@ test(
         ['machine_b']
       )
       await assert.rejects(f.service.execute('machines_get', { name: 'alpha' }, context()), code('not_found'))
-      f.setLocal(policy([{ ...target, profile: 'session', session: 'other' }], 'local_3'))
+      f.setCaller({ id: 'alice', device_scope: { mode: 'selected', machine_ids: [] } })
       assert.deepEqual((await f.service.execute('machines_list', {}, context())).data.items, [])
     } finally {
       f.close()
@@ -168,7 +169,7 @@ test(
         (await f.service.execute('providers_list', { machine_id: 'machine_a' }, context())).data.items.map(
           /* 范围内的 provider 仍可见。 */ (item) => item.provider_id
         ),
-        ['luvus_a']
+        ['herdr_a', 'luvus_a']
       )
       await assert.rejects(
         f.service.execute('providers_list', { machine_id: 'machine_b' }, context()),
@@ -225,12 +226,12 @@ test(
         code('invalid_cursor')
       )
       await assert.rejects(f.service.execute('machines_list', { cursor: '1' }, context()), code('invalid_cursor'))
-      f.setLocal(policy([target], 'local_changed'))
+      f.setCaller({ id: 'alice', device_scope: { mode: 'selected', machine_ids: ['machine_a'] } })
       await assert.rejects(
         f.service.execute('machines_list', { limit: 1, cursor: first.data.next_cursor }, context()),
         code('invalid_cursor')
       )
-      f.setLocal(policy([target, secondTarget], 'local_1'))
+      f.setCaller({ id: 'alice' })
       f.advance(30_001)
       await assert.rejects(
         f.service.execute('machines_list', { limit: 1, cursor: first.data.next_cursor }, context()),
@@ -253,24 +254,19 @@ test(
       assert.equal(view.data.contract_ref, null)
       assert.equal(view.data.content_delivery, 'unavailable')
       assert(!JSON.stringify(view).includes(syntheticSecret))
-      f.setCaller({ ...f.current(), permissions: { discard_response: false } })
-      await assert.rejects(
-        f.service.execute('runtime_response_discard', { call_id: 'call_fixture' }, context()),
-        code('forbidden')
-      )
-      f.setCaller({ id: 'bob', policy: policy(), permissions: { discard_response: true } })
+      f.setCaller({ id: 'bob' })
       await assert.rejects(
         f.service.execute('runtime_response_discard', { call_id: 'call_fixture' }, context('bob')),
         code('not_found')
       )
-      f.setCaller({ id: 'alice', policy: policy(), permissions: { discard_response: true } })
-      f.setLocal(policy([], 'local_revoked'))
+      f.setCaller({ id: 'alice' })
+      f.setCaller({ id: 'alice', device_scope: { mode: 'selected', machine_ids: [] } })
       await assert.rejects(
         f.service.execute('runtime_response_discard', { call_id: 'call_fixture' }, context()),
         code('forbidden')
       )
       assert(f.store.call('alice', 'call_fixture').response)
-      f.setLocal(policy([target, secondTarget], 'local_1'))
+      f.setCaller({ id: 'alice' })
       assert.equal(
         (await f.service.execute('runtime_response_discard', { call_id: 'call_fixture' }, context())).data
           .content_status,
@@ -301,7 +297,7 @@ test(
     const f = storeFixture()
     try {
       f.store.connect('machine_a', syntheticCredential)
-      const router = new Router(f.store, f.localPolicies)
+      const router = new Router(f.store)
       const call = router.create(
         f.current(),
         target,
@@ -318,7 +314,7 @@ test(
       await assert.rejects(waiting, code('unavailable'))
       assert.equal(f.store.call('alice', call.call_id).state, 'created')
       const revoked = f.service.execute('runtime_call_get', { call_id: call.call_id, wait_ms: 5000 }, context())
-      f.setLocal(policy([], 'local_revoked'))
+      f.setCaller({ id: 'alice', device_scope: { mode: 'selected', machine_ids: [] } })
       await assert.rejects(revoked, code('forbidden'))
       assert.equal(f.store.call('alice', call.call_id).state, 'created')
       const device = await f.service.management.execute('devices_get', { machine_id: 'machine_a' }, adminContext())
@@ -443,7 +439,7 @@ test(
         }
       }
     })
-    const service = new StoreGatewayService({ store, identities: f.identities, localPolicies: f.localPolicies })
+    const service = new StoreGatewayService({ targets: f.targets, store, identities: f.identities })
     const inspect = new DatabaseSync(f.path, { readOnly: true })
     const observed: { machine_id: string; call_id: string; request_json: unknown; response: unknown }[] = []
     const unsubscribe = store.subscribeInvalidation(
@@ -682,9 +678,9 @@ test(
         value
       })
       const service = new StoreGatewayService({
+        targets: f.targets,
         store: f.store,
         identities: f.identities,
-        localPolicies: f.localPolicies,
         transportObservations: {
           snapshot: () => ({
             observed_at: at,
@@ -774,9 +770,9 @@ test(
         value
       })
       const service = new StoreGatewayService({
+        targets: f.targets,
         store: f.store,
         identities: f.identities,
-        localPolicies: f.localPolicies,
         transportObservations: {
           snapshot: () => ({
             observed_at: at,

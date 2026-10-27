@@ -24,23 +24,14 @@ import {
   id,
   object,
   parseJson,
-  providerScopeAllowed,
   text,
   uint,
   validateContractSource,
-  validatePolicies,
   validateTarget,
   assertBinding,
   WireError
 } from '../../wire/index.js'
-import type {
-  ContractRecord,
-  ContractSource,
-  JsonObject,
-  ProviderBinding,
-  ProviderPolicies,
-  V2Target
-} from '../../wire/types.js'
+import type { ContractRecord, ContractSource, JsonObject, ProviderBinding, V2Target } from '../../wire/types.js'
 import { compileHerdrSchemas } from './compiler-api.js'
 import { HerdrInstallation, createHerdrHostServices } from './installation.js'
 import { HerdrLocalError, inspectHerdrPath, pinHerdrConfig } from './local.js'
@@ -67,7 +58,6 @@ export type HerdrProviderRefConfig = Readonly<{
   config_ref: string
   expected_source: ContractSource
   schema_path: string
-  peer_policy_revision: string
   connector?: Readonly<{
     local: HerdrLocalConfig
     principal_id: string
@@ -144,8 +134,8 @@ export function parseHerdrProviderRefConfig(input: unknown): HerdrProviderRefCon
   const value = object(parseJson(boundedJson(input, 65_536)))
   fields(
     value,
-    ['version', 'target', 'binding_revision', 'config_ref', 'expected_source', 'schema_path', 'peer_policy_revision'],
-    ['connector']
+    ['version', 'target', 'binding_revision', 'config_ref', 'expected_source', 'schema_path'],
+    ['connector', 'peer_policy_revision']
   )
   if (value.version !== 1) {
     fail('herdr_provider_config_invalid')
@@ -156,7 +146,6 @@ export function parseHerdrProviderRefConfig(input: unknown): HerdrProviderRefCon
   }
   uint(value.binding_revision, true)
   text(value.config_ref, 256)
-  id(value.peer_policy_revision)
   validateContractSource(value.expected_source)
   if (!isReviewedHerdrSource(value.expected_source)) {
     fail('herdr_contract_unreviewed')
@@ -168,8 +157,7 @@ export function parseHerdrProviderRefConfig(input: unknown): HerdrProviderRefCon
     binding_revision: value.binding_revision,
     config_ref: value.config_ref,
     expected_source: Object.freeze({ ...value.expected_source }),
-    schema_path: path(value.schema_path),
-    peer_policy_revision: value.peer_policy_revision
+    schema_path: path(value.schema_path)
   }
   if (value.connector === undefined) {
     return Object.freeze(shared)
@@ -380,27 +368,11 @@ export async function createHerdrGatewayResources(
       }
       const descriptor = describeCurrent()
       const principalId = principal.id
-      /** 同一策略在两侧仅作 caller 单侧投影；这不是对 Gateway 本地策略已授权的声明。 */
-      function callerActions(method: string): ('dispatch' | 'read')[] {
-        return (['dispatch', 'read'] as const).filter(
-          /** 复用完整 Target/方法/动作匹配，不拼接跨 provider 或会话的 grant。 */ (action) =>
-            providerScopeAllowed({ target: config.target }, method, action, {
-              caller: principal.policy,
-              local: principal.policy
-            })
-        )
-      }
-      const visible = descriptor.methods.flatMap(
-        /** 目录可见性允许 dispatch 或 read 任一动作；cancel/stream_input 不足以探测方法。 */ (method) => {
-          const actions = callerActions(method.method)
-          if (!actions.length) {
-            return []
-          }
-          const summary: JsonObject = { ...method, caller_actions: actions }
-          delete summary.params_schema
-          return [summary]
-        }
-      )
+      const visible = descriptor.methods.map((method) => {
+        const summary: JsonObject = { ...method }
+        delete summary.params_schema
+        return summary
+      })
       if (!visible.length) {
         return undefined
       }
@@ -425,8 +397,7 @@ export async function createHerdrGatewayResources(
           if (principal.id !== principalId) {
             fail('unauthenticated')
           }
-          const actions = callerActions(method)
-          if (!actions.length || !visibleMethods.has(method)) {
+          if (!visibleMethods.has(method)) {
             fail('runtime_method_unavailable')
           }
           const selected = describeCurrent().methods.find(
@@ -435,7 +406,7 @@ export async function createHerdrGatewayResources(
           if (!selected) {
             fail('runtime_method_unavailable')
           }
-          return { ...selected, caller_actions: actions }
+          return { ...selected }
         }
       })
     }
@@ -448,7 +419,6 @@ export async function createHerdrGatewayResources(
       {
         binding,
         target: config.target,
-        peer_policy_revision: config.peer_policy_revision,
         max_response_bytes: 65_536,
         contract_ref: reference,
         preflightRequest: /** 使用同一已编译完整根预检真实登记请求；不生成原生 permit 或发送字节。 */ (
@@ -510,7 +480,6 @@ export async function createHerdrGatewayResources(
               phase: 'authenticated',
               direction,
               connection: channel.connection(),
-              policies: principal ? services.policies(principal) : undefined,
               resolveContract: /** 固定契约必须仍可从本资源读取。 */ (ref) =>
                 ref === reference ? record.wire : undefined
             }
@@ -524,8 +493,6 @@ export async function createHerdrGatewayResources(
             source.assertCurrent()
             const local = services.localProvider(config.target)
             return {
-              policy_revision: services.localPolicies(config.target).revision,
-              peer_policy_revision: config.peer_policy_revision,
               providers: [{ expected: binding, local: local ?? { ...binding, enabled: false }, native_ready: true }]
             }
           },
@@ -570,7 +537,6 @@ export async function createHerdrConnectorResources(
     config: unknown
     installation: HerdrInstallation
     now(): number
-    policies(principal: string): ProviderPolicies
     releaseOwner(): Promise<void>
     release_timeout_ms?: number
     /** 与最终写入共用的本机开关读取器；省略时使用原安装配置。 */
@@ -583,7 +549,6 @@ export async function createHerdrConnectorResources(
     !connector ||
     !(input.installation instanceof HerdrInstallation) ||
     typeof input.now !== 'function' ||
-    typeof input.policies !== 'function' ||
     typeof input.releaseOwner !== 'function'
   ) {
     fail('herdr_connector_owner_required')
@@ -613,17 +578,6 @@ export async function createHerdrConnectorResources(
   let closed = false
   let releasing: Promise<void> | undefined
   /** policies 每次来自受保护宿主当前值，配置中的 principal 只是路由归属，不发行身份。 */
-  function policies(principal: string): ProviderPolicies {
-    if (closed || principal !== connector!.principal_id) {
-      fail('admission_principal_mismatch')
-    }
-    const value = JSON.parse(boundedJson(input.policies(principal))) as ProviderPolicies
-    validatePolicies(value)
-    if (closed) {
-      fail('herdr_provider_closed')
-    }
-    return value
-  }
   /** 先停止全部 epoch，再释放两个已有 writer 和原所有者；失败仍逐项清理且只执行一次。 */
   function release(): Promise<void> {
     if (!releasing) {
@@ -690,7 +644,7 @@ export async function createHerdrConnectorResources(
           connection,
           routes,
           book,
-          source: { policies, now: input.now }
+          source: { now: input.now }
         })
         const listeners = new Set<(event: LedgerInvalidation) => void>()
         let runtime: ReturnType<typeof createHerdrRuntime> | undefined
@@ -705,7 +659,6 @@ export async function createHerdrConnectorResources(
               phase: 'authenticated',
               direction,
               connection: admission.connection(),
-              policies: policies(principal || connector.principal_id),
               resolveProvider: /** 只解析这一个完整固定目标。 */ (target) =>
                 boundedJson(target) === boundedJson(config.target) ? binding : undefined,
               resolveContract: /** 原生契约只能来自实际 installation。 */ (ref) =>
@@ -765,8 +718,6 @@ export async function createHerdrConnectorResources(
               installed.assert()
               document.assertCurrent()
               return {
-                policy_revision: policies(connector.principal_id).local.revision,
-                peer_policy_revision: config.peer_policy_revision,
                 providers: [{ expected: binding, local: binding, native_ready: true }]
               }
             },

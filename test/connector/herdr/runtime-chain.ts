@@ -79,7 +79,6 @@ export function createHerdrRuntimeChain(root: string, methods: readonly string[]
             phase: 'authenticated',
             direction,
             connection,
-            policies: { caller: f.principal.policy, local: f.local },
             resolveContract: /** 每次从同一实际安装对象取得固定完整来源。 */ (ref) => {
               const record = installed.record()
               return contractRef(record.wire.source) === ref ? record.wire : undefined
@@ -338,8 +337,6 @@ export function createHerdrRuntimeChain(root: string, methods: readonly string[]
                     fail('provider_binding_unavailable')
                   }
                   return {
-                    policy_revision: 'trusted_policy1',
-                    peer_policy_revision: 'trusted_policy1',
                     providers: [
                       { expected: f.store.provider(target.machine_id, target.provider_id)!, local, native_ready: true }
                     ]

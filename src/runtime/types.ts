@@ -3,7 +3,7 @@ import type { NativeRequest } from '../contracts.js'
 import type { NativeWireBackend, NativeContractRecord } from '../integration/luvus-wire.js'
 import type { TrustedNativeContext } from '../native-contract/index.js'
 import type { GatewayIdentitySource, CallerIdentity } from '../mcp/management.js'
-import type { LocalPolicies, Principal } from '../router.js'
+import type { Principal } from '../router.js'
 import type { CallAdmissionOptions, Store } from '../store.js'
 import type {
   ChannelRegistry,
@@ -23,7 +23,7 @@ export type RuntimeProviderBinding = Readonly<{
   binding: ProviderBinding
   target: V2Target
   // 来自独立受保护设备配置的预期政策修订，不从本机政策复制或设备广告自证。
-  peer_policy_revision: string
+  peer_policy_revision?: string
   // 就绪由各 provider 的受保护实际来源重新核对，不能由设备认证或广告建立。
   ready(): boolean
   // 旧 Luvus 入口固定为 1MiB；中性入口必须显式提供此预算。
@@ -41,11 +41,8 @@ export type RuntimeProvider = RuntimeProviderBinding &
     // Connector 复核本机实例；远端 Gateway 复核受保护 pin 和实际认证 epoch，不由广告 JSON 自证。
     source(binding: AttemptBinding): TrustedNativeContext | undefined
     // 目录直接绑定当前实际连接，不编造完整 attempt；旧有限 custody provider 可省略。
-    catalogSource?(
-      connection: Connection,
-      policies: Readonly<{ caller_policy_revision: string; local_policy_revision: string }>
-    ): TrustedNativeContext
-    authority: NativeWireBackend['authority']
+    catalogSource?(connection: Connection): TrustedNativeContext
+    validateAttempt?: NativeWireBackend['validateAttempt']
   }>
 // 受保护 pin 与当前认证 epoch 分离；此接缝不接受本机 Owner、编译句柄或原生许可的 JSON。
 export type RemoteLuvusRuntimeProvider = RuntimeProviderBinding &
@@ -76,9 +73,7 @@ export type RuntimeCatalogProvider = Readonly<{
 export type GatewayProviderServices = Readonly<{
   store: Store
   router: import('../router.js').Router
-  localPolicies: LocalPolicies
   localProvider(target: V2Target): ProviderBinding | undefined
-  policies: NativeWireBackend['policies']
   currentPrincipal(): string | undefined
 }>
 export type ProviderGatewayRuntimeOptions = Omit<GatewayRuntimeOptions, 'lifecycle' | 'providers' | 'hosted'> &
@@ -94,14 +89,13 @@ export type GatewayRuntimeOptions = Readonly<{
   lifecycle: DeviceLifecycleWiring
   channels?: ChannelRegistry
   identities: GatewayIdentitySource
-  localPolicies: LocalPolicies
   providers: readonly (RuntimeProvider | RemoteLuvusRuntimeProvider)[]
   hosted?: readonly GatewayHostedProviders[]
   listener: Pick<GatewayOptions, 'hostname' | 'port' | 'developmentLoopback' | 'limits' | 'offer' | 'setupRequest'>
   // 仅在显式关闭角色时释放所交付的 Store/身份库；HTTP 客户端断开不调用此端口。
   release(): Promise<void>
 }>
-export type RuntimeAdmissionOptions = Omit<CallAdmissionOptions, 'caller_policy_revision' | 'local_policy_revision'>
+export type RuntimeAdmissionOptions = CallAdmissionOptions
 export type RuntimeCallInput = Readonly<{
   target: V2Target
   native_request: NativeRequest

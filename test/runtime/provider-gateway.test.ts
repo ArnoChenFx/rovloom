@@ -88,12 +88,10 @@ async function fixture(settings: Settings = {}) {
         return null
       }
     },
-    localPolicies: /** 当前本地 ACL 来自同一 fixture 的受保护独立策略。 */ () => base.local,
     providers: [
       {
         binding: { ...binding, ...settings.binding },
         target: paired.target,
-        peer_policy_revision: 'local1',
         max_response_bytes: settings.max_response_bytes ?? DEFAULT_LIMITS.object_bytes,
         ready: /** 设备认证不能代替当前 provider 的独立健康，回调关闭也不能越过fence。 */ () => {
           if (settings.stage === 'provider') {
@@ -121,7 +119,6 @@ async function fixture(settings: Settings = {}) {
         persistentBackend(base.store, {
           ...base.backendServices(connection),
           localProvider: ports.localProvider,
-          policies: ports.policies,
           currentPrincipal: ports.currentPrincipal
         })
       )
@@ -150,8 +147,6 @@ async function fixture(settings: Settings = {}) {
             closeFromCallback()
           }
           return {
-            policy_revision: state.revision,
-            peer_policy_revision: 'local1',
             providers: [{ expected: binding, local: binding, native_ready: state.ready }]
           }
         },
@@ -348,7 +343,7 @@ test(
 )
 
 test(
-  'neutral Gateway retains only evidence after the original caller loses current read authority',
+  'neutral Gateway ignores legacy action lists and retains the original caller result',
   /** 原caller撤权时另一HTTP主体仍获授权，也不能借最近请求身份保留原响应正文。 */ async () => {
     const f = await fixture()
     try {
@@ -374,15 +369,13 @@ test(
         }
       )
       const stored = f.base.store.call('synthetic', admitted.call.call_id)
-      assert.equal(stored.response, null)
-      assert.equal(stored.content_status, 'unavailable')
+      assert.notEqual(stored.response, null)
+      assert.equal(stored.content_status, 'available')
       f.principal.policy = saved
-      await f.gateway.runAuthenticated(
-        { principal_id: 'synthetic' },
-        /** 后来重新授权不能从已删除原文的证据建立结果句柄。 */ () => {
-          assert.throws(/** 没有正文可供恢复。 */ () => f.gateway.results.open(stored.call_id), /result_not_ready/)
-        }
-      )
+      await f.gateway.runAuthenticated({ principal_id: 'synthetic' }, () => {
+        const meta = f.gateway.results.open(stored.call_id)
+        assert.equal(Buffer.from(f.gateway.results.read(meta.result_id).data, 'base64').toString(), stored.response)
+      })
       assert.equal(f.state.nativeCalls, 1)
     } finally {
       await f.close()
@@ -445,7 +438,7 @@ test(
   }
 )
 
-for (const condition of ['not_ready', 'revision'] as const) {
+for (const condition of ['not_ready'] as const) {
   test(
     'neutral Gateway refuses dispatch while provider ' + condition + ' is current',
     /** 设备已认证也不能替代独立原生健康或双端配置修订。 */ async () => {

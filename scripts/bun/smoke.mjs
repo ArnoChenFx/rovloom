@@ -167,7 +167,7 @@ for (const role of ['gateway', 'connector']) {
 }
 assert.deepEqual(
   Object.keys(contracts).sort(),
-  ['GatewayError', 'authorize', 'canonical', 'digest', 'validateRequest', 'validateTarget'].sort()
+  ['GatewayError', 'canonical', 'digest', 'validateRequest', 'validateTarget'].sort()
 )
 assert.deepEqual(
   Object.keys(protocol).sort(),

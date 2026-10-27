@@ -873,6 +873,11 @@ export class Store {
     }
     return result
   }
+  // 原登记契约引用属于持久调用元数据，不依赖原连接的内存上下文。
+  callContractRef(principal: string, callId: string): string {
+    const row = this.owned(principal, callId)
+    return (JSON.parse(row.identity_json) as AttemptIdentity).contract_ref
+  }
   // 保留内部相对 timeout 调用路径；与绝对准入共用同一 writer 登记，返回原有 Call 视图。
   createCall(
     principal: string,
@@ -930,8 +935,6 @@ export class Store {
     const options: CallOptions = {
       binding_revision: supplied.binding_revision,
       contract_ref: supplied.contract_ref,
-      caller_policy_revision: supplied.caller_policy_revision,
-      local_policy_revision: supplied.local_policy_revision,
       ...(supplied.validation === undefined ? {} : { validation: supplied.validation }),
       ...(supplied.client_request_key === undefined ? {} : { client_request_key: supplied.client_request_key })
     }
@@ -967,9 +970,7 @@ export class Store {
             binding_revision: provider.binding_revision,
             contract_ref: options.contract_ref,
             registration: {
-              deadline: 'deadline' in timing ? timing.deadline : now + timing.timeoutMs,
-              caller_policy_revision: options.caller_policy_revision,
-              local_policy_revision: options.local_policy_revision
+              deadline: 'deadline' in timing ? timing.deadline : now + timing.timeoutMs
             }
           }
           validateAttempt(identity)
@@ -1085,12 +1086,7 @@ export class Store {
   }
   // 核对当前连接、期限及可选的宿主策略 revision，提交完整 attempt 锚点与完成预留后才允许发送。
   // 返回绑定只证明账本派发锚点已持久化，真实原生执行许可仍由适配器独立校验。
-  dispatch(
-    principal: string,
-    callId: string,
-    epoch: string,
-    policies?: { caller: string; local: string }
-  ): AttemptBinding {
+  dispatch(principal: string, callId: string, epoch: string): AttemptBinding {
     const binding = this.transaction(
       /* 核对调用状态、连接与可选策略 revision，写入一次性完整 attempt 绑定及完成空间预留。 */ (now) => {
         const row = this.owned(principal, callId, now)
@@ -1105,13 +1101,6 @@ export class Store {
           throw new GatewayError('dispatch_rejected')
         }
         const registered = JSON.parse(row.identity_json) as AttemptIdentity
-        if (
-          policies &&
-          (registered.registration.caller_policy_revision !== policies.caller ||
-            registered.registration.local_policy_revision !== policies.local)
-        ) {
-          throw new GatewayError('policy_revision_mismatch')
-        }
         const binding: AttemptBinding = {
           ...registered,
           machine_id: row.machine_id,

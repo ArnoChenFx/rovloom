@@ -158,8 +158,6 @@ export function fixtureReply<K extends ManagementReadOperation>(
         target: { machine_id: target },
         principal_id: 'fixture-principal',
         policy_revision: 'fixture-policy',
-        caller_policy_revision: 'fixture-caller',
-        local_policy_revision: null,
         recovery_generation: 'fixture-recovery',
         observed_at: fixtureTime,
         expires_at: fixtureTime + 30_000,

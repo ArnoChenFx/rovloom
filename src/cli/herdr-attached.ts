@@ -124,12 +124,7 @@ export async function startAttachedHerdr(
         now: Date.now,
         ...(options.terminalExecution ? { terminalExecution: options.terminalExecution } : {}),
         /** 固定 principal 的策略来自受保护配置快照，不读取消息自报身份或打开 Gateway Store。 */
-        policies(principal) {
-          if (closed || principal !== config.connector.principal_id) {
-            throw new HerdrLocalError('herdr_production_principal_unavailable')
-          }
-          return structuredClone(selected.policies)
-        },
+
         /** 实例不归 Connector 所有：释放只撤去来源，不终止任何进程。 */
         releaseOwner: async () => {}
       })

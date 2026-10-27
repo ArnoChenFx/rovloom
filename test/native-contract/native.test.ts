@@ -186,12 +186,9 @@ test(
     assert.deepEqual(unwrap(validator.checkResponse(permit, error, sourceFor(checked.binding))).response, error)
     const resultContext = {
       principal_id: 'synthetic',
-      caller_policy_allowed: true,
-      local_policy_allowed: true,
       content_status: 'available' as const
     }
     unwrap(checkResultBoundary(permit, resultContext))
-    rejects(checkResultBoundary(permit, { ...resultContext, caller_policy_allowed: false }), 'forbidden')
     rejects(checkResultBoundary(permit, { ...resultContext, content_status: 'discarded' }), 'content_unavailable')
     rejects(checkResultBoundary(permit, { ...resultContext, principal_id: 'other' }), 'forbidden')
     rejects(validator.checkResponse(clone(permit), error, sourceFor(checked.binding)), 'invalid_permit_handle')

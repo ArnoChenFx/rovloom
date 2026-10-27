@@ -74,7 +74,7 @@ Setting an address does not pair the device or install a native provider.
 | `management.hostname` | String, optional, written by default | `127.0.0.1`; also accepts `0.0.0.0` for LAN access. The bind controls the listening interface, not a domain whitelist. Management supports HTTP/HTTPS reverse proxies that preserve or rewrite `Host`, without an external URL setting. Login, session cookies and CSRF remain required; browser cross-site requests are refused. HTTPS is detected from the request, browser Origin, `X-Forwarded-Proto` or `Forwarded` to add `Secure` to cookies. |
 | Connector `gateway` | Object, required | Contains only `url`. |
 | `gateway.url` | String, required | `""` while setup is pending; otherwise WS/WSS origin, ≤2048 characters, e.g. `ws://192.0.2.10:9443` or `wss://gateway.example`. No credentials/query/fragment/path except optional trailing `/`. Product selects `/connector`. |
-| Connector `allow_terminal_execution` | Boolean, optional | `false`, also when omitted. Only literal `true` enables direct terminal input and custom launch/restore commands through the existing local guard. Edit this single user file and restart Connector; it does not change installation settings or caller/local grants. |
+| Connector `allow_terminal_execution` | Boolean, optional | `false`, also when omitted. Only literal `true` enables direct terminal input and custom launch/restore commands through the existing local guard. Edit this single user file and restart Connector; it does not change installation settings or token device scopes. |
 | Connector `native` | Object, optional | Absent by default. Contains only the provider-selection and installation-directory settings below; applied at first native initialization. |
 | `native.provider` | String enum, optional | Omitted: `luvus`; `herdr` selects Herdr, `mixed` selects one of each. Choose it before native initialization; it cannot change afterwards. |
 | `native.runtime_bin_dirs` | Array of 1–16 distinct normalized absolute directory strings (each ≤4096 characters), optional | Where to look for the selected `luvus`/`herdr` programs. Search order: these directories, then the usable entries of the Connector's `PATH`, then `/usr/bin:/bin` (not on Windows). Different programs may live in different directories. No shell expansion or executable argv. |
@@ -167,66 +167,40 @@ rovloom token scope  --principal worker --no-devices true
 ```
 
 The token registry (`managed/mcp-callers.json` under the Gateway state directory)
-holds SHA-256 digests, recoverable newly issued tokens, principal policies and fixed expiry. The Gateway re-reads
+holds SHA-256 digests, recoverable newly issued tokens, principal identities, device scopes and fixed expiry. The Gateway re-reads
 it on every authentication, so create, renew, rotate and revoke take effect **without a
 restart**, and revoking also invalidates established MCP sessions. `create` and
 `rotate` write the new token to stdout exactly once (everything else goes to stderr);
-a new principal's permissions are cloned from `--like`, never widened. `rotate`
+a new principal's device scope is cloned from `--like`. `rotate`
 invalidates the old token immediately unless `--grace-minutes` gives clients a bounded
 switch-over window. A local `mcp-client.json` belonging to the same principal is
 updated too. A corrupt registry denies all authentication until it is repaired.
 
 ### Device visibility scope
 
-A token can be narrowed to a subset of devices. `device_scope` is an **optional** field on a
-caller entry and does not bump the registry `schema_version`; a registry without it behaves
-exactly as before, so no migration is needed:
+MCP authorization has two controls for both Herdr and Luvus: the token's device scope, and the Connector's `allow_terminal_execution` switch for direct terminal input/execution and custom commands. There are no per-method, per-provider or read/dispatch/cancel grants.
+
+New registries use `schema_version: 2`. A caller entry contains its identity, credentials, expiry and optional device scope:
 
 ```jsonc
 {
-  "principal": { "id": "worker", "policy": { "…": "…" } },
+  "principal": { "id": "worker" },
   "token_sha256": "…",
   "device_scope": { "mode": "selected", "machine_ids": ["m_ab12", "m_cd34"] },
-  "issued_at": 0,
-  "expires_at": 0
+  "issued_at": 1000,
+  "expires_at": 86401000
 }
 ```
 
-- Absent = today's behaviour: the token sees every device its current grants cover.
-- `mode: "selected"` = only these stable `machine_id`s. Device **names are never accepted**
-  (names can change; renaming a device must not change authorization). Listed IDs that were
-  revoked or no longer exist simply do not match; re-pairing mints a new `machine_id`, so the
-  device drops out of view — deliberately failing closed.
-- A selected list may contain 0–256 unique IDs. An empty list blocks every device; use `--no-devices true` to set it. `--devices ""`, duplicates and empty entries are rejected.
-- Clearing requires the explicit `--all-devices true`; nothing ever silently widens a token.
+- No scope means all active devices, including devices paired later.
+- `selected` accepts 0–256 unique stable machine IDs. Names are not accepted. An empty list blocks all devices.
+- Use `token scope --devices ...`, `--no-devices true` or `--all-devices true`. Changes apply without a restart; `token create --like` copies the scope. Pairing does not change existing scopes.
+- Lists and descriptions hide out-of-scope devices with `not_found`. Dispatch, cancellation and result access reject with `forbidden`. Each request uses the current identity and scope; an already dispatched native operation is not stopped by narrowing scope.
+- Every provider-exposed method on a visible device is available, subject to the Connector's terminal switch and actual native availability. Parameters, source/binding, deadlines and idempotency are checked for correctness. Calls and results retain their original principal ownership.
 
-Scope is a **filter, not a second ACL**: it can only remove devices from what the grants already
-allow. `machines_list`, `machines_get` (including exact-name lookup), `providers_list`,
-`providers_get`, `runtime_discover` and `runtime_describe` all shrink with it, and out-of-scope
-devices keep answering `not_found` — indistinguishable from "not granted", so no device existence
-probe is added. Dispatch, short waits, cancellation, result reads and result deletion are checked
-in the router and answer `forbidden`, exactly like a missing grant.
+Version 1 registries are read without rewriting the file. On migration, an ordinary legacy caller's own grants contribute only their machine IDs to `device_scope`; an explicit scope takes precedence. Legacy Gateway-scoped and pairing callers keep their global scope. `local_policy` is never used to expand device visibility. The next registry write saves version 2 and omits all old policies, methods, actions, revisions and result-discard permissions. Administrator-only records remain excluded from MCP authentication; management roles are independent.
 
-Scope changes do **not** bump `policy.revision`: the Connector still compares only
-`caller_policy_revision`, so narrowing never makes a native attempt already dispatched stop on
-the device (the same limitation as revoking a token mid-flight). Every subsequent read, short
-wait, cancel and result access is re-checked and refused. The registry is re-read on every
-request, so `rovloom token scope` applies without a restart. `token create --like` clones the
-scope along with the policy, and joining more devices rewrites only policies, leaving
-`device_scope` untouched. `token list` gains an `all` / `selected(N)` column.
-
-Downgrading to a binary that predates this field makes it treat the registry as `invalid_config`
-and deny all authentication: it fails closed instead of silently widening the token.
-
-Management-page tokens (`scope: "gateway"`) retain separate principal IDs and result
-ownership while following the paired caller policy in `gateway_policy`. Pairing and
-joining devices update that policy separately from `local_policy`; their revisions
-must not be interchanged. Existing single-code pairing registries without this field
-use the policy stored on `operator_simple_pairing`, and the next registry write preserves
-it independently. If neither binding exists, Gateway tokens have no method grants.
-Revoking the original pairing token does not revoke separately issued Gateway tokens.
-The device scope applies to these tokens too (the management page offers the same control), but it
-never touches `Administrator.grants`, so management-page visibility is unaffected.
+Upgrade and restart both Gateway and Connector. Existing tokens and pairing credentials remain usable; no re-pairing or per-method authorization update is needed. Old Connector policy/raw fields are accepted as inert compatibility input and omitted from new pairing output. Before upgrading, back up both roles' complete private data directories and configs while stopped. Rolling back requires restoring those matching backups and binaries: old releases cannot consume the new registry/config format safely.
 
 ### Pairing
 
@@ -320,7 +294,7 @@ environment, or `native.herdr.config_home`). On every start the Connector:
 A listener that is **not** your installed `herdr` is never attached and never replaced. The server
 the Connector starts gets your shell and Git configuration but not other environment variables
 (SSH agent, API keys); configure Agent credentials in the Agent's own files.
-Remote callers act on your **real** workspaces; the Gateway grants and `allow_terminal_execution`
+Remote callers act on your **real** workspaces; the token device scopes and `allow_terminal_execution`
 remain the only fences.
 
 **managed.** A private instance under the Connector's data directory (`<data.directory>/hr`), owned
@@ -344,7 +318,7 @@ prompt shows `session: default`). Setup records your real `HOME` and state direc
    instance. Calls in flight at that moment stay `outcome_unknown` and are never resent.
 
 A server on that endpoint that is **not** your installed `luvus` is never attached or replaced.
-Remote callers act on your **real** workspaces; the Gateway grants and
+Remote callers act on your **real** workspaces; the token device scopes and
 `allow_terminal_execution` remain the only fences.
 
 **managed.** A private instance (session `rovloom`) under the Connector's data directory, owned
@@ -529,15 +503,8 @@ Keep the error code when asking for help. Do not post real configuration,
 Bearers, administrator passwords or pairing codes.
 
 
-### Result cleanup permission
+### Result cleanup
 
-Caller registries may include `principal.permissions: { "discard_response": true }`. It defaults to false. The local operator can change it without restarting Gateway:
+After saving the needed result, call `runtime_response_discard` with its `call_id` to delete its original content and handles. Current identity, device scope and original result ownership are checked; there is no separate discard permission or `token permissions` command. Reading to EOF does not delete or renew the result.
 
-```sh
-rovloom token permissions --principal owner --discard-response true
-rovloom token permissions --principal owner --discard-response false
-```
-
-Use the actual principal ID from `rovloom token list`. This grants result deletion for the caller's own results, subject to the current method read policies; it changes neither method grants nor token expiry. `token create --like` copies this permission along with the method policy.
-
-After reading and saving a result, call `runtime_response_discard` with its `call_id` to delete the original content and handles and release read capacity. Reading to EOF keeps the result available until its fixed TTL. Gateway retains at most 128 read contexts by default; clients making repeated calls should explicitly discard finished results they no longer need. Other retained results remain readable. Discard cannot be undone.
+Validated responses are persisted on arrival. Their handles remain readable until the fixed TTL even after the original connection closes, subject to Store content/handle budgets and device lifecycle. Result reads do not require a live original Wire or revalidate the native schema. The production runtime releases completed execution contexts rather than retaining one for every stored result.

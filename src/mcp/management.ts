@@ -196,8 +196,6 @@ export type PermissionSnapshot = {
   target: ResourceTarget
   principal_id: string
   policy_revision: string
-  caller_policy_revision: string
-  local_policy_revision: string | null
   recovery_generation: string
   observed_at: number
   expires_at: number

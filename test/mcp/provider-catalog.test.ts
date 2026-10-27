@@ -26,7 +26,6 @@ test(
         store: f.store,
         principal: f.current(),
         currentPrincipal: f.current,
-        localPolicies: f.localPolicies,
         target,
         expected_binding_revision: 1,
         provider: {

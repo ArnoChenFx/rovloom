@@ -1,7 +1,7 @@
 /** 复用固定 Luvus 普通方法的契约审核、参数检查和逐次授权；原生来源与 raw 决定仍由受信宿主交付。 */
 import { isDeepStrictEqual } from 'node:util'
 import { LuvusAdapterError } from '../connector/luvus/types.js'
-import type { NativeContractRecord, NativeWireBackend, TrustedAttempt } from '../integration/luvus-wire.js'
+import type { NativeContractRecord, NativeWireBackend } from '../integration/luvus-wire.js'
 import type { TrustedNativeContext } from '../native-contract/index.js'
 import { object } from '../wire/index.js'
 import type { AttemptBinding } from '../wire/types.js'
@@ -35,11 +35,10 @@ export function assertLuvusOperationsContract(contract: NativeContractRecord): v
 }
 
 /** 固定分类不能授予来源或 raw 权限；每次先取宿主当前来源，再按显式回调决定是否交付原 gate 所需 grant。 */
-export function createLuvusOperationsAuthority(
+export function createLuvusOperationsValidation(
   contract: NativeContractRecord,
-  current: (binding: AttemptBinding) => TrustedNativeContext,
-  rawAllowed: (attempt: TrustedAttempt) => boolean
-): NativeWireBackend['authority'] {
+  current: (binding: AttemptBinding) => TrustedNativeContext
+): NonNullable<NativeWireBackend['validateAttempt']> {
   assertLuvusOperationsContract(contract)
   const methods = object(object(contract.capabilities).result).method_contracts as Record<string, unknown>[]
   return /** 每个候选重验当前来源、精确方法与参数，不从快照导入 Owner、permit 或新的期限。 */ (attempt, native) => {
@@ -73,23 +72,5 @@ export function createLuvusOperationsAuthority(
       throw new LuvusAdapterError('luvus_operations_contract_mismatch')
     }
     validateLuvusOperationParams(attempt.method, attempt.native_request.params)
-    const raw = attempt.mode === 'raw-contract'
-    const allowed = raw && rawAllowed(attempt) === true
-    return {
-      owner: allowed,
-      raw_requested: raw,
-      ...(allowed
-        ? {
-            raw_grant: {
-              id: attempt.binding.call_id,
-              source_verified: true,
-              principal_id: attempt.principal_id,
-              binding: native,
-              methods: [attempt.method],
-              expires_at: attempt.binding.registration.deadline
-            }
-          }
-        : {})
-    }
   }
 }

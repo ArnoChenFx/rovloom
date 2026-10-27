@@ -1,329 +1,42 @@
-/** 复用原 Wire 读取及独立保留许可，为各 provider 共用 Store 结果句柄、分页、丢弃与全局预算门禁。 */
+/** 已提交响应只按当前 token 的设备范围与句柄归属读取，不依赖仍在线的原连接。 */
 import { GatewayError } from '../contracts.js'
-import { Router } from '../router.js'
-import type { LocalPolicies, Principal } from '../router.js'
+import { Router, type Principal } from '../router.js'
 import type { ResultPage, Store } from '../store.js'
-import type { Call } from '../storage/model.js'
-import type { Adapter } from '../transport/index.js'
-import {
-  assertBinding,
-  boundedJson,
-  id,
-  LIMITS,
-  object,
-  parseJson,
-  validateProvider,
-  validateTarget
-} from '../wire/index.js'
-import type { AttemptBinding, JsonObject, ProviderBinding, V2Target } from '../wire/types.js'
 
 export type ProviderResultMetadata = Readonly<Pick<ResultPage, 'result_id' | 'bytes' | 'hash' | 'expires'>>
 export type ProviderResultPage = Readonly<ResultPage>
-export type ProviderOriginalRead = Readonly<{
-  binding: AttemptBinding
-  wire: Pick<Adapter, 'checkResult'> & Partial<Pick<Adapter, 'checkResultRetention'>>
-}>
-export type ResultProvider = Readonly<{ binding: ProviderBinding; max_response_bytes: number }>
 export type ProviderResultAccessOptions = Readonly<{
   store: Store
-  localPolicies: LocalPolicies
-  /** 当前认证主体只能来自原请求作用域，不能由结果参数自报。 */
+  /** 当前身份由认证宿主提供，不能由结果参数自报。 */
   principal(): Principal
-  /** 原请求持有的真实 Wire；缺失时不从持久元数据恢复许可。 */
-  resolveOriginalRead(callId: string): ProviderOriginalRead | undefined
-  /** 受保护的完整目标配置；上限不得超过共享 Wire 对象硬限，全局内容/句柄预算仍由 Store 唯一计量。 */
-  provider(target: V2Target): ResultProvider | undefined
 }>
-type ProviderSnapshot = { value: ResultProvider; configured: ResultProvider; stamp: string }
 
-/** 拒绝异步宿主 port 并消费其晚到拒绝，防止把未完成的授权当作成功继续执行。 */
-function synchronous<T>(value: T): T {
-  if (
-    value !== null &&
-    (typeof value === 'object' || typeof value === 'function') &&
-    typeof (value as { then?: unknown }).then === 'function'
-  ) {
-    Promise.resolve(value).catch(/* 消费被拒绝的异步 port，不保留或回显底层错误。 */ () => {})
-    throw new GatewayError('result_port_invalid')
-  }
-  return value
-}
-
-/** 创建无正文或期限缓存的结果访问层；所有读许可、句柄归属和期限均按实际操作重新取得。 */
+/** 来源、binding 与响应结构在提交时核验；分页复用 Store 的期限、字节预算和摘要。 */
 export function createProviderResultAccess(options: ProviderResultAccessOptions) {
-  if (
-    !options?.store ||
-    typeof options.localPolicies !== 'function' ||
-    typeof options.principal !== 'function' ||
-    typeof options.resolveOriginalRead !== 'function' ||
-    typeof options.provider !== 'function'
-  ) {
+  if (!options?.store || typeof options.principal !== 'function') {
     throw new GatewayError('result_port_invalid')
   }
-  const store = options.store
-
-  /** 快照宿主当前认证主体；一次操作中身份切换必须失败，策略则始终使用最新快照。 */
-  function principal(expectedId?: string): Principal {
-    const current = JSON.parse(boundedJson(synchronous(options.principal()))) as Principal
-    if (typeof current?.id !== 'string' || !current.id.trim() || !current.policy) {
-      throw new GatewayError('unauthenticated')
-    }
-    if (expectedId !== undefined && current.id !== expectedId) {
-      throw new GatewayError('unauthenticated')
-    }
-    return current
-  }
-
-  /** 为一次授权绑定主体快照，本地策略回调改变身份、策略或专门权限时立即拒绝。 */
-  function router(reader: Principal, observe?: (policy: ReturnType<LocalPolicies>) => void): Router {
-    return new Router(
-      store,
-      /* 先快照当前本地策略，随后核验回调没有改变本次授权所使用的完整主体事实。 */ (target) => {
-        const live = synchronous(options.localPolicies(target))
-        const local = JSON.parse(boundedJson(live)) as ReturnType<LocalPolicies>
-        if (boundedJson(principal(reader.id)) !== boundedJson(reader)) {
-          throw new GatewayError('forbidden')
-        }
-        observe?.(live)
-        return local
-      }
-    )
-  }
-
-  /** 运行一次同步结果操作，将未知宿主异常收敛为不含正文或凭据的安全错误。 */
+  const router = new Router(options.store)
   function operation<T>(action: (principal: Principal) => T): T {
     try {
-      return action(principal())
+      const principal = options.principal()
+      if (!principal || typeof principal.id !== 'string' || !principal.id.trim()) {
+        throw new GatewayError('unauthenticated')
+      }
+      return action(principal)
     } catch (error) {
       throw error instanceof GatewayError ? error : new GatewayError('result_unavailable')
     }
   }
-
-  /** 受保护 provider 配置必须仍与唯一 Store 的完整 canonical binding 同值，不能只信 kind 标签。 */
-  function providerCurrent(value: Call, configured: ResultProvider): boolean {
-    const current = store.provider(value.machine_id, value.provider_id)
-    return (
-      !!current &&
-      configured.binding.enabled &&
-      configured.binding.machine_id === value.machine_id &&
-      configured.binding.provider_id === value.provider_id &&
-      configured.binding.kind === value.provider_kind &&
-      configured.binding.binding_revision === value.binding_revision &&
-      boundedJson(configured.binding) === boundedJson(current)
-    )
-  }
-
-  /** 每次从完整目标读取可信配置并快照上限；回调不得改变当前身份或借其它 provider 的预算。 */
-  function provider(reader: Principal, value: Call): ProviderSnapshot {
-    const target = JSON.parse(value.target_json) as V2Target
-    validateTarget(target)
-    const live = synchronous(options.provider(structuredClone(target)))
-    if (!live) {
-      throw new GatewayError('provider_binding_unavailable')
-    }
-    const stamp = boundedJson(live)
-    const configured = JSON.parse(stamp) as ResultProvider
-    validateProvider(configured.binding)
-    if (!providerCurrent(value, configured)) {
-      throw new GatewayError('provider_binding_mismatch')
-    }
-    if (
-      !Number.isSafeInteger(configured.max_response_bytes) ||
-      configured.max_response_bytes < 1 ||
-      configured.max_response_bytes > LIMITS.frame_bytes
-    ) {
-      throw new GatewayError('result_port_invalid')
-    }
-    if (boundedJson(principal(reader.id)) !== boundedJson(reader)) {
-      throw new GatewayError('forbidden')
-    }
-    return { value: live, configured, stamp }
-  }
-
-  /** 按真实归属和当前双端 ACL 读取调用，再核对完整 provider 来源；不返回策略回调前的旧正文。 */
-  function call(
-    reader: Principal,
-    callId: string,
-    observe?: (policy: ReturnType<LocalPolicies>) => void,
-    observeProvider?: (snapshot: ProviderSnapshot) => void
-  ): Call {
-    id(callId)
-    router(reader, observe).get(reader, callId)
-    const value = store.call(reader.id, callId)
-    const configured = provider(reader, value)
-    observeProvider?.(configured)
-    return value
-  }
-
-  /** 原保留门禁同时核验当前读取；保留时不重复读校验，仍不从持久数据恢复原 permit。 */
-  function nativeResult(
-    original: ProviderOriginalRead,
-    binding: AttemptBinding,
-    response: JsonObject,
-    retain: boolean
-  ): void {
-    if (!retain && synchronous(original.wire.checkResult(binding, response)) !== undefined) {
-      throw new GatewayError('result_port_invalid')
-    }
-    if (retain) {
-      if (typeof original.wire.checkResultRetention !== 'function') {
-        throw new GatewayError('result_retention_context_unavailable')
-      }
-      if (synchronous(original.wire.checkResultRetention(binding, response)) !== undefined) {
-        throw new GatewayError('result_port_invalid')
-      }
-    }
-  }
-
-  /** 用原始完整 binding 关联 Store 锚点，并对保存的完整响应执行原许可及当前原生读取门禁。 */
-  function readable(reader: Principal, callId: string, retain = false): Call {
-    let configured!: ProviderSnapshot
-    const current = call(
-      principal(reader.id),
-      callId,
-      undefined,
-      /** 原响应必须同时服从本次受保护 provider 上限。 */ (value) => {
-        configured = value
-      }
-    )
-    if (current.state !== 'responded' || current.content_status !== 'available' || current.response === null) {
-      throw new GatewayError('result_not_ready')
-    }
-    const original = synchronous(options.resolveOriginalRead(callId))
-    if (!original || typeof original.wire?.checkResult !== 'function') {
-      throw new GatewayError('result_context_unavailable')
-    }
-    const binding = JSON.parse(boundedJson(original.binding)) as AttemptBinding
-    if (binding.call_id !== callId || binding.provider_kind !== configured.configured.binding.kind) {
-      throw new GatewayError('attempt_binding_mismatch')
-    }
-    assertBinding(binding, store.responseAnchor(binding).binding)
-    let response: JsonObject
-    try {
-      response = object(parseJson(current.response, configured.configured.max_response_bytes))
-    } catch {
-      throw new GatewayError('native_response_invalid')
-    }
-    nativeResult(original, binding, response, retain)
-    // 宿主读取门禁可能更新当前事实；返回前再次核对双端 ACL，且整段流程没有 await。
-    const finalReader = principal(reader.id)
-    let local: { value: ReturnType<LocalPolicies>; stamp: string } | undefined
-    let finalProvider: ProviderSnapshot | undefined
-    const final = call(
-      finalReader,
-      callId,
-      /* 仅保存本次授权的活策略值及摘要，供末次原生门禁返回后同步检查；不跨操作保留。 */ (value) => {
-        local = { value, stamp: boundedJson(value) }
-      },
-      /** 最后一道策略回调之后重新取得完整 provider 配置，变化只能拒绝本次交付。 */ (value) => {
-        finalProvider = value
-      }
-    )
-    if (final.state !== 'responded' || final.content_status !== 'available' || final.response === null) {
-      throw new GatewayError('result_not_ready')
-    }
-    // 最后一次策略回调也可能关闭原 Wire 或撤销原生来源；不能以回调前已通过的门禁作为交付依据。
-    const live = synchronous(options.resolveOriginalRead(callId))
-    if (!live || live.wire !== original.wire) {
-      throw new GatewayError('result_context_unavailable')
-    }
-    assertBinding(binding, live.binding)
-    nativeResult(live, binding, response, retain)
-    if (
-      boundedJson(principal(reader.id)) !== boundedJson(finalReader) ||
-      !local ||
-      boundedJson(local.value) !== local.stamp ||
-      !finalProvider ||
-      finalProvider.stamp !== configured.stamp ||
-      boundedJson(finalProvider.value) !== finalProvider.stamp ||
-      !providerCurrent(final, finalProvider.configured)
-    ) {
-      throw new GatewayError('forbidden')
-    }
-    const checked = store.call(reader.id, callId)
-    if (checked.state !== 'responded' || checked.content_status !== 'available' || checked.response === null) {
-      throw new GatewayError('result_not_ready')
-    }
-    if (Buffer.byteLength(checked.response) > finalProvider.configured.max_response_bytes) {
-      throw new GatewayError('native_response_invalid')
-    }
-    return checked
-  }
-
-  /** 校验 Store 实际句柄元数据形状与内容期限上界，不推导或保存另一份期限。 */
-  function metadata(value: ProviderResultMetadata, call: Call, resultId: string): ProviderResultMetadata {
-    if (
-      !value ||
-      value.result_id !== resultId ||
-      !Number.isSafeInteger(value.bytes) ||
-      value.bytes <= 0 ||
-      typeof value.hash !== 'string' ||
-      !/^[0-9a-f]{64}$/.test(value.hash) ||
-      !Number.isSafeInteger(value.expires) ||
-      value.expires <= store.clock() ||
-      value.expires > call.content_expires
-    ) {
-      throw new GatewayError('result_metadata_mismatch')
-    }
-    return Object.freeze({ result_id: value.result_id, bytes: value.bytes, hash: value.hash, expires: value.expires })
-  }
-
   return Object.freeze({
-    /** 仅在原 Wire 独立保留能力也通过时创建或复用句柄；能力缺失则拒绝，期限均不刷新。 */
     open(callId: string): ProviderResultMetadata {
-      return operation(
-        /* 在持久创建前核对原生读许可，创建后重新授权，最终只返回 Store 的实际元数据。 */ (principal) => {
-          // 已有句柄没有保留写事务；先验当前ACL，再以一轮前后完整原生门禁核验，避免重复整轮观察。
-          router(principal).get(principal, callId)
-          const existing = store.findResult(principal.id, callId)
-          if (existing) {
-            const current = readable(principal, callId, true)
-            // 宿主回调可能删除、替换或使句柄到期；末次从Store新读，不能返回先前元数据或在此重新签发。
-            const final = store.findResult(principal.id, callId)
-            if (
-              !final ||
-              final.result_id !== existing.result_id ||
-              final.bytes !== existing.bytes ||
-              final.hash !== existing.hash ||
-              final.expires !== existing.expires
-            ) {
-              throw new GatewayError('result_not_ready')
-            }
-            return metadata(final, current, final.result_id)
-          }
-          readable(principal, callId, true)
-          const saved = router(principal).saveResult(principal, callId)
-          const current = readable(principal, callId, true)
-          return metadata(saved, current, saved.result_id)
-        }
-      )
+      return operation((principal) => Object.freeze({ ...router.saveResult(principal, callId) }))
     },
-
-    /** 按字节有界分页，联合实际句柄 TTL、Store 摘要、原生读取许可和当前双端 ACL 后返回 base64。 */
     read(resultId: string, cursor = 0, maxBytes = 65_536): ProviderResultPage {
-      return operation(
-        /* 全程同步执行句柄解析、元数据读取和最终授权，不新建或续期任何结果。 */ (principal) => {
-          id(resultId)
-          const owned = store.resultCall(principal.id, resultId)
-          call(principal, owned.call_id)
-          router(principal).checkResultRead(principal, resultId, cursor, maxBytes)
-          const current = readable(principal, owned.call_id)
-          // 最后一道策略回调可能已使实际句柄失效；授权结束后重新读页，禁止交付回调前准备的副本。
-          const page = store.readResult(principal.id, resultId, cursor, maxBytes)
-          metadata(page, current, resultId)
-          return Object.freeze(page)
-        }
-      )
+      return operation((principal) => Object.freeze(router.readResult(principal, resultId, cursor, maxBytes)))
     },
-
-    /** 以当前调用归属、双端读取 ACL 和独立 discard_response 权限丢弃内容，不借用原生派发许可。 */
     discard(callId: string): void {
-      operation(
-        /* 即使原生读取上下文已回收，也只由 Router 的专门删除权限决定是否清理，不返回正文。 */ (principal) => {
-          call(principal, callId)
-          router(principal).discardResponse(principal, callId)
-        }
-      )
+      operation((principal) => router.discardResponse(principal, callId))
     }
   })
 }

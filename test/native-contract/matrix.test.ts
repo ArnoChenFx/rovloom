@@ -154,8 +154,6 @@ function capabilityCase(c: any): any {
       'connection_epoch',
       'recovery_generation',
       'capability_revision',
-      'caller_policy_revision',
-      'local_policy_revision',
       'classification_revision'
     ]) {
       const authorization: any = clone(auth(candidate))

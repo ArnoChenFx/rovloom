@@ -10,21 +10,12 @@ import {
 import { target } from './store-fixture.js'
 import { catalogFixture, catalogMethods } from './catalog-fixture.js'
 import { contractRef } from '../../src/wire/index.js'
-import { secondTarget } from './store-fixture.js'
 
-test('prompt 帮助只推荐当前完整目标可见的输出等待，授权新增与撤销即时生效', async () => {
+test('prompt 帮助只推荐当前完整目标可见的输出等待，后端暴露面变化即时生效', async () => {
   const f = catalogFixture()
   const route = { target, expected_binding_revision: 1 }
-  const grant = (methods: string[]) => [{ target, methods, actions: ['read' as const] }]
-  const setMethods = (caller: string[], local = caller) => {
-    f.setCaller({
-      id: 'alice',
-      policy: {
-        revision: 'caller_1',
-        grants: [...grant(caller), { target: secondTarget, methods: ['wait.output'], actions: ['read'] }]
-      }
-    })
-    f.setLocal({ revision: 'local_1', grants: grant(local) })
+  const setMethods = (exposed: string[], local = exposed) => {
+    f.setSource({ ...f.source(), supported_methods: exposed.filter((method) => local.includes(method)) })
   }
   const describePrompt = async () => {
     const result = await f.service.execute('runtime_describe', { ...route, method: 'agent.prompt' }, context())
@@ -110,20 +101,7 @@ test(
         new FacadeServiceError('not_found')
       )
       assert.equal(f.resolutions(), calls)
-      f.setLocal({ revision: 'local_2', grants: [{ target, methods: ['ping'], actions: ['read'] }] })
-      await assert.rejects(
-        f.service.execute(
-          'runtime_discover',
-          { target, expected_binding_revision: 1, limit: 2, cursor: page.data.next_cursor },
-          context()
-        ),
-        new FacadeServiceError('contract_unavailable')
-      )
-      const previous = f.source()
-      f.setSource({
-        ...previous,
-        source: { ...previous.source, binding: { ...previous.source.binding, local_policy_revision: 'local_2' } }
-      })
+      f.setSource({ ...f.source(), supported_methods: ['ping'] })
       await assert.rejects(
         f.service.execute(
           'runtime_discover',
@@ -132,6 +110,20 @@ test(
         ),
         new FacadeServiceError('invalid_cursor')
       )
+      const previous = f.source()
+      f.setSource({
+        ...previous,
+        source: { ...previous.source, binding: { ...previous.source.binding, capability_revision: 'changed' } }
+      })
+      await assert.rejects(
+        f.service.execute(
+          'runtime_discover',
+          { target, expected_binding_revision: 1, limit: 2, cursor: page.data.next_cursor },
+          context()
+        ),
+        new FacadeServiceError('contract_unavailable')
+      )
+      f.setSource(previous)
       const filtered = await f.service.execute('runtime_discover', { target, expected_binding_revision: 1 }, context())
       assert.deepEqual(
         filtered.data.items.map(/* 双方交集只剩ping，caller其它read grant不能补充本地授权。 */ (row) => row.method),
@@ -157,9 +149,9 @@ test(
       ]) {
         let reads = 0
         const service = new StoreGatewayService({
+          targets: f.targets,
           store: f.store,
           identities: f.identities,
-          localPolicies: f.localPolicies,
           catalog: {
             resolve: /* 首次返回有效来源，随后模拟未更新revision的外部registry变化。 */ () =>
               ++reads === 1 ? good : changed
@@ -262,9 +254,9 @@ test(
         const good = f.source()
         let reads = 0
         const service = new StoreGatewayService({
+          targets: f.targets,
           store: f.store,
           identities: f.identities,
-          localPolicies: f.localPolicies,
           catalog: {
             resolve: /* 在最后一次读取中改变宿主事实，不能由返回的旧source掩盖撤销。 */ () => {
               if (++reads === lastRead) {
@@ -272,7 +264,7 @@ test(
                   f.setCaller(null)
                 }
                 if (change === 'local') {
-                  f.setLocal({ revision: 'revoked', grants: [] })
+                  f.setCaller({ id: 'alice', device_scope: { mode: 'selected', machine_ids: [] } })
                 }
                 if (change === 'expiry') {
                   f.advance(30_001)

@@ -9,7 +9,7 @@ import { openCallerSource } from '../../src/cli/caller-source.js'
 import { configDocument, configTemplate } from '../../src/cli/config.js'
 import type { GatewayConfig } from '../../src/cli/config.js'
 import { handleTokenCommand } from '../../src/cli/token-command.js'
-import { LIMITS, providerScopeAllowed } from '../../src/wire/index.js'
+import { LIMITS } from '../../src/wire/index.js'
 import {
   createCaller,
   digestToken,
@@ -18,7 +18,6 @@ import {
   revokeCaller,
   rotateCaller,
   setDeviceScope,
-  setDiscardPermission,
   summarize
 } from '../../src/cli/token-registry.js'
 import type { CallerRegistry } from '../../src/cli/token-registry.js'
@@ -29,13 +28,12 @@ const policy = { revision: 'p1', grants: [] }
 
 function registry(token = 'a'.repeat(43), now = 1_000): CallerRegistry {
   return {
-    schema_version: 1,
+    schema_version: 2,
     kind: 'mcp-caller-source',
     resource,
-    local_policy: { revision: 'local1', grants: [] },
     callers: [
       {
-        principal: { id: 'owner', policy },
+        principal: { id: 'owner' },
         token_sha256: digestToken(token),
         issued_at: now,
         expires_at: now + DAY
@@ -48,7 +46,7 @@ test('create clones policy from an existing principal and never repeats a princi
   const base = registry()
   const made = createCaller(base, 'worker', 'owner', 2_000, 7)
   assert.equal(made.registry.callers.length, 2)
-  assert.deepEqual(made.registry.callers[1]!.principal.policy, policy)
+  assert.deepEqual(made.registry.callers[1]!.principal, { id: 'worker' })
   assert.equal(made.registry.callers[1]!.token_sha256, digestToken(made.token))
   assert.equal(made.expires_at, 2_000 + 7 * DAY)
   assert.match(made.token, /^[A-Za-z0-9_-]{43}$/)
@@ -58,93 +56,6 @@ test('create clones policy from an existing principal and never repeats a princi
   assert.throws(() => createCaller(base, 'worker', 'owner', 2_000, 0), /Rovloom command failed/)
   assert.throws(() => createCaller(base, 'worker', 'owner', 2_000, 366), /Rovloom command failed/)
   parseRegistry(JSON.parse(JSON.stringify(made.registry)))
-})
-
-test('scope/create CLI 写盘保留旧方法与只读 actions，运行时展开不产生写权限', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'rovloom-readonly-token-'))
-  const state = join(root, 'gateway')
-  mkdirSync(join(state, 'managed'), { recursive: true, mode: 0o700 })
-  const configPath = join(root, 'gateway.json')
-  const callers = join(state, 'managed', 'mcp-callers.json')
-  const config = { ...configTemplate('gateway'), state_dir: state } as GatewayConfig
-  writeFileSync(configPath, JSON.stringify(configDocument(config)), { mode: 0o600 })
-  const base = registry('a'.repeat(43), Date.now() - 1000)
-  const target = { machine_id: 'device_x', provider_id: 'luvus', profile: 'session' as const, session: 'default' }
-  base.callers[0]!.principal.policy = {
-    revision: 'caller1',
-    grants: [{ target, methods: ['pane.list'], actions: ['read'] }]
-  }
-  base.gateway_policy = structuredClone(base.callers[0]!.principal.policy)
-  base.local_policy = { ...structuredClone(base.gateway_policy), revision: 'local1' }
-  writeFileSync(callers, JSON.stringify(base), { mode: 0o600 })
-  try {
-    for (const args of [
-      ['scope', '--principal', 'owner', '--devices', 'device_x'],
-      ['create', '--principal', 'clone', '--like', 'owner']
-    ]) {
-      assert.equal(
-        await handleTokenCommand(['token', ...args, '--config', configPath], {
-          stdout: sink().stream,
-          stderr: sink().stream
-        }),
-        0
-      )
-      const stored = JSON.parse(readFileSync(callers, 'utf8')) as CallerRegistry
-      assert.deepEqual(stored.gateway_policy, base.gateway_policy)
-      assert.deepEqual(stored.local_policy, base.local_policy)
-      for (const caller of stored.callers) {
-        assert.deepEqual(caller.principal.policy, base.callers[0]!.principal.policy)
-      }
-    }
-    const source = openCallerSource(callers, resource)
-    try {
-      const effective = source.identities.principal({ principal_id: 'owner' })!
-      assert.deepEqual(effective.policy.grants[0]!.methods, ['*'])
-      assert.deepEqual(effective.policy.grants[0]!.actions, ['read'])
-      assert.deepEqual(source.localPolicies().grants[0]!.actions, ['read'])
-      const policies = { caller: effective.policy, local: source.localPolicies() }
-      const binding = { target } as Parameters<typeof providerScopeAllowed>[0]
-      assert(providerScopeAllowed(binding, 'workspace.rename', 'read', policies))
-      assert(!providerScopeAllowed(binding, 'workspace.rename', 'dispatch', policies))
-      assert(!providerScopeAllowed(binding, 'workspace.rename', 'cancel', policies))
-    } finally {
-      source.close()
-    }
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test('discard permission is explicit, strictly parsed and preserved by token operations', () => {
-  const base = registry()
-  assert.equal(parseRegistry(base).callers[0]!.principal.permissions, undefined)
-  const allowed = setDiscardPermission(base, 'owner', true)
-  parseRegistry(allowed)
-  assert.equal(base.callers[0]!.principal.permissions, undefined)
-  const cloned = createCaller(allowed, 'worker', 'owner', 2000).registry
-  assert.deepEqual(cloned.callers[1]!.principal.permissions, { discard_response: true })
-  cloned.callers[1]!.principal.permissions!.discard_response = false
-  assert.equal(allowed.callers[0]!.principal.permissions!.discard_response, true)
-  assert.deepEqual(renewCaller(allowed, 'owner', 2000).registry.callers[0]!.principal.permissions, {
-    discard_response: true
-  })
-  assert.deepEqual(rotateCaller(allowed, 'owner', 2000).registry.callers[0]!.principal.permissions, {
-    discard_response: true
-  })
-  assert.deepEqual(setDiscardPermission(allowed, 'owner', false).callers[0]!.principal.permissions, {
-    discard_response: false
-  })
-  for (const permissions of [
-    null,
-    {},
-    { discard_response: 'true' },
-    { discard_response: 1 },
-    { discard_response: true, admin: true }
-  ]) {
-    const changed = structuredClone(base)
-    Object.assign(changed.callers[0]!.principal, { permissions })
-    assert.throws(() => parseRegistry(changed))
-  }
 })
 
 test('renew extends expiry without changing the token digest, even after expiry', () => {
@@ -204,7 +115,7 @@ test('device scope defaults to today’s visibility, validates selected lists an
   assert.deepEqual(narrowed.callers[0]!.device_scope, { mode: 'selected', machine_ids: ['m_one', 'm_two'] })
   assert.deepEqual(summarize(narrowed, 1_000)[0]!.device_scope, { mode: 'selected', machine_ids: ['m_one', 'm_two'] })
   // 不修改策略修订：范围是可见性过滤器，不是权限授予。
-  assert.equal(narrowed.callers[0]!.principal.policy.revision, base.callers[0]!.principal.policy.revision)
+  assert.equal(narrowed.callers[0]!.principal.id, base.callers[0]!.principal.id)
   assert.equal(narrowed.callers[0]!.token_sha256, base.callers[0]!.token_sha256)
 
   // 清除必须显式传 null；删除字段后回到缺省语义。
@@ -313,11 +224,6 @@ test('caller source re-reads the registry: revoke, renew, rotate and recovery ap
     assert.equal(authenticate(source, token), null)
 
     // 已建立身份的独立权限也热生效，不改变令牌或有效期。
-    write(setDiscardPermission(hard.registry, 'owner', true))
-    assert.deepEqual(source.identities.principal({ principal_id: 'owner' })?.permissions, { discard_response: true })
-    write(setDiscardPermission(hard.registry, 'owner', false))
-    assert.deepEqual(source.identities.principal({ principal_id: 'owner' })?.permissions, { discard_response: false })
-
     // 吊销：令牌与已建立会话的主体查询同时失效；恢复文件后无需重启即恢复。
     write(revokeCaller(hard.registry, 'owner'))
     assert.equal(authenticate(source, hard.token), null)
@@ -367,7 +273,7 @@ test('token CLI manages the registry file and the local client credential end to
     writeFileSync(
       client,
       JSON.stringify({
-        schema_version: 1,
+        schema_version: 2,
         kind: 'mcp-client-credential',
         attempt_id: 'attempt1',
         resource,
@@ -414,17 +320,6 @@ test('token CLI manages the registry file and the local client credential end to
     assert(stored().callers[0]!.expires_at > Date.now() + 80 * DAY)
     assert.equal(JSON.parse(readFileSync(client, 'utf8')).token, rotated)
     assert(JSON.parse(readFileSync(client, 'utf8')).expires_at > Date.now() + 80 * DAY)
-
-    const beforePermissions = stored().callers[0]!
-    result = await run('permissions', '--principal', 'owner', '--discard-response', 'true')
-    assert.equal(result.code, 0)
-    assert.equal(result.out, '')
-    assert.deepEqual(stored().callers[0]!.principal.permissions, { discard_response: true })
-    assert.equal(stored().callers[0]!.token_sha256, beforePermissions.token_sha256)
-    assert.equal(stored().callers[0]!.expires_at, beforePermissions.expires_at)
-    result = await run('permissions', '--principal', 'owner', '--discard-response', 'false')
-    assert.equal(result.code, 0)
-    assert.deepEqual(stored().callers[0]!.principal.permissions, { discard_response: false })
 
     // 设备范围：收窄、列表列、清除；注册表字节在不合法请求后保持不变。
     result = await run('scope', '--principal', 'owner', '--devices', 'm_one,m_two')

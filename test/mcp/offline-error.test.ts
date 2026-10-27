@@ -37,8 +37,7 @@ test(
           throw new Error('synthetic_dispatch_must_not_run')
         }
       },
-      identities: f.identities,
-      localPolicies: f.localPolicies
+      identities: f.identities
     })
     const session = httpFixture(service, {
       authentication: {

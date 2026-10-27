@@ -4,7 +4,6 @@ import type { LedgerInvalidation } from '../../storage/model.js'
 import type { ResponseAnchor } from '../../wire/evidence.js'
 import {
   assertBinding,
-  assertProviderAccess,
   boundedJson,
   contractRef,
   fail,
@@ -397,14 +396,6 @@ export function createHerdrReadonlyAdapter(backend: HerdrReadonlyBackend) {
       if (backend.currentPrincipal() !== attempt.principal_id) {
         fail('attempt_binding_mismatch')
       }
-      assertProviderAccess(attempt.binding, attempt.method, access, ctx)
-    }
-    if (
-      access === 'dispatch' &&
-      (ctx.policies?.caller.revision !== attempt.binding.registration.caller_policy_revision ||
-        ctx.policies?.local.revision !== attempt.binding.registration.local_policy_revision)
-    ) {
-      fail('policy_revision_stale')
     }
     const now = backend.now()
     if (
@@ -593,8 +584,7 @@ export function createHerdrReadonlyAdapter(backend: HerdrReadonlyBackend) {
         /** 每次以原账本身份解析上下文，并读取该 principal 当前双端策略。 */
         resolveAttempt(identity) {
           const found = api.resolve(identity)
-          const state = stateFor(found)
-          ctx.policies = backend.context(state.attempt.principal_id, direction).policies
+          stateFor(found)
           return found
         }
       }
@@ -619,18 +609,7 @@ export function createHerdrReadonlyAdapter(backend: HerdrReadonlyBackend) {
         resolveAttempt: /** 只解析本适配器已登记的原 attempt，不能由响应帧生成新许可。 */ (identity) =>
           api.resolve(identity)
       }
-      let retain = false
-      if (!state.responseOnly) {
-        try {
-          api.checkResult(context)
-          retain = true
-        } catch {
-          // 当前撤权或内容不可用只允许最小证据，不恢复交付权。
-        }
-      }
-      return planResponseEvidence(frame, wire, retainedAnchor(state), backend.now(), {
-        retain_content_authorized: retain
-      })
+      return planResponseEvidence(frame, wire, retainedAnchor(state), backend.now())
     },
     /** 释放桥接句柄，不关闭 pane/agent，也不向 Herdr 发送 cancel。 */
     release(context: NativeValidationContext): void {

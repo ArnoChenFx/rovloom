@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Store } from '../src/store.js'
 import { Router } from '../src/router.js'
-import { connected, management, options, policy, respond } from './storage/helpers.js'
+import { connected, management, options, respond } from './storage/helpers.js'
 
 test(
   'deduplicated handles retain expiry; aggregate quota reclaims expired payloads; cursor boundaries',
@@ -69,23 +69,18 @@ test(
       const c = s.createCall('alice', d.target, { method: 'pane.read' }, o)
       respond(s, s.dispatch('alice', c.call_id, d.epoch), { result: { text: 'abc' } }, 100)
       const meta = s.saveResult('alice', c.call_id)
-      let local = policy(d.target, true)
-      const p = { id: 'alice', policy: policy(d.target) }
-      const router = new Router(s, /* 即时提供本地策略，验证删除操作重新检查当前权限。 */ () => local)
+      const p: import('../src/router.js').Principal = { id: 'alice' }
+      const router = new Router(s)
       assert.throws(
         /* 用其他主体删除响应，要求隐藏调用并拒绝。 */ () => router.discardResponse({ ...p, id: 'other' }, c.call_id),
         /call_not_found/
       )
-      local = { ...local, grants: [] }
+      p.device_scope = { mode: 'selected', machine_ids: [] }
       assert.throws(
         /* 撤销本地读取授权后删除响应，要求重新授权失败。 */ () => router.discardResponse(p, c.call_id),
         /forbidden/
       )
-      local = policy(d.target, true)
-      assert.throws(
-        /* 缺少独立删除权限时清除响应，要求拒绝。 */ () => router.discardResponse(p, c.call_id),
-        /discard_forbidden/
-      )
+      delete p.device_scope
       assert(s.call('alice', c.call_id).response)
       const manager = { ...p, permissions: { discard_response: true } }
       router.discardResponse(manager, c.call_id)

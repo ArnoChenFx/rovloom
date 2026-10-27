@@ -54,8 +54,8 @@ export type ConnectionIdentity = {
 }
 export type AttemptRegistration = {
   deadline: number
-  caller_policy_revision: string
-  local_policy_revision: string
+  caller_policy_revision?: string
+  local_policy_revision?: string
 }
 export type AttemptIdentity = {
   call_id: string
@@ -69,11 +69,6 @@ export type AttemptIdentity = {
 }
 export type AttemptBinding = ConnectionIdentity & AttemptIdentity
 export type ValidationMode = 'strict' | 'raw-contract'
-export type ProviderAction = 'dispatch' | 'read' | 'cancel'
-// 每条 grant 是一个完整 route tuple；不得拆成机器/provider/session 数组后求笛卡尔积。
-export type ProviderGrant = { target: V2Target; methods: string[]; actions: ProviderAction[] }
-export type ProviderPolicy = { revision: string; grants: ProviderGrant[] }
-export type ProviderPolicies = { caller: ProviderPolicy; local: ProviderPolicy }
 export type NativeValidationContext = {
   binding: AttemptBinding
   mode: ValidationMode
@@ -177,7 +172,6 @@ export type AuthenticatedContext = {
   direction: Direction
   // 外部认证事实，不是 codec 产生的认证证明。
   connection: ConnectionIdentity & { authenticated: true; active: true; negotiated: Negotiated }
-  policies?: ProviderPolicies
   resolveProvider?: (target: V2Target) => ProviderBinding | undefined
   resolveContract?: (contract_ref: string) => ContractRecord | undefined
   validators?: Partial<Record<ProviderKind, NativePayloadValidator>>

@@ -11,7 +11,7 @@ import { openCallerSource } from '../../src/cli/caller-source.js'
 import { runtimeReference, readRuntimeJson } from '../../src/cli/runtime-files.js'
 import { parseRegistry, REGISTRY_MAX_BYTES } from '../../src/cli/token-registry.js'
 import { writeSetupFile } from '../../src/cli/setup-files.js'
-import { publishFirstCallers } from '../../src/cli/setup-publish.js'
+import { publishSetupCaller } from '../../src/cli/setup-publish.js'
 import { LIMITS } from '../../src/wire/index.js'
 import { options as callOptions } from '../storage/helpers.js'
 import { context, setup, confirmed } from '../admin/write-helpers.js'
@@ -70,17 +70,13 @@ test('Dashboard tokens persist across reopen, authenticate, follow new devices a
     assert.deepEqual(await caller.authentication.authenticate(request, new AbortController().signal), {
       principal_id: 'claude'
     })
-    const authorization = {
-      principal_id: 'first',
-      policies: { caller: { revision: 'caller', grants: [] }, local: { revision: 'local', grants: [] } }
-    }
-    publishFirstCallers(path, registry.resource, authorization, {
-      principal: { id: 'first', policy: authorization.policies.caller },
+    publishSetupCaller(path, registry.resource, {
+      principal: { id: 'first' },
       token_sha256: 'a'.repeat(64),
       issued_at: Date.now(),
       expires_at: Date.now() + 86400000
     })
-    assert.equal(caller.identities.principal({ principal_id: 'claude' })!.policy.revision, 'caller')
+    assert(!Object.hasOwn(caller.identities.principal({ principal_id: 'claude' })!, 'policy'))
     caller.close()
     caller = openCallerSource(path, registry.resource)
     assert.equal(o.execute('tokens_list').items.find((entry: any) => entry.principal === 'claude').token, token)
@@ -99,39 +95,25 @@ test('Dashboard tokens persist across reopen, authenticate, follow new devices a
   }
 })
 
-test('Dashboard 范围和 token 创建写盘不改变已批准的只读策略', () => {
+test('Dashboard 范围和 token 创建只保存身份与设备范围，清理旧策略数据', () => {
   const o = owned()
   try {
     o.execute('tokens_create', { principal: 'reader' })
     const device = o.f.store.register('readonly-device')
     const path = runtimeReference(o.root, 'mcp-callers')
-    const original = structuredClone(parseRegistry(readRuntimeJson(path, REGISTRY_MAX_BYTES)))
-    const policy = {
-      revision: 'reader_policy',
-      grants: [
-        {
-          target: {
-            machine_id: device.machine_id,
-            provider_id: 'luvus',
-            profile: 'session' as const,
-            session: 'default'
-          },
-          methods: ['pane.list'],
-          actions: ['read' as const]
-        }
-      ]
-    }
-    original.gateway_policy = structuredClone(policy)
-    original.local_policy = { ...structuredClone(policy), revision: 'local_policy' }
-    original.callers.find((entry) => entry.principal.id === 'reader')!.principal.policy = structuredClone(policy)
-    writeSetupFile(path, JSON.stringify(original), true)
     o.execute('tokens_scope', { principal: 'reader', machine_ids: [device.machine_id] })
     o.execute('tokens_create', { principal: 'new_reader' })
-    const stored = readRuntimeJson(path, REGISTRY_MAX_BYTES) as typeof original
-    assert.deepEqual(stored.gateway_policy, original.gateway_policy)
-    assert.deepEqual(stored.local_policy, original.local_policy)
-    assert.deepEqual(stored.callers.find((entry) => entry.principal.id === 'reader')!.principal.policy, policy)
-    assert.deepEqual(stored.callers.find((entry) => entry.principal.id === 'new_reader')!.principal.policy, policy)
+    const stored = parseRegistry(readRuntimeJson(path, REGISTRY_MAX_BYTES))
+    assert.equal(stored.schema_version, 2)
+    assert.deepEqual(stored.callers.find((entry) => entry.principal.id === 'reader')!.device_scope, {
+      mode: 'selected',
+      machine_ids: [device.machine_id]
+    })
+    for (const entry of stored.callers) {
+      assert.deepEqual(entry.principal, { id: entry.principal.id })
+    }
+    assert(!Object.hasOwn(stored, 'local_policy'))
+    assert(!Object.hasOwn(stored, 'gateway_policy'))
   } finally {
     o.close()
   }

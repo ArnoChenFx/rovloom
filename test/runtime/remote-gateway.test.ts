@@ -25,13 +25,7 @@ import {
   decodeWireFrame,
   MessageWindow
 } from '../../src/wire/index.js'
-import type {
-  AuthenticatedEnvelope,
-  ProviderSnapshot,
-  ProviderBinding,
-  ProviderPolicy,
-  Direction
-} from '../../src/wire/types.js'
+import type { AuthenticatedEnvelope, ProviderSnapshot, ProviderBinding, Direction } from '../../src/wire/types.js'
 import type { Adapter, Connection, ConnectorWireSession } from '../../src/transport/index.js'
 import { envelope } from '../../src/transport/common.js'
 import { until } from '../transport/helpers.js'
@@ -54,6 +48,7 @@ async function fixture(
   } = {}
 ) {
   const { mixed = false, isolated = false, fastObservation = false } = options
+  let deviceScope: string[] | undefined
   const root = mixed
     ? privateHerdrTestRoot('.remote-gateway-')
     : mkdtempSync(join(fileURLToPath(new URL('../../', import.meta.url)), '.remote-gateway-'))
@@ -101,7 +96,6 @@ async function fixture(
     authentication: 'remote_connector',
     binding,
     target,
-    peer_policy_revision: local.revision,
     ...(options.rawGrant ? { raw_grant: options.rawGrant } : {}),
     contract: {
       binary_version: '0.14.3',
@@ -130,8 +124,7 @@ async function fixture(
           binding_revision: 1,
           config_ref: 'herdr_snapshot',
           expected_source: fixedHerdrSource(),
-          schema_path: schema,
-          peer_policy_revision: local.revision
+          schema_path: schema
         }
       })
       state.store.defineProvider(herdr.providers[0]!.binding)
@@ -184,11 +177,13 @@ async function fixture(
     identities: {
       principal: /** 合成 caller 与设备身份独立。 */ (identity) =>
         (options.principals ?? ['remote_reader']).includes(identity.principal_id)
-          ? { id: identity.principal_id, policy: caller }
+          ? {
+              id: identity.principal_id,
+              ...(deviceScope ? { device_scope: { mode: 'selected' as const, machine_ids: deviceScope } } : {})
+            }
           : null,
       administrator: /** 普通读取不取得管理身份。 */ () => null
     },
-    localPolicies: /** 每次门禁读取当前完整目标策略。 */ () => local,
     providers: resources.providers,
     ...(herdr ? { hosted: [herdr] } : {}),
     listener: {
@@ -313,6 +308,9 @@ async function fixture(
   }
   return {
     runtime,
+    setScope: (scope?: string[]) => {
+      deviceScope = scope
+    },
     state,
     databasePath: join(directory, 'gateway.db'),
     config,
@@ -347,8 +345,7 @@ test(
       identities: {
         principal: () => ({ id: 'remote_reader', policy: f.caller }),
         administrator: () => null
-      },
-      localPolicies: () => f.local
+      }
     })
     const http = httpFixture(service, {
       authentication: { authenticate: () => ({ principal_id: 'remote_reader' }) }
@@ -378,11 +375,10 @@ test(
             http.client.callTool({ name: 'runtime_call', arguments: input }, CallToolResultSchema, { timeout: 5000 })
           const rows = reader.prepare('SELECT count(*) AS n FROM calls').get()!.n
           const writes = f.writes()
-          const policy = structuredClone(f.caller.grants)
-          f.caller.grants.length = 0
+          f.setScope([])
           const forbidden = await invoke()
           assert.deepEqual(forbidden.structuredContent, { gateway_error: { code: 'forbidden' } })
-          f.caller.grants.push(...policy)
+          f.setScope()
           const revision = await invoke({ ...args, expected_binding_revision: 99 })
           assert.deepEqual(revision.structuredContent, { gateway_error: { code: 'binding_revision_conflict' } })
           const refused = await invoke()
@@ -458,8 +454,7 @@ test('直接 MCP 调用不能绕过 provider 暴露面，原生广告不额外�
     identities: {
       principal: () => ({ id: 'remote_reader', policy: f.caller }),
       administrator: () => null
-    },
-    localPolicies: () => f.local
+    }
   })
   const http = httpFixture(service, { authentication: { authenticate: () => ({ principal_id: 'remote_reader' }) } })
   try {
@@ -583,7 +578,7 @@ test('remote Gateway 策略 raw 授权允许多个 caller，调用和结果继�
   const principals = ['remote_reader', 'test', 'admin']
   const f = await fixture({
     principals,
-    rawGrant: { caller_policy_revision: 'remote_caller', methods: ['workspace.rename'] }
+    rawGrant: { methods: ['workspace.rename'] }
   })
   try {
     for (const policy of [f.caller, f.local]) {
@@ -628,7 +623,7 @@ test('remote Gateway 策略 raw 授权允许多个 caller，调用和结果继�
 function snapshotSession(
   connection: Connection,
   route: Pick<ProviderSnapshot, 'binding' | 'target'>,
-  policy: string
+  _legacyPolicy: string
 ): ConnectorWireSession {
   let closed = false
   const windows = new Map<Direction, MessageWindow>()
@@ -667,8 +662,6 @@ function snapshotSession(
   return {
     adapter,
     readiness: /** 只有本组的受保护配置；不宣称原生执行就绪。 */ () => ({
-      policy_revision: policy,
-      peer_policy_revision: policy,
       providers: [{ expected: route.binding, local: route.binding, native_ready: true }]
     }),
     executeWire: /** 该合成Connector仅发布快照，没有业务成功stub。 */ async () => native(),
@@ -1013,8 +1006,7 @@ for (const { isolated, disconnectBeforeRead } of [
             principal: /** 沿用原 runtime 的当前 caller 来源。 */ (caller) =>
               caller.principal_id === 'remote_reader' ? { id: 'remote_reader', policy: f.caller } : null,
             administrator: /** 本例不提供管理员会话。 */ () => null
-          },
-          localPolicies: /** 与原 Gateway 使用同一政策对象。 */ () => f.local
+          }
         })
         http = httpFixture(service, {
           authentication: {
@@ -1138,8 +1130,8 @@ for (const { isolated, disconnectBeforeRead } of [
           })
         )
         if (disconnectBeforeRead) {
-          assert.equal(page.isError, true)
-          assert.deepEqual(page.structuredContent, { gateway_error: { code: 'content_unavailable' } })
+          assert.equal(page.isError, undefined)
+          assert((page.structuredContent!.data as { chunk: string }).chunk)
           const afterLoss = CallToolResultSchema.parse(
             await http.client.callTool({ name: 'runtime_call_get', arguments: { call_id: healthyId } })
           )
@@ -1389,8 +1381,8 @@ test(
     const routes = [f.snapshot, hosted]
     const methods = ['pane.run', 'pane.send_text']
     for (const policy of [f.caller, f.local]) {
-      policy.grants[0]!.methods.push('pane.run', 'pane.read', 'agent.prompt')
-      policy.grants[1]!.methods.push('pane.send_text')
+      policy.grants[0]!.methods!.push('pane.run', 'pane.read', 'agent.prompt')
+      policy.grants[1]!.methods!.push('pane.send_text')
     }
     const snapshots = structuredClone([f.snapshot])
     /** 快照沿用生产固定深冻结要求，测试只更改独立布尔观察，不替换来源。 */
@@ -1469,7 +1461,6 @@ test(
             caller.principal_id === 'remote_reader' ? { id: 'remote_reader', policy: f.caller } : null,
           administrator: /** 本例没有管理员会话。 */ () => null
         },
-        localPolicies: /** 目录仍使用同一双端完整目标授权。 */ () => f.local,
         catalog: {
           kind: 'mixed',
           select: /** 委托两种真实原生目录，不自造描述或参数 schema。 */ (target) =>
@@ -1488,7 +1479,8 @@ test(
             name: 'runtime_discover',
             arguments: {
               target: route.target,
-              expected_binding_revision: 1
+              expected_binding_revision: 1,
+              limit: 100
             }
           },
           CallToolResultSchema,
@@ -1547,7 +1539,8 @@ test(
             name: 'runtime_discover',
             arguments: {
               target: route.target,
-              expected_binding_revision: 1
+              expected_binding_revision: 1,
+              limit: 100
             }
           },
           CallToolResultSchema,
@@ -1599,3 +1592,5 @@ test(
     }
   }
 )
+
+import type { ProviderPolicy } from '../legacy-policy.js'

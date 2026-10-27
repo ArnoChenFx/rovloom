@@ -5,8 +5,8 @@ import { contractRef } from '../../src/wire/index.js'
 import { createLuvusWireAdapter } from '../../src/integration/luvus-wire.js'
 import { commitLuvusResponse, persistentBackend } from '../../src/integration/persistence.js'
 import type { NativeBinding } from '../../src/native-contract/index.js'
-import type { AttemptBinding, AuthenticatedContext, ProviderPolicies } from '../../src/wire/types.js'
-import { auth, compiled, G, identity, json, request, view } from '../native-contract/helpers.js'
+import type { AttemptBinding, AuthenticatedContext } from '../../src/wire/types.js'
+import { compiled, G, identity, json } from '../native-contract/helpers.js'
 import { source } from '../wire/helpers.js'
 import { connected, options, responseFrame } from './helpers.js'
 
@@ -31,13 +31,9 @@ export function nativeBackend(
     method: configuration.method ?? 'task.add',
     params: configuration.params ?? { title: 'synthetic' }
   }
-  const reviewed = auth(request(view(), { id: 'unused', ...nativeRequest }))
   const origin = { ...source, runtime_generation: G, classification_revision: 'review1' }
   const bindings = new Map<string, AttemptBinding>()
   const state = { sourceVerified: true, sends: 0 }
-  const grants: ProviderPolicies['caller']['grants'] = [
-    { target, methods: [nativeRequest.method], actions: ['dispatch', 'read', 'cancel'] }
-  ]
   const capabilities = json('session-capabilities.json')
   capabilities.result.session = 'synthetic'
   capabilities.result.server_generation = G
@@ -77,17 +73,14 @@ export function nativeBackend(
         connection_epoch: device.epoch,
         recovery_generation: store.generation(),
         capability_revision: 'caps1',
-        caller_policy_revision: 'caller1',
-        local_policy_revision: 'local1',
         classification_revision: 'review1',
         contract: identity
       }
       return { authenticated: true, source_verified: state.sourceVerified, binding: nativeBinding }
     },
     // 为实际测试方法提供当前双端精确 grant，避免其它方法借用授权。
-    policies: () => ({ caller: { revision: 'caller1', grants }, local: { revision: 'local1', grants } }),
     // 返回测试显式配置的完整分类及秘密边界权限事实。
-    authority: () => reviewed,
+    validateAttempt: () => {},
     // 把当前读取者固定为合成身份，使测试不接触真实账号。
     currentPrincipal: () => 'synthetic'
   })
@@ -106,8 +99,6 @@ export function nativeBackend(
         nativeRequest,
         options({
           contract_ref: contractRef(origin),
-          caller_policy_revision: 'caller1',
-          local_policy_revision: 'local1',
           ...extra
         })
       )

@@ -289,7 +289,6 @@ export class StoreManagementWriteService implements GatewayManagementService {
     }
     identifier(admin.policy_revision)
     identifier(admin.session_ref)
-    identifier(principal.policy.revision)
     return JSON.parse(canonical(admin)) as Administrator
   }
 
@@ -369,7 +368,6 @@ export class StoreManagementWriteService implements GatewayManagementService {
             policy_digest: digest(
               canonical({
                 revision: admin.policy_revision,
-                caller_revision: principal.policy.revision,
                 grants: admin.grants
               })
             )

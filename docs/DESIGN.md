@@ -19,7 +19,7 @@ Rovloom 让 AI Agent 通过一个 MCP 入口，访问多台设备上的本地 **
 | 网络上的未授权方（没有 Bearer、没有设备凭据） | Gateway 或 Connector 所在主机已被攻陷 |
 | 泄露或过期的 Bearer / 设备凭据 | 同机其它 OS 用户读取状态目录（交给 OS 文件权限） |
 | 管理员配置错误导致的误暴露（默认只监听 loopback） | 整机回滚、备份篡改的自动检测 |
-| 调用方越权访问未授权的设备或方法 | 对 Agent 内部工具的沙箱（终端本身就是目标账号权限） |
+| 调用方越权访问 token 范围以外的设备 | 对 Agent 内部工具的沙箱（终端本身就是目标账号权限） |
 | 断线、重启导致的重复执行 | exactly-once、跨机器事务 |
 
 终端与 Agent prompt 具有目标账号的执行权限，不是沙箱。需要强隔离时使用专用账号或容器。
@@ -76,7 +76,7 @@ Luvus 与 Herdr 各自保留原生协议，Rovloom 不把 Herdr 改写成 UHP。
 
 - 表中没有的方法一律拒绝。`schema` 通过只代表参数合法，不代表允许调用。
 - 流类方法、token 与 Host/server 管理方法不在表中。
-- 调用方策略与 Connector 本机策略各自授权到完整 `Target + method + action`（action 为 `dispatch`、`read`、`cancel`），两端都允许才放行。`runtime_response_discard` 另需独立的 discard 权限。
+- Herdr、Luvus 和混合模式只保留 token 设备范围与 Connector 终端执行开关。没有按方法、provider 或动作授权的策略快照，配对不写方法清单；结果读/删核对当前设备范围与原主体归属。
 - 会输入终端或启动程序的方法，还要求 Connector 的终端开关开启。
 - 兼容性按实际安装的 schema 和方法能力判断。版本号只用于诊断，不设版本白名单。
 
@@ -116,7 +116,7 @@ runtime_call
 
 | 对象 | 方式 |
 |---|---|
-| MCP 调用方 | Bearer 令牌，默认 30 天有效。`rovloom token create / list / renew / rotate / revoke` 管理，热生效；新令牌保留原文供管理员面板再次查看，认证仍核对摘要。面板可直接创建、查看、复制和删除令牌，默认有效期 365 天。每个令牌可另设可选的设备可见范围（`device_scope`，只收窄、缺省不收窄）：枚举面越界设备返回 `not_found`，执行面返回 `forbidden`，与缺少授权逐字一致；范围不推进 `policy.revision`，因此已派发的 attempt 不会停下。固定 `/mcp` 路径支持任意 HTTP/HTTPS 代理域名与端口，不将公网地址作为认证条件；每个请求仍核对当前 Bearer，转发头不提供身份 |
+| MCP 调用方 | Bearer 令牌，默认 30 天有效。`rovloom token create / list / renew / rotate / revoke` 管理，热生效；新令牌保留原文供管理员面板再次查看，认证仍核对摘要。面板可直接创建、查看、复制和删除令牌，默认有效期 365 天。每个令牌可另设可选的设备可见范围（`device_scope`，只收窄、缺省不收窄）：枚举面越界设备返回 `not_found`，执行面返回 `forbidden`，与缺少授权逐字一致；范围收窄不会停止已派发的 attempt。固定 `/mcp` 路径支持任意 HTTP/HTTPS 代理域名与端口，不将公网地址作为认证条件；每个请求仍核对当前 Bearer，转发头不提供身份 |
 | 设备 | 一机一码（不过期，用掉/作废即终结，并发兑换只有一次成功）经 `POST /pairing` 单端点兑换设备凭据并自动批准原生安装。凭据不过期，撤销或重新配对时失效。重复连接默认拒绝。凭据丢失或泄漏时用新码重新执行 join，本机作为新设备重新配对。撤销后的设备只能作为新设备重新配对 |
 | 管理员 | 独立 listener（默认 `127.0.0.1:9445`）、独立的管理员口令（`rovloom admin`）与 CSRF。高影响操作（改名、断开、撤销、禁用 provider）要求管理员在页面上两步确认。MCP 不提供任何管理工具 |
 

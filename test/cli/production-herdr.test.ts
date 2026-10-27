@@ -42,7 +42,6 @@ function fixture() {
   const value: HerdrProductionOwnerConfig = {
     kind: 'herdr',
     native: { mode: 'managed' },
-    policies: { caller: { revision: 'caller_policy', grants: [] }, local: { revision: 'local_policy', grants: [] } },
     config: {
       version: 1,
       target,
@@ -50,7 +49,6 @@ function fixture() {
       config_ref: 'herdr_fixture',
       expected_source: fixedHerdrSource(),
       schema_path: schema,
-      peer_policy_revision: 'gateway_policy',
       connector: {
         local: {
           target,
@@ -231,7 +229,6 @@ test(
         [{ reference: 'herdr_fixture', value: { kind: 'herdr' } }],
         [{ reference: 'other', value: f.value }],
         [{ reference: 'herdr_fixture', value: { ...f.value, native: { mode: 'attach' } } }],
-        [{ reference: 'herdr_fixture', value: { ...f.value, policies: { caller: f.value.policies.caller } } }],
         [{ reference: 'herdr_fixture', value: { ...f.value, arbitrary_module: 'SYNTHETIC_SECRET' } }]
       ]) {
         await assert.rejects(sources.connector!(f.config, refs), { code: 'invalid_config' })

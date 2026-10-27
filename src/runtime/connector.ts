@@ -112,10 +112,9 @@ export function createLuvusConnectorSessions(options: Pick<ConnectorRuntimeOptio
         ...resource.backend,
         nativeSource: boundSource,
         /** 受保护 authority 回调结束后再复核来源，防止回调中的同步撤销漏过最终写入门禁。 */
-        authority(attempt, binding) {
-          const result = resource.backend.authority(attempt, binding)
+        validateAttempt(attempt, binding) {
+          resource.backend.validateAttempt?.(attempt, binding)
           boundSource(attempt.binding.call_id, attempt.binding.attempt_id)
-          return result
         }
       }
       assertSessionOpen()
