@@ -23,6 +23,15 @@ const RELEASE_NOTES = Object.freeze({
     ],
     upgrade:
       'Existing 35-method Luvus grants keep their original scope: `wait.output` must be granted explicitly in the Gateway caller/local policies, the provider raw grant and the Connector method grants. Upgrading does not widen a paired device automatically; a new pairing includes it.'
+  },
+  '0.6.9': {
+    highlights: [
+      'MCP tokens can be narrowed to selected devices (`rovloom token scope`, `--no-devices`), configurable per token in the Dashboard.',
+      'Stale provider contracts are rejected before a call is registered, and the host report carries the system-visible logical CPU count.',
+      'The Dashboard sidebar shows the running product version.'
+    ],
+    upgrade:
+      'Connectors through v0.6.8 report available parallelism in `host_profile.cpus`. Upgrade and reconnect the Connector to report the system-visible logical CPU count; the Gateway does not convert old reports. Device scope on a token is an optional registry field: leaving it unset keeps today’s visibility, and an older binary refuses a registry that contains it (`invalid_config`) instead of ignoring it.'
   }
 })
 
