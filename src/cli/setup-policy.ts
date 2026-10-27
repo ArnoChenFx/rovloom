@@ -2,7 +2,7 @@
 import { LUVUS_OPERATION_METHODS } from '../runtime/luvus-operations.js'
 import { HERDR_WORKFLOW_METHODS } from '../connector/herdr/methods.js'
 import { CliError, luvusMode, type ConnectorConfig, type NativeProviderKind } from './config.js'
-import type { ProviderPolicies, V2Target } from '../wire/types.js'
+import type { ProviderPolicies, ProviderPolicy, V2Target } from '../wire/types.js'
 
 // 配对双方共用的计划事实：单码直连配对没有逐次人工批准，主体与谱系都是固定常量。
 export type SetupPlanFacts = Readonly<{
@@ -54,9 +54,48 @@ const LUVUS_SETUP_METHODS_V1 = Object.freeze([
   'agent.resume'
 ])
 
+// 这一步只补齐输出等待，不随未来静态方法表增长而扩大已安装的完整预设。
+const LUVUS_SETUP_METHODS_OUTPUT_WAIT = Object.freeze([
+  LUVUS_SETUP_METHODS_V1[0]!,
+  'wait.output',
+  ...LUVUS_SETUP_METHODS_V1.slice(1)
+])
+
+/** 已发布的完整旧预设升级为含输出等待的预设；自定义子集、次序或范围保持原样。 */
+export function upgradeSetupLuvusMethods(methods: readonly string[]): readonly string[] {
+  return methods.length === LUVUS_SETUP_METHODS_V1.length &&
+    methods.every((method, index) => method === LUVUS_SETUP_METHODS_V1[index])
+    ? LUVUS_SETUP_METHODS_OUTPUT_WAIT
+    : methods
+}
+
+/** 只升级单码配对默认修订和 Luvus 完整目标；保留动作、设备范围及所有其它 provider。 */
+export function upgradeSetupLuvusPolicy(policy: ProviderPolicy): ProviderPolicy {
+  if (!['setup_caller_simple', 'setup_local_simple'].includes(policy.revision)) {
+    return policy
+  }
+  let changed = false
+  const grants = policy.grants.map((grant) => {
+    if (
+      grant.target.provider_id !== 'luvus' ||
+      grant.target.profile !== 'session' ||
+      !['default', 'rovloom'].includes(grant.target.session)
+    ) {
+      return grant
+    }
+    const methods = upgradeSetupLuvusMethods(grant.methods)
+    if (methods === grant.methods) {
+      return grant
+    }
+    changed = true
+    return { ...grant, methods: [...methods] }
+  })
+  return changed ? { ...policy, grants } : policy
+}
+
 /** 只接纳程序实际发布过的完整集合，保持次序、方法子集和显式自定义授权的边界。 */
 export function isSetupLuvusMethods(methods: readonly string[]): boolean {
-  return [LUVUS_OPERATION_METHODS, LUVUS_SETUP_METHODS_V1].some(
+  return [LUVUS_OPERATION_METHODS, LUVUS_SETUP_METHODS_V1, LUVUS_SETUP_METHODS_OUTPUT_WAIT].some(
     (expected) => methods.length === expected.length && methods.every((method, index) => method === expected[index])
   )
 }

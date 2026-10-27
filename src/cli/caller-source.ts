@@ -8,6 +8,7 @@ import { readRuntimeFile } from './runtime-files.js'
 import { parseNativeJson } from '../native-contract/json.js'
 import { gatewayCallerPolicy, parseRegistry, REGISTRY_MAX_BYTES } from './token-registry.js'
 import type { CallerEntry, CallerRegistry } from './token-registry.js'
+import { upgradeSetupLuvusPolicy } from './setup-policy.js'
 
 // 固定资源的只读 adapter；文件缺失、损坏或时钟回拨使该次读取失败（拒绝），文件恢复后下一次读取自动恢复。
 export function openCallerSource(
@@ -44,7 +45,17 @@ export function openCallerSource(
       if (!parsed.ok) {
         throw new CliError('invalid_config')
       }
-      const registry = parseRegistry(parsed.value, resource)
+      const stored = parseRegistry(parsed.value, resource)
+      // 仅升级默认完整预设的有效内存副本；token、到期、设备范围和原文件均不改变。
+      const registry: CallerRegistry = {
+        ...stored,
+        local_policy: upgradeSetupLuvusPolicy(stored.local_policy),
+        ...(stored.gateway_policy ? { gateway_policy: upgradeSetupLuvusPolicy(stored.gateway_policy) } : {}),
+        callers: stored.callers.map((entry) => ({
+          ...entry,
+          principal: { ...entry.principal, policy: upgradeSetupLuvusPolicy(entry.principal.policy) }
+        }))
+      }
       cached = { text, registry }
       return registry
     } finally {

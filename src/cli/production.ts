@@ -28,7 +28,7 @@ import { SimplePairingHttp, PairingReplayCache } from './simple-pairing.js'
 import type { CliSetup } from './setup-runtime.js'
 import { boundedJson, object, fields, WIRE_MAJOR, WIRE_MINOR } from '../wire/index.js'
 import { readRuntimeConfig } from './runtime-config.js'
-import { migrateSetupLuvusGrant } from './setup-luvus-grant.js'
+import { migrateSetupLuvusConnector, migrateSetupLuvusGrant } from './setup-luvus-grant.js'
 import { canonicalLoopbackHost } from '../mcp/listen.js'
 import { createManagementResources } from './management-resources.js'
 import { loadProductManagementAssets } from './management-assets.js'
@@ -537,7 +537,10 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
       }
       let resource: ProductionConnectorResources
       try {
-        resource = await sources.connector(isolated ? { ...config, state_dir: control } : config, settings.providers)
+        resource = await sources.connector(
+          isolated ? { ...config, state_dir: control } : config,
+          settings.providers.map(migrateSetupLuvusConnector)
+        )
       } catch (error) {
         try {
           setup?.nativeFailed(error)

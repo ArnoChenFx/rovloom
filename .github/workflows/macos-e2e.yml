@@ -100,7 +100,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [macos-15, macos-15-intel]
-        scenario: [first-run, attach-existing, connector-crash, luvus-killed]
+        scenario: [first-run, attach-existing, connector-crash, luvus-killed, legacy-wait-output]
         include:
           - scenario: first-run
             flags: ''
@@ -110,6 +110,8 @@ jobs:
             flags: --crash
           - scenario: luvus-killed
             flags: --pre-existing --kill-luvus
+          - scenario: legacy-wait-output
+            flags: --legacy-wait-output
     steps:
       - uses: actions/checkout@v7
         with:

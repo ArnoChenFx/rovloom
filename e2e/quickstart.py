@@ -120,6 +120,8 @@ def main():
     ap.add_argument('--kill-luvus', action='store_true',
                     help='就绪后 kill -9 Luvus server：Connector 应自行重建并恢复调用')
     ap.add_argument('--crash', action='store_true', help='就绪后 kill -9 Connector 再重启，验证无需人工清理即可恢复')
+    ap.add_argument('--legacy-wait-output', action='store_true',
+                    help='（Luvus）把隔离配对记录还原成旧 35 方法预设，重启后用原 test token 验证输出等待')
     ap.add_argument('--unknown-outcome', action='store_true',
                     help='（Luvus）暂停原生后提交写调用并杀掉 Connector：调用必须收敛为 outcome_unknown，且不被重发')
     ap.add_argument('--revoke', action='store_true',
@@ -141,6 +143,8 @@ def main():
         ap.error('--service is a macOS Herdr scenario')
     if (args.unknown_outcome or args.revoke) and not args.luvus:
         ap.error('--unknown-outcome / --revoke are Luvus scenarios')
+    if args.legacy_wait_output and not args.luvus:
+        ap.error('--legacy-wait-output is a Luvus scenario')
     work = os.path.abspath(args.work or tempfile.mkdtemp(prefix='.rq-', dir=os.path.expanduser('~')))
     os.makedirs(work, mode=0o700, exist_ok=True)
     home_g, home_c, tools, herdr_dir = (os.path.join(work, n) for n in ('g', 'c', 'bin', 'hb'))
@@ -234,6 +238,53 @@ def main():
             print('LUVUS_SERVERS', servers, flush=True)
             if args.pre_existing:
                 assert servers == existing, f'Connector must attach, not start another: {existing} -> {servers}'
+        if args.legacy_wait_output:
+            # 真实 CLI 创建非配对主体，之后仍使用同一个 token；所有文件仅属于本轮隔离 HOME。
+            made = subprocess.run([rov, 'token', 'create', '--principal', 'test', '--like', 'operator_simple_pairing'],
+                                  env=env_g, cwd=home_g, capture_output=True, text=True, timeout=10)
+            assert made.returncode == 0, 'test_token_create_failed'
+            info['token'] = made.stdout.strip()
+            assert re.fullmatch(r'[A-Za-z0-9_-]{43}', info['token']), 'test_token_format'
+            open(out, 'w').write(json.dumps(info))
+            connector.stop(); gateway.stop()
+            managed_g = os.path.join(home_g, '.local', 'share', 'rovloom', 'gateway', 'managed')
+            managed_c = os.path.join(home_c, '.local', 'share', 'rovloom', 'connector', 'managed')
+            registry = json.load(open(os.path.join(managed_g, 'mcp-callers.json')))
+            grant = next(g for g in registry['local_policy']['grants'] if g['target']['provider_id'] == 'luvus')
+            methods = set(grant['methods'])
+            assert len(methods) == 36 and 'wait.output' in methods
+            def downgrade(value):
+                changed = 0
+                if isinstance(value, dict):
+                    for key, item in value.items():
+                        if key == 'methods' and isinstance(item, list) and all(isinstance(method, str) for method in item) and set(item) == methods:
+                            value[key] = [method for method in item if method != 'wait.output']
+                            changed += 1
+                        else:
+                            changed += downgrade(item)
+                elif isinstance(value, list):
+                    changed += sum(downgrade(item) for item in value)
+                return changed
+            counts = []
+            for directory in (managed_g, managed_c):
+                changed = 0
+                for filename in os.listdir(directory):
+                    if not filename.endswith('.json'):
+                        continue
+                    path = os.path.join(directory, filename)
+                    value = json.load(open(path))
+                    updates = downgrade(value)
+                    if updates:
+                        open(path, 'w').write(json.dumps(value))
+                        changed += updates
+                assert changed > 0, 'legacy_fixture_missing_policies'
+                counts.append(changed)
+            gateway = Term('gateway-upgraded', [rov, 'gateway'], env_g, home_g); terms.append(gateway)
+            connector = Term('connector-upgraded', [rov, 'connector'], env_c, home_c); terms.append(connector)
+            connector.expect('provider_ready=true', timeout=90)
+            subprocess.run(['bun', '--no-env-file', os.path.join(os.path.dirname(__file__), 'luvus-wait-output.mjs')],
+                           env={**os.environ, 'MCP_CONFIG': out}, check=True, timeout=90)
+            print('LEGACY_WAIT_OUTPUT_OK', json.dumps({'legacy_policy_blocks': counts}), flush=True)
         if args.kill_luvus:
             before = luvus_servers(herdr_dir)
             for pid, _ in before:
@@ -361,6 +412,13 @@ def main():
     finally:
         for term in reversed(terms):
             term.stop()
+        if args.legacy_wait_output:
+            # 此场景的 daemon 来自本轮私有 binary/HOME，不属于用户已有实例。
+            for pid, _ in luvus_servers(herdr_dir):
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
         if args.service:
             # 先让服务收到正常停止请求，再撤销开机登记；尽力而为，不影响测试结论。
             for step in (['stop', '--role', 'connector'], ['uninstall', '--role', 'connector']):

@@ -639,7 +639,7 @@ test('旧单码配对 raw grant 只在完整程序形状下迁移，配置原文
   }
 })
 
-test('新增输出等待不扩大已发布三十五方法 raw grant，旧 caller 策略迁移仍生效', () => {
+test('旧完整三十五方法 raw grant 升级输出等待并保留 caller 绑定，自定义子集不变', () => {
   const authorization = simpleSetupAuthorization('remote_machine', ['luvus'], { luvus: 'default' })
   const methods = authorization.policies.caller.grants[0]!.methods.filter((method) => method !== 'wait.output')
   assert.equal(methods.length, 35)
@@ -653,8 +653,11 @@ test('新增输出等待不扩大已发布三十五方法 raw grant，旧 caller
   const migrated = migrateSetupLuvusGrant(entry)
   assert.notEqual(migrated, entry)
   const checked = checkedRemoteLuvusConfig(name, migrated.value)
-  assert.deepEqual(checked.raw_grant, { caller_policy_revision: authorization.policies.caller.revision, methods })
-  assert(!checked.raw_grant!.methods.includes('wait.output'))
+  assert.deepEqual(checked.raw_grant, {
+    caller_policy_revision: authorization.policies.caller.revision,
+    methods: authorization.policies.caller.grants[0]!.methods
+  })
+  assert(checked.raw_grant!.methods.includes('wait.output'))
   const custom = {
     ...entry,
     value: { ...configured, raw_grant: { ...configured.raw_grant!, methods: methods.slice(1) } }
