@@ -1027,6 +1027,34 @@ export class StoreGatewayService implements GatewayService {
   ): Promise<ManagementReply[K]> {
     try {
       const { principal, admin } = this.administrator(context)
+      if (name === 'devices_get') {
+        const args = adminArguments(value, ['machine_id'])
+        const machine = args.machine_id as string
+        if (!this.allowed(admin, 'devices_read', machine)) {
+          throw new FacadeServiceError('not_found')
+        }
+        const { projection: observed, now } = this.observe({ machine_ids: [machine], include_host: true })
+        const current = this.administrator(context)
+        if (canonical(current.principal) !== canonical(principal) || canonical(current.admin) !== canonical(admin)) {
+          throw new FacadeServiceError('forbidden')
+        }
+        const details = observed.machineDetails(machine)
+        return {
+          ...this.deviceSnapshot(machine, now, observed),
+          last_seen_at: details.last_seen_at,
+          link_since: details.link_since,
+          ...(details.host
+            ? {
+                host: {
+                  ...details.host,
+                  providers: details.host.providers.filter((provider) =>
+                    this.allowed(admin, 'providers_read', machine, provider.provider_id)
+                  )
+                }
+              }
+            : {})
+        } as ManagementReply[K]
+      }
       // 每次管理读取取一次传输观测，同一回复里的设备、provider 与状态汇总来自同一取样。
       const { projection: observed, now, health } = this.observe()
       if (name === 'status') {
@@ -1107,11 +1135,6 @@ export class StoreGatewayService implements GatewayService {
           scope,
           now
         )
-      } else if (name === 'devices_get') {
-        if (!this.allowed(admin, 'devices_read', machine)) {
-          throw new FacadeServiceError('not_found')
-        }
-        result = this.deviceSnapshot(machine!, now, observed)
       } else if (name === 'providers_list') {
         if (!this.allowed(admin, 'devices_read', machine)) {
           throw new FacadeServiceError('not_found')

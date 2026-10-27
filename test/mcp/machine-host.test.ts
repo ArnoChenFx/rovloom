@@ -9,6 +9,8 @@ import { fixture, until } from '../transport/helpers.js'
 import { httpFixture } from './http-fixture.js'
 import { probeHostProfile } from '../../src/platform/host.js'
 import type { ReplyData, ToolArguments } from '../../src/mcp/types.js'
+import type { Administrator } from '../../src/mcp/management.js'
+import { checkManagementReadReply } from '../../src/webui/validate.js'
 
 const offer = { major: 2, minor: 2, capabilities: ['rpc', 'host_profile'], required: ['rpc'] }
 const report: HostProfileReport = {
@@ -52,6 +54,16 @@ test(
   async () => {
     const f = fixture({ offer })
     const paired = f.pair('host_fixture')
+    let admin: Administrator = {
+      principal_id: 'synthetic',
+      session_ref: 'fixture_admin',
+      assurance: 'administrator',
+      policy_revision: 'admin1',
+      grants: [
+        { action: 'devices_read', machine_id: paired.machine_id },
+        { action: 'providers_read', machine_id: paired.machine_id, provider_id: 'provider' }
+      ]
+    }
     const hidden = f.store.defineProvider({
       machine_id: paired.machine_id,
       provider_id: 'hidden_provider',
@@ -65,7 +77,10 @@ test(
       store: f.store,
       router: f.router,
       localPolicies: () => f.local,
-      identities: { principal: () => f.principal, administrator: () => null },
+      identities: {
+        principal: () => f.principal,
+        administrator: (_caller, ref) => (ref === 'fixture_admin' ? admin : null)
+      },
       transportObservations: f.gateway.observations
     })
     const http = httpFixture(service, { authentication: { authenticate: () => ({ principal_id: 'synthetic' }) } })
@@ -109,6 +124,29 @@ test(
       assert.equal(later.host!.reported_at, detail.host.reported_at)
       assert.equal(later.last_seen_at, 1010)
       assert.equal(reports, 1)
+      const managementContext = {
+        caller: { principal_id: 'synthetic' },
+        management_session_ref: 'fixture_admin',
+        wait_signal: new AbortController().signal
+      }
+      const visibleGrants = [...f.principal.policy.grants]
+      f.principal.policy.grants.length = 0
+      const managed = await service.management.execute(
+        'devices_get',
+        { machine_id: paired.machine_id },
+        managementContext
+      )
+      assert.deepEqual(managed.host, later.host)
+      assert.equal(managed.last_seen_at, later.last_seen_at)
+      checkManagementReadReply('devices_get', managed, { machine_id: paired.machine_id })
+      admin = { ...admin, grants: admin.grants.filter((grant) => grant.action !== 'providers_read') }
+      const reduced = await service.management.execute(
+        'devices_get',
+        { machine_id: paired.machine_id },
+        managementContext
+      )
+      assert.deepEqual(reduced.host!.providers, [])
+      f.principal.policy.grants.push(...visibleGrants)
       client.stop()
       await until(() => f.store.machine(paired.machine_id).status === 'offline')
       const offline = await call('machines_get', { machine_id: paired.machine_id })

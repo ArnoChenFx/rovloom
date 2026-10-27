@@ -121,7 +121,7 @@ function observed<T>(value: Observed<T>, inspect: (item: T) => void): void {
 
 /** 校验共享设备 DTO，原生错误或凭据字段均不属于允许集。 */
 function device(value: DeviceSnapshot): void {
-  record(value, [
+  const required = [
     'machine_id',
     'name',
     'labels',
@@ -131,10 +131,32 @@ function device(value: DeviceSnapshot): void {
     'connection',
     'authentication',
     'platform'
-  ])
+  ]
+  record(value, [...required, 'host', 'last_seen_at', 'link_since'], required)
   text(value.machine_id)
   text(value.name, 256)
   time(value.observed_at)
+  for (const key of ['last_seen_at', 'link_since'] as const) {
+    const at = value[key]
+    if (at !== undefined && at !== null) {
+      time(at)
+      if (!Number.isSafeInteger(at) || at > value.observed_at) {
+        invalid()
+      }
+    }
+  }
+  if (
+    value.link_since !== undefined &&
+    value.link_since !== null &&
+    value.last_seen_at !== undefined &&
+    value.last_seen_at !== null &&
+    value.link_since > value.last_seen_at
+  ) {
+    invalid()
+  }
+  if (value.host !== undefined) {
+    host(value.host, value.observed_at, value.last_seen_at)
+  }
   revision(value.resource_revision)
   choice(value.persisted_state, ['pending', 'offline', 'online', 'revoked'])
   if (value.labels !== null) {
@@ -200,6 +222,73 @@ function device(value: DeviceSnapshot): void {
       }
     }
   )
+}
+
+/** 浏览器单独列举设备 host DTO，不能将原生正文、网络或环境附加字段带入页面。 */
+function host(value: NonNullable<DeviceSnapshot['host']>, observedAt: number, lastSeen?: number | null): void {
+  record(value, [
+    'os',
+    'arch',
+    'cpus',
+    'memory_bytes',
+    'container',
+    'agent_version',
+    'providers',
+    'reported_at',
+    'source'
+  ])
+  record(value.os, ['family', 'distribution', 'kernel'])
+  choice(value.os.family, ['linux', 'darwin', 'win32'])
+  for (const entry of [value.os.distribution, value.os.kernel]) {
+    if (entry !== null && (typeof entry !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._+~-]{0,127}$/.test(entry))) {
+      invalid()
+    }
+  }
+  if (value.os.family !== 'linux' && value.os.distribution !== null) {
+    invalid()
+  }
+  choice(value.arch, ['x86_64', 'aarch64'])
+  for (const amount of [value.cpus, value.memory_bytes]) {
+    if (amount !== null && (!Number.isSafeInteger(amount) || amount < 1)) {
+      invalid()
+    }
+  }
+  if (value.cpus !== null && value.cpus > 262144) {
+    invalid()
+  }
+  choice(value.container, ['docker', 'podman', 'none', 'unknown'])
+  if (typeof value.agent_version !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._+~-]{0,127}$/.test(value.agent_version)) {
+    invalid()
+  }
+  choice(value.source, ['connector_handshake'])
+  time(value.reported_at)
+  if (
+    !Number.isSafeInteger(value.reported_at) ||
+    value.reported_at > observedAt ||
+    (lastSeen !== undefined && lastSeen !== null && value.reported_at > lastSeen)
+  ) {
+    invalid()
+  }
+  bounded(value.providers, 64)
+  const ids = new Set<string>()
+  for (const provider of value.providers) {
+    record(provider, ['provider_id', 'native_version'])
+    if (
+      typeof provider.provider_id !== 'string' ||
+      !/^[a-zA-Z0-9_-]{1,128}$/.test(provider.provider_id) ||
+      ids.has(provider.provider_id)
+    ) {
+      invalid()
+    }
+    ids.add(provider.provider_id)
+    if (
+      provider.native_version !== null &&
+      (typeof provider.native_version !== 'string' ||
+        !/^[a-zA-Z0-9][a-zA-Z0-9._+~-]{0,127}$/.test(provider.native_version))
+    ) {
+      invalid()
+    }
+  }
 }
 
 /** 校验共享 provider DTO；运行观测与 readiness 独立保留。 */

@@ -1038,6 +1038,62 @@ function providerList(page: PageView, device: DeviceSnapshot, freshness: Freshne
 }
 
 /** 详情只使用该 machine_id 的共享快照，未提供的配对/ready/重连信息明确未知。 */
+/** 主机卡明确展示连接时来源，不能把历史报告渲染成实时探测或当前在线证明。 */
+function hostDetails(device: DeviceSnapshot, freshness: Freshness): HTMLElement | null {
+  const host = device.host
+  if (!host) {
+    return null
+  }
+  const { i18n } = freshness
+  const { t } = i18n
+  const section = node('section', '', 'detail-host')
+  section.dataset.hostSource = host.source
+  section.append(node('h2', t('detail.hostHeading')), node('p', t('detail.hostNote'), 'muted'))
+  const family = t(
+    host.os.family === 'linux'
+      ? 'platform.osLinux'
+      : host.os.family === 'darwin'
+        ? 'platform.osDarwin'
+        : 'platform.osWindows'
+  )
+  const memoryUnit = host.memory_bytes !== null && host.memory_bytes < 1073741824 ? 'MiB' : 'GiB'
+  const memory =
+    host.memory_bytes === null
+      ? t('value.notRecorded')
+      : `${new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 1 }).format(host.memory_bytes / (memoryUnit === 'MiB' ? 1048576 : 1073741824))} ${memoryUnit}`
+  section.append(
+    facts([
+      [t('detail.platform'), host.os.distribution ? `${family} · ${host.os.distribution}` : family],
+      [t('detail.hostArch'), host.arch],
+      [t('detail.hostKernel'), host.os.kernel ?? t('value.notRecorded')],
+      [t('detail.hostCpus'), host.cpus === null ? t('value.notRecorded') : String(host.cpus)],
+      [t('detail.hostMemory'), memory],
+      [
+        t('detail.hostContainer'),
+        host.container === 'unknown'
+          ? t('detail.hostUnknown')
+          : host.container === 'none'
+            ? t('detail.hostNone')
+            : host.container
+      ],
+      [t('detail.hostAgentVersion'), host.agent_version],
+      [t('detail.hostReportedAt'), i18n.timestamp(host.reported_at)],
+      [t('detail.hostSource'), t('detail.hostHandshake')]
+    ])
+  )
+  if (host.providers.length) {
+    const providers = node('div', '', 'host-provider-versions')
+    providers.append(node('h3', t('detail.hostProviderVersions')))
+    const list = node('ul')
+    for (const provider of host.providers) {
+      list.append(node('li', `${provider.provider_id} · ${provider.native_version ?? t('value.notRecorded')}`))
+    }
+    providers.append(list)
+    section.append(providers)
+  }
+  return section
+}
+
 function deviceDetail(page: PageView, freshness: Freshness, management = false): PageSection {
   const { i18n } = freshness
   const { t } = i18n
@@ -1079,6 +1135,22 @@ function deviceDetail(page: PageView, freshness: Freshness, management = false):
   connectionSection.append(
     facts([
       [t('detail.epoch'), connection?.value.connection_epoch_ref ?? t('value.noConnection')],
+      ...(device.last_seen_at === undefined
+        ? []
+        : ([
+            [
+              t('detail.lastSeen'),
+              device.last_seen_at === null ? t('value.notRecorded') : i18n.timestamp(device.last_seen_at)
+            ]
+          ] as [string, string][])),
+      ...(device.link_since === undefined
+        ? []
+        : ([
+            [
+              t('detail.linkSince'),
+              device.link_since === null ? t('value.notRecorded') : i18n.timestamp(device.link_since)
+            ]
+          ] as [string, string][])),
       [
         t('detail.heartbeat'),
         `${i18n.timestamp(connection?.value.last_heartbeat_at ?? null)} · ${i18n.age(connection?.value.last_heartbeat_at ?? null, freshness.now)}`
@@ -1103,6 +1175,10 @@ function deviceDetail(page: PageView, freshness: Freshness, management = false):
     ])
   )
   layout.append(connectionSection, registration, observations)
+  const host = hostDetails(device, freshness)
+  if (host) {
+    layout.append(host)
+  }
   section.append(layout)
   section.append(providerList(page, device, freshness, management), deviceActions(page, freshness, management))
   return { heading, body: section }

@@ -56,6 +56,8 @@ The detail also returns `last_seen_at` and `link_since` (Unix milliseconds or `n
 
 This is a connection-time report, not a live probe. Gateway timestamps receipt; reading does not refresh it. Unknown scalar measurements are null; container detection without a positive marker is `unknown`. CPU is available parallelism and memory is the OS-visible total, not a container quota. No network, environment, credentials, paths or toolchain inventory is collected. Only currently visible providers appear. Host/timing history is bounded to 4096 machines in the current Gateway process; restart, recovery-generation change or eviction can make it unknown. A new epoch clears the previous host until a new report arrives. Do not infer that an old report proves the current kernel, container or online state.
 
+The management device detail uses the same optional host report and timing fields, validated by the browser DTO boundary. It labels the report as connection-time data and shows its receipt time/source. Provider versions inside the report follow the independent administrator providers_read grants; MCP dispatch/read grants are not substituted for management permissions. Device lists omit the full block. See [storage lifetimes](../../../docs/STORAGE.md#主机报告与连接时间缓存).
+
 ## 3. providers_list
 
 Parameters: `machine_id` (required), `cursor?`, `limit?`.
