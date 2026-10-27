@@ -19,7 +19,7 @@
 `raw_grant.principal_id` 仍只允许该主体；它与 `caller_policy_revision` 互斥。
 
 旧单码配对的完整标准授权在 Gateway 启动时迁移内存副本，无需重新配对、更换 token
-或修改 Connector。自定义主体、方法子集、会话、修订和 binding 不自动扩大范围。
+或修改 Connector；这是 caller 绑定格式的迁移。输出等待的完整默认预设升级还须同时更新并重启 Connector。显式自定义 raw 主体、方法子集、会话、修订和 binding 不自动扩大范围；按默认策略派生的 test 等 caller 仍继承默认预设的兼容升级。
 先升级 Gateway；新 Connector 的策略格式清单需要新版 Gateway 接纳。
 
 Gateway 在编码阶段拒绝请求时，尚未写入设备通道；调用账本记录
@@ -73,13 +73,13 @@ Luvus 0.14.3 的数字 `pane` 是进程级递增分配的 ID，不是布局中�
 - 命中回包形如 `{"type":"wait","matched":true,"pane":"2"}`；未命中或 pane 关闭时可为 `{"type":"wait","matched":false}`。Rovloom 原样保留，`matched:false` 不是 Gateway 派发失败，也不代表命令已经停止。
 - 只读等待不需要打开终端输入开关，但双方 dispatch/read ACL、原生权限和 raw 授权仍须允许 `wait.output`。原生 schema 对此方法是 generic，`runtime_describe` 提供明确标记来源的 `parameter_help`，不伪造完整原生参数 schema。
 
-部署需要 Gateway 与 Connector 都支持此方法；已有 35 方法授权保持原范围，升级不会自动加入 `wait.output`。所有者须在 Gateway 当前 caller/local 策略、该 provider 的 `raw_grant.methods` 与 Connector 当前 caller/local 方法授权中明确加入它。新配对包含该只读方法；旧清单的配对重入与 caller 授权迁移保留原方法集合，不强制重配，也不扩大自定义子集。
+升级并重启 Gateway 与 Connector 后，旧单码配对的完整默认 35 方法预设会自动补齐 `wait.output`：覆盖 Gateway caller/local、旧或新格式的 raw grant，以及 Connector caller/local。沿用原 token、设备凭据、配对记录和策略修订，不需要重新配对或手改多份文件；只改受保护配置的有效内存副本。升级只增加这个只读方法，不增加终端执行权限，也不改变设备范围或 Herdr。显式自定义的子集、修订、目标或 raw 主体保持原范围；这些自定义配置仍按其授权结果处理。新配对本来就包含该方法。
 
 ### 先确认当前调用方可见
 
 先对实际完整 target 运行 `runtime_discover`。只有结果列出 `wait.output` 时，才继续 describe 和提交；未列出时，对当前 caller/target 就不可用，不要因为原生 `uhp schema` 中存在或其他方法的提示提到它就尝试调用。继续用 `agent.read` / `pane.status` 读取，或由所有者明确补齐上述授权后重新发现。只授予另一个设备、provider 或 session 的权限不能使用；read 可见也不替代 dispatch 和 raw 授权。
 
-`agent.prompt.parameter_help` 按这次已授权目录生成：未列出输出等待时明确说明当前不可用；不含目录上下文的参数拒绝提示则要求先发现。旧部署仍显示 35 方法，并不表示 `wait.output` 尚未接入；方法白名单、新配对默认授权和回包透传已实现，旧授权范围按兼容约定保留。授权与实际契约都允许后，describe 可返回它的 `parameter_help`；原生参数 schema 为 generic 时继续报告 `generic_params_only`，不合成专用 `params_schema`。
+`agent.prompt.parameter_help` 按这次已授权目录生成：未列出输出等待时明确说明当前不可用；不含目录上下文的参数拒绝提示则要求先发现。方法白名单和透传已实现，本次进一步补齐旧完整默认授权的升级；若两端已升级却仍不可见，需检查是否属于自定义范围或当前原生能力未提供。授权与实际契约都允许后，describe 可返回它的 `parameter_help`；原生参数 schema 为 generic 时继续报告 `generic_params_only`，不合成专用 `params_schema`。
 
 `runtime_describe` 的 `not_found` 表示方法不在当前授权目录，也可用于不存在或未审核的方法，不是全局原生方法存在性查询；不会为了区分这些情况而暴露隐藏方法。`runtime_call` 的 `forbidden` 则表示本次派发权限未通过。原生包含但尚未审核的其它 `agent.*` 方法不因此自动开放。
 
