@@ -248,7 +248,10 @@ export function authorizedLuvusCatalog(options: CatalogOptions) {
         }
         try {
           const entry = terminalExecutionCatalog('luvus', method, terminal)
-          const parameterHelp = luvusParameterHelp(method)
+          const parameterHelp = luvusParameterHelp(
+            method,
+            methods.map((row) => row.method as string)
+          )
           return JSON.parse(
             boundedJson({
               ...catalog.describe(method),

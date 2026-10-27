@@ -75,6 +75,14 @@ Luvus 0.14.3 的数字 `pane` 是进程级递增分配的 ID，不是布局中�
 
 部署需要 Gateway 与 Connector 都支持此方法；已有 35 方法授权保持原范围，升级不会自动加入 `wait.output`。所有者须在 Gateway 当前 caller/local 策略、该 provider 的 `raw_grant.methods` 与 Connector 当前 caller/local 方法授权中明确加入它。新配对包含该只读方法；旧清单的配对重入与 caller 授权迁移保留原方法集合，不强制重配，也不扩大自定义子集。
 
+### 先确认当前调用方可见
+
+先对实际完整 target 运行 `runtime_discover`。只有结果列出 `wait.output` 时，才继续 describe 和提交；未列出时，对当前 caller/target 就不可用，不要因为原生 `uhp schema` 中存在或其他方法的提示提到它就尝试调用。继续用 `agent.read` / `pane.status` 读取，或由所有者明确补齐上述授权后重新发现。只授予另一个设备、provider 或 session 的权限不能使用；read 可见也不替代 dispatch 和 raw 授权。
+
+`agent.prompt.parameter_help` 按这次已授权目录生成：未列出输出等待时明确说明当前不可用；不含目录上下文的参数拒绝提示则要求先发现。旧部署仍显示 35 方法，并不表示 `wait.output` 尚未接入；方法白名单、新配对默认授权和回包透传已实现，旧授权范围按兼容约定保留。授权与实际契约都允许后，describe 可返回它的 `parameter_help`；原生参数 schema 为 generic 时继续报告 `generic_params_only`，不合成专用 `params_schema`。
+
+`runtime_describe` 的 `not_found` 表示方法不在当前授权目录，也可用于不存在或未审核的方法，不是全局原生方法存在性查询；不会为了区分这些情况而暴露隐藏方法。`runtime_call` 的 `forbidden` 则表示本次派发权限未通过。原生包含但尚未审核的其它 `agent.*` 方法不因此自动开放。
+
 原生语义依据：[0.14.3 wait.output 接口](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/ipc/api.rs)与[已有输出检查和等待器](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/app/dispatch/agent_workflow.rs)。`pane.run` 的 stdout / exit code 派生执行能力继续在 [#292](https://github.com/ArnoChenFx/rovloom/issues/292) 跟踪，不包含在此等待接口中。
 
 ## 位置坐标
@@ -168,7 +176,7 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 1. 从 `agent.get` / `pane.get` 确认选定 Agent、pane、`terminal_id` 和 session，并读取一次输出作为基线。
 2. 调用 `agent.prompt`，省略 `wait`、`until` 和 `timeout_s`，带上已观察的 `terminal_id` 与 `strict:true`。保留返回的提交证据和同一 `call_id`，不要因观察超时重发 prompt。
 3. 用短调用轮询 `agent.read` / `pane.status`，核对终端与 session 仍相同。输出或 `content_revision` 变化只证明活动；状态为 `idle` 且 `state_source:"no_positive_state_evidence"` 时按未知处理。读到与本轮请求相关的真实 Agent 回复后再向用户交付结果，不能用终端输入回显替代。
-4. 如果任务约定了可验证的输出标记，可调用上文的 `wait.output`，随后读取并核对内容。已有 recent 输出或本次 prompt 的输入回显都可能命中；不要把原样写在 prompt 中的标记当作回复完成证据。没有约定可验证标记时，继续有界轮询输出，不制造通用完成保证。
+4. 如果当前 `runtime_discover` 已列出 `wait.output`、所有者已授予派发/raw 权限，且任务约定了可验证的输出标记，可调用该方法，随后读取并核对内容。未列出时继续读取 `agent.read` / `pane.status`，不要尝试调用。已有 recent 输出或本次 prompt 的输入回显都可能命中；不要把原样写在 prompt 中的标记当作回复完成证据。没有约定可验证标记时，继续有界轮询输出，不制造通用完成保证。
 
 无等待提交示例（使用实际观察到的选择器）：
 

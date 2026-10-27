@@ -1,4 +1,8 @@
 // 已审核子集的调用提示与固定字段诊断；不冒充安装版原生 JSON Schema，不返回请求值。
+const sentinelAdvice =
+  'Use wait.output only if runtime_discover lists it for this exact target and dispatch/raw authorization also allows it. If it is not listed, it is unavailable for this caller/target; do not probe runtime_call. Old output and prompt echo can match, so verify the reply separately.'
+const sentinelUnavailable =
+  'wait.output is not in the current authorized method catalog and is unavailable for this caller/target. Do not call it; continue observing agent.read and pane.status. Its presence in the native schema does not grant access.'
 const help = {
   'agent.start': {
     required: ['name', 'kind'],
@@ -45,7 +49,8 @@ const help = {
       'wait:true requires a new working or blocked transition before matching until. A fast reply or missing positive state evidence can leave the wait unmatched.',
       'A working state already present when the wait is registered is its baseline, not a new transition. Even until:["working"] can time out without a later active transition; observed_state records a transition, not the current status snapshot.',
       'evidence:timeout with observed_state:null means no qualifying transition was observed; with observed_state:working or blocked it means the requested until state was not matched before the deadline. Neither proves the agent failed to reply.',
-      'Prefer submitting without wait, then observing agent.read and pane.status. Use wait.output for an explicitly authorized literal output sentinel; old output and prompt echo can match, so verify the reply separately. Do not resend a submitted prompt on an observation timeout.',
+      'Prefer submitting without wait, then observing agent.read and pane.status. Do not resend a submitted prompt on an observation timeout.',
+      sentinelAdvice,
       'For fast-completing tasks, use two phases: agent.prompt without wait, followed by agent.wait on the resolved pane and agent.read. agent.wait matches current state, so verify the reply belongs to this turn even when matched:true.',
       'submitted/queued does not prove the agent consumed the prompt or finished replying.'
     ],
@@ -74,10 +79,18 @@ export type LuvusParameterDiagnostic = Readonly<{
 }>
 
 /** 每次返回独立数据；提示不改变 generic_params_only 或 conditional_branch 的原生事实。 */
-export function luvusParameterHelp(method: string): Record<string, unknown> | undefined {
-  return Object.hasOwn(help, method)
-    ? { source: 'rovloom_reviewed_subset', ...JSON.parse(JSON.stringify(help[method as Method])) }
-    : undefined
+export function luvusParameterHelp(
+  method: string,
+  visibleMethods?: readonly string[]
+): Record<string, unknown> | undefined {
+  if (!Object.hasOwn(help, method)) {
+    return undefined
+  }
+  const guide = { source: 'rovloom_reviewed_subset', ...JSON.parse(JSON.stringify(help[method as Method])) }
+  if (method === 'agent.prompt' && visibleMethods && !visibleMethods.includes('wait.output')) {
+    guide.rules = guide.rules.map((rule: string) => (rule === sentinelAdvice ? sentinelUnavailable : rule))
+  }
+  return guide
 }
 
 /** 只定位固定方法的已知字段和依赖关系，不复制未知键、参数值或原生/Ajv 错误文本。 */

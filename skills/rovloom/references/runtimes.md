@@ -106,6 +106,8 @@ For common parameter failures on the guided methods, read `gateway_error.details
 
 Set `timeout_s` explicitly for output waits (35 seconds can use a deadline 45–60 seconds in the future). Waiting remains a blocking native RPC and occupies an execution slot; `wait_ms:0` only releases the HTTP wait. Both Gateway and Connector must support this method, and existing 35-method grants are preserved. The owner must explicitly authorize `wait.output` on both ends and in the provider raw grant; never bypass a refusal. New pairing includes it. The terminal-input switch can remain off for this read-only operation.
 
+Check `runtime_discover` for the exact target before following sentinel advice. If `wait.output` is absent, it is unavailable to this caller/target; use `agent.read` / `pane.status` instead and do not probe a dispatch. `agent.prompt.parameter_help` states this explicitly when the authorized catalog lacks it. The integration already exists, but old 35-method ACL/raw grants are not expanded by upgrades. Read visibility still does not grant dispatch. `runtime_describe not_found` means outside the current authorized catalog, including unknown, unreviewed and hidden methods; it is not proof the native schema lacks the method.
+
 ### Terminal command submission
 
 `pane.run({pane, command})` submits command text to a selected terminal and returns `{"type":"ok"}`. It accepts no `cwd`, `env` or `argv` override. Read the rendered output separately with `pane.read`; the acknowledgement contains no command stdout/stderr or exit code, and it does not prove completion.
