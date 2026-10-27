@@ -139,6 +139,8 @@ rovloom token create --principal worker --like owner [--ttl-days 30]
 rovloom token renew  --principal owner [--ttl-days 30]
 rovloom token rotate --principal owner [--ttl-days 30] [--grace-minutes 10]
 rovloom token revoke --principal worker
+rovloom token scope  --principal worker --devices m_ab12,m_cd34
+rovloom token scope  --principal worker --all-devices true
 ```
 
 令牌注册表（Gateway 状态目录下的 `managed/mcp-callers.json`）保存 SHA-256 摘要、新签发令牌的原文、主体策略和固定到期；
@@ -147,11 +149,50 @@ Gateway 每次认证都重读它，因此创建、续期、轮换和吊销**无�
 `rotate` 默认立即让旧令牌失效，`--grace-minutes` 给客户端一个有界的切换窗口。本机 `mcp-client.json`
 属于同一主体时会同步更新。注册表损坏时拒绝全部认证，修复前一直如此。
 
+### 设备可见范围
+
+可以给单个令牌收窄到部分设备。`device_scope` 是调用方条目上的**可选**字段，不推进注册表
+`schema_version`；没有该字段的注册表行为与今天完全相同，因此无需迁移：
+
+```jsonc
+{
+  "principal": { "id": "worker", "policy": { "…": "…" } },
+  "token_sha256": "…",
+  "device_scope": { "mode": "selected", "machine_ids": ["m_ab12", "m_cd34"] },
+  "issued_at": 0,
+  "expires_at": 0
+}
+```
+
+- 缺省 = 今天的行为：令牌能看到当前 grants 覆盖的全部设备。
+- `mode: "selected"` = 只在这些稳定 `machine_id` 上可见。**不接受设备名**（名字可变，改名不应
+  改变授权）。列表里已撤销或不存在的 `machine_id` 按不匹配处理；重新配对会生成新的
+  `machine_id`，该设备因此自动不可见——有意失败关闭。
+- 列表必须非空（1–256 个去重 ID）。`--devices ""`、重复项或空项一律 `invalid_arguments`，注册表
+  文件字节不变。
+- 清除必须显式 `--all-devices true`；不存在静默放开令牌的路径。
+
+范围是**过滤器，不是第二套 ACL**：只能从 grants 已允许的设备中再减去，不可能扩大。
+`machines_list`、`machines_get`（含精确名称查询）、`providers_list`、`providers_get`、
+`runtime_discover`、`runtime_describe` 全部随之收窄，越界设备仍返回 `not_found`——与「没有授权」
+不可区分，不提供设备存在性探测。派发、短等、取消、结果读取与结果删除在 Router 里核对，返回
+`forbidden`，与缺少 grant 时逐字一致。
+
+范围变更**不推进** `policy.revision`：Connector 侧仍只比对 `caller_policy_revision`，因此收窄
+不会让已经派发出去的 native attempt 在设备上停下（与运行中吊销令牌同一限制）。此后所有读取、
+短等、取消与结果访问都会重新核对并被拒绝。Gateway 每次请求都重读注册表，因此
+`rovloom token scope` 无需重启即生效。`token create --like` 连同范围一起克隆；加入新设备只改策略，
+`device_scope` 原样保留。`token list` 增加 `all` / `selected(N)` 一列。
+
+降级到不识别该字段的旧二进制时，注册表被判为 `invalid_config`，全部认证被拒绝：失败关闭，
+不会静默放宽令牌。
+
 管理页令牌（`scope: "gateway"`）保留各自的主体 ID 和结果归属，调用授权跟随独立保存的
 `gateway_policy`。配对和加入设备时更新这份 caller 策略，不能与 `local_policy` 的修订混用。
 旧版单码配对注册表没有此字段时，从 `operator_simple_pairing` 恢复 caller 策略，下一次写入
 注册表时独立保留；两处绑定都缺失时，Gateway 令牌不获得方法授权。吊销原配对令牌不会
-连带吊销另行签发的 Gateway 令牌。
+连带吊销另行签发的 Gateway 令牌。设备范围同样适用于这类令牌（管理页提供同一个控件），
+但它不会影响 `Administrator.grants`，管理页自身的可见性不变。
 
 ### 配对
 

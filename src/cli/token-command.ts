@@ -9,10 +9,12 @@ import { setupFileStamp, writeSetupFile } from './setup-files.js'
 import {
   REGISTRY_MAX_BYTES,
   createCaller,
+  deviceScopeView,
   parseRegistry,
   renewCaller,
   revokeCaller,
   rotateCaller,
+  setDeviceScope,
   setDiscardPermission,
   summarize
 } from './token-registry.js'
@@ -27,11 +29,15 @@ type Flags = {
   days?: number
   grace?: number
   discard?: boolean
+  devices?: string[]
+  allDevices?: boolean
 }
+
+const SUBCOMMANDS = ['list', 'create', 'renew', 'rotate', 'revoke', 'permissions', 'scope'] as const
 
 function parse(args: readonly string[]): Flags {
   const sub = args[1]
-  if (!sub || !['list', 'create', 'renew', 'rotate', 'revoke', 'permissions'].includes(sub)) {
+  if (!sub || !SUBCOMMANDS.includes(sub as (typeof SUBCOMMANDS)[number])) {
     throw new CliError('invalid_arguments')
   }
   const flags: Flags = { sub }
@@ -53,6 +59,14 @@ function parse(args: readonly string[]): Flags {
       flags.principal = value
     } else if (name === '--like' && flags.like === undefined) {
       flags.like = value
+    } else if (name === '--devices' && flags.devices === undefined) {
+      // 逗号分隔的 machine_id 列表；空值或空项都不接受，防止变量为空时静默锁死或放开。
+      if (!/^[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*$/.test(value)) {
+        throw new CliError('invalid_arguments')
+      }
+      flags.devices = value.split(',')
+    } else if (name === '--all-devices' && flags.allDevices === undefined && value === 'true') {
+      flags.allDevices = true
     } else if (name === '--discard-response' && flags.discard === undefined && ['true', 'false'].includes(value)) {
       flags.discard = value === 'true'
     } else if (name === '--ttl-days' && flags.days === undefined) {
@@ -69,7 +83,8 @@ function parse(args: readonly string[]): Flags {
     renew: ['principal', 'days'],
     rotate: ['principal', 'days', 'grace'],
     revoke: ['principal'],
-    permissions: ['principal', 'discard']
+    permissions: ['principal', 'discard'],
+    scope: ['principal', 'devices', 'allDevices']
   }
   const required: Record<string, readonly (keyof Flags)[]> = {
     list: [],
@@ -77,14 +92,23 @@ function parse(args: readonly string[]): Flags {
     renew: ['principal'],
     rotate: ['principal'],
     revoke: ['principal'],
-    permissions: ['principal', 'discard']
+    permissions: ['principal', 'discard'],
+    scope: ['principal']
   }
-  for (const key of ['principal', 'like', 'days', 'grace', 'discard'] as const) {
+  for (const key of ['principal', 'like', 'days', 'grace', 'discard', 'devices', 'allDevices'] as const) {
     if (flags[key] !== undefined && !allowed[sub]!.includes(key)) {
       throw new CliError('invalid_arguments')
     }
   }
   if (required[sub]!.some(/* 缺少必填参数。 */ (key) => flags[key] === undefined)) {
+    throw new CliError('invalid_arguments')
+  }
+  // 收窄与清除必须二选一，不提供隐含默认。
+  if (sub === 'scope' && (flags.devices === undefined) === (flags.allDevices === undefined)) {
+    throw new CliError('invalid_arguments')
+  }
+  // --devices 去重后仍须非空；--all-devices 必须显式写 true。
+  if (sub === 'scope' && flags.devices !== undefined && new Set(flags.devices).size !== flags.devices.length) {
     throw new CliError('invalid_arguments')
   }
   return flags
@@ -147,14 +171,37 @@ export async function handleTokenCommand(
         registry.callers.filter((entry) => isAdminPlaceholder(entry)).map((entry) => entry.principal.id)
       )
       for (const row of summarize(registry, at).filter((entry) => !placeholders.has(entry.principal))) {
+        // 范围列：缺省为 all，收窄时为 selected(N)；设备 ID 由 token scope 之外的界面另行查看。
+        const deviceScope =
+          row.device_scope.mode === 'all' ? 'all' : 'selected(' + row.device_scope.machine_ids.length + ')'
         io.stdout.write(
-          [row.principal, row.status, new Date(row.expires_at).toISOString(), row.rotating ? 'rotating' : '-'].join(
-            '\t'
-          ) + '\n'
+          [
+            row.principal,
+            row.status,
+            new Date(row.expires_at).toISOString(),
+            row.rotating ? 'rotating' : '-',
+            deviceScope
+          ].join('\t') + '\n'
         )
       }
       return 0
     }
+    if (flags.sub === 'scope') {
+      const changed = setDeviceScope(registry, flags.principal!, flags.allDevices ? null : flags.devices!)
+      next = changed
+      const view = deviceScopeView(
+        changed.callers.find(/* 取目标主体的新范围。 */ (entry) => entry.principal.id === flags.principal)!
+      )
+      io.stderr.write(
+        formatMessage(cliMessages(io.language)['token.scope'], {
+          principal: flags.principal!,
+          scope: view.mode === 'all' ? 'all' : 'selected(' + view.machine_ids.length + ')'
+        })
+      )
+      writeSetupFile(path, boundedJson(changed, REGISTRY_MAX_BYTES), true, stamp)
+      return 0
+    }
+
     if (flags.sub === 'create') {
       const made = createCaller(registry, flags.principal!, flags.like!, at, flags.days)
       next = made.registry
@@ -193,14 +240,14 @@ export async function handleTokenCommand(
           discard: String(flags.discard)
         })
       )
-    } else {
+    } else if (flags.sub === 'revoke') {
       next = revokeCaller(registry, flags.principal!)
       io.stderr.write(formatMessage(cliMessages(io.language)['token.revoked'], { principal: flags.principal! }))
     }
     // 先落盘注册表（带字节代次，防并发编辑），再同步本机客户端凭据文件。
-    writeSetupFile(path, boundedJson(next, REGISTRY_MAX_BYTES), true, stamp)
+    writeSetupFile(path, boundedJson(next!, REGISTRY_MAX_BYTES), true, stamp)
     if (flags.sub === 'renew' || flags.sub === 'rotate') {
-      const entry = next.callers.find(/* 取目标主体的新到期。 */ (e) => e.principal.id === flags.principal)!
+      const entry = next!.callers.find(/* 取目标主体的新到期。 */ (e) => e.principal.id === flags.principal)!
       syncClientFile(config.state_dir, flags.principal!, issued, entry.issued_at, entry.expires_at)
     }
     return 0

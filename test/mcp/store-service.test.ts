@@ -142,6 +142,73 @@ test(
 )
 
 test(
+  '令牌设备范围在枚举面收窄可见设备，越界设备与按名称查询一律 not_found',
+  /* 同一策略下两个设备：收窄后只留一台，且不提供设备存在性探测入口。 */ async () => {
+    const f = storeFixture()
+    try {
+      const wide = await f.service.execute('machines_list', {}, context())
+      assert.deepEqual(
+        wide.data.items.map(/* 缺省范围保持现状。 */ (item) => item.machine_id),
+        ['machine_a', 'machine_b']
+      )
+      f.setCaller({ ...f.current(), device_scope: { mode: 'selected', machine_ids: ['machine_a'] } })
+      const narrowed = await f.service.execute('machines_list', {}, context())
+      assert.deepEqual(
+        narrowed.data.items.map(/* 只保留范围内的设备。 */ (item) => item.machine_id),
+        ['machine_a']
+      )
+      assert.equal(
+        (await f.service.execute('machines_get', { machine_id: 'machine_a' }, context())).data.machine_id,
+        'machine_a'
+      )
+      // 越界设备与其名称查询都与「未授权」逐字一致。
+      await assert.rejects(f.service.execute('machines_get', { machine_id: 'machine_b' }, context()), code('not_found'))
+      await assert.rejects(f.service.execute('machines_get', { name: 'beta' }, context()), code('not_found'))
+      assert.deepEqual(
+        (await f.service.execute('providers_list', { machine_id: 'machine_a' }, context())).data.items.map(
+          /* 范围内的 provider 仍可见。 */ (item) => item.provider_id
+        ),
+        ['luvus_a']
+      )
+      await assert.rejects(
+        f.service.execute('providers_list', { machine_id: 'machine_b' }, context()),
+        code('not_found')
+      )
+      await assert.rejects(
+        f.service.execute('providers_get', { machine_id: 'machine_b', provider_id: 'luvus_b' }, context()),
+        code('not_found')
+      )
+      // 范围也约束目录：越界 tuple 直接 not_found。
+      await assert.rejects(
+        f.service.execute('runtime_discover', { target: secondTarget, expected_binding_revision: 1 }, context()),
+        code('not_found')
+      )
+      // 恢复全部设备后回到今天的行为（删除字段，不留 undefined）。
+      const { device_scope: _cleared, ...unscoped } = f.current()
+      f.setCaller(unscoped)
+      assert.deepEqual(
+        (await f.service.execute('machines_list', {}, context())).data.items.map(
+          /* 范围清除即不再过滤。 */ (item) => item.machine_id
+        ),
+        ['machine_a', 'machine_b']
+      )
+      // 身份来源交付变形的范围时拒绝，而不是放宽。
+      for (const device_scope of [
+        { mode: 'all' },
+        { mode: 'selected', machine_ids: [] },
+        { mode: 'selected', machine_ids: ['machine_a', 'machine_a'] },
+        { mode: 'selected', machine_ids: ['bad id'] }
+      ]) {
+        f.setCaller({ ...f.current(), device_scope: device_scope as never })
+        await assert.rejects(f.service.execute('machines_list', {}, context()), code('unauthenticated'))
+      }
+    } finally {
+      f.close()
+    }
+  }
+)
+
+test(
   '真实授权分页游标绑定身份、查询、limit、当前政策和期限，不接受offset自报',
   /* 使用同一数据库跨页，再改变查询和政策验证旧游标失效。 */ async () => {
     const f = storeFixture()

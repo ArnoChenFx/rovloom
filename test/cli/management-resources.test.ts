@@ -12,6 +12,7 @@ import { runtimeReference, readRuntimeJson } from '../../src/cli/runtime-files.j
 import { parseRegistry, REGISTRY_MAX_BYTES } from '../../src/cli/token-registry.js'
 import { writeSetupFile } from '../../src/cli/setup-files.js'
 import { publishFirstCallers } from '../../src/cli/setup-publish.js'
+import { LIMITS } from '../../src/wire/index.js'
 import { options as callOptions } from '../storage/helpers.js'
 import { context, setup, confirmed } from '../admin/write-helpers.js'
 
@@ -94,6 +95,97 @@ test('Dashboard tokens persist across reopen, authenticate, follow new devices a
     assert.throws(() => o.execute('tokens_delete', { principal: 'admin' }))
   } finally {
     caller?.close()
+    o.close()
+  }
+})
+
+test('Dashboard device scope is strictly validated, authorized and applied to the same registry', () => {
+  const o = owned()
+  try {
+    o.execute('tokens_create', { principal: 'claude' })
+    const device = o.f.store.register('scoped-device')
+    const path = runtimeReference(o.root, 'mcp-callers')
+    const read = () => parseRegistry(readRuntimeJson(path, REGISTRY_MAX_BYTES))
+    // 设备候选与令牌列表来自同一次读取，按 machine_id 有界排序；未超上限时明确不截断。
+    let list = o.execute('tokens_list')
+    assert.equal(list.devices_total, o.f.store.resources().length)
+    assert.equal(list.devices_truncated, false)
+    assert(Array.isArray(list.devices))
+    assert.deepEqual(
+      list.devices.map(/* 公开字段只有稳定 ID 与名称。 */ (entry: any) => Object.keys(entry).sort()),
+      [['machine_id', 'name']]
+    )
+    assert(list.devices.some((entry: any) => entry.machine_id === device.machine_id))
+    // 缺省为全部设备。
+    assert.deepEqual(list.items[0].device_scope, { mode: 'all' })
+    const stamp = readFileSync(path)
+    o.execute('tokens_scope', { principal: 'claude', machine_ids: [device.machine_id] })
+    assert.deepEqual(read().callers.find((entry) => entry.principal.id === 'claude')!.device_scope, {
+      mode: 'selected',
+      machine_ids: [device.machine_id]
+    })
+    list = o.execute('tokens_list')
+    assert.deepEqual(list.items[0].device_scope, { mode: 'selected', machine_ids: [device.machine_id] })
+    // 空数组是面板显式的「全部设备」，写回缺省语义。
+    const narrowed = readFileSync(path)
+    assert.notDeepEqual(narrowed, stamp)
+    o.execute('tokens_scope', { principal: 'claude', machine_ids: [] })
+    assert.equal(read().callers.find((entry) => entry.principal.id === 'claude')!.device_scope, undefined)
+    assert.deepEqual(o.execute('tokens_list').items[0].device_scope, { mode: 'all' })
+    // 严格参数：未知字段、重复 ID、非字符串与超限全部 invalid_arguments，且文件字节不变。
+    const before = readFileSync(path)
+    for (const args of [
+      { principal: 'claude', machine_ids: [device.machine_id, device.machine_id] },
+      { principal: 'claude', machine_ids: [1] },
+      { principal: 'claude', machine_ids: device.machine_id },
+      { principal: 'claude', machine_ids: Array.from({ length: 257 }, (_, index) => 'm_' + index) },
+      { principal: 'claude', machine_ids: [], days: 30 },
+      { principal: 'ghost', machine_ids: [device.machine_id] },
+      { machine_ids: [device.machine_id] }
+    ]) {
+      assert.throws(() => o.execute('tokens_scope', args), /invalid_arguments/)
+    }
+    assert.deepEqual(readFileSync(path), before)
+    // 写后注册表字节代次推进：并发编辑检测依据 setupFileStamp 变化。
+    const advanced = readFileSync(path)
+    o.execute('tokens_scope', { principal: 'claude', machine_ids: [device.machine_id] })
+    assert.notDeepEqual(readFileSync(path), advanced)
+    // 授权失败不得写入。
+    const guarded = readFileSync(path)
+    o.deny()
+    assert.throws(() => o.execute('tokens_scope', { principal: 'claude', machine_ids: [] }), /forbidden/)
+    assert.deepEqual(readFileSync(path), guarded)
+  } finally {
+    o.close()
+  }
+})
+
+test('device candidates past the scope limit are flagged instead of silently dropped', () => {
+  const o = owned()
+  try {
+    // 上限 + 1 台设备：候选按 machine_id 有界排序交付，超出部分显式标记为截断。
+    for (let index = 0; index < LIMITS.scope_machines + 1; index++) {
+      o.f.store.register('overflow_' + String(index).padStart(3, '0'))
+    }
+    o.execute('tokens_create', { principal: 'claude' })
+    const list = o.execute('tokens_list')
+    assert.equal(list.devices.length, LIMITS.scope_machines)
+    assert.equal(list.devices_total, o.f.store.resources().length)
+    assert.equal(list.devices_truncated, true)
+    assert.equal(list.devices_total, LIMITS.scope_machines + 1)
+    // 排序稳定：候选前缀与 Store 排序一致，不随机丢设备。
+    assert.deepEqual(
+      list.devices.map(/* 只比对稳定 ID。 */ (entry: any) => entry.machine_id),
+      o.f.store
+        .resources()
+        .slice(0, LIMITS.scope_machines)
+        .map((entry) => entry.machine_id)
+    )
+    // 已被截断的设备仍可写入范围（CLI 或既有选择），只是不在候选里；写入按 machine_id 校验。
+    const beyond = o.f.store.resources().at(-1)!.machine_id
+    o.execute('tokens_scope', { principal: 'claude', machine_ids: [beyond] })
+    assert.deepEqual(o.execute('tokens_list').items[0].device_scope, { mode: 'selected', machine_ids: [beyond] })
+  } finally {
     o.close()
   }
 })

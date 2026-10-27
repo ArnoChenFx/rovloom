@@ -1,8 +1,8 @@
 // MCP Bearer registry: authentication uses hashes; newly issued tokens remain available to administrators.
 import { createHash, randomBytes } from 'node:crypto'
-import type { Principal } from '../router.js'
+import type { DeviceScope, Principal } from '../router.js'
 import type { ProviderPolicy } from '../wire/types.js'
-import { fields, id, object, validatePolicies } from '../wire/index.js'
+import { fields, id, LIMITS, object, validatePolicies } from '../wire/index.js'
 import { CliError } from './config.js'
 import { SIMPLE_SETUP_ACTOR } from './setup-policy.js'
 
@@ -16,6 +16,8 @@ export type CallerEntry = {
   token_sha256: string
   token?: string
   scope?: 'gateway'
+  // 可选可见性收窄：缺省表示今天的行为（当前 grants 覆盖的全部设备）。
+  device_scope?: DeviceScope
   issued_at: number
   expires_at: number
   // 轮换后的有界重叠期：旧令牌在此之前仍可认证，之后自动失效。
@@ -32,6 +34,8 @@ export type CallerRegistry = {
 
 const HEX = /^[a-f0-9]{64}$/
 const PRINCIPAL = /^[a-zA-Z0-9_-]{1,128}$/
+/** 设备范围只接受稳定 machine_id 形状；设备名可变，因此永不参与授权。 */
+const MACHINE = /^[a-zA-Z0-9_-]{1,128}$/
 
 /** Authentication digest; recoverable tokens are stored separately in the private registry. */
 export function digestToken(token: string): string {
@@ -45,6 +49,26 @@ export function newToken(): string {
 
 function invalid(): never {
   throw new CliError('invalid_config')
+}
+
+/** 严格校验设备范围：只允许非空的 selected 列表，元素须为去重的 machine_id 形状。 */
+function deviceScope(value: unknown): DeviceScope {
+  const scope = object(value)
+  fields(scope, ['mode', 'machine_ids'])
+  const ids = scope.machine_ids
+  if (
+    scope.mode !== 'selected' ||
+    !Array.isArray(ids) ||
+    ids.length === 0 ||
+    ids.length > LIMITS.scope_machines ||
+    ids.some(
+      /* 只接受稳定 ID 形状，不接受设备名或路径。 */ (item) => typeof item !== 'string' || !MACHINE.test(item)
+    ) ||
+    new Set(ids).size !== ids.length
+  ) {
+    invalid()
+  }
+  return { mode: 'selected', machine_ids: [...(ids as string[])] }
 }
 
 /** 精确校验注册表；配置本身不能声明 authenticated 或 source_verified。 */
@@ -70,7 +94,11 @@ export function parseRegistry(value: unknown, resource?: string): CallerRegistry
     const digests = new Set<string>()
     for (const input of source.callers) {
       const caller = object(input)
-      fields(caller, ['principal', 'token_sha256', 'issued_at', 'expires_at'], ['previous', 'token', 'scope'])
+      fields(
+        caller,
+        ['principal', 'token_sha256', 'issued_at', 'expires_at'],
+        ['previous', 'token', 'scope', 'device_scope']
+      )
       if (
         (caller.scope !== undefined && caller.scope !== 'gateway') ||
         (caller.token !== undefined &&
@@ -118,6 +146,10 @@ export function parseRegistry(value: unknown, resource?: string): CallerRegistry
         digests.add(previous.token_sha256)
       }
       validatePolicies({ caller: principal.policy as ProviderPolicy, local })
+      // 范围只校验形状；已撤销或不存在的 machine_id 按不匹配处理，不视为配置错误。
+      if (caller.device_scope !== undefined) {
+        deviceScope(caller.device_scope)
+      }
       principals.add(principal.id as string)
       digests.add(caller.token_sha256)
     }
@@ -171,6 +203,8 @@ export function createCaller(
   const entry: CallerEntry = {
     principal: { ...structuredClone(template.principal), id: principal },
     ...(template.scope ? { scope: template.scope } : {}),
+    // 克隆范围与克隆策略同源，同样不会扩大权限；--like 的收窄一并继承。
+    ...(template.device_scope ? { device_scope: structuredClone(template.device_scope) } : {}),
     token_sha256: digestToken(token),
     token,
     issued_at: now,
@@ -192,6 +226,43 @@ export function setDiscardPermission(registry: CallerRegistry, principal: string
         at === index
           ? { ...entry, principal: { ...entry.principal, permissions: { discard_response: allowed } } }
           : entry
+    )
+  }
+}
+
+/** 本机操作员显式收窄/清除设备可见性；不改变策略修订、方法授权、令牌或到期时间。 */
+export function setDeviceScope(
+  registry: CallerRegistry,
+  principal: string,
+  machineIds: readonly string[] | null
+): CallerRegistry {
+  const index = find(registry, principal)
+  let device_scope: DeviceScope | undefined
+  if (machineIds !== null) {
+    // 空列表不能含蓄地表示「全部设备」；清除必须显式传 null（CLI 的 --all-devices）。
+    if (
+      !Array.isArray(machineIds) ||
+      machineIds.length === 0 ||
+      machineIds.length > LIMITS.scope_machines ||
+      machineIds.some(
+        /* 只接受稳定 machine_id，不接受设备名。 */ (item) => typeof item !== 'string' || !MACHINE.test(item)
+      ) ||
+      new Set(machineIds).size !== machineIds.length
+    ) {
+      throw new CliError('invalid_arguments')
+    }
+    device_scope = { mode: 'selected', machine_ids: [...machineIds] }
+  }
+  return {
+    ...registry,
+    callers: registry.callers.map(
+      /* 只修改选定主体；清除时删除字段回到缺省语义。 */ (value, at) => {
+        if (at !== index) {
+          return value
+        }
+        const { device_scope: _previous, ...rest } = value
+        return device_scope === undefined ? rest : { ...rest, device_scope }
+      }
     )
   }
 }
@@ -230,6 +301,8 @@ export function rotateCaller(
   const entry: CallerEntry = {
     principal: old.principal,
     ...(old.scope ? { scope: old.scope } : {}),
+    // 轮换不改变可见性，也不因为签发新令牌而放宽范围。
+    ...(old.device_scope ? { device_scope: structuredClone(old.device_scope) } : {}),
     token_sha256: digestToken(token),
     token,
     issued_at: now,
@@ -254,12 +327,20 @@ export function revokeCaller(registry: CallerRegistry, principal: string): Calle
   return { ...registry, callers: registry.callers.filter(/* 保留其余主体。 */ (_e, i) => i !== index) }
 }
 
+export type DeviceScopeView = { mode: 'all' } | DeviceScope
+
+/** 把可选范围投影为列表视图；缺省即全部设备。 */
+export function deviceScopeView(entry: { device_scope?: DeviceScope }): DeviceScopeView {
+  return entry.device_scope ? { mode: 'selected', machine_ids: [...entry.device_scope.machine_ids] } : { mode: 'all' }
+}
+
 export type CallerSummary = {
   principal: string
   issued_at: number
   expires_at: number
   status: 'active' | 'expired'
   rotating: boolean
+  device_scope: DeviceScopeView
 }
 
 /** 列表只含非秘密字段。 */
@@ -270,7 +351,8 @@ export function summarize(registry: CallerRegistry, now: number): CallerSummary[
       issued_at: entry.issued_at,
       expires_at: entry.expires_at,
       status: now < entry.expires_at ? ('active' as const) : ('expired' as const),
-      rotating: entry.previous !== undefined && now < entry.previous.expires_at
+      rotating: entry.previous !== undefined && now < entry.previous.expires_at,
+      device_scope: deviceScopeView(entry)
     })
   )
 }

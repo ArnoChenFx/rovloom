@@ -10,7 +10,9 @@ export const LIMITS = Object.freeze({
   nodes: 100_000,
   object_bytes: 8_388_608,
   buffered_bytes: 20_971_520,
-  dedup_entries: 4096
+  dedup_entries: 4096,
+  // 令牌设备范围（device_scope.machine_ids）的数组上限：形状/规模边界，注册表与 MCP 两面共用。
+  scope_machines: 256
 })
 
 export class WireError extends GatewayError {

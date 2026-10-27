@@ -475,6 +475,18 @@ body > [role='note'], body > p:has(+ #rovloom-management) { position: relative; 
 .mcp-endpoint code, .pairing-record code { overflow-wrap: anywhere; }
 .pairing-record, .resource-delete-card { justify-content: space-between; }
 .danger-button { color: var(--danger-text); border-color: var(--danger-text); }
+.token-scope { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; }
+.token-scope legend { padding-inline: 6px; font-size: 13px; font-weight: 600; }
+.token-scope label { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; overflow-wrap: anywhere; }
+.token-scope input { width: auto; margin: 0; }
+.token-scope-picker { display: flex; flex-wrap: wrap; gap: 10px 18px; flex-basis: 100%; }
+.token-scope-picker[hidden] { display: none; }
+.token-scope-picker button { flex-basis: 100%; justify-self: start; }
+.scope-badge { overflow-wrap: anywhere; }
+@media (max-width: 320px) {
+  .token-scope, .token-scope-picker { flex-direction: column; align-items: stretch; }
+  .token-scope-picker button { min-height: 44px; }
+}
 .resource-feedback { min-height: 20px; font-size: 13px; }
 @media (max-width: 700px) {
   .resource-panel { margin-block: 20px 24px; padding-inline: 20px; }

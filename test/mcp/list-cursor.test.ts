@@ -132,6 +132,33 @@ describe(
 )
 
 test(
+  '设备范围进入游标绑定：改范围后旧游标失效，重读仍在范围内',
+  /** 同一 Store 上收窄范围，旧页不能被重放；新范围的第一页只含范围内设备。 */ async () => {
+    const f = listFixture(3)
+    try {
+      const start = (await f.service.execute('machines_list', { limit: 1 }, context())).data
+      assert(start.next_cursor)
+      const machine = f.targets[0]!.machine_id
+      f.setCaller({ ...f.current(), device_scope: { mode: 'selected', machine_ids: [machine] } })
+      await assert.rejects(
+        f.service.execute('machines_list', { limit: 1, cursor: start.next_cursor }, context()),
+        /* 旧游标绑定的是未收窄的可见集合。 */ (error: unknown) =>
+          error instanceof Error && 'code' in error && error.code === 'invalid_cursor'
+      )
+      const narrowed = (await f.service.execute('machines_list', {}, context())).data
+      assert.deepEqual(
+        narrowed.items.map(/* 只保留范围内设备。 */ (item) => item.machine_id),
+        [machine]
+      )
+      // 范围内重读同一页保持稳定。
+      assert.deepEqual((await f.service.execute('machines_list', {}, context())).data, narrowed)
+    } finally {
+      f.close()
+    }
+  }
+)
+
+test(
   '重读同一列表页超过128次仍保持页面和后继，EOF重读不累积容量',
   /** 重试第二页仍需返回第三页游标，不能通过提前消费或删除旧token掩盖容量上限。 */ async () => {
     const f = listFixture()

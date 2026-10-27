@@ -106,6 +106,13 @@
 可以访问当前及之后配对的设备。列表支持显示/隐藏原文、复制和删除，刷新页面或重启 Gateway 后仍然可查看。
 删除后，已有 MCP 会话在下一次请求时失效，不需要重启。
 
+每张令牌卡片带一个「设备可见范围」控件：默认「全部设备」，切到「指定设备」时展开设备多选
+（候选与令牌列表来自同一次 `tokens_list`，按 `machine_id` 有界排序）。保存走
+`POST /admin/v1/resources/tokens_scope`，与 CLI 共用同一份注册表校验；空列表不提交，
+「全部设备」是一次显式提交并带二次确认。卡片上显示当前状态（`全部设备` / `N 台设备` 加具体名称），
+中英双语、320px 窄屏可用。范围只收窄：被排除的设备对使用该令牌的 MCP 客户端不可见
+（`machines_*`、`providers_*`、`runtime_*` 都受影响），管理页自身的可见性由管理员授权决定，不受影响。
+
 为支持后续查看，新 Token 的原文与认证摘要一起保存在 Gateway 的私有 `managed/mcp-callers.json`。
 CLI 新创建或轮换的 Token 同样可查看。旧的纯摘要记录不能还原，若已有 `mcp-client` 原文副本则使用该副本；
 否则可在列表中重新签发，旧 Token 立即失效。管理员密码仍只存摘要，不受此功能影响。
@@ -113,7 +120,8 @@ CLI 新创建或轮换的 Token 同样可查看。旧的纯摘要记录不能还
 「配对设备」面板列出全部配对码：未使用的码显示完整加入命令（可复制、可作废），
 已用/作废/失败的码保留状态与时间供对账。需要移除设备时，到设备详情执行「删除设备」。
 
-上述管理请求通过 `/admin/v1/resources/` 下的固定 POST 路由，复用现有管理员 Cookie 和 CSRF；
+资源路由包括 `tokens_list`、`tokens_create`、`tokens_rotate`、`tokens_delete`、`tokens_scope`、
+`pairing_codes_*`、`pairings_*` 与 `devices_delete`。上述管理请求通过 `/admin/v1/resources/` 下的固定 POST 路由，复用现有管理员 Cookie 和 CSRF；
 仅完整 Gateway 管理员可使用，不向 MCP 调用方开放 Token 管理或删除权限。
 
 ## 配对码
