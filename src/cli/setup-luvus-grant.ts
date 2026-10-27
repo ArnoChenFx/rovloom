@@ -3,7 +3,7 @@ import { boundedJson } from '../wire/index.js'
 import { checkedRemoteLuvusConfig } from '../runtime/remote-luvus.js'
 import type { LuvusProductionRemoteConfig } from '../runtime/remote-luvus.js'
 import type { ProductionProviderReference } from './production.js'
-import { SIMPLE_SETUP_ACTOR, setupReference, simpleSetupAuthorization } from './setup-policy.js'
+import { isSetupLuvusMethods, SIMPLE_SETUP_ACTOR, setupReference, simpleSetupAuthorization } from './setup-policy.js'
 
 /** 在受保护的 Gateway 配置装配时迁移内存副本；不重配设备、不改 token，不写回旧文件。 */
 export function migrateSetupLuvusGrant(entry: ProductionProviderReference): ProductionProviderReference {
@@ -41,10 +41,13 @@ export function migrateSetupLuvusGrant(entry: ProductionProviderReference): Prod
     luvus: target.session as 'default' | 'rovloom'
   })
   const grant = expected.policies.caller.grants[0]!
+  const raw = remote.raw_grant
   if (
     boundedJson(target) !== boundedJson(grant.target) ||
     remote.peer_policy_revision !== expected.policies.local.revision ||
-    boundedJson(remote.raw_grant ?? null) !== boundedJson({ principal_id: SIMPLE_SETUP_ACTOR, methods: grant.methods })
+    !raw ||
+    !isSetupLuvusMethods(raw.methods) ||
+    boundedJson(raw) !== boundedJson({ principal_id: SIMPLE_SETUP_ACTOR, methods: raw.methods })
   ) {
     return entry
   }
@@ -52,7 +55,7 @@ export function migrateSetupLuvusGrant(entry: ProductionProviderReference): Prod
     reference: entry.reference,
     value: {
       ...remote,
-      raw_grant: { caller_policy_revision: expected.policies.caller.revision, methods: grant.methods }
+      raw_grant: { caller_policy_revision: expected.policies.caller.revision, methods: [...raw.methods] }
     }
   }
 }

@@ -35,9 +35,12 @@ Luvus 没有 `window.*` 方法。窗口选择沿 Luvus 自己的 workspace、tab
 | 发现与选择 | `session.snapshot`、`workspace.list/get`、`tab.list/get`、`pane.list/get/current` | 优先保存 `workspace_id`、`tab_id`、`terminal_id`。`pane.get` 的参数名是 `pane`；`pane.list` 不接收 pane selector，`session.snapshot` 返回 `pane_id` |
 | 窗口管理 | `workspace.new/open/focus/rename/close`、`tab.new/focus/rename/close`、`pane.split/focus/rename/close` | 变更使用已发现的稳定 ID，不按标题或最近对象重选 |
 | 状态与输出 | `pane.status/read`、`agent.list/get/explain/read/sessions/wait` | 原样使用 `status`、`authority`、`state_source`、`session` |
+| 输出哨兵 | `wait.output` | 只读的字面子串等待，参数是 `pane`、`match` 和可选的秒数 `timeout_s` |
 | Agent 操作 | `agent.start/prompt/send/keys/resume` | `agent.start` 的 `pane` 与 `anchor` 互斥。`prompt`、`send`、`keys` 可绑定 `terminal_id`。`resume` 只用于显式选择已有 session |
 
 ## Pane 身份与存活范围
+
+所有已审核方法中的 `pane`（以及 `agent.start.anchor`）统一接受 `1`–`4294967295` 的十进制字符串，不接受数值类型、前导零或超出原生 `u32` 的值；超界 ID 在登记前拒绝。
 
 Luvus 0.14.3 的数字 `pane` 是进程级递增分配的 ID，不是布局中的第几个位置。分屏、交换或移动不会对同一个存活 pane 重新编号，因此同一原生实例中可以跨调用复用。原生进程重启恢复 pane 时会重新分配，不能把重启后的相同数字视为原终端。
 
@@ -54,6 +57,25 @@ Luvus 0.14.3 的数字 `pane` 是进程级递增分配的 ID，不是布局中�
 `workspace_id/tab_id` 随保存的拓扑对象恢复；`terminal_id` 仅在同一个 PTY 存活期间跨移动、客户端断开重连保持，PTY 重建就会变化。数字 workspace/tab 是位置坐标，会随拓扑变化，不能与数字 pane 的进程内 ID 混为一谈。原生字段一致性缺口跟踪在 [issue #291](https://github.com/ArnoChenFx/rovloom/issues/291)，不在 Rovloom 中改写原生正文。
 
 身份变更、原生重启或 pane 消失时重新发现，不自动选择当前 pane 或同名 Agent。依据为固定版本的 [ID 分配](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/ids.rs)、[pane 查询与选择器](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/app/dispatch/topology.rs)以及[重启恢复](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/app/mod.rs)。该范围不扩展为跨原生进程持久 ID 的保证。
+
+## 输出哨兵等待
+
+通过现有 `runtime_call` 调用 Luvus 原生 `wait.output`，仍使用发现得到的完整 target、binding revision 和 contract_ref。不是新增 MCP 工具，也不会向终端输入命令。
+
+```json
+{"method":"wait.output","params":{"pane":"2","match":"unique_marker_for_this_execution","timeout_s":35}}
+```
+
+- `pane` 为显式数字 pane ID 字符串；`match` 为 1–4096 UTF-8 字节、无 NUL 的字面子串，不是正则。Rovloom 在登记前拒绝错字段、错单位或越界参数。
+- `timeout_s` 是 0–3600 的秒数，可为小数；建议显式填写，缺省由原生按最多一小时等待。外层 `deadline` 仍是绝对 Unix 毫秒，且服从 Rovloom 十分钟及本机更短上限，不能靠省略 timeout 绕过。
+- 例如等待 35 秒时把 `deadline` 设为当前时间加 45–60 秒，`wait_ms:0` 取得 call_id 后查询同一调用；HTTP 短等结束不重提调用。它仍是一条阻塞 native RPC，会占执行槽，不是异步 job。
+- 原生先检查已有 recent 输出，旧标记可能立即命中。需要区分执行时使用每次不同的标记；匹配不证明标记来自本轮命令，更不证明 exit code。不会自动插入 shell wrapper。
+- 命中回包形如 `{"type":"wait","matched":true,"pane":"2"}`；未命中或 pane 关闭时可为 `{"type":"wait","matched":false}`。Rovloom 原样保留，`matched:false` 不是 Gateway 派发失败，也不代表命令已经停止。
+- 只读等待不需要打开终端输入开关，但双方 dispatch/read ACL、原生权限和 raw 授权仍须允许 `wait.output`。原生 schema 对此方法是 generic，`runtime_describe` 提供明确标记来源的 `parameter_help`，不伪造完整原生参数 schema。
+
+部署需要 Gateway 与 Connector 都支持此方法；已有 35 方法授权保持原范围，升级不会自动加入 `wait.output`。所有者须在 Gateway 当前 caller/local 策略、该 provider 的 `raw_grant.methods` 与 Connector 当前 caller/local 方法授权中明确加入它。新配对包含该只读方法；旧清单的配对重入与 caller 授权迁移保留原方法集合，不强制重配，也不扩大自定义子集。
+
+原生语义依据：[0.14.3 wait.output 接口](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/ipc/api.rs)与[已有输出检查和等待器](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/app/dispatch/agent_workflow.rs)。`pane.run` 的 stdout / exit code 派生执行能力继续在 [#292](https://github.com/ArnoChenFx/rovloom/issues/292) 跟踪，不包含在此等待接口中。
 
 ## 位置坐标
 
@@ -104,9 +126,9 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 - `schema_annotations`：原生 request/response 文档根的 `$comment`、`description` 原文，附 `document_uri` 与 JSON Pointer。根注释属于整个文档，不应当作当前方法独有的约束。
 - 安装 schema 只有通用参数时，`schema_status` 仍为 `generic_params_only`，不会补造原生 `params_schema`；无法准确投影的额外条件也保持缺失。执行校验始终使用完整原始 schema。
 
-例如 `agent.prompt` 的原生根注释明确说明：等待模式须先观察到新的 working/blocked 转换，再匹配 `until`；`agent.wait` 则只是当前状态匹配器。MCP 现在可直接读到这段原文。
+例如 `agent.prompt` 的原生根注释明确说明：等待模式须先观察到新的 working/blocked 转换，再匹配 `until`；`agent.wait` 则只是当前状态匹配器。快速回复或缺少正向状态证据时，前者可能一直未匹配，即使 Agent 实际已答完。MCP 可直接读到原生注释和下面的审核提示。
 
-`runtime_describe` 对 `agent.wait`、`agent.prompt`、`pane.run` 附带
+`runtime_describe` 对 `agent.wait`、`agent.prompt`、`pane.run`、`wait.output` 附带
 `parameter_help`：必填/可选字段、依赖规则和示例，来源标记为
 `rovloom_reviewed_subset`。它是 Rovloom 已审核子集的调用指南，原来的
 `schema_status` 仍表示安装版原生 schema 的覆盖情况。`runtime_discover` 不附带这些示例。
@@ -126,11 +148,41 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 
 - `pane.read` 接受 `pane` 和 `lines`。`agent.read` 接受 `target`、`lines` 和 `source`。`lines` 最大为 1000，只取末尾行。返回的 `text`、`content_revision`、`terminal_id` 来自 Luvus。
 - `agent.prompt` 的 `until` 和 `timeout_s` 必须与 `wait:true` 一起使用。
-- `submitted`、`queued`、`ready=true` 和 `observed_state` 只表示输入已提交或识别就绪，不表示 prompt 已被消费或模型已回复。需要继续读取真实状态和输出。
+- `submitted`、`queued` 和 `ready=true` 表示提交或识别就绪；`observed_state` 记录 prompt 等待中首次观察到的新 working/blocked 跃迁。这些都不证明 prompt 已被消费或模型已回复，需要继续读取真实状态和输出。
 - 界面应同时展示 `status` 和 `authority`/`state_source`。缺少正面状态证据时按 unknown 处理，不能把 idle、queued 或 TUI 文本当作完成。
 - 上游模型失败不会触发重发，也不会切换到收费模型。
 - 两轮对话应保持相同的完整 Target、选定的 pane 或别名、`terminal_id` 和已知的 Agent `session`。验证第二轮时，检查回复是否记得第一轮的随机内容，不能用终端回显代替。
 - Connector 的 `allow_terminal_execution` 默认关闭。此时文本 `agent.send` 和 `agent.prompt` 需要请求中显式带 `strict:true`，`agent.keys` 和自定义启动参数仍需要开启开关。该开关不隔离 Agent 自己的工具。详见 [终端执行](TERMINAL-EXECUTION.md)。
+
+### 推荐两段式：提交后独立观察
+
+1. 从 `agent.get` / `pane.get` 确认选定 Agent、pane、`terminal_id` 和 session，并读取一次输出作为基线。
+2. 调用 `agent.prompt`，省略 `wait`、`until` 和 `timeout_s`，带上已观察的 `terminal_id` 与 `strict:true`。保留返回的提交证据和同一 `call_id`，不要因观察超时重发 prompt。
+3. 用短调用轮询 `agent.read` / `pane.status`，核对终端与 session 仍相同。输出或 `content_revision` 变化只证明活动；状态为 `idle` 且 `state_source:"no_positive_state_evidence"` 时按未知处理。读到与本轮请求相关的真实 Agent 回复后再向用户交付结果，不能用终端输入回显替代。
+4. 如果任务约定了可验证的输出标记，可调用上文的 `wait.output`，随后读取并核对内容。已有 recent 输出或本次 prompt 的输入回显都可能命中；不要把原样写在 prompt 中的标记当作回复完成证据。没有约定可验证标记时，继续有界轮询输出，不制造通用完成保证。
+
+无等待提交示例（使用实际观察到的选择器）：
+
+```json
+{"method":"agent.prompt","params":{"target":"selected-agent","terminal_id":"observed_terminal_id","text":"13*7=?","strict":true}}
+{"method":"agent.read","params":{"target":"selected-agent","lines":100,"source":"recent"}}
+{"method":"pane.status","params":{"pane":"2"}}
+```
+
+外层 `wait_ms:0` 只结束 HTTP 短等，仍须查询原 `call_id` 得到提交回包。`agent.wait` 也可以立即匹配旧 idle，不能替代上述回复核对。观察期限到了且证据不足时报告“未确认”，允许稍后继续读取，不推断 Agent 没有回复或再次提交。
+
+### 如何判读 prompt 等待超时
+
+下面只解释原生字段组合，不新增或改写 `native_response.evidence`：
+
+| 原生结果 | 可确认的事实 |
+|---|---|
+| `evidence:"timeout"`、`observed_state:null` | 等待期间未观察到所需的新 working/blocked 跃迁；不能推断没有回复 |
+| `evidence:"timeout"`、`observed_state:"working"` 或 `"blocked"` | 已观察到跃迁，但截止前等待未匹配 `until`；不能推断执行失败 |
+| `evidence:"state_transition"`、`matched:true` | 原生状态等待已匹配；仍需读取并核对本轮回复 |
+| 旧响应缺少 `observed_state` | 信息不足，不能当成显式 `null` 分类 |
+
+例如 `status:"idle", matched:false, evidence:"timeout", observed_state:null` 与 Agent 已经输出答案并不矛盾。该回包仍是正常收到的原生响应，Rovloom 调用可为 `responded`；它不同于 Gateway 派发失败或未获得回包。Rovloom 不凭当前 idle 改成 `matched:true`。原生 evidence 的改进跟踪在 [#301](https://github.com/ArnoChenFx/rovloom/issues/301)。
 
 ## 验证
 

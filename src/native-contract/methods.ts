@@ -8,7 +8,7 @@ const write = (method: string, scope: string): NativeMethodContract =>
 
 /** UI 操作清单中的普通读方法，按 scope 分组（窗口、pane 与 Agent）。 */
 export const LUVUS_OPERATION_READ = Object.freeze({
-  read: ['session.snapshot'],
+  read: ['session.snapshot', 'wait.output'],
   workspace: [
     'workspace.list',
     'workspace.get',

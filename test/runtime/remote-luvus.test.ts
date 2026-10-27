@@ -639,6 +639,29 @@ test('旧单码配对 raw grant 只在完整程序形状下迁移，配置原文
   }
 })
 
+test('新增输出等待不扩大已发布三十五方法 raw grant，旧 caller 策略迁移仍生效', () => {
+  const authorization = simpleSetupAuthorization('remote_machine', ['luvus'], { luvus: 'default' })
+  const methods = authorization.policies.caller.grants[0]!.methods.filter((method) => method !== 'wait.output')
+  assert.equal(methods.length, 35)
+  const configured = input({ principal_id: authorization.principal_id, methods })
+  const name = setupReference('synthetic_old_pairing')
+  configured.binding.config_ref = name
+  configured.target = { ...authorization.policies.caller.grants[0]!.target } as typeof configured.target
+  configured.binding.provider_id = configured.target.provider_id
+  configured.peer_policy_revision = authorization.policies.local.revision
+  const entry = { reference: name, value: configured }
+  const migrated = migrateSetupLuvusGrant(entry)
+  assert.notEqual(migrated, entry)
+  const checked = checkedRemoteLuvusConfig(name, migrated.value)
+  assert.deepEqual(checked.raw_grant, { caller_policy_revision: authorization.policies.caller.revision, methods })
+  assert(!checked.raw_grant!.methods.includes('wait.output'))
+  const custom = {
+    ...entry,
+    value: { ...configured, raw_grant: { ...configured.raw_grant!, methods: methods.slice(1) } }
+  }
+  assert.equal(migrateSetupLuvusGrant(custom), custom)
+})
+
 test(
   'remote 显式 raw grant 仅匹配 principal 与精确方法，截止仍为原 attempt deadline',
   /** 用真实 raw gate 证明范围和固定截止，而非只断言配置字段。 */ async () => {
