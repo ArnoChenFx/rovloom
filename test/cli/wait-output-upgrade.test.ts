@@ -73,8 +73,24 @@ test('同一个 token 使用全方法，旧方法限制失效且设备范围保�
     assert.deepEqual(source.identities.principal({ principal_id: 'test' })!.policy.grants[0]!.methods, ['*'])
     registry.callers[0]!.principal.policy = { revision: 'old_per_token_policy', grants: [] }
     writeSetupFile(path, JSON.stringify(registry), true)
-    assert.deepEqual(source.identities.principal({ principal_id: 'test' })!.policy.grants[0]!.methods, ['*'])
-    assert.equal(source.identities.principal({ principal_id: 'test' })!.policy.revision, 'setup_caller_simple')
+    assert.deepEqual(source.identities.principal({ principal_id: 'test' })!.policy.grants, [])
+    assert.equal(source.identities.principal({ principal_id: 'test' })!.policy.revision, 'old_per_token_policy')
+    // 绑定丢失不能借 local 的其它设备；普通 token 仍只使用自己的目标和动作边界。
+    delete (registry as Partial<typeof registry>).gateway_policy
+    registry.local_policy.grants.push({
+      ...registry.local_policy.grants[0]!,
+      target: { ...registry.local_policy.grants[0]!.target, machine_id: 'device_y' }
+    })
+    registry.callers[0]!.principal.policy = {
+      revision: 'setup_caller_simple',
+      grants: [{ ...authorization.policies.caller.grants[0]!, methods: ['pane.list'], actions: ['read'] }]
+    }
+    writeSetupFile(path, JSON.stringify(registry), true)
+    const restricted = source.identities.principal({ principal_id: 'test' })!.policy
+    assert.equal(restricted.grants.length, 1)
+    assert.equal(restricted.grants[0]!.target.machine_id, 'legacy_machine')
+    assert.deepEqual(restricted.grants[0]!.actions, ['read'])
+    assert.deepEqual(source.identities.principal({ principal_id: 'gateway_test' })!.policy.grants, [])
   } finally {
     source.close()
     rmSync(root, { recursive: true, force: true })
@@ -114,4 +130,10 @@ test('Connector 的旧逐方法策略不再限制调用，原安装与目标不�
   assert.deepEqual(allExposedMethods(narrow).grants[0]!.methods, ['*'])
   const custom = { ...authorization.policies.caller, revision: 'custom_policy' }
   assert.deepEqual(allExposedMethods(custom).grants[0]!.methods, ['*'])
+  const readonly = structuredClone(entry)
+  readonly.value.policies.caller.grants[0]!.actions = ['read']
+  readonly.value.policies.local.grants[0]!.actions = ['read']
+  const runtime = allExposedConnectorMethods(readonly).value as typeof entry.value
+  assert.deepEqual(runtime.policies.caller.grants[0]!.actions, ['read'])
+  assert.deepEqual(runtime.policies.local.grants[0]!.actions, ['read'])
 })

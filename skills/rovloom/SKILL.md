@@ -121,7 +121,7 @@ runtime_call {
 
 **6. Query and read the result**
 
-For a Luvus output sentinel, discover `wait.output` on the exact target, describe it, and call it with `{ "pane": "<observed pane ID>", "match": "<literal marker>", "timeout_s": 35 }`. A valid MCP token can use every exposed method on its visible devices; do not edit caller/local/raw method lists. New pairing stores no method snapshot and old lists are ignored. Allow RPC overhead before the call deadline and poll the original call. Historical output and prompt echo can match, so verify the actual reply. If discovery omits the method, the current provider does not expose it; continue reading state/output.
+For a Luvus output sentinel, discover `wait.output` on the exact target, describe it, and call it with `{ "pane": "<observed pane ID>", "match": "<literal marker>", "timeout_s": 35 }`. Approved targets and read/dispatch/cancel actions apply uniformly to every exposed method; read-only access does not grant dispatch. Do not edit caller/local/raw method lists. New pairing stores no method snapshot and old lists are ignored. Allow RPC overhead before the call deadline and poll the original call. Historical output and prompt echo can match, so verify the actual reply. If discovery omits the method, the current provider does not expose it; continue reading state/output.
 
 ```
 runtime_call_get { "call_id": "<call_id from step 5>", "wait_ms": 2000 }
@@ -143,7 +143,7 @@ These are not style advice. Violating them loses data or repeats side effects.
 2. **A `wait_ms` timeout is not a failure.** It only means this short wait ended; `call_id` is still valid. Keep querying the original call with `runtime_call_get`.
 3. **`contract_ref` and `binding_revision` do not transfer across providers.** A revision mismatch returns `binding_revision_conflict`; a stale contract on a new call returns `contract_unavailable` before registration. Refresh `providers_get` and `runtime_discover/describe` after upgrades or either mismatch. An existing request key still refers to its original call; changing its contract is a different intent and returns `conflict`. Never resend an existing unknown call with a fresh key just to use a newer contract.
 4. **Never guess a session name.** `providers_list` returns neither `profile` nor `session`; only `targets` on `machines_*` has them. Without an authorized tuple, do not construct a target.
-5. **Use the current provider contract.** A valid token can call all methods exposed on its visible devices. Device scope, provider availability, native parameters and device operating settings still apply. Do not invent an unexposed method or resend an unknown call.
+5. **Use the current provider contract.** Method names do not form a token ACL. Approved targets and read/dispatch/cancel actions remain in force; read-only access never becomes dispatch access. Device scope, provider availability, native parameters and device operating settings still apply. Missing Gateway caller binding fails closed. Do not invent an unexposed method or resend an unknown call.
 6. **Result handles expire.** A `runtime_result_read` cursor is bound to the caller, result, page size and deadline; paging and retries never extend it. After expiry, call `runtime_call_get` again for a fresh handle (content still obeys the original deadline).
 7. **Do not manage devices over MCP.** You also cannot supply a principal, admin, `discard_response`, or a native `id` or `auth` through parameters; the schema rejects them.
 8. **Terminal input is off by default.** A device's `allow_terminal_execution` defaults to `false`. With it off, `agent.prompt` / `agent.send` must carry an explicit `strict: true`, and `agent.keys` plus custom launch arguments are refused outright. The device owner configures that switch locally; you cannot turn it on remotely.
@@ -155,7 +155,7 @@ A Gateway refusal returns `isError: true` with `gateway_error: { code }`.
 | Code | Meaning | Action |
 |---|---|---|
 | `unauthenticated` | Bearer missing, invalid or expired | Ask the user to renew or reissue; do not retry the same token |
-| `forbidden` | Device scope, native permissions or a device operating setting rejects the request; MCP has no per-method token ACL | Report the refusal and check the device/provider state; do not edit method lists or hunt for another target |
+| `forbidden` | Approved target/action boundaries, device scope, native permissions or a device operating setting rejects the request; MCP has no per-method token ACL | Report the refusal and check the device/provider state; do not edit method lists or hunt for another target |
 | `not_found` | The target tuple is outside your visible devices, the method is not exposed, or the object is gone | Re-run `machines_list` and `runtime_discover`; do not fuzzy-match |
 | `binding_revision_conflict` | The revision changed | Re-run `providers_get` and `runtime_discover` |
 | `unavailable` / `backend_unavailable` | Device offline or backend unavailable | Check `link` from `machines_get`; do not hammer it |

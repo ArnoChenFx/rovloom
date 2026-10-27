@@ -68,7 +68,7 @@ test('tokens issued before and after pairing follow caller grants, retain their 
     assert.deepEqual(f.principal().policy, expected)
     assert.notDeepEqual(f.principal().policy, f.source.localPolicies())
     const after = createGatewayCaller(f.read(), 'after_pairing', Date.now() - 1000)
-    assert.deepEqual(after.registry.callers.at(-1)!.principal.policy, expected)
+    assert.deepEqual(after.registry.callers.at(-1)!.principal.policy, f.authorization.policies.caller)
     const cloned = createCaller(after.registry, 'cloned', 'after_pairing', Date.now() - 1000)
     f.write(revokeCaller(cloned.registry, f.authorization.principal_id))
     for (const id of ['before_pairing', 'after_pairing', 'cloned']) {
@@ -113,14 +113,14 @@ test('legacy simple-pairing registries recover the authoritative caller policy w
   }
 })
 
-test('有效 token 使用已配对设备范围，原配对 token 吊销不移除其它 token 的方法能力', () => {
+test('缺少 Gateway caller 绑定且配对主体已删除时失败关闭，不借用本机授权', () => {
   const f = fixture()
   try {
     f.pair()
     const unbound = revokeCaller(f.read(), f.authorization.principal_id)
     delete unbound.gateway_policy
     f.write(unbound)
-    assert.deepEqual(f.principal().policy.grants, f.authorization.policies.caller.grants)
+    assert.deepEqual(f.principal().policy, { revision: 'rovloom_unpaired', grants: [] })
     for (const gateway_policy of [
       null,
       {},
@@ -172,8 +172,9 @@ test('加入新设备追加目标，旧方法快照不再构成 token 限制', (
     const wider = simpleSetupAuthorization('second_machine', ['herdr'])
     wider.policies.local.grants[0]!.methods = [...wider.policies.local.grants[0]!.methods, 'title.remove']
     wider.policies.caller.grants[0]!.methods = [...wider.policies.caller.grants[0]!.methods, 'title.remove']
-    mergeSetupCallers(f.path, resource, wider)
-    assert.deepEqual(f.source.localPolicies().grants[1]!.methods, ['*'])
+    const original = readFileSync(f.path)
+    assert.throws(() => mergeSetupCallers(f.path, resource, wider))
+    assert.deepEqual(readFileSync(f.path), original)
   } finally {
     f.close()
   }

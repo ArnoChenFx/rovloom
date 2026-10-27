@@ -461,6 +461,9 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
             if (!provider) {
               fail('provider_binding_unavailable')
             }
+            if (provider.catalog_methods && !provider.catalog_methods.includes(attempt.method)) {
+              throw new GatewayError('forbidden')
+            }
             const authority = provider.authority(attempt, binding)
             if (closing) {
               throw new GatewayError('runtime_closed')
@@ -836,6 +839,11 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
           /** 首次登记在授权事务内比对当前批准契约；旧 key 仍返回原意图，不受新契约影响。 */
           (request) => {
             const native = nativeProviders.get(providerKey)
+            // 目录与新调用共用 provider 的实际暴露面；原生广告不能扩大后端实现范围。
+            const method = request.method
+            if (native?.catalog_methods && (typeof method !== 'string' || !native.catalog_methods.includes(method))) {
+              throw new GatewayError('forbidden')
+            }
             const expected = configured.contract_ref ?? (native ? contractRef(native.contract.wire.source) : undefined)
             if (
               (expected !== undefined && requestedContract !== expected) ||

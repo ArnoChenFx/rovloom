@@ -99,6 +99,44 @@ test('Dashboard tokens persist across reopen, authenticate, follow new devices a
   }
 })
 
+test('Dashboard 范围和 token 创建写盘不改变已批准的只读策略', () => {
+  const o = owned()
+  try {
+    o.execute('tokens_create', { principal: 'reader' })
+    const device = o.f.store.register('readonly-device')
+    const path = runtimeReference(o.root, 'mcp-callers')
+    const original = structuredClone(parseRegistry(readRuntimeJson(path, REGISTRY_MAX_BYTES)))
+    const policy = {
+      revision: 'reader_policy',
+      grants: [
+        {
+          target: {
+            machine_id: device.machine_id,
+            provider_id: 'luvus',
+            profile: 'session' as const,
+            session: 'default'
+          },
+          methods: ['pane.list'],
+          actions: ['read' as const]
+        }
+      ]
+    }
+    original.gateway_policy = structuredClone(policy)
+    original.local_policy = { ...structuredClone(policy), revision: 'local_policy' }
+    original.callers.find((entry) => entry.principal.id === 'reader')!.principal.policy = structuredClone(policy)
+    writeSetupFile(path, JSON.stringify(original), true)
+    o.execute('tokens_scope', { principal: 'reader', machine_ids: [device.machine_id] })
+    o.execute('tokens_create', { principal: 'new_reader' })
+    const stored = readRuntimeJson(path, REGISTRY_MAX_BYTES) as typeof original
+    assert.deepEqual(stored.gateway_policy, original.gateway_policy)
+    assert.deepEqual(stored.local_policy, original.local_policy)
+    assert.deepEqual(stored.callers.find((entry) => entry.principal.id === 'reader')!.principal.policy, policy)
+    assert.deepEqual(stored.callers.find((entry) => entry.principal.id === 'new_reader')!.principal.policy, policy)
+  } finally {
+    o.close()
+  }
+})
+
 test('Dashboard device scope is strictly validated, authorized and applied to the same registry', () => {
   const o = owned()
   try {

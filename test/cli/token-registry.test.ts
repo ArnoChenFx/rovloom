@@ -9,7 +9,7 @@ import { openCallerSource } from '../../src/cli/caller-source.js'
 import { configDocument, configTemplate } from '../../src/cli/config.js'
 import type { GatewayConfig } from '../../src/cli/config.js'
 import { handleTokenCommand } from '../../src/cli/token-command.js'
-import { LIMITS } from '../../src/wire/index.js'
+import { LIMITS, providerScopeAllowed } from '../../src/wire/index.js'
 import {
   createCaller,
   digestToken,
@@ -58,6 +58,61 @@ test('create clones policy from an existing principal and never repeats a princi
   assert.throws(() => createCaller(base, 'worker', 'owner', 2_000, 0), /Rovloom command failed/)
   assert.throws(() => createCaller(base, 'worker', 'owner', 2_000, 366), /Rovloom command failed/)
   parseRegistry(JSON.parse(JSON.stringify(made.registry)))
+})
+
+test('scope/create CLI 写盘保留旧方法与只读 actions，运行时展开不产生写权限', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'rovloom-readonly-token-'))
+  const state = join(root, 'gateway')
+  mkdirSync(join(state, 'managed'), { recursive: true, mode: 0o700 })
+  const configPath = join(root, 'gateway.json')
+  const callers = join(state, 'managed', 'mcp-callers.json')
+  const config = { ...configTemplate('gateway'), state_dir: state } as GatewayConfig
+  writeFileSync(configPath, JSON.stringify(configDocument(config)), { mode: 0o600 })
+  const base = registry('a'.repeat(43), Date.now() - 1000)
+  const target = { machine_id: 'device_x', provider_id: 'luvus', profile: 'session' as const, session: 'default' }
+  base.callers[0]!.principal.policy = {
+    revision: 'caller1',
+    grants: [{ target, methods: ['pane.list'], actions: ['read'] }]
+  }
+  base.gateway_policy = structuredClone(base.callers[0]!.principal.policy)
+  base.local_policy = { ...structuredClone(base.gateway_policy), revision: 'local1' }
+  writeFileSync(callers, JSON.stringify(base), { mode: 0o600 })
+  try {
+    for (const args of [
+      ['scope', '--principal', 'owner', '--devices', 'device_x'],
+      ['create', '--principal', 'clone', '--like', 'owner']
+    ]) {
+      assert.equal(
+        await handleTokenCommand(['token', ...args, '--config', configPath], {
+          stdout: sink().stream,
+          stderr: sink().stream
+        }),
+        0
+      )
+      const stored = JSON.parse(readFileSync(callers, 'utf8')) as CallerRegistry
+      assert.deepEqual(stored.gateway_policy, base.gateway_policy)
+      assert.deepEqual(stored.local_policy, base.local_policy)
+      for (const caller of stored.callers) {
+        assert.deepEqual(caller.principal.policy, base.callers[0]!.principal.policy)
+      }
+    }
+    const source = openCallerSource(callers, resource)
+    try {
+      const effective = source.identities.principal({ principal_id: 'owner' })!
+      assert.deepEqual(effective.policy.grants[0]!.methods, ['*'])
+      assert.deepEqual(effective.policy.grants[0]!.actions, ['read'])
+      assert.deepEqual(source.localPolicies().grants[0]!.actions, ['read'])
+      const policies = { caller: effective.policy, local: source.localPolicies() }
+      const binding = { target } as Parameters<typeof providerScopeAllowed>[0]
+      assert(providerScopeAllowed(binding, 'workspace.rename', 'read', policies))
+      assert(!providerScopeAllowed(binding, 'workspace.rename', 'dispatch', policies))
+      assert(!providerScopeAllowed(binding, 'workspace.rename', 'cancel', policies))
+    } finally {
+      source.close()
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('discard permission is explicit, strictly parsed and preserved by token operations', () => {

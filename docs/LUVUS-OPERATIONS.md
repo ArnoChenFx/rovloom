@@ -12,11 +12,13 @@
 
 ### MCP token 与设备范围
 
-有效 MCP token 可以发现、描述和调用其可见设备上 provider 已暴露的全部方法，不再设置逐 token、caller/local 或配对时的逐方法白名单。设备范围由 token 的 `device_scope` 控制；吊销、过期、设备撤销和 provider 启用状态继续生效。
+MCP 不再按方法名分配 token 权限：在已批准的目标与 `dispatch/read/cancel` 动作范围内，所有 provider 已暴露的方法一视同仁。旧方法列表只在运行时展开，不修改原目标和动作；例如仅 `read` 的策略不会获得 `dispatch`。`device_scope` 继续收窄设备范围；吊销、过期、设备撤销和 provider 启用状态继续生效。完整 Gateway token 缺少权威 `gateway_policy` 时失败关闭，不能借用本机策略；旧普通 token 保留自己的目标和动作边界。
 
-新配对使用全方法标志，不保存当时的 35/36 项方法快照，也不再生成持久化 `raw_grant`。旧配置中的方法列表与 raw grant 仅兼容读取，不再限制 MCP 方法；无需按新增方法迁移授权。原生 raw 校验所需的许可由可信运行时按实际 caller、方法、来源、连接和固定 deadline 逐次生成，不是用户需要维护的权限列表。
+新配对使用全方法标志，不保存当时的 35/36 项方法快照，也不再生成持久化 `raw_grant`。旧配置中的方法列表与 raw grant 仅兼容读取，不再限制 MCP 方法；无需按新增方法迁移授权。注册表解析以及 token 创建、续期、修改范围等写操作保留原策略，不把运行时的展开结果写盘。
 
-升级并重启 Gateway 与 Connector 后，原 token 和配对继续使用，不需要手改多份文件。provider 目录只暴露当前后端实际实现的契约；设备运行开关与原生参数校验仍决定方法/参数是否可用。
+远端 raw 授权由可信 Gateway 在通过身份、目标和动作检查后逐次提供，取代旧配对清单这道显式 gate。它不证明 Gateway 拥有远端 OS 进程的 Owner 身份；authority 先复核实际认证 epoch、来源、契约、已实现方法与参数，再生成只绑定本次实际 caller、方法、来源、连接和固定 deadline 的原生许可。目录和调用准入使用同一 provider 暴露面，静态分类表或原生广告不能额外开放接口。
+
+升级并重启 Gateway 与 Connector 后，原 token 和配对继续使用，不需要手改多份文件。provider 目录只暴露当前后端实际实现的契约；设备运行开关与原生参数校验仍决定方法/参数是否可用。新配对的全方法标志无法由 0.6.9 解释，回滚前须恢复升级前两端完整状态，见[运维指南](OPERATIONS.md#升级与回滚)。
 
 Gateway 在编码阶段拒绝请求时，尚未写入设备通道；调用账本记录
 `not_dispatched` 和 Gateway 的 `dispatch_refused` 审计（含固定错误码），释放该次调用的

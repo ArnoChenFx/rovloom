@@ -39,7 +39,7 @@ export type LuvusProductionRemoteConfig = Readonly<{
     schema_bundle: string
   }>
   peer_policy_revision: string
-  // raw 显式绑定主体或 caller 策略修订；两者互斥，本次原 Wire 仍复验双端策略、完整来源和截止。
+  // 兼容旧配置的只读字段，不再充当授权来源；原 Wire 仍逐次复验动作、来源和截止。
   raw_grant?: Readonly<
     (
       | { principal_id: string; caller_policy_revision?: never }
@@ -327,8 +327,11 @@ export async function createPinnedRemoteLuvus(config: LuvusProductionRemoteConfi
             authority: createLuvusOperationsAuthority(
               record,
               sourceFor,
-              /** MCP 认证及设备范围已由 Gateway 复核；原 authority 仍逐次核对已暴露方法和真实来源。 */
-              () => true
+              /** 已通过来源/契约/参数复核后，按当前 epoch 的暴露面提供逐次 raw 许可；不是重建本机 Owner。 */
+              (attempt) => {
+                assertEpoch(epoch)
+                return LUVUS_OPERATION_METHODS.includes(attempt.method)
+              }
             ),
             /** 旧 live 对象即使仍被原句柄引用，也只能检查其原 epoch。 */
             ready() {

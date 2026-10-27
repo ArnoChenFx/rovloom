@@ -40,6 +40,8 @@ import { RuntimeGatewayService } from '../../src/mcp/runtime-service.js'
 import { httpFixture } from '../mcp/http-fixture.js'
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import { SERVICE_ERROR_CODES, type ReplyData, type ServiceErrorCode } from '../../src/mcp/types.js'
+import { LUVUS_TABLE_METHODS } from '../../src/native-contract/methods.js'
+import { LUVUS_OPERATION_METHODS } from '../../src/runtime/luvus-operations.js'
 
 /** Gateway 只建立自身状态目录；没有 binary、HOME、native root 或 socket 输入。 */
 async function fixture(
@@ -446,6 +448,83 @@ test(
     }
   }
 )
+
+test('直接 MCP 调用不能绕过 provider 暴露面，原生广告不额外开放静态表方法', { timeout: 45000 }, async () => {
+  const f = await fixture()
+  f.caller.grants[0]!.methods = ['*']
+  f.local.grants[0]!.methods = ['*']
+  const service = new RuntimeGatewayService({
+    runtime: f.runtime,
+    identities: {
+      principal: () => ({ id: 'remote_reader', policy: f.caller }),
+      administrator: () => null
+    },
+    localPolicies: () => f.local
+  })
+  const http = httpFixture(service, { authentication: { authenticate: () => ({ principal_id: 'remote_reader' }) } })
+  try {
+    const peer = await f.peer()
+    peer.snapshot()
+    await until(() => f.runtime.transport.status().devices[0]?.ready === true)
+    await http.client.connect(http.transport, { timeout: 5000 })
+    const reader = new DatabaseSync(f.databasePath, { readOnly: true })
+    try {
+      const rows = reader.prepare('SELECT count(*) AS n FROM calls').get()!.n
+      const outside = LUVUS_TABLE_METHODS.filter((method) => !LUVUS_OPERATION_METHODS.includes(method))
+      assert(outside.includes('task.delete'))
+      assert(outside.includes('terminal.backend.close'))
+      for (const method of [...outside, 'automation.run', 'automation.delete', 'module.load', 'module.unload']) {
+        const result = await http.client.callTool(
+          {
+            name: 'runtime_call',
+            arguments: {
+              target: f.target,
+              expected_binding_revision: 1,
+              contract_ref: contractRef(f.snapshot.source),
+              native_request: { method, params: {} },
+              deadline: f.state.store.clock() + 30_000,
+              client_request_key: 'unexposed_' + method.replaceAll('.', '_')
+            }
+          },
+          CallToolResultSchema
+        )
+        assert.equal(result.isError, true, JSON.stringify({ method, response: result.structuredContent }))
+        assert.deepEqual(result.structuredContent, { gateway_error: { code: 'forbidden' } }, method)
+      }
+      assert.equal(reader.prepare('SELECT count(*) AS n FROM calls').get()!.n, rows)
+      assert.equal(f.writes(), 0)
+      assert.equal(peer.socket.readyState, WebSocket.OPEN)
+      assert.equal(
+        f.runtime.transport.currentConnection(f.target.machine_id)!.connection_epoch,
+        peer.connection.connection_epoch
+      )
+      // 拒绝不消耗请求 key；同一连接仍可正常调用暴露方法。
+      const healthy = await http.client.callTool(
+        {
+          name: 'runtime_call',
+          arguments: {
+            target: f.target,
+            expected_binding_revision: 1,
+            contract_ref: contractRef(f.snapshot.source),
+            native_request: { method: 'pane.list', params: {} },
+            deadline: f.state.store.clock() + 30_000,
+            client_request_key: 'unexposed_task_delete',
+            wait_ms: 2000
+          }
+        },
+        CallToolResultSchema
+      )
+      assert(!healthy.isError, JSON.stringify(healthy.structuredContent))
+      assert.equal((healthy.structuredContent as { data: ReplyData['runtime_call'] }).data.state, 'responded')
+      assert.equal(f.writes(), 1)
+    } finally {
+      reader.close()
+    }
+  } finally {
+    await http.client.close()
+    await f.close()
+  }
+})
 
 test('无静态 raw 清单也能派发，mixed 通道保留并发 Herdr 调用', { timeout: 45000 }, async () => {
   const f = await fixture({ mixed: true, isolated: true })

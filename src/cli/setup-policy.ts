@@ -13,14 +13,13 @@ export type SetupPlanFacts = Readonly<{
 export const SIMPLE_SETUP_ACTOR = 'operator_simple_pairing'
 export const SIMPLE_SETUP_LINEAGE = 'simple'
 
-/** MCP token 按设备范围授权；内部 Wire 使用全方法标志，不持久化配对时的方法快照。 */
+/** 仅在运行时展开方法维度，保留原目标/actions；返回值不得用于注册表写盘。 */
 export function allExposedMethods(policy: ProviderPolicy): ProviderPolicy {
   return {
     ...policy,
     grants: policy.grants.map((grant) => ({
       ...grant,
-      methods: ['*'],
-      actions: ['dispatch', 'read', 'cancel']
+      methods: ['*']
     }))
   }
 }

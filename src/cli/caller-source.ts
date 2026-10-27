@@ -8,6 +8,7 @@ import { readRuntimeFile } from './runtime-files.js'
 import { parseNativeJson } from '../native-contract/json.js'
 import { gatewayCallerPolicy, parseRegistry, REGISTRY_MAX_BYTES } from './token-registry.js'
 import type { CallerEntry, CallerRegistry } from './token-registry.js'
+import { allExposedMethods } from './setup-policy.js'
 
 // 固定资源的只读 adapter；文件缺失、损坏或时钟回拨使该次读取失败（拒绝），文件恢复后下一次读取自动恢复。
 export function openCallerSource(
@@ -75,7 +76,9 @@ export function openCallerSource(
         const principal = found
           ? structuredClone({
               ...found.principal,
-              policy: gatewayCallerPolicy(registry),
+              policy: allExposedMethods(
+                found.scope === 'gateway' ? gatewayCallerPolicy(registry) : found.principal.policy
+              ),
               // 范围随主体以纯 JSON 值携带；每次请求重新读取，因此 rovloom token scope 热生效。
               ...(found.device_scope ? { device_scope: found.device_scope } : {})
             })
@@ -137,7 +140,7 @@ export function openCallerSource(
     identities,
     authentication,
     localPolicies: /* 当前本机策略仍由同一受保护源持有，不从caller请求复制。 */ () => {
-      return structuredClone(current().registry.local_policy)
+      return allExposedMethods(structuredClone(current().registry.local_policy))
     },
     close: /* 关闭只撤销本轮读取能力，不删除外部身份或修改既有凭据。 */ () => {
       closed = true

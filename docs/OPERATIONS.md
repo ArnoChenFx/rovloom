@@ -15,6 +15,12 @@
 
 > 加入更多设备：Gateway 保持运行，在管理页生成新配对码（或 `rovloom gateway --issue-code`），新机器执行显示的加入命令（见[快速开始](QUICK-START-zh.md)）。现有 MCP Bearer 自动覆盖新设备；用 `token create --like` 克隆出的令牌需重新克隆。
 
+### 升级与回滚
+
+Gateway 与 Connector 一同升级。升级前停止两端进程，离线备份两端完整 `data.directory` 与配置，保留私有文件权限；脱敏数据库快照不能代替包含配对及 token 的完整备份。
+
+移除方法清单后，新配对会保存 `methods:["*"]`。0.6.9 把 `*` 当普通方法名，直接用旧二进制读取这种状态会拒绝读与派发。回滚时须停止两端并恢复同一升级前备份及对应二进制；仅替换镜像不足以回滚。这也会撤去备份之后的配对、token 和调用状态。已有旧策略的范围/创建 token 操作不会自动写入 `*` 或增加 `actions`，但不能据此假定整个当前状态都兼容旧版本。
+
 ## 2. 安装与升级
 
 Luvus raw 授权与 Gateway readiness 的修复可先只升级 Gateway，沿用现有 Connector、
