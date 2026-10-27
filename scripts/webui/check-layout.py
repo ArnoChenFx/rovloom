@@ -86,21 +86,23 @@ def main():
                 language_control, theme_control = controls(page)
                 language_control.choose(language)
                 theme_control.choose(theme)
-                # 侧栏版本号与导航、网关状态同一块内容区居中，不能偏向任何一侧。
-                sidebar = page.evaluate('''/* 同帧比较侧栏三块内容的水平中心与文本对齐。 */ () => {
-                    const center = selector => {
-                        const box = document.querySelector(selector).getBoundingClientRect()
-                        return {left: box.left, right: box.right, middle: (box.left + box.right) / 2}
-                    }
+                # 侧栏版本号与导航同一条中心线；量的是文字本身而不是元素盒子，
+                # 元素盒子已居中但文字靠左（旧实现）必须被测出来。
+                sidebar = page.evaluate('''/* 同帧比较版本号文字的实测中心与导航内容区中心。 */ () => {
+                    const version = document.querySelector('.sidebar-version')
+                    const range = document.createRange()
+                    range.selectNodeContents(version)
+                    const text = range.getBoundingClientRect()
+                    const nav = document.querySelector('.sidebar-nav').getBoundingClientRect()
+                    const status = document.querySelector('.sidebar-status').getBoundingClientRect()
                     return {
-                        nav: center('.sidebar-nav'), status: center('.sidebar-status'),
-                        version: center('.sidebar-version'),
-                        align: getComputedStyle(document.querySelector('.sidebar-version')).textAlign
+                        text: (text.left + text.right) / 2,
+                        nav: (nav.left + nav.right) / 2,
+                        status: (status.left + status.right) / 2
                     }
                 }''')
-                assert abs(sidebar['version']['middle'] - sidebar['nav']['middle']) <= 1
-                assert abs(sidebar['version']['middle'] - sidebar['status']['middle']) <= 1
-                assert sidebar['align'] == 'center'
+                assert abs(sidebar['text'] - sidebar['nav']) <= 1, sidebar
+                assert abs(sidebar['text'] - sidebar['status']) <= 1, sidebar
                 # 概览页检查标题在网关卡之上；列对齐与行高属于设备页。
                 heading = bounds(page, '.page-heading')
                 gateway = bounds(page, '.gateway')
