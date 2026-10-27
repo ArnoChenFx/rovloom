@@ -86,6 +86,7 @@
 ### 错误
 
 - 网关拒绝返回 `isError: true` 与 `gateway_error: {code}`。`code` 取下列之一：`backend_unavailable`、`invalid_arguments`、`native_request_invalid`、`internal_error`、`unauthenticated`、`forbidden`、`unavailable`、`not_found`、`conflict`、`invalid_cursor`、`binding_revision_conflict`、`contract_unavailable`、`unsupported`、`confirmation_required`、`storage_exhausted`、`storage_degraded`、`content_unavailable`、`deadline_exceeded`、`busy`。
+- 新调用的 `contract_ref` 与当前批准契约不符时，授权后的登记预检返回 `gateway_error: {code: "contract_unavailable"}`，不建立 call、不占用请求 key、不发送 Wire 帧，也不关闭设备连接。重新 `runtime_discover/describe` 获取当前引用后才能提交新意图；不要将拒绝理解为原生执行失败。已存在的同 key、同请求仍查询原调用，不因契约变化而重新派发；同 key 换契约引用是不同请求，返回 `conflict`。
 - `native_request_invalid` 在 Luvus 或 Herdr 的完整请求 schema 于登记预检阶段被拒时附带 `outcome: "not_dispatched"`：此时还没有建立 call 或派发锚点，坏请求不占用 key，不发送 Wire 帧，不关闭设备连接。已有 key 仍返回原调用的真实状态，旧的 unknown 不会倒退或重派。预检通过不授予执行权限，网关不返回参数或 schema 的错误正文。
 - 响应超过 64 KiB 时，只返回 `response_too_large`、`truncated`、字节数、hash 和适用的 `call_id`，不制造句柄，也不再次执行。
 - 未知工具或非法参数返回固定的 JSON-RPC 错误，不回显请求值、异常、路径或栈。

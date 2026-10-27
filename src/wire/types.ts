@@ -102,6 +102,7 @@ export type DevicePlatformPayload = Readonly<{
 export type HostProfileReport = Readonly<{
   os: Readonly<{ family: 'linux' | 'darwin' | 'win32'; distribution: string | null; kernel: string | null }>
   arch: 'x86_64' | 'aarch64'
+  /** os.cpus().length 的系统可见逻辑 CPU 数量；不是物理核数或容器 CPU 配额。 */
   cpus: number | null
   memory_bytes: number | null
   container: 'docker' | 'podman' | 'none' | 'unknown'

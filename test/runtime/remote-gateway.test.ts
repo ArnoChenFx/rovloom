@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
+import { DatabaseSync } from 'node:sqlite'
 import { createLuvusCatalog } from '../../src/connector/luvus/index.js'
 import { createLuvusProductionSources } from '../../src/runtime/production-luvus.js'
 import type { LuvusProductionRemoteConfig } from '../../src/runtime/remote-luvus.js'
@@ -311,6 +312,7 @@ async function fixture(
   return {
     runtime,
     state,
+    databasePath: join(directory, 'gateway.db'),
     config,
     target,
     local,
@@ -332,6 +334,118 @@ async function fixture(
     }
   }
 }
+
+test(
+  '旧契约经真实 MCP 返回 contract_unavailable，保留 mixed epoch、请求 key 和原幂等调用',
+  { timeout: 45000 },
+  async () => {
+    const f = await fixture({ mixed: true })
+    const service = new RuntimeGatewayService({
+      runtime: f.runtime,
+      identities: {
+        principal: () => ({ id: 'remote_reader', policy: f.caller }),
+        administrator: () => null
+      },
+      localPolicies: () => f.local
+    })
+    const http = httpFixture(service, {
+      authentication: { authenticate: () => ({ principal_id: 'remote_reader' }) }
+    })
+    try {
+      const peer = await f.peer()
+      peer.snapshot()
+      await until(() => f.runtime.transport.status().devices[0]?.ready === true)
+      await http.client.connect(http.transport, { timeout: 5000 })
+      const reader = new DatabaseSync(f.databasePath, { readOnly: true })
+      try {
+        const herdr = f.herdr!.providers[0]!
+        for (const route of [
+          { target: f.target, reference: contractRef(f.snapshot.source), method: 'pane.list' },
+          { target: herdr.target, reference: herdr.contract_ref!, method: 'ping' }
+        ]) {
+          const args = {
+            target: route.target,
+            expected_binding_revision: 1,
+            contract_ref: '0'.repeat(64),
+            native_request: { method: route.method, params: {} },
+            deadline: f.state.store.clock() + 30000,
+            client_request_key: 'contract_' + route.method.replaceAll('.', '_'),
+            wait_ms: 2000
+          }
+          const invoke = (input = args) =>
+            http.client.callTool({ name: 'runtime_call', arguments: input }, CallToolResultSchema, { timeout: 5000 })
+          const rows = reader.prepare('SELECT count(*) AS n FROM calls').get()!.n
+          const writes = f.writes()
+          const policy = structuredClone(f.caller.grants)
+          f.caller.grants.length = 0
+          const forbidden = await invoke()
+          assert.deepEqual(forbidden.structuredContent, { gateway_error: { code: 'forbidden' } })
+          f.caller.grants.push(...policy)
+          const revision = await invoke({ ...args, expected_binding_revision: 99 })
+          assert.deepEqual(revision.structuredContent, { gateway_error: { code: 'binding_revision_conflict' } })
+          const refused = await invoke()
+          assert.equal(refused.isError, true)
+          assert.deepEqual(refused.structuredContent, { gateway_error: { code: 'contract_unavailable' } })
+          assert.equal(reader.prepare('SELECT count(*) AS n FROM calls').get()!.n, rows)
+          assert.equal(f.writes(), writes)
+          assert.equal(peer.socket.readyState, WebSocket.OPEN)
+          assert.equal(
+            f.runtime.transport.currentConnection(f.target.machine_id)!.connection_epoch,
+            peer.connection.connection_epoch
+          )
+          const acceptedArgs = { ...args, contract_ref: route.reference }
+          const accepted = await invoke(acceptedArgs)
+          assert(!accepted.isError, JSON.stringify(accepted.structuredContent))
+          const call = (accepted.structuredContent as { data: ReplyData['runtime_call'] }).data
+          assert.equal(call.state, 'responded')
+          const duplicate = await invoke(acceptedArgs)
+          assert.equal((duplicate.structuredContent as { data: ReplyData['runtime_call'] }).data.call_id, call.call_id)
+          const changed = await invoke()
+          assert.deepEqual(changed.structuredContent, { gateway_error: { code: 'conflict' } })
+          assert.equal(f.writes(), writes + 1)
+        }
+        const legacyArgs = {
+          target: f.target,
+          expected_binding_revision: 1,
+          contract_ref: '0'.repeat(64),
+          native_request: { method: 'pane.list', params: {} },
+          deadline: f.state.store.clock() + 30000,
+          client_request_key: 'legacy_unknown_contract'
+        }
+        const old = await f.runtime.runAuthenticated({ principal_id: 'remote_reader' }, () => {
+          // 通过原账本构造旧版本留下的 unknown 历史；不发送 Wire，不声称原生已执行。
+          const principal = f.runtime.principal()
+          const admitted = f.runtime.router.admit(principal, f.target, legacyArgs.native_request, {
+            binding_revision: 1,
+            contract_ref: legacyArgs.contract_ref,
+            deadline: legacyArgs.deadline,
+            client_request_key: legacyArgs.client_request_key
+          })
+          f.runtime.router.dispatch(principal, admitted.call.call_id, peer.connection.connection_epoch)
+          return f.state.store.stop(principal.id, admitted.call.call_id)
+        })
+        assert.equal(old.state, 'outcome_unknown')
+        const writes = f.writes()
+        const repeated = await http.client.callTool(
+          { name: 'runtime_call', arguments: legacyArgs },
+          CallToolResultSchema,
+          { timeout: 5000 }
+        )
+        assert(!repeated.isError, JSON.stringify(repeated.structuredContent))
+        const history = (repeated.structuredContent as { data: ReplyData['runtime_call'] }).data
+        assert.equal(history.call_id, old.call_id)
+        assert.equal(history.state, 'outcome_unknown')
+        assert.equal(f.writes(), writes)
+      } finally {
+        reader.close()
+      }
+    } finally {
+      await http.close()
+      service.close()
+      await f.close()
+    }
+  }
+)
 
 test('同一真实 mixed 通道中 Luvus raw 拒绝不打断已接受的 Herdr 调用', { timeout: 45000 }, async () => {
   const f = await fixture({ mixed: true, isolated: true })

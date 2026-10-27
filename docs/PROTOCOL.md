@@ -46,7 +46,8 @@ AI 客户端 ──MCP Streamable HTTP──▶ Gateway ──Wire v2 (WS/WSS)�
 
 - 主机信息只由支持 `host_profile` 的 Connector 在认证后的连接握手阶段上报；旧版本不协商、不上报，`host` 整块省略。新 epoch 不沿用旧 epoch 的 host。未取得的 CPU、内存、内核或发行版为 `null`；容器无正向标记时为 `unknown`，不猜 `none`。
 - `reported_at` 是 Gateway 收到该认证帧的 Unix 毫秒时间，`source` 固定为 `connector_handshake`。这不是实时探测，查询不会刷新时间。采集只用系统 API、`/etc/os-release` 与固定容器标记文件，不执行 shell，也不收集网络、环境、用户、路径或工具链。
-- CPU 是进程可用的并行度，内存是操作系统可见总量；不将其当作容器 cgroup 配额。`host.providers` 只保留调用方当前可见的 provider；这些版本是 Connector 的上报，不能代替原生结果 provenance。
+- `cpus` 取自 Connector 运行时的 `os.cpus().length`，表示系统可见的逻辑 CPU 数量，不是物理核数、进程可用并行度或容器 CPU 配额。例如系统可见 4 个逻辑 CPU、`cpu.max = 50000 100000`（0.5 核配额）时仍上报 `cpus: 4`；不能据此判断进程能持续使用 4 核。系统未提供 CPU 列表时为 `null`。`memory_bytes` 是操作系统可见总量，不代表容器内存限额。v0.6.8 及之前的 Connector 曾上报可用并行度；需更新并重连 Connector 才能获得新语义，Gateway 不换算旧报告。
+- host 只在建立认证连接时采集并上报；provider、系统或资源配置在长连接期间变化不会触发定时刷新，心跳和查询也不刷新它。需要新快照时应在适当窗口重连 Connector；不为刷新元数据而自动打断正在进行的调用。`host.providers` 只保留调用方当前可见的 provider；这些连接时版本不能代替原生结果 provenance，当前契约元数据应另查 `providers_get/list`。
 - `last_seen_at` 是认证或有效收包的 Gateway 时间；`link_since` 是当前认证连接的起点，断线后为 `null`。无记录时为 `null`。主机和时间历史仅在当前 Gateway 进程中有界缓存（最多 4096 台），重启、恢复代次变化或淘汰后未知；不冒充持久在线历史。
 - `providers_get` / `providers_list` 增加 `native_version`、`schema_status`（`validated` / `unavailable`）、`schema_sha256`。取自同一授权目录的已核验安装契约，缺失、过期、绑定不符或未知版本不猜默认值。`native_version` 是原生程序版本，不是 Rovloom 版本；它也不是按次 RPC 的实时进程探测。
 - provider 级 `schema_status` 表示契约核验，不表示每个方法都有专用参数 schema，也不替代 `readiness`。方法级参数覆盖仍看 `runtime_describe.schema_status`。主机信息不混入 `runtime_discover/describe`，也不通过伪造 `runtime_call` 或新增工具提供。

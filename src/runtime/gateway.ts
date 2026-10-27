@@ -824,16 +824,26 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
         if (!localProvider(input.target)) {
           fail('provider_binding_mismatch')
         }
-        const configured = providers.get(key(input.target))!
-        if (configured.contract_ref !== undefined && input.options.contract_ref !== configured.contract_ref) {
-          fail('contract_unavailable')
-        }
+        const providerKey = key(input.target)
+        const configured = providers.get(providerKey)!
+        const requestedContract = input.options.contract_ref
         const admitted = router.admit(
           principal(),
           input.target,
           input.native_request,
           luvusValidation(configured.binding.kind, input.native_request, input.options),
-          configured.preflightRequest?.bind(configured)
+          /** 首次登记在授权事务内比对当前批准契约；旧 key 仍返回原意图，不受新契约影响。 */
+          (request) => {
+            const native = nativeProviders.get(providerKey)
+            const expected = configured.contract_ref ?? (native ? contractRef(native.contract.wire.source) : undefined)
+            if (
+              (expected !== undefined && requestedContract !== expected) ||
+              (remoteProviders.has(providerKey) && !native)
+            ) {
+              fail('contract_unavailable')
+            }
+            return configured.preflightRequest?.(request)
+          }
         )
         if (admitted.created) {
           try {
