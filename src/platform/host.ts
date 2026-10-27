@@ -1,6 +1,6 @@
 /** 只使用系统 API 与固定标记文件，不启动 shell 或读取用户环境。未知项明确缺省。 */
 import { existsSync } from 'node:fs'
-import { availableParallelism, release, totalmem } from 'node:os'
+import { cpus as visibleCpus, release, totalmem } from 'node:os'
 import type { HostProfileReport } from '../wire/types.js'
 import { probePlatform } from './device.js'
 
@@ -14,8 +14,8 @@ export function probeHostProfile(agentVersion: string): HostProfileReport | unde
   let kernel: string | null = null
   let container: HostProfileReport['container'] = 'unknown'
   try {
-    // 运行时可能考虑 CPU 亲和性与配额；整数估计不能反推出可见核数或精确的配额核数。
-    const count = availableParallelism()
+    // 系统可见逻辑 CPU 数量；不将亲和性或 cgroup 配额折算为核数。
+    const count = visibleCpus().length
     if (Number.isSafeInteger(count) && count > 0 && count <= 262144) {
       cpus = count
     }

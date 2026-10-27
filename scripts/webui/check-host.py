@@ -45,6 +45,7 @@ def main():
                 host = page.locator('.detail-host')
                 expect(host).to_have_count(1)
                 expect(host).to_have_attribute('data-host-source', 'connector_handshake')
+                expect(host).to_contain_text('可见逻辑 CPU 数量' if language == 'zh-CN' else 'Visible logical CPUs')
                 for value in ['debian-12', 'x86_64', '6.1.0-31-amd64', '16 GiB', 'docker', '0.6.7', '0.9.5', '0.14.3']:
                     expect(host).to_contain_text(value)
                 expect(host).to_contain_text('连接器握手' if language == 'zh-CN' else 'Connector handshake')
