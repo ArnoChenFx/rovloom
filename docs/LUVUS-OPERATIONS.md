@@ -171,6 +171,16 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 
 外层 `wait_ms:0` 只结束 HTTP 短等，仍须查询原 `call_id` 得到提交回包。`agent.wait` 也可以立即匹配旧 idle，不能替代上述回复核对。观察期限到了且证据不足时报告“未确认”，允许稍后继续读取，不推断 Agent 没有回复或再次提交。
 
+快速任务不要依赖 `agent.prompt wait:true` 捕捉短暂跃迁。可无等待提交，再对已解析的 pane 调用 `agent.wait`，最后读取同一 Agent 的回复：
+
+```json
+{"method":"agent.prompt","params":{"target":"selected-agent","terminal_id":"observed_terminal_id","text":"8*8=?","strict":true}}
+{"method":"agent.wait","params":{"pane":"2","statuses":["done","idle"],"timeout_s":60}}
+{"method":"agent.read","params":{"target":"selected-agent","lines":100,"source":"recent"}}
+```
+
+这里 `target` 与 `pane` 必须事先映射到同一对象；`agent.wait matched:true` 仍只证明当前状态匹配，可能是旧 idle/done。读回并核对本轮答案，缺少正向状态证据时不能仅凭状态宣称完成。
+
 ### 如何判读 prompt 等待超时
 
 下面只解释原生字段组合，不新增或改写 `native_response.evidence`：
@@ -183,6 +193,8 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 | 旧响应缺少 `observed_state` | 信息不足，不能当成显式 `null` 分类 |
 
 例如 `status:"idle", matched:false, evidence:"timeout", observed_state:null` 与 Agent 已经输出答案并不矛盾。该回包仍是正常收到的原生响应，Rovloom 调用可为 `responded`；它不同于 Gateway 派发失败或未获得回包。Rovloom 不凭当前 idle 改成 `matched:true`。原生 evidence 的改进跟踪在 [#301](https://github.com/ArnoChenFx/rovloom/issues/301)。
+
+v0.6.8 的部署验收还确认：即使 `until:["done","idle"]` 且原生已回报 `status:"done"`，没有观测到新的 working/blocked 时仍可能返回 `matched:false, evidence:"timeout", observed_state:null`。长阻塞等待的通道修复和两段式可用，不表示这个原生一段式行为已经修复；需要 Luvus 原生层调整等待语义及响应 schema，Rovloom 保留原文。
 
 ## 验证
 
