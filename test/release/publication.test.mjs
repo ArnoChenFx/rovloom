@@ -473,6 +473,14 @@ test('Release 说明按版本生成：没有该版本条目就不带升级提示
   assert.match(current, /wait\.output/u)
   assert.match(current, /host_profile/u)
   assert.match(current, /35-method Luvus grants keep their original scope/u)
+  // 0.6.9 只讲自己的变更：设备范围、契约拒绝、逻辑 CPU 语义；不沿用 0.6.8 的要点。
+  const latest = releaseBody({ tag: 'v0.6.9', version: '0.6.9', commit: 'c'.repeat(40) })
+  assert(!latest.includes('wait.output'))
+  assert(!latest.includes('35-method Luvus grants'))
+  assert(!latest.includes('mcp.public_url'))
+  assert.match(latest, /token scope/u)
+  assert.match(latest, /logical CPU count/u)
+  assert.match(latest, /does not convert old reports/u)
   // 未登记的版本不继承任何旧提示，只保留固定的公共段落与契约标记。
   const future = releaseBody({ tag: 'v0.9.9', version: '0.9.9', commit: 'b'.repeat(40) })
   assert(!future.includes('Upgrade note'))
