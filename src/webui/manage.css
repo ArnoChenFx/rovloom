@@ -84,6 +84,7 @@ code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; fo
 .sidebar-status-value { display: block; color: var(--muted); font-size: 11px; }
 .sidebar-status-value::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 6px; border-radius: 50%; background: var(--muted); }
 .sidebar-status[data-state='current'] .sidebar-status-value::before { background: var(--good-text); }
+.sidebar-version { margin: 12px 8px 0; color: var(--muted); font-size: 12px; }
 .workspace { margin-left: 224px; min-width: 0; }
 .topbar { min-height: 70px; display: flex; align-items: center; justify-content: space-between; padding: 10px 40px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .header-label { display: flex; gap: 12px; align-items: center; color: var(--muted); font-size: 13px; }
@@ -363,6 +364,7 @@ dd { margin: 0; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
   .brand { margin-left: -9px; width: 150px; height: 50px; }
   .brand-logo { width: 150px; height: 50px; }
   .sidebar-caption, .sidebar .nav-heading, .docs-link, .sidebar-status { display: none; }
+  .sidebar-version { margin: 0 0 8px; }
   .sidebar-nav { display: flex; gap: 8px; padding-block: 10px; flex-wrap: wrap; }
   .nav-link { flex: 1; justify-content: center; white-space: nowrap; min-height: 42px; padding: 8px 10px; gap: 8px; }
   .nav-link[aria-current='page']::after { display: none; }
