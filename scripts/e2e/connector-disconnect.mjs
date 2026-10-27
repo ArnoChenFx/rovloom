@@ -9,6 +9,10 @@ import { spawn } from 'node:child_process'
 import { setTimeout as pause } from 'node:timers/promises'
 import { createDualRoleFixture } from '../release/dual-role-fixture.mjs'
 import { createConnectorOutput } from './connector-output.mjs'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
+import { PRODUCT_VERSION } from '../../src/mcp/version.js'
 
 setTimeout(() => {
   process.stderr.write('E2E_TIMEOUT\n')
@@ -56,6 +60,42 @@ function start(executable, args, name, configPath, cwd, env) {
 }
 
 const f = await createDualRoleFixture({ herdrBinary: process.env.ROVLOOM_HERDR_BIN })
+/** 用真实 MCP 读取主机报告，ready 相位本身不能证明中性运行时完成了采集和 getter 转发。 */
+async function verifyHostProfile() {
+  const client = new Client({ name: 'host-profile-e2e', version: '1' })
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(f.resource), {
+        requestInit: { headers: { authorization: `Bearer ${f.proof}` } }
+      })
+    )
+    const reply = CallToolResultSchema.parse(
+      await client.callTool(
+        {
+          name: 'machines_get',
+          arguments: {
+            machine_id: f.target.machine_id
+          }
+        },
+        CallToolResultSchema
+      )
+    )
+    assert(!reply.isError, 'e2e_machine_details_failed')
+    const host = reply.structuredContent?.data?.host
+    assert(host, 'e2e_host_profile_missing')
+    assert.equal(host.source, 'connector_handshake')
+    assert.equal(host.agent_version, PRODUCT_VERSION)
+    assert.equal(host.os.family, process.platform)
+    assert(Number.isSafeInteger(host.reported_at))
+    const provider = host.providers.find((item) => item.provider_id === f.target.provider_id)
+    assert(provider, 'e2e_herdr_version_missing')
+    assert.equal(provider.native_version, f.source.binary_version)
+    report('host_profile=present native_version=' + provider.native_version)
+    return host.reported_at
+  } finally {
+    await client.close()
+  }
+}
 let gateway
 let connector
 try {
@@ -101,6 +141,7 @@ try {
   }
   assert(ready, 'e2e_connector_not_ready:' + connector.stderr)
   report('connector=ready')
+  const firstReport = await verifyHostProfile()
   report('baseline_stderr=' + JSON.stringify(connector.stderr.split('\n').filter(Boolean)))
 
   // SIGTERM 停网关进程：这是运维真实停服路径。
@@ -156,6 +197,7 @@ try {
   report('after_restart_stderr=' + JSON.stringify(connector.stderr.split('\n').filter(Boolean).slice(-8)))
   assert(reready, 'e2e_connector_not_ready_after_restart:' + connector.stderr)
   report('connector=ready_after_restart')
+  assert((await verifyHostProfile()) >= firstReport, 'e2e_host_report_not_republished')
 } finally {
   gateway?.term()
   connector?.term()
