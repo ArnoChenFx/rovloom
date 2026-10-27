@@ -7,9 +7,38 @@ import { assemble, checksumsName, manifestName, releaseContext, repository } fro
 import { publishNpm } from './registry.mjs'
 import { findRelease, githubClient, verifyRemoteTag } from './github.mjs'
 
-/** 生成公开版本、升级提示和提交说明，固定标记用于阻止借用不属于此契约的已有 Release。 */
-function releaseBody(context) {
-  return `Rovloom ${context.version}\n\nCommit: ${context.commit}\n\n**Upgrade note:** Remove \`mcp.public_url\` from existing Gateway configuration before upgrading. Keeping this removed field causes \`config check\` and Gateway startup to fail with \`invalid_config\`; the old value is not ignored. Set the proxy HTTPS \`/mcp\` address in the AI client.\n\nBinaries are not publisher-signed or notarized. Verify release-manifest.json and SHA256SUMS.\n\nWith Bun installed you can also run the npm package from this release: \`bunx --package <url of rovloom-${context.version}.tgz> rovloom --version\`.\n\n<!-- rovloom-release:1 ${context.tag} ${context.commit} -->`
+/**
+ * 按版本记录该版本真正需要告知用户的升级事项与变更要点；没有条目的版本不生成任何提示。
+ * 写成按版本查表，避免某个版本的升级提示被后续所有版本沿用。
+ */
+const RELEASE_NOTES = Object.freeze({
+  '0.6.7': {
+    upgrade:
+      'Remove `mcp.public_url` from existing Gateway configuration before upgrading. Keeping this removed field causes `config check` and Gateway startup to fail with `invalid_config`; the old value is not ignored. Set the proxy HTTPS `/mcp` address in the AI client.'
+  },
+  '0.6.8': {
+    highlights: [
+      'Luvus read-only `wait.output` sentinel waits, with prompt-wait evidence guidance in `runtime_describe`.',
+      'Host handshake details (`host_profile`, Wire minor 2) and provider native version / contract status in `machines_get` and `providers_get`.'
+    ],
+    upgrade:
+      'Existing 35-method Luvus grants keep their original scope: `wait.output` must be granted explicitly in the Gateway caller/local policies, the provider raw grant and the Connector method grants. Upgrading does not widen a paired device automatically; a new pairing includes it.'
+  }
+})
+
+/** 生成公开版本、该版本的升级提示与变更要点，固定标记用于阻止借用不属于此契约的已有 Release。 */
+export function releaseBody(context) {
+  const notes = RELEASE_NOTES[context.version]
+  const sections = []
+  if (notes?.highlights?.length) {
+    sections.push(notes.highlights.map(/** 每条要点独占一行。 */ (line) => `- ${line}`).join('\n'))
+  }
+  if (notes?.upgrade) {
+    sections.push(`**Upgrade note:** ${notes.upgrade}`)
+  }
+  const head = `Rovloom ${context.version}\n\nCommit: ${context.commit}\n\n`
+  const body = sections.length ? sections.join('\n\n') + '\n\n' : ''
+  return `${head}${body}Binaries are not publisher-signed or notarized. Verify release-manifest.json and SHA256SUMS.\n\nWith Bun installed you can also run the npm package from this release: \`bunx --package <url of rovloom-${context.version}.tgz> rovloom --version\`.\n\n<!-- rovloom-release:1 ${context.tag} ${context.commit} -->`
 }
 
 /** 在每次恢复和公开前核对资产集合、长度和 GitHub 存储端摘要；不允许同名覆盖。 */
