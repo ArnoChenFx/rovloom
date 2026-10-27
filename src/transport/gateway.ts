@@ -35,7 +35,12 @@ import {
   runtime
 } from './common.js'
 import type { Adapter, Connection, Listener, ServerSocket, Session } from './common.js'
-import type { GatewayTransportObservationSource, GatewayTransportSnapshot, TransportObserved } from './observation.js'
+import type {
+  GatewayTransportObservationSource,
+  GatewayTransportSnapshot,
+  MachineObservationRequest,
+  TransportObserved
+} from './observation.js'
 
 /** 冻结新建的纯观测副本；调用方不能借快照修改 Gateway 私有连接和后续取样。 */
 function freezeObservation<T>(value: T): T {
@@ -83,6 +88,7 @@ type Peer = {
   readyProviders: Set<string>
   epochReference?: string
   lastHeartbeatAt?: number
+  hostReported?: boolean
 }
 export type GatewayOptions = {
   hostname: string
@@ -185,6 +191,17 @@ export function createGateway(options: GatewayOptions) {
   const peers = new Set<Peer>()
   const channels = options.channels ?? new ChannelRegistry()
   const machines = new Map<string, Peer>()
+  // 有界进程内观察缓存；重启或恢复代次改变后不编造离线历史。
+  const machineHistory = new Map<
+    string,
+    {
+      generation: string
+      epoch: string
+      last_seen_at: number
+      link_since?: number
+      host?: import('../wire/types.js').HostProfile
+    }
+  >()
   const inflight = new Map<string, AuthenticatedEnvelope & { type: 'request' }>()
   const inflightPrincipals = new WeakMap<AuthenticatedEnvelope & { type: 'request' }, string>()
   const reads = new Map<string, { binding: AttemptBinding; wire: Adapter; peer: Peer; expires: number }>()
@@ -239,6 +256,10 @@ export function createGateway(options: GatewayOptions) {
       }
     }
     if (peer.connection) {
+      const history = machineHistory.get(peer.connection.machine_id)
+      if (history?.epoch === peer.connection.connection_epoch) {
+        delete history.link_since
+      }
       if (machines.get(peer.connection.machine_id) === peer) {
         machines.delete(peer.connection.machine_id)
       }
@@ -369,7 +390,7 @@ export function createGateway(options: GatewayOptions) {
   /** 只读取 live peer 和当前身份/绑定；未知保持未知，取样不会关闭通道或发起原生工作。 */
   const observations: GatewayTransportObservationSource = Object.freeze({
     /** 每次取样独立核验；重入拒绝，不让宿主回调创建无限递归观测。 */
-    snapshot(): GatewayTransportSnapshot {
+    snapshot(metadata?: MachineObservationRequest): GatewayTransportSnapshot {
       if (samplingObservation) {
         fail('transport_observation_unavailable')
       }
@@ -546,11 +567,41 @@ export function createGateway(options: GatewayOptions) {
         } catch {
           fail('transport_observation_unavailable')
         }
+        if (
+          metadata &&
+          (!Array.isArray(metadata.machine_ids) ||
+            metadata.machine_ids.length > 256 ||
+            new Set(metadata.machine_ids).size !== metadata.machine_ids.length ||
+            typeof metadata.include_host !== 'boolean' ||
+            (metadata.include_host && metadata.machine_ids.length > 1))
+        ) {
+          fail('invalid_machine_metadata_scope')
+        }
+        const machineMetadata = (metadata?.machine_ids ?? []).flatMap((machine) => {
+          id(machine)
+          const history = machineHistory.get(machine)
+          if (!history || history.generation !== generation || stopped) {
+            return []
+          }
+          const connected = devices.some(
+            (device) => device.machine_id === machine && device.connection.verification === 'verified'
+          )
+          return [
+            {
+              machine_id: machine,
+              platform: history.host ? `${history.host.os.family}/${history.host.arch}` : null,
+              last_seen_at: history.last_seen_at,
+              ...(metadata?.include_host && history.host ? { host: structuredClone(history.host) } : {}),
+              ...(connected && history.link_since !== undefined ? { link_since: history.link_since } : {})
+            }
+          ]
+        })
         return freezeObservation({
           observed_at: at,
           recovery_generation: generation,
           transport: observed(at, stopped ? ('unavailable' as const) : ('available' as const)),
-          devices: stopped ? [] : devices
+          devices: stopped ? [] : devices,
+          ...(metadata ? { machine_metadata: machineMetadata } : {})
         })
       } finally {
         samplingObservation = false
@@ -704,6 +755,17 @@ export function createGateway(options: GatewayOptions) {
           fail('provider_fence_backend_unavailable')
         }
         machines.set(connection.machine_id, peer)
+        const connectedAt = observationNow()
+        if (!machineHistory.has(connection.machine_id) && machineHistory.size >= 4096) {
+          machineHistory.delete(machineHistory.keys().next().value!)
+        }
+        // 新 epoch 先清旧 host；旧 Connector 连接时不沿用新 Connector 曾上报过的块。
+        machineHistory.set(connection.machine_id, {
+          generation: connection.recovery_generation,
+          epoch: connection.connection_epoch,
+          last_seen_at: connectedAt,
+          link_since: connectedAt
+        })
         const welcome = encodeWireFrame(
           {
             protocol_major: selected.major,
@@ -748,6 +810,27 @@ export function createGateway(options: GatewayOptions) {
         fail('authentication_required')
       }
       if (peer.session.adapter.observeMessage(decoded, 'connector_to_gateway') === 'duplicate') {
+        return
+      }
+      const history = machineHistory.get(peer.connection.machine_id)
+      if (history?.epoch === peer.connection.connection_epoch) {
+        history.last_seen_at = observationNow()
+      }
+      if (decoded.type === 'host_profile') {
+        if (peer.hostReported || !history || history.epoch !== peer.connection.connection_epoch) {
+          fail('invalid_host_profile')
+        }
+        const allowed = new Set(peer.session.readiness().providers.map((provider) => provider.expected.provider_id))
+        if (decoded.payload.providers.some((provider) => !allowed.has(provider.provider_id))) {
+          fail('provider_binding_mismatch')
+        }
+        assertPeer(peer)
+        peer.hostReported = true
+        history.host = {
+          ...structuredClone(decoded.payload),
+          reported_at: history.last_seen_at,
+          source: 'connector_handshake'
+        }
         return
       }
       if (decoded.type === 'device_platform') {

@@ -99,7 +99,14 @@ export function productionOffer(): VersionOffer {
     major: WIRE_MAJOR,
     // 跟随当前实现支持的 minor：写死旧值会让较新能力（如 device_platform）永远协商不到。
     minor: WIRE_MINOR,
-    capabilities: ['rpc', 'provider_fence', 'terminal_execution_state', 'dispatch_refusal', 'device_platform'],
+    capabilities: [
+      'rpc',
+      'provider_fence',
+      'terminal_execution_state',
+      'dispatch_refusal',
+      'device_platform',
+      'host_profile'
+    ],
     required: ['rpc']
   }
 }

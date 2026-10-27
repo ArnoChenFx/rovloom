@@ -55,7 +55,8 @@ export function createHerdrWireAdapter(backend: HerdrReadonlyBackend, core = cre
         'heartbeat',
         'error',
         // 平台声明属于连接本身，不属于任何一个 provider，仍由 Wire codec 完整校验。
-        'device_platform'
+        'device_platform',
+        'host_profile'
       ].includes(frame.type)
     ) {
       fail('herdr_transport_unsupported')

@@ -4,6 +4,8 @@ import { createConnector } from '../transport/index.js'
 import type { Connection, ConnectorWireSession, WireConnectorOptions } from '../transport/index.js'
 import { closeSession, OFFER } from '../transport/common.js'
 import { probePlatform } from '../platform/device.js'
+import { probeHostProfile } from '../platform/host.js'
+import { PRODUCT_VERSION } from '../mcp/version.js'
 
 export type ConnectorHostOptions = Readonly<{
   transport: Omit<WireConnectorOptions, 'session'>
@@ -244,6 +246,15 @@ export async function createProviderConnectorRuntime(options: ConnectorHostOptio
           return result
         }
       }
+      if (current.nativeVersions) {
+        const versions = current.nativeVersions.bind(current)
+        owned.nativeVersions = /** 转发原版本观察口，回调不能关闭 owner 后仍交付晚到值。 */ () => {
+          assertOpen()
+          const result = versions()
+          assertOpen()
+          return result
+        }
+      }
       assertOpen()
       originalAdapter = current.adapter
       assertOpen()
@@ -277,7 +288,11 @@ export async function createProviderConnectorRuntime(options: ConnectorHostOptio
     if (platform() !== undefined && !offer.capabilities.includes('device_platform')) {
       offer.capabilities.push('device_platform')
     }
-    transport = createConnector({ ...options.transport, offer, platform, session })
+    const hostProfile = options.transport.hostProfile ?? (() => probeHostProfile(PRODUCT_VERSION))
+    if (!offer.capabilities.includes('host_profile')) {
+      offer.capabilities.push('host_profile')
+    }
+    transport = createConnector({ ...options.transport, offer, platform, hostProfile, session })
   } catch {
     await close().catch(/** 启动失败只等待有界逻辑结果，未确认物理释放继续由 shutdown 暴露。 */ () => {})
     throw new ConnectorHostStartupError(shutdown)

@@ -26,7 +26,10 @@ export type {
   ReplyData,
   CallView,
   MachineView,
+  MachineDetailsView,
   ProviderView,
+  ProviderMetadata,
+  McpProviderView,
   Page
 } from './types.js'
 

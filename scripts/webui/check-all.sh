@@ -15,7 +15,7 @@ for _ in $(seq 1 50); do
   sleep 0.2
 done
 status=0
-for entry in browser:33230 preferences:33230 layout:33230 actions:33231 lifecycle:33231 bootstrap:33231 retry-deadline:33231 lan:33231 dashboard:33230 resources:33231; do
+for entry in browser:33230 preferences:33230 layout:33230 host:33230 actions:33231 lifecycle:33231 bootstrap:33231 retry-deadline:33231 lan:33231 dashboard:33230 resources:33231; do
   name="${entry%%:*}"
   port="${entry##*:}"
   args=("scripts/webui/check-$name.py" --url "http://127.0.0.1:$port" --output "$out/$name")

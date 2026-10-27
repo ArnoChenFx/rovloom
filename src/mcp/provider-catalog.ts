@@ -2,7 +2,15 @@
 import { isDeepStrictEqual } from 'node:util'
 import type { Store } from '../store.js'
 import type { LocalPolicies, Principal } from '../router.js'
-import { boundedJson, hash, LIMITS, providerScopeAllowed, validatePolicies } from '../wire/index.js'
+import {
+  boundedJson,
+  contractRef,
+  hash,
+  LIMITS,
+  providerScopeAllowed,
+  validateContractSource,
+  validatePolicies
+} from '../wire/index.js'
 import type { AttemptBinding, JsonObject, ProviderBinding, ProviderPolicy, V2Target } from '../wire/types.js'
 import type { ProviderCatalogProvider, ProviderCatalogSource } from './native-catalog.js'
 import { FacadeServiceError } from './types.js'
@@ -72,6 +80,7 @@ export function authorizedProviderCatalog(options: {
           target: resolved.target,
           local_provider: resolved.local_provider,
           contract_ref: resolved.contract_ref,
+          ...(resolved.contract ? { contract: resolved.contract } : {}),
           capability_revision: resolved.capability_revision,
           expires_at: resolved.expires_at,
           methods: resolved.methods
@@ -95,6 +104,16 @@ export function authorizedProviderCatalog(options: {
     ) {
       throw new FacadeServiceError('contract_unavailable')
     }
+    if (source.contract) {
+      validateContractSource(source.contract.source)
+      if (
+        source.contract.source.provider_kind !== binding.kind ||
+        !['candidate', 'validated'].includes(source.contract.support_status) ||
+        contractRef(source.contract.source) !== source.contract_ref
+      ) {
+        throw new FacadeServiceError('contract_unavailable')
+      }
+    }
     // fresh目录视图可以有不同观察期限，但同一次读取始终受最早取得的期限约束。
     expiresAt = Math.min(expiresAt ?? source.expires_at, source.expires_at)
     const methods = JSON.parse(boundedJson(source.methods, LIMITS.object_bytes)) as JsonObject[]
@@ -115,6 +134,7 @@ export function authorizedProviderCatalog(options: {
           binding,
           terminal_execution: terminal ?? null,
           contract_ref: source.contract_ref,
+          contract: source.contract ?? null,
           revision: source.capability_revision,
           methods
         },
@@ -137,6 +157,14 @@ export function authorizedProviderCatalog(options: {
   )
   current()
   return {
+    metadata: {
+      schema_sha256: source.contract?.support_status === 'validated' ? source.contract.source.schema_sha256 : null,
+      native_version:
+        source.contract?.support_status === 'validated' && source.contract.source.binary_version !== 'unavailable'
+          ? source.contract.source.binary_version
+          : null,
+      schema_status: source.contract?.support_status === 'validated' ? ('validated' as const) : ('unavailable' as const)
+    },
     methods: visible.map<JsonObject>(
       /* 契约引用取同一owner快照，不使用条目自报的另一引用。 */ (method) => {
         const entry = terminalExecutionCatalog(binding.kind, method.method as string, terminal)

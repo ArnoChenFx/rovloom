@@ -38,6 +38,8 @@ export type Readiness = {
 }
 export type Session = {
   adapter: Adapter
+  /** 仅用于连接时主机声明；不是原生执行许可或实时版本探针。 */
+  nativeVersions?(): readonly Readonly<{ provider_id: string; native_version: string | null }>[]
   /** 只失效同 epoch 原配置的一个 provider；不得用此入口接纳新 binding 或复活旧来源。 */
   fenceProvider?(binding: ProviderBinding): void
   /** 返回已永久失效的原配置，供 transport 发布有界撤回；不交付原生状态或许可。 */

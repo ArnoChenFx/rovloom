@@ -27,10 +27,34 @@ AI 客户端 ──MCP Streamable HTTP──▶ Gateway ──Wire v2 (WS/WSS)�
 - 调用终态：`responded`、`not_dispatched`（确定未写出）、`outcome_unknown`（可能已执行，不会自动重发）。同一 `client_request_key` 加同一请求返回原调用，不同请求报 `conflict`。
 - 细则：[MCP Streamable HTTP](protocol/MCP-HTTP.md)。
 
+### 设备详情与原生版本
+
+`machines_list` 仅增加 `platform` 一行摘要（如 `linux/x86_64`），没有已知上报时为 `null`。
+`machines_get` 另返回 `last_seen_at`、`link_since`，以及可选的 `host`：
+
+```json
+{
+  "host": {
+    "os": {"family":"linux","distribution":"debian-12","kernel":"6.1.0-31-amd64"},
+    "arch":"x86_64", "cpus":4, "memory_bytes":17179869184,
+    "container":"docker", "agent_version":"0.6.7",
+    "providers":[{"provider_id":"luvus","native_version":"0.14.3"}],
+    "reported_at":1793039388447, "source":"connector_handshake"
+  }
+}
+```
+
+- 主机信息只由支持 `host_profile` 的 Connector 在认证后的连接握手阶段上报；旧版本不协商、不上报，`host` 整块省略。新 epoch 不沿用旧 epoch 的 host。未取得的 CPU、内存、内核或发行版为 `null`；容器无正向标记时为 `unknown`，不猜 `none`。
+- `reported_at` 是 Gateway 收到该认证帧的 Unix 毫秒时间，`source` 固定为 `connector_handshake`。这不是实时探测，查询不会刷新时间。采集只用系统 API、`/etc/os-release` 与固定容器标记文件，不执行 shell，也不收集网络、环境、用户、路径或工具链。
+- CPU 是进程可用的并行度，内存是操作系统可见总量；不将其当作容器 cgroup 配额。`host.providers` 只保留调用方当前可见的 provider；这些版本是 Connector 的上报，不能代替原生结果 provenance。
+- `last_seen_at` 是认证或有效收包的 Gateway 时间；`link_since` 是当前认证连接的起点，断线后为 `null`。无记录时为 `null`。主机和时间历史仅在当前 Gateway 进程中有界缓存（最多 4096 台），重启、恢复代次变化或淘汰后未知；不冒充持久在线历史。
+- `providers_get` / `providers_list` 增加 `native_version`、`schema_status`（`validated` / `unavailable`）、`schema_sha256`。取自同一授权目录的已核验安装契约，缺失、过期、绑定不符或未知版本不猜默认值。`native_version` 是原生程序版本，不是 Rovloom 版本；它也不是按次 RPC 的实时进程探测。
+- provider 级 `schema_status` 表示契约核验，不表示每个方法都有专用参数 schema，也不替代 `readiness`。方法级参数覆盖仍看 `runtime_describe.schema_status`。主机信息不混入 `runtime_discover/describe`，也不通过伪造 `runtime_call` 或新增工具提供。
+
 ## 2. Wire v2（Gateway ↔ Connector）
 
 - 传输：Connector 主动出站的 WebSocket（`ws://` 或 `wss://`，路径 `/connector`），每条消息一个 UTF-8 JSON 信封。
-- 版本：只有 major 2，当前 minor 1。minor 取双方交集。可选能力（`rpc`、`dispatch_refusal`、`provider_snapshot`、`terminal_execution_state`、`provider_fence`、`late_evidence`、`device_platform`）取双方广告的交集，未知的 required 能力被拒绝。
+- 版本：只有 major 2，当前 minor 2。minor 取双方交集。可选能力（`rpc`、`dispatch_refusal`、`provider_snapshot`、`terminal_execution_state`、`provider_fence`、`late_evidence`、`device_platform`、`host_profile`）取双方广告的交集，未知的 required 能力被拒绝。
 - 限额：单帧 1 MiB，JSON 深度 64，节点 10 万。超限的响应不截断，调用保持 `outcome_unknown`。
 - 已认证帧都带 `machine_id`、`recovery_generation`、`connection_epoch`，逐项核对当前认证连接。心跳间隔 5 秒，20 秒无有效心跳判定断线。
 - 细则：[Wire 协议](protocol/WIRE-PROTOCOL.md)、[通道](TRANSPORT.md)。

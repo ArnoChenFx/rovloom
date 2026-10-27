@@ -1,6 +1,7 @@
 /** MCP/CLI 与 WebUI 共用的管理契约；类型按管理面提供方维护，不实现身份或后台服务。 */
 import type { Principal } from '../router.js'
 import type { CallState } from '../contracts.js'
+import type { HostProfile } from '../wire/types.js'
 
 export type CallerIdentity = Readonly<{ principal_id: string }>
 export type Page<T> = { items: T[]; next_cursor?: string }
@@ -73,6 +74,10 @@ export type DeviceSnapshot = {
   persisted_state: 'pending' | 'offline' | 'online' | 'revoked'
   resource_revision: number | null
   observed_at: number
+  /** 仅详情按范围采样；旧响应可缺省。历史缓存不跨 Gateway 重启保留。 */
+  last_seen_at?: number | null
+  link_since?: number | null
+  host?: HostProfile
   connection: Observed<{
     state: 'connecting' | 'reconnecting' | 'online' | 'degraded' | 'offline'
     connection_epoch_ref: string | null

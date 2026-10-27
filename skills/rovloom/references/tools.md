@@ -44,12 +44,19 @@ Returns `{ items: MachineView[], next_cursor? }`:
 | `status` | `pending` / `active` / `revoked` |
 | `link` | `connected` (trustworthy online evidence in the same sample) / `unverified` (no evidence; never inferred as offline) / `offline` (`pending` and `revoked` always report this) |
 | `targets` | The complete tuples you are authorized for on this device; usable verbatim as `runtime_*`'s `target` |
+| `platform` | One-line OS/architecture summary, such as `linux/x86_64`; `null` when unknown. The list omits the full host block and timestamps. |
 
 `link` comes from the Gateway's observation of real transport, not from persisted state. `unverified` does not mean the device is broken.
 
 ## 2. machines_get
 
 Parameters: `machine_id` **or** `name` (exactly one, exact match). Returns a single `MachineView`.
+
+The detail also returns `last_seen_at` and `link_since` (Unix milliseconds or `null` when unknown; `link_since` is null after disconnect). It can include `host` when the Connector negotiated and sent a host profile. Old Connectors omit this block entirely. Its fields are `os: {family, distribution, kernel}`, `arch`, `cpus`, `memory_bytes`, `container`, `agent_version`, visible `providers: [{provider_id, native_version}]`, plus mandatory `reported_at` and `source:"connector_handshake"`.
+
+This is a connection-time report, not a live probe. Gateway timestamps receipt; reading does not refresh it. Unknown scalar measurements are null; container detection without a positive marker is `unknown`. CPU is available parallelism and memory is the OS-visible total, not a container quota. No network, environment, credentials, paths or toolchain inventory is collected. Only currently visible providers appear. Host/timing history is bounded to 4096 machines in the current Gateway process; restart, recovery-generation change or eviction can make it unknown. A new epoch clears the previous host until a new report arrives. Do not infer that an old report proves the current kernel, container or online state.
+
+The management device detail uses the same optional host report and timing fields, validated by the browser DTO boundary. It labels the report as connection-time data and shows its receipt time/source. Provider versions inside the report follow the independent administrator providers_read grants; MCP dispatch/read grants are not substituted for management permissions. Device lists omit the full block. See [storage lifetimes](../../../docs/STORAGE.md#主机报告与连接时间缓存).
 
 ## 3. providers_list
 
@@ -64,6 +71,9 @@ Returns `{ items: ProviderView[], next_cursor? }`:
 | `binding_revision` | Current binding version; use as `expected_binding_revision` |
 | `enabled` | Whether an administrator enabled it |
 | `readiness` | `ready` (observed revision matches the current binding and dispatch is ready) / `unavailable` (disabled) / `unverified` (no evidence or stale observation) |
+| `native_version` | Installed native version from the authorized verified contract, not the Rovloom version; `null` if unknown |
+| `schema_status` | Provider contract verification: `validated` / `unavailable`; independent of readiness and per-method parameter coverage |
+| `schema_sha256` | Verified installed schema SHA-256, or `null` if unavailable |
 
 `providers_list` returns neither `profile` nor `session` — those appear only in `targets` on `machines_*`.
 

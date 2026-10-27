@@ -1,6 +1,13 @@
 /** 将真实Gateway观测投影到已授权管理读模型；不查询设备、不解析管理员身份、不提供管理写入。 */
 import type { DeviceSnapshot, ManagementStatus, Observed } from './management.js'
-import type { GatewayTransportObservationSource, GatewayTransportSnapshot } from '../transport/observation.js'
+import type {
+  GatewayTransportObservationSource,
+  GatewayTransportSnapshot,
+  MachineObservationRequest,
+  MachineMetadataObservation
+} from '../transport/observation.js'
+import { validateHostProfile } from '../wire/index.js'
+import type { HostProfile } from '../wire/types.js'
 
 export type ManagementObservationFence = Readonly<
   Pick<ManagementStatus, 'mode' | 'server_time' | 'recovery_generation' | 'stale_after_ms'>
@@ -13,6 +20,13 @@ export interface ManagementTransportProjection {
   device(device: DeviceSnapshot): DeviceSnapshot
   /** 当前可信传输证据下的设备连接；无证据时保持未知，不从持久状态推断。 */
   link(machine_id: string): 'connected' | 'unverified'
+  /** 历史采样时间不随读取刷新；主机块仅来自实际认证握手，缺少时省略。 */
+  machineDetails(machine_id: string): {
+    platform: string | null
+    last_seen_at: number | null
+    link_since: number | null
+    host?: HostProfile
+  }
   /** 指定 provider 在给定绑定 revision 下的派发就绪；revision 不符或无证据时保持未知。 */
   providerReady(
     machine_id: string,
@@ -23,10 +37,11 @@ export interface ManagementTransportProjection {
 
 /** 可信宿主逐次取样；异常只成为不可用，调用方随后采集同一Store的时间/代次与模式fence。 */
 export function sampleManagementTransport(
-  source: GatewayTransportObservationSource | undefined
+  source: GatewayTransportObservationSource | undefined,
+  metadata?: MachineObservationRequest
 ): GatewayTransportSnapshot | null {
   try {
-    return source?.snapshot() ?? null
+    return (metadata ? source?.snapshot(metadata) : source?.snapshot()) ?? null
   } catch {
     return null
   }
@@ -166,6 +181,7 @@ export function createManagementTransportProjection(
   fence: ManagementObservationFence
 ): ManagementTransportProjection {
   const devices = new Map<string, TransportDevice>()
+  const metadata = new Map<string, MachineMetadataObservation>()
   let transport: ManagementStatus['components']['transport'] = 'unavailable'
   let reason: UnknownReason = 'backend_unavailable'
   try {
@@ -190,17 +206,77 @@ export function createManagementTransportProjection(
           }
           devices.set(item.machine_id, item)
         }
+        for (const item of sample.machine_metadata ?? []) {
+          if (metadata.has(item.machine_id)) {
+            throw new Error('duplicate_machine_metadata')
+          }
+          metadata.set(item.machine_id, item)
+        }
         transport = 'available'
         reason = 'not_recorded'
       }
     }
   } catch {
     devices.clear()
+    metadata.clear()
     transport = 'unverified'
     reason = 'backend_unavailable'
   }
   return Object.freeze({
     transport,
+    machineDetails(machine_id: string) {
+      const result: {
+        platform: string | null
+        last_seen_at: number | null
+        link_since: number | null
+        host?: HostProfile
+      } = {
+        platform: null,
+        last_seen_at: null,
+        link_since: null
+      }
+      if (transport !== 'available') {
+        return result
+      }
+      const device = metadata.get(machine_id)
+      if (!device) {
+        return result
+      }
+      if (timestamp(device.last_seen_at) && device.last_seen_at <= fence.server_time) {
+        result.last_seen_at = device.last_seen_at
+      }
+      if (typeof device.platform === 'string' && /^(linux|darwin|win32)\/(x86_64|aarch64)$/.test(device.platform)) {
+        result.platform = device.platform
+      }
+      try {
+        if (
+          timestamp(device.link_since) &&
+          device.link_since <= fence.server_time &&
+          result.last_seen_at !== null &&
+          device.link_since <= result.last_seen_at &&
+          devices.has(machine_id) &&
+          connection(devices.get(machine_id)!.connection, fence).verification === 'verified'
+        ) {
+          result.link_since = device.link_since
+        }
+        const host = device.host
+        if (
+          host &&
+          host.source === 'connector_handshake' &&
+          timestamp(host.reported_at) &&
+          host.reported_at <= fence.server_time &&
+          result.last_seen_at !== null &&
+          host.reported_at <= result.last_seen_at
+        ) {
+          const { reported_at, source, ...report } = host
+          validateHostProfile(report)
+          result.host = { ...structuredClone(report), reported_at, source }
+        }
+      } catch {
+        /* 不合法或缺少来源时省略该块，不推断本机数据。 */
+      }
+      return result
+    },
     /** 白名单复制已授权设备元数据，不把其它设备/provider、原始epoch或秘密带入回复。 */
     device: (device: DeviceSnapshot): DeviceSnapshot => {
       let link: DeviceSnapshot['connection'] = unknown(reason)

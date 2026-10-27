@@ -1,6 +1,6 @@
 # 存储与数据保留
 
-Gateway 的全部状态保存在单个 SQLite 库 `<data.directory>/gateway.db` 中，单 writer。系统保留默认值与安全语义见 [DESIGN §6](DESIGN.md#6-持久化与默认限额)，部署与升级见 [运维指南](OPERATIONS.md)。
+Gateway 的持久状态保存在单个 SQLite 库 `<data.directory>/gateway.db` 中，单 writer。系统保留默认值与安全语义见 [DESIGN §6](DESIGN.md#6-持久化与默认限额)，部署与升级见 [运维指南](OPERATIONS.md)。
 
 
 ## 本机离线运维
@@ -17,7 +17,7 @@ Gateway 的全部状态保存在单个 SQLite 库 `<data.directory>/gateway.db` 
 - 副本的创建、`VACUUM INTO`、打开、同步和开启迁移事务都纳入失败清理；确认未迁移或已回滚后删除本次未登记产物，可在故障解除后用同一时间戳重试。无法确认回滚时保留副本作为恢复证据。
 - 高于当前版本的库（例如 999）仍拒绝启动（`unsupported_database_version`），且在写入前拒绝，库文件字节不变。**比 v9 更旧的库（v1-v8）不在迁移范围内**，同样拒绝启动、不写入。
 - `rovloom storage check` 只读：对 v9 库报告 `schema_version: 9` 与 `migration_required: true`（`quota` 为 `not_checked`），不写库、不建备份目录；对更高版本或比 v9 更旧的版本返回 `unsupported_database_version`。
-- 设备最近一次上报的平台存在 `machines.platform_json`，语义是历史观测：离线后保留旧值，管理面标注为历史，不作为当前在线依据。
+- 设备最近一次上报的平台存在 `machines.platform_json`，语义是最近一次上报：离线后保留旧值，平台徽标不作为当前在线或实时探测依据。
 - 内容、结果和收尾预约用量由同事务 SQLite 触发器维护；启动与离线检查重算核对。热路径不扫描历史，物理文件与备份仍逐次计入预算，见 [ADR 0007](adr/0007-transactional-storage-usage.md)。
 - Connector 的共享发送账本为独立 schema v2，仅保留 call/attempt ID、32 字节绑定摘要和原执行 deadline；版本不匹配拒绝打开，不自动转换，见 [ADR 0008](adr/0008-compact-connector-claims.md)。
 - SQLite 使用 DELETE journal 与 FULL synchronous，打开时做完整性检查。它依赖操作系统和文件系统的持久性。
@@ -26,6 +26,21 @@ Gateway 的全部状态保存在单个 SQLite 库 `<data.directory>/gateway.db` 
 - 数据目录内的文件和子目录计入受管存储，不要放入不相关文件。符号链接文件按目标大小计入，不递归符号链接目录。
 - Gateway 运行时持有 `gateway.db.lock`，正常退出时删除。锁里记录持有者的进程身份（PID 与启动标识）；异常退出后再次启动时，只有证明记录的进程已不存在（或 PID 已被无关进程复用）才自动删除并接管，SQLite 回滚日志随后自行恢复。持有者仍在运行、锁为空或格式未知、当前平台没有进程身份证据时，Gateway 拒绝启动；确认没有 Gateway 进程仍在运行后，手工删除该文件再启动。
 - 配置文件和 managed JSON 先写入排他临时文件并同步，再原子发布。已有文件损坏时不会被默认值覆盖。
+
+## 主机报告与连接时间缓存
+
+MCP 的 `machines_get` 和管理页 `DeviceSnapshot` 详情可以包含 `host`、`last_seen_at`、`link_since`。这些新字段不写入 SQLite，也不修改 schema v10：
+
+| 数据 | 保存位置与寿命 |
+|---|---|
+| `platform` 的 OS / 架构 / 发行版 | `machines.platform_json`，离线及 Gateway 重启后保留最近上报 |
+| 完整 `host` | 当前 Gateway 进程的有界缓存，最多 4096 台；包含接收时固定的 `reported_at` 与 `source: connector_handshake` |
+| `last_seen_at` / `link_since` | 同一进程记录的认证或有效收包时间 / 当前连接建立时间；断线后 `link_since` 为 null |
+| provider 原生版本与 schema 状态/摘要 | 读取已核验契约目录，不新增设备表列；不能当作每次原生进程探测或全部方法参数 schema 完整性的证明 |
+
+完整 host 只在双方协商能力并上报后出现，旧 Connector 缺报时整块省略。读取不会刷新报告时间；缓存被淘汰、Gateway 重启或恢复代次变化后，host 缺省、时间未知为 null。新认证 epoch 清除旧 host，等待重新上报。该缓存不计入持久备份，不承诺跨重启的在线历史；磁盘平台摘要仍按其独立寿命保留。
+
+管理页详情明确显示“连接时上报”、上报接收时间与来源；其中 provider 版本按当前管理员的 `providers_read` 授权过滤。设备列表保持轻量，不携带完整 host。缺报不影响旧设备页面。
 
 ## 重启行为
 

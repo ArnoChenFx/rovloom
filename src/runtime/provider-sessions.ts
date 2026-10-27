@@ -158,11 +158,17 @@ function compose(
     // 平台声明属于连接本身而不是某个 provider，没有可校验的 binding；只在协商到该能力时放行。
     const devicePlatform =
       value.type === 'device_platform' && connection.negotiated.capabilities.includes('device_platform')
+    const hostProfile = value.type === 'host_profile' && connection.negotiated.capabilities.includes('host_profile')
     if (
-      (!isolated && !terminalState && !devicePlatform) ||
-      !['heartbeat', 'error', 'provider_fenced', 'terminal_execution_state', 'device_platform'].includes(
-        value.type as string
-      )
+      (!isolated && !terminalState && !devicePlatform && !hostProfile) ||
+      ![
+        'heartbeat',
+        'error',
+        'provider_fenced',
+        'terminal_execution_state',
+        'device_platform',
+        'host_profile'
+      ].includes(value.type as string)
     ) {
       return false
     }
@@ -568,6 +574,32 @@ function compose(
     close
   }
   if (connector) {
+    result.nativeVersions = () =>
+      invoke(() =>
+        groups.flatMap((group) => {
+          if (fenced.has(group)) {
+            return []
+          }
+          const values =
+            group.session.nativeVersions?.() ??
+            group.session.providerSnapshot?.().map((snapshot) => ({
+              provider_id: snapshot.binding.provider_id,
+              native_version: snapshot.source.binary_version === 'unavailable' ? null : snapshot.source.binary_version
+            })) ??
+            []
+          if (
+            !Array.isArray(values) ||
+            values.length > group.providers.length ||
+            values.some(
+              (value) => !group.providers.some((provider) => provider.binding.provider_id === value.provider_id)
+            )
+          ) {
+            void Promise.resolve(values).catch(() => {})
+            fail('provider_binding_mismatch')
+          }
+          return values
+        })
+      )
     result.terminalExecutionState = /** 原owner只能报告自己原配置的本地开关，不使已失效组复活。 */ () =>
       invoke(
         /** 聚合原配置的同步观察值，不调用原生方法。 */ () =>

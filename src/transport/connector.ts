@@ -17,6 +17,7 @@ import {
   validateProviderSnapshot,
   validateProvider,
   validateOffer,
+  validateHostProfile,
   WireError
 } from '../wire/index.js'
 import type {
@@ -46,7 +47,7 @@ import {
   socket
 } from './common.js'
 import type { Connection, Session, Socket } from './common.js'
-import type { DevicePlatformPayload } from '../wire/types.js'
+import type { DevicePlatformPayload, HostProfileReport } from '../wire/types.js'
 import { DisconnectLog, remoteDisconnect } from './disconnect.js'
 import type { DisconnectReason } from './disconnect.js'
 
@@ -66,6 +67,7 @@ type ConnectorBaseOptions = {
    * 返回 undefined 表示当前平台不在允许集合内，此时什么都不发。
    */
   platform?: () => DevicePlatformPayload | undefined
+  hostProfile?: () => HostProfileReport | undefined
   /** 提供有界退避的随机采样，不影响请求授权或派发去重。 */
   random?: () => number
   /** 提供独立可信时间，调用方仍须检查单调性和固定到期边界。 */
@@ -167,6 +169,7 @@ export function createConnector(options: ConnectorOptions) {
   const terminalReported = new Map<string, string>()
   /** 每个 epoch 只上报一次平台；未协商或平台不可知时不发，老 Gateway 完全收不到该帧。 */
   let platformReported = false
+  let hostReported = false
   let published:
     | {
         connection: Connection
@@ -339,6 +342,42 @@ export function createConnector(options: ConnectorOptions) {
     }
     write(envelope(active, 'device_platform', value))
     platformReported = true
+  }
+
+  /** 可协商的连接级报告，仅在本次 welcome 后采集一次，失败不编造数据。 */
+  function publishHostProfile(active: Connection, current: Session): void {
+    if (hostReported || !active.negotiated.capabilities.includes('host_profile')) {
+      return
+    }
+    hostReported = true
+    let value: HostProfileReport | undefined
+    try {
+      const report = options.hostProfile?.()
+      void Promise.resolve(report).catch(() => {})
+      if (report) {
+        value = {
+          ...report,
+          providers:
+            current.nativeVersions?.() ??
+            current.providerSnapshot?.().map((snapshot) => ({
+              provider_id: snapshot.binding.provider_id,
+              native_version: snapshot.source.binary_version === 'unavailable' ? null : snapshot.source.binary_version
+            })) ??
+            report.providers
+        }
+        void Promise.resolve(value.providers).catch(() => {})
+        validateHostProfile(value)
+      }
+    } catch {
+      return
+    }
+    if (!value) {
+      return
+    }
+    if (connection !== active || stopped) {
+      fail('connection_unavailable')
+    }
+    write(envelope(active, 'host_profile', value))
   }
 
   function publishTerminalExecution(active: Connection, current: Session): void {
@@ -794,9 +833,11 @@ export function createConnector(options: ConnectorOptions) {
             }
             terminalReported.clear()
             platformReported = false
+            hostReported = false
             publishSnapshots(connection, session)
             publishTerminalExecution(connection, session)
             publishPlatform(connection)
+            publishHostProfile(connection, session)
             if (stopped || ws !== current || !connection || !session) {
               fail('connection_unavailable')
             }

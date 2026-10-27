@@ -39,6 +39,7 @@ export type Capability =
   | 'terminal_execution_state'
   | 'late_evidence'
   | 'device_platform'
+  | 'host_profile'
 export type VersionOffer = {
   major: number
   minor: number
@@ -97,10 +98,23 @@ export type DevicePlatformPayload = Readonly<{
   arch: 'x64' | 'arm64'
   distribution: Readonly<{ id: string; version_id: string | null }> | null
 }>
+/** 连接时采集的最小主机信息，不含网络、路径、用户、环境或工具清单。 */
+export type HostProfileReport = Readonly<{
+  os: Readonly<{ family: 'linux' | 'darwin' | 'win32'; distribution: string | null; kernel: string | null }>
+  arch: 'x86_64' | 'aarch64'
+  cpus: number | null
+  memory_bytes: number | null
+  container: 'docker' | 'podman' | 'none' | 'unknown'
+  agent_version: string
+  providers: readonly Readonly<{ provider_id: string; native_version: string | null }>[]
+}>
+/** reported_at 由 Gateway 在接收该认证帧时记下，不信任远端时钟，也不在读取时刷新。 */
+export type HostProfile = HostProfileReport & Readonly<{ reported_at: number; source: 'connector_handshake' }>
 export type Payloads = {
   provider_fenced: { binding: ProviderBinding }
   terminal_execution_state: TerminalExecutionState
   device_platform: DevicePlatformPayload
+  host_profile: HostProfileReport
   provider_snapshot: {
     binding: ProviderBinding
     target: V2Target

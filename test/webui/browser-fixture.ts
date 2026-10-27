@@ -2,9 +2,11 @@
 import { mountWebUi, ReadError, type PageRead, type TimedSnapshot, type PageView } from '../../src/webui/index.js'
 import { fixtureReply, fixtureDevice } from './fixtures.js'
 import { createManagementPageRead } from '../../src/webui/read.js'
+import { fixtureHostFields } from './host-fixture.js'
 
 type FixtureMode =
   | 'normal'
+  | 'host'
   | 'showcase'
   | 'hold'
   | '401'
@@ -91,6 +93,9 @@ const read: PageRead = async (route, signal) => {
   }
   const result = await baseRead(route, signal)
   fixture.lastServerTime = result.serverTime
+  if (fixture.mode === 'host' && result.value.device) {
+    Object.assign(result.value.device, fixtureHostFields())
+  }
   if (fixture.mode === 'showcase') {
     const samples = ['studio-workstation', 'macbook-pro', 'home-server', 'build-runner'].map((name, index) => {
       const device = fixtureDevice('fixture-a')

@@ -14,6 +14,8 @@ import { composeConnectorSessions } from './provider-sessions.js'
 import { connectorAdmissionAdapter } from './connector-attempts.js'
 import { OFFER } from '../transport/common.js'
 import { probePlatform } from '../platform/device.js'
+import { probeHostProfile } from '../platform/host.js'
+import { PRODUCT_VERSION } from '../mcp/version.js'
 import type { ConnectorRuntimeOptions } from './types.js'
 
 type Pending = {
@@ -375,7 +377,11 @@ export async function createConnectorRuntime(options: ConnectorRuntimeOptions) {
     if (platform() !== undefined && !offer.capabilities.includes('device_platform')) {
       offer.capabilities.push('device_platform')
     }
-    transport = createConnector({ ...options.transport, offer, platform, session })
+    const hostProfile = options.transport.hostProfile ?? (() => probeHostProfile(PRODUCT_VERSION))
+    if (!offer.capabilities.includes('host_profile')) {
+      offer.capabilities.push('host_profile')
+    }
+    transport = createConnector({ ...options.transport, offer, platform, hostProfile, session })
   } catch {
     stopping = true
     cleanup([/** 原构建器停止全部已交付epoch。 */ () => owner.close()])

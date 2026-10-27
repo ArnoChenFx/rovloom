@@ -11,6 +11,9 @@ import type { Connection, ConnectorWireSession } from '../../src/transport/index
 import type {} from '../../src/wire/types.js'
 import { decodeWireFrame, encodeWireFrame } from '../../src/wire/index.js'
 import { fixture, until } from '../transport/helpers.js'
+import { composeConnectorSessions } from '../../src/runtime/provider-sessions.js'
+import { probeHostProfile } from '../../src/platform/host.js'
+import { PRODUCT_VERSION } from '../../src/mcp/version.js'
 
 const privateFailure = 'ISOLATED_PRIVATE_PROVIDER_FAILURE /not-a-real-private-path'
 
@@ -149,6 +152,7 @@ function dummySession(
     observeMessage() {
       return 'new' as const
     },
+    stats: () => ({ closed, executions: 0, responses: 0 }),
     /** 回收本 dummy adapter 并统计角色实际调用次数。 */
     close() {
       closed = true
@@ -175,6 +179,133 @@ function dummySession(
       return callbacks.resourceClose() as void
     }
   }
+}
+
+for (const mixed of [false, true]) {
+  for (const collector of ['default', 'explicit'] as const) {
+    test(`中性 Connector ${mixed ? '混合' : 'Herdr'} 使用 ${collector} 采集器上报真实 host 帧与原版本 getter`, async () => {
+      const offer = { major: 2, minor: 2, capabilities: ['rpc', 'host_profile'], required: ['rpc'] }
+      const f = fixture({ offer })
+      const paired = f.pair('neutral_host_profile')
+      const herdr = f.store.defineProvider({
+        machine_id: paired.machine_id,
+        provider_id: 'herdr',
+        kind: 'herdr',
+        config_ref: 'synthetic_herdr',
+        binding_revision: 1,
+        enabled: true
+      })
+      f.localBindings.set(paired.machine_id + '/herdr', herdr)
+      const versions = mixed
+        ? [
+            { provider_id: 'provider', native_version: '0.14.3' },
+            { provider_id: 'herdr', native_version: '0.9.5' }
+          ]
+        : [{ provider_id: 'herdr', native_version: '0.9.5' }]
+      let reads = 0
+      const runtime = await createProviderConnectorRuntime({
+        transport: {
+          url: f.gateway.url,
+          developmentLoopback: true,
+          credential: () => paired.credential,
+          offer,
+          now: () => f.now,
+          ...(collector === 'explicit' ? { hostProfile: () => probeHostProfile(PRODUCT_VERSION) } : {})
+        },
+        session(connection) {
+          const groups = versions.map((version) => {
+            const binding = f.store.provider(paired.machine_id, version.provider_id)!
+            const target = { ...paired.target, provider_id: version.provider_id }
+            const session = dummySession(connection, {
+              adapter() {},
+              readiness() {},
+              adapterClose() {},
+              resourceClose() {}
+            })
+            session.readiness = () => ({
+              policy_revision: 'synthetic',
+              peer_policy_revision: 'synthetic',
+              providers: [{ expected: binding, local: binding, native_ready: true }]
+            })
+            session.nativeVersions = function () {
+              assert.equal(this, session)
+              reads++
+              return [version]
+            }
+            return { providers: [{ binding, target }], session }
+          })
+          return mixed ? composeConnectorSessions(connection, groups, () => f.now) : groups[0]!.session
+        },
+        async release() {}
+      })
+      try {
+        const scope = { machine_ids: [paired.machine_id], include_host: true }
+        await until(() => !!f.gateway.observations.snapshot(scope).machine_metadata?.[0]?.host)
+        const host = f.gateway.observations.snapshot(scope).machine_metadata![0]!.host!
+        assert.equal(host.agent_version, PRODUCT_VERSION)
+        assert.equal(host.os.family, process.platform)
+        assert.equal(host.source, 'connector_handshake')
+        assert.deepEqual(host.providers, versions)
+        assert.equal(reads, versions.length)
+      } finally {
+        await runtime.close()
+        f.stop()
+      }
+    })
+  }
+}
+
+for (const phase of ['getter', 'callback'] as const) {
+  test(`中性版本 ${phase} 关闭角色后不能交付 host 或晚到版本`, async () => {
+    const offer = { major: 2, minor: 2, capabilities: ['rpc', 'host_profile'], required: ['rpc'] }
+    const f = fixture({ offer })
+    const paired = f.pair('closing_version_source')
+    let calls = 0
+    const runtime: Awaited<ReturnType<typeof createProviderConnectorRuntime>> = await createProviderConnectorRuntime({
+      transport: {
+        url: f.gateway.url,
+        developmentLoopback: true,
+        credential: () => paired.credential,
+        offer,
+        now: () => f.now
+      },
+      session(connection) {
+        const current = dummySession(connection, {
+          adapter() {},
+          readiness() {},
+          adapterClose() {},
+          resourceClose() {}
+        })
+        Object.defineProperty(current, 'nativeVersions', {
+          get() {
+            if (phase === 'getter') {
+              void runtime.close()
+            }
+            return function () {
+              calls++
+              void runtime.close()
+              return [{ provider_id: 'provider', native_version: '0.14.3' }]
+            }
+          }
+        })
+        return current
+      },
+      async release() {}
+    })
+    try {
+      await until(() => runtime.transport.status().phase === 'stopped')
+      await runtime.closed
+      assert.equal(calls, phase === 'getter' ? 0 : 1)
+      assert.equal(
+        f.gateway.observations.snapshot({ machine_ids: [paired.machine_id], include_host: true }).machine_metadata?.[0]
+          ?.host,
+        undefined
+      )
+    } finally {
+      await runtime.close()
+      f.stop()
+    }
+  })
 }
 
 /** 用已有隔离身份 fixture 完成真实 authenticate/welcome，只验证角色资源，不调用 native 方法。 */
