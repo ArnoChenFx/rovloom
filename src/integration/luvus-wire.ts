@@ -78,8 +78,7 @@ export interface NativeWireBackend {
   contract(ref: string): NativeContractRecord | undefined
   // 独立核验指定尝试所连接的原生 endpoint 和身份。
   nativeSource(callId: string, attemptId: string): TrustedNativeContext | undefined
-  // 取得指定 principal 当前的调用方与本地双端策略。
-  // 提供独立核验的 Owner 与 raw 授权事实，不能从消息自报导入。
+  // 可选的 provider 参数与来源预检；不承担 caller/local 方法授权。
   validateAttempt?(attempt: TrustedAttempt, binding: NativeBinding): void
   // 取得当前结果读取方身份，避免借用原调用者的派发许可。
   currentPrincipal(): string | undefined
@@ -684,7 +683,7 @@ export function createLuvusWireAdapter(
     return state
   }
 
-  // 从当前双端策略和宿主权限构造原生派发授权，不继承旧的读取权限。
+  // 核验本次原生来源、参数与验证模式，并保留原派发主体。
   function authorization(state: State): DispatchAuthorization {
     const { attempt } = refresh(state)
     backend.validateAttempt?.(copy(attempt), state.source.binding)

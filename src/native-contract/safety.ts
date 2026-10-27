@@ -1,4 +1,4 @@
-// 独立执行调用与结果读取门禁：按静态方法表、双端策略和 raw 授权校验后登记内存派发许可。
+// 核验原生方法、参数覆盖程度与实际来源，登记本次请求的内存派发句柄。
 import { candidates, views } from './internal.js'
 import { luvusMethod } from './methods.js'
 import { attempt, equal, fail, snapshot } from './json.js'
@@ -91,7 +91,7 @@ export function checkDispatch(candidate: DispatchCandidate, input: DispatchAutho
   )
 }
 
-// 在结果读取时重新核验许可主体、当前双端策略与内容状态。
+// 在执行上下文内核验原请求主体与内容状态。
 export function checkResultBoundary(permit: DispatchPermit, input: ResultAuthorization): Check<void> {
   return attempt(
     'result',

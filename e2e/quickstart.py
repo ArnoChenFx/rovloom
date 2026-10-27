@@ -7,7 +7,7 @@
 
 用法：python3 e2e/quickstart.py --binary /path/rovloom --herdr /path/herdr-0.9.5 [--work DIR] [--then 'cmd ...']
 """
-import argparse, socket, fcntl, getpass, json, os, pty, re, select, shlex, shutil, signal, subprocess, sys, tempfile, termios, time
+import argparse, socket, hashlib, fcntl, getpass, json, os, pty, re, select, shlex, shutil, signal, subprocess, sys, tempfile, termios, time
 
 ANSI = re.compile(rb'\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]|\r')
 CODE = re.compile(r'm_[0-9a-f-]{36}\.[0-9a-f-]{36}\.[A-Za-z0-9_-]+')
@@ -110,6 +110,7 @@ def redact(text):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--binary', required=True)
+    ap.add_argument('--upgrade-from', help='先用旧 Rovloom 二进制配对并读取，再原位替换两端，验证原 token/设备凭据/结果句柄')
     ap.add_argument('--herdr', help='官方 herdr 0.9.5 可执行文件')
     ap.add_argument('--luvus', help='官方 luvus 0.14.3 可执行文件（与 --herdr 二选一；走默认的 Luvus 引导）')
     ap.add_argument('--work', help='工作目录（需位于祖先不可被其它用户写入的位置；默认 ~/.rq-*）')
@@ -121,7 +122,7 @@ def main():
                     help='就绪后 kill -9 Luvus server：Connector 应自行重建并恢复调用')
     ap.add_argument('--crash', action='store_true', help='就绪后 kill -9 Connector 再重启，验证无需人工清理即可恢复')
     ap.add_argument('--legacy-wait-output', action='store_true',
-                    help='（Luvus）把隔离配对记录还原成旧 35 方法预设，重启后用原 test token 验证输出等待')
+                    help='（Luvus）注入旧 policy/raw 字段，重启后用原 test token 验证字段不再限制输出等待')
     ap.add_argument('--unknown-outcome', action='store_true',
                     help='（Luvus）暂停原生后提交写调用并杀掉 Connector：调用必须收敛为 outcome_unknown，且不被重发')
     ap.add_argument('--revoke', action='store_true',
@@ -154,7 +155,7 @@ def main():
     for d in (home_g, home_c, tools, herdr_dir):
         os.makedirs(d, mode=0o700, exist_ok=True)
     rov = os.path.join(tools, 'rovloom')
-    shutil.copy(args.binary, rov); os.chmod(rov, 0o755)
+    shutil.copy(args.upgrade_from or args.binary, rov); os.chmod(rov, 0o755)
     source, name = (args.herdr, 'herdr') if args.herdr else (args.luvus, 'luvus')
     shutil.copy(source, os.path.join(herdr_dir, name)); os.chmod(os.path.join(herdr_dir, name), 0o700)
     # ROVLOOM_LANG 固定英文输出，宿主 locale 不影响这些脚本的提示标记。
@@ -253,6 +254,44 @@ def main():
             print('LUVUS_SERVERS', servers, flush=True)
             if args.pre_existing:
                 assert servers == existing, f'Connector must attach, not start another: {existing} -> {servers}'
+        if args.upgrade_from:
+            made = subprocess.run([rov, 'token', 'create', '--principal', 'upgrade_test', '--like', 'operator_simple_pairing'],
+                                  env=env_g, cwd=home_g, capture_output=True, text=True, timeout=10)
+            assert made.returncode == 0, 'upgrade_token_create_failed'
+            info['token'] = made.stdout.strip()
+            assert re.fullmatch(r'[A-Za-z0-9_-]{43}', info['token']), 'upgrade_token_format'
+            open(out, 'w').write(json.dumps(info))
+            evidence = os.path.join(work, 'upgrade-evidence.json')
+            probe = os.path.join(os.path.dirname(__file__), 'upgrade-client.mjs')
+            probe_env = {**os.environ, 'MCP_CONFIG': out, 'UPGRADE_EVIDENCE': evidence}
+            subprocess.run(['bun', '--no-env-file', probe, 'before'], env=probe_env, check=True, timeout=60)
+            connector.stop(); gateway.stop()
+            connector_state = cfg.get('data', {}).get('directory') or os.path.join(home_c, '.local', 'share', 'rovloom', 'connector')
+            credential_path = os.path.join(connector_state, 'managed', 'device.json')
+            credential_digest = hashlib.sha256(open(credential_path, 'rb').read()).digest()
+            # 只替换二进制，不重新 join、不编辑 managed 配对配置或设备凭据。
+            shutil.copy(args.binary, rov); os.chmod(rov, 0o755)
+            gateway = Term('gateway-upgraded', [rov, 'gateway'], env_g, home_g); terms.append(gateway)
+            connector = Term('connector-upgraded', [rov, 'connector'], env_c, home_c); terms.append(connector)
+            connector.expect('provider_ready=true', timeout=90)
+            assert hashlib.sha256(open(credential_path, 'rb').read()).digest() == credential_digest, 'upgrade_changed_device_credential'
+            subprocess.run(['bun', '--no-env-file', probe, 'after'], env=probe_env, check=True, timeout=60)
+            # 范围命令触发真实 v2 写盘，原 token 不轮换，旧方法/动作策略不再落盘。
+            scoped = subprocess.run([rov, 'token', 'scope', '--principal', 'upgrade_test', '--devices', info['targets'][0]['machine_id']],
+                                    env=env_g, cwd=home_g, capture_output=True, text=True, timeout=10)
+            assert scoped.returncode == 0, 'upgrade_scope_write_failed'
+            registry_path = os.path.join(home_g, '.local', 'share', 'rovloom', 'gateway', 'managed', 'mcp-callers.json')
+            registry = json.load(open(registry_path))
+            assert registry['schema_version'] == 2
+            assert 'local_policy' not in registry and 'gateway_policy' not in registry
+            assert all(set(entry['principal']) == {'id'} for entry in registry['callers'])
+            subprocess.run(['bun', '--no-env-file', probe, 'after'], env=probe_env, check=True, timeout=60)
+            if args.luvus:
+                subprocess.run(['bun', '--no-env-file', os.path.join(os.path.dirname(__file__), 'luvus-wait-output.mjs')],
+                               env=probe_env, check=True, timeout=90)
+            print('NATIVE_UPGRADE_OK', json.dumps({'provider': 'herdr' if args.herdr else 'luvus',
+                                                 'credential_preserved': True, 'token_preserved': True,
+                                                 'registry_version': 2, 'old_result_readable': True}), flush=True)
         if args.legacy_wait_output:
             # 真实 CLI 创建非配对主体，之后仍使用同一个 token；所有文件仅属于本轮隔离 HOME。
             made = subprocess.run([rov, 'token', 'create', '--principal', 'test', '--like', 'operator_simple_pairing'],
@@ -440,7 +479,7 @@ def main():
     finally:
         for term in reversed(terms):
             term.stop()
-        if args.legacy_wait_output:
+        if args.legacy_wait_output or args.upgrade_from:
             # 此场景的 daemon 来自本轮私有 binary/HOME，不属于用户已有实例。
             for pid, _ in luvus_servers(herdr_dir):
                 try:

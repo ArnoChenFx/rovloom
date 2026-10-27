@@ -34,7 +34,7 @@ export function assertLuvusOperationsContract(contract: NativeContractRecord): v
   }
 }
 
-/** 固定分类不能授予来源或 raw 权限；每次先取宿主当前来源，再按显式回调决定是否交付原 gate 所需 grant。 */
+/** 每次按实际安装契约核对方法、参数、验证模式和当前来源，不生成策略或 raw grant。 */
 export function createLuvusOperationsValidation(
   contract: NativeContractRecord,
   current: (binding: AttemptBinding) => TrustedNativeContext
