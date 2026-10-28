@@ -73,7 +73,7 @@ export async function createDualRoleFixture({
     load('src/connector/herdr/local.ts'),
     load('src/connector/herdr/review.ts'),
     load('src/wire/index.ts'),
-    load('src/connector/luvus/claims.ts')
+    load('src/connector/claims.ts')
   ])
   const root = mkdtempSync(join(parent, '.dual-role-'))
   const directory = /** 每个隔离根独占创建，绝不修改既有目录权限。 */ (name) => {
