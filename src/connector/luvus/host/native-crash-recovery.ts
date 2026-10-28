@@ -2,23 +2,15 @@
 import { lstatSync } from 'node:fs'
 import { join } from 'node:path'
 import { listening, ownerIsDead } from '../../../storage/process-identity.js'
-import { lockOwnerFields, ownedFile, recordedProcess, recoverStaleLock } from '../../../storage/lock-recovery.js'
-
-export { lockOwnerFields }
+import { ownedFile, recordedProcess } from '../../../storage/lock-recovery.js'
 import type { ProcessIdentity } from '../../../storage/process-identity.js'
-import { nativeRecordStamp, readNativeRecord, removeNativeRecord } from './native-record-files.js'
-import { DISPATCH_CLAIMS_LOCK_FORMAT } from '../../claims.js'
+import { nativeRecordStamp, readNativeRecord, removeNativeRecord } from '../../../connector/native-record-files.js'
+import { lockOwnerFields, recoverDispatchClaimsLock } from '../../../connector/crash-recovery.js'
 import type { LuvusLocalConfig } from '../types.js'
 
-export const LUVUS_OWNER_FORMAT = 'rovloom-luvus-owner-v1'
+export { lockOwnerFields, recoverDispatchClaimsLock }
 
-/**
- * claim 账本互斥锁：内容带持有者进程身份且该进程已死，才删除锁（SQLite 回滚日志在下次打开时自行恢复，
- * 账本里的派发墓碑原样保留）。空锁、旧格式或无法判断时返回 false，沿用原 fail-closed。
- */
-export function recoverDispatchClaimsLock(lockPath: string): boolean {
-  return recoverStaleLock(lockPath, DISPATCH_CLAIMS_LOCK_FORMAT)
-}
+export const LUVUS_OWNER_FORMAT = 'rovloom-luvus-owner-v1'
 
 /**
  * root 拥有锁：记录的 Connector 已死，且该会话的 Luvus 端点都无人监听（没有孤儿 server）时才移除。

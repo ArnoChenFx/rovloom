@@ -13,11 +13,7 @@ import {
 } from '../connector/herdr/local.js'
 import { createHerdrConnectorResources, parseHerdrProviderRefConfig } from '../connector/herdr/provider.js'
 import type { HerdrProviderRefConfig } from '../connector/herdr/provider.js'
-import {
-  createNativeRecord,
-  nativeRecordStamp,
-  removeNativeRecord
-} from '../connector/luvus/host/native-record-files.js'
+import { createNativeRecord, nativeRecordStamp, removeNativeRecord } from '../connector/native-record-files.js'
 import { boundedJson, fields, hash, object, parseJson } from '../wire/index.js'
 import type { Connection } from '../transport/index.js'
 import { CliError } from './config.js'
@@ -25,7 +21,7 @@ import type { ProductionCliSources, ProductionProviderReference } from './produc
 import { startAttachedHerdr } from './herdr-attached.js'
 import { createHerdrProductSources } from './herdr-sources.js'
 import { HERDR_OWNER_FORMAT, currentProcessIdentity, recoverHerdrCrashResidue } from './herdr-crash-recovery.js'
-import { recoverDispatchClaimsLock } from '../connector/luvus/host/native-crash-recovery.js'
+import { recoverDispatchClaimsLock } from '../connector/crash-recovery.js'
 import { readRuntimeFile } from './runtime-files.js'
 import { ProviderUnavailableError } from './provider-unavailable.js'
 import { pinTerminalExecution } from '../connector/terminal-execution.js'

@@ -3,7 +3,6 @@ import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { lstatSync, readFileSync, readlinkSync, statSync } from 'node:fs'
-import { dirname, isAbsolute, resolve, sep } from 'node:path'
 import { getSystemErrorName } from 'node:util'
 import { childEnvironment, withPrivateUmask } from '../local.js'
 import { LuvusAdapterError } from '../types.js'
@@ -14,7 +13,17 @@ import { readLinuxLuvusPeer } from '../linux-peer.js'
 import { readMacosLuvusPeer, readWindowsLuvusPeer } from '../peer.js'
 import { WINDOWS_PIPE } from '../local.js'
 import { macosProcessArgv, macosProcessImage, macosProcessState, macosProcessUid } from '../../../platform/macos.js'
-import { windowsInspectPath, windowsProcessFacts, windowsProcessState } from '../../../platform/windows.js'
+import { windowsProcessFacts, windowsProcessState } from '../../../platform/windows.js'
+import { ownedPathStamp as stampOwnedPath } from '../../../connector/path-identity.js'
+
+/** Luvus 端点命名规则固定为 `luvus-<16 hex>`；其余语义交给 provider 中立的路径核验。 */
+export function ownedPathStamp(path: string, kind: 'directory' | 'binary' | 'socket'): string {
+  return stampOwnedPath(
+    path,
+    kind,
+    /* Windows 命名管道端点只接受本 provider 的固定命名。 */ (address) => WINDOWS_PIPE.test(address)
+  )
+}
 
 export interface ReadonlyNativeProcess {
   assertLive(): void
@@ -181,67 +190,6 @@ export async function stopOwnedProcess(
       false
     )
   }
-}
-
-/** 对路径链逐层检查归属与可写性；目录 ctime 的正常内容变化不改变其身份。 */
-export function ownedPathStamp(path: string, kind: 'directory' | 'binary' | 'socket'): string {
-  if (process.platform === 'win32') {
-    // Windows：命名管道端点以名称为身份；目录/二进制按属主 SID + DACL 逐级核验。
-    if (kind === 'socket') {
-      if (!WINDOWS_PIPE.test(path)) {
-        throw new LuvusAdapterError('owned_path_untrusted')
-      }
-      return path
-    }
-    try {
-      return windowsInspectPath(path, kind)
-    } catch {
-      throw new LuvusAdapterError('owned_path_untrusted')
-    }
-  }
-  if (typeof path !== 'string' || !isAbsolute(path) || resolve(path) !== path || path.includes('\0')) {
-    throw new LuvusAdapterError('owned_path_untrusted')
-  }
-  const paths = [path]
-  while (paths[0] !== sep) {
-    const parent = dirname(paths[0]!)
-    if (parent === paths[0]) {
-      throw new LuvusAdapterError('owned_path_untrusted')
-    }
-    paths.unshift(parent)
-  }
-  const rootOwner = lstatSync(sep, { bigint: true }).uid
-  const uid = BigInt(process.geteuid!())
-  const stamps: string[] = []
-  for (const component of paths) {
-    const info = lstatSync(component, { bigint: true })
-    const last = component === path
-    const mode = Number(info.mode & 0o777n)
-    if (
-      info.isSymbolicLink() ||
-      (mode & 0o022) !== 0 ||
-      (info.uid !== uid && info.uid !== 0n && info.uid !== rootOwner) ||
-      (!last && !info.isDirectory()) ||
-      (last && kind === 'directory' && (!info.isDirectory() || info.uid !== uid || mode !== 0o700)) ||
-      (last && kind === 'socket' && (!info.isSocket() || info.uid !== uid || mode !== 0o600)) ||
-      (last && kind === 'binary' && (!info.isFile() || (mode & 0o111) === 0 || (info.mode & 0o6000n) !== 0n))
-    ) {
-      throw new LuvusAdapterError('owned_path_untrusted')
-    }
-    stamps.push(
-      [
-        component,
-        info.dev,
-        info.ino,
-        info.uid,
-        info.gid,
-        info.mode,
-        last && kind !== 'directory' ? info.size : '',
-        last && kind !== 'directory' ? info.ctimeNs : ''
-      ].join(':')
-    )
-  }
-  return stamps.join('\n')
 }
 
 /** 命令行固定为 `--session <name> server`；default 会话手动运行时可省略 `--session default`。 */

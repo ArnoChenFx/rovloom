@@ -13,7 +13,7 @@ import {
   recoverDispatchClaimsLock,
   recoverLuvusOwnerLock
 } from '../../../src/connector/luvus/host/native-crash-recovery.js'
-import { createNativeRecord } from '../../../src/connector/luvus/host/native-record-files.js'
+import { createNativeRecord } from '../../../src/connector/native-record-files.js'
 import { currentProcessIdentity } from '../../../src/storage/process-identity.js'
 import { privateHerdrTestRoot } from '../herdr/private-root.js'
 

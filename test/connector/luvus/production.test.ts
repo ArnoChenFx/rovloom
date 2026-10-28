@@ -12,7 +12,7 @@ import {
   MANAGED_LUVUS_CLASSIFICATION,
   MANAGED_LUVUS_REVISION
 } from '../../../src/connector/luvus/host/native-source.js'
-import { createNativeRecord } from '../../../src/connector/luvus/host/native-record-files.js'
+import { createNativeRecord } from '../../../src/connector/native-record-files.js'
 import { ownedPathStamp } from '../../../src/connector/luvus/host/native-process.js'
 import { createLuvusProductionSources } from '../../../src/connector/luvus/host/production-luvus.js'
 import type { LuvusProductionOwnerConfig } from '../../../src/connector/luvus/host/production-luvus.js'

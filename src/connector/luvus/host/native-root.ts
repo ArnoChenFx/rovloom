@@ -15,7 +15,7 @@ import {
   nativeRecordStamp,
   readNativeRecord,
   removeNativeRecord
-} from './native-record-files.js'
+} from '../../../connector/native-record-files.js'
 
 const rootBrand = Symbol('managed-luvus-root')
 export interface ManagedLuvusRoot {
