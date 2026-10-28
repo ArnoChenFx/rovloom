@@ -7,8 +7,8 @@ import {
   checkResultBoundary,
   compileBundle,
   parseNativeJson
-} from '../../src/connector/luvus/contract/index.js'
-import { DEFAULT_LIMITS, snapshot } from '../../src/connector/luvus/contract/json.js'
+} from '../../../../src/connector/luvus/contract/index.js'
+import { DEFAULT_LIMITS, snapshot } from '../../../../src/connector/luvus/contract/json.js'
 import {
   auth,
   bytes,

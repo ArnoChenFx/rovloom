@@ -6,7 +6,7 @@ import { hash, boundedJson } from '../../src/wire/index.js'
 import type { ProviderSnapshot } from '../../src/wire/index.js'
 import { createGateway } from '../../src/transport/gateway.js'
 import { source } from '../wire/helpers.js'
-import { G } from '../native-contract/helpers.js'
+import { G } from '../connector/luvus/contract/helpers.js'
 import { fixture, rawConnect, until } from './helpers.js'
 
 const offer = { major: 2, minor: 0, capabilities: ['rpc', 'provider_snapshot'], required: ['rpc', 'provider_snapshot'] }

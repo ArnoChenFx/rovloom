@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { compileBundle, parseNativeJson } from '../../src/connector/luvus/contract/index.js'
+import { compileBundle, parseNativeJson } from '../../../../src/connector/luvus/contract/index.js'
 import { bytes, G, identity, json, rejects, request, source, sourceFor, T, unwrap, validator } from './helpers.js'
 
 // 覆盖样本中的在线通用与终端预算，并绑定真实能力视图。

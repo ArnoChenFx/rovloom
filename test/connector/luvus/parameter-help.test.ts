@@ -1,7 +1,7 @@
 // 用实际原生 schema 与既有审核校验器验证提示；错误诊断只投影固定字段，不带用户值。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { compiled } from '../../native-contract/helpers.js'
+import { compiled } from './contract/helpers.js'
 import { createLuvusRequestPreflight, NativeRequestPreflightError } from '../../../src/connector/luvus/preflight.js'
 import { validateLuvusOperationParams } from '../../../src/connector/luvus/operations.js'
 import {

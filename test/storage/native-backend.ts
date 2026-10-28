@@ -6,7 +6,7 @@ import { createLuvusWireAdapter } from '../../src/wire/native.js'
 import { commitLuvusResponse, persistentBackend } from '../../src/wire/persistence.js'
 import type { NativeBinding } from '../../src/connector/luvus/contract/index.js'
 import type { AttemptBinding, AuthenticatedContext } from '../../src/wire/types.js'
-import { compiled, G, identity, json } from '../native-contract/helpers.js'
+import { compiled, G, identity, json } from '../connector/luvus/contract/helpers.js'
 import { source } from '../wire/helpers.js'
 import { connected, options, responseFrame } from './helpers.js'
 

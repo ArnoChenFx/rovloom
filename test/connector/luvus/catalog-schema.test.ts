@@ -6,7 +6,7 @@ import type { AnySchema } from 'ajv'
 import { createLuvusCatalog } from '../../../src/connector/luvus/catalog.js'
 import { compileBundle, createNativeValidator } from '../../../src/connector/luvus/contract/index.js'
 import { hash } from '../../../src/json/bounds.js'
-import { compiled, source, json, identity, unwrap, G } from '../../native-contract/helpers.js'
+import { compiled, source, json, identity, unwrap, G } from './contract/helpers.js'
 import type { CompiledContract } from '../../../src/connector/luvus/contract/index.js'
 
 function catalog(contract: CompiledContract = compiled) {

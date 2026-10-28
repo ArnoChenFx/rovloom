@@ -8,7 +8,7 @@ import { OFFER } from '../../src/transport/common.js'
 import { negotiate } from '../../src/wire/index.js'
 import { fixture } from './helpers.js'
 import type { TrustedNativeContext } from '../../src/connector/luvus/contract/index.js'
-import { G, identity as nativeIdentity } from '../native-contract/helpers.js'
+import { G, identity as nativeIdentity } from '../connector/luvus/contract/helpers.js'
 
 /** 建立真实 Store 与生命周期接线；配对设备的凭据取自 Store 的一次性兑换结果。 */
 function wiringFixture() {

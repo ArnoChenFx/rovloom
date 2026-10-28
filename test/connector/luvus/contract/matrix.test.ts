@@ -3,12 +3,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { checkDispatch, compileBundle, parseNativeJson } from '../../src/connector/luvus/contract/index.js'
+import { checkDispatch, compileBundle, parseNativeJson } from '../../../../src/connector/luvus/contract/index.js'
 import { auth, clone, G, identity, json, request, source, sourceFor, T, unwrap, validator, view } from './helpers.js'
 
 // 将接口无关场景转为真实内存工厂；不把 JSON 中的可信标志直接当作生产认证。
 const matrix: any = JSON.parse(
-  readFileSync(new URL('../fixtures/native-contract/matrix.json', import.meta.url), 'utf8')
+  readFileSync(new URL('../../../fixtures/native-contract/matrix.json', import.meta.url), 'utf8')
 )
 const seeds = new Map<string, any>()
 // 在测试样本中按 JSON Pointer 读取选定节点。

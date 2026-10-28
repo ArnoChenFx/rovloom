@@ -15,7 +15,7 @@ import { contractRef, LIMITS } from '../../src/wire/index.js'
 import { DEFAULT_LIMITS } from '../../src/connector/luvus/contract/index.js'
 import { fixture as transportFixture, until } from '../transport/helpers.js'
 import { source as contractSource } from '../wire/helpers.js'
-import { G } from '../native-contract/helpers.js'
+import { G } from '../connector/luvus/contract/helpers.js'
 
 type Gateway = Awaited<ReturnType<typeof createProviderGatewayRuntime>>
 type Stage = 'none' | 'session' | 'adapter' | 'readiness' | 'provider'

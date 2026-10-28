@@ -13,7 +13,7 @@ import type { GatewayIdentitySource } from '../../src/mcp/management.js'
 import type { NativeContractRecord } from '../../src/wire/backend.js'
 import type { ContractSource } from '../../src/wire/types.js'
 import { contractRef } from '../../src/wire/index.js'
-import { compiled, G, json } from '../native-contract/helpers.js'
+import { compiled, G, json } from '../connector/luvus/contract/helpers.js'
 
 /** 只解析本回归的合成 caller，不发放管理员会话或读取任何外部身份。 */
 function identities(beforeResolve?: () => void): GatewayIdentitySource {

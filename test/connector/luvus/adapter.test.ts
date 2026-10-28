@@ -13,7 +13,7 @@ import { parseRpcFrame, requestFrame } from '../../../src/connector/luvus/adapte
 import { inspectEndpoint, recheckEndpoint } from '../../../src/connector/luvus/local.js'
 import { localLimits } from '../../../src/connector/luvus/local.js'
 import { runFixedProcess } from '../../../src/connector/luvus/io.js'
-import { bytes, clone, json } from '../../native-contract/helpers.js'
+import { bytes, clone, json } from './contract/helpers.js'
 import { fixture } from './helpers.js'
 
 /** 构造拒绝断言，检查安全错误码以及可选的派发结果语义。 */

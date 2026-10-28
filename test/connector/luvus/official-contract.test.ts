@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { checkDispatch } from '../../../src/connector/luvus/contract/index.js'
-import { auth, request, validator, view } from '../../native-contract/helpers.js'
+import { auth, request, validator, view } from './contract/helpers.js'
 
 test(
   '官方大结果验收的有界 task.add/update 参数具有完整 strict 分支',

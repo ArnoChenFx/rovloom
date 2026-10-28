@@ -6,7 +6,7 @@ import type { NativeWireBackend, TrustedAttempt } from '../../src/wire/backend.j
 import { contractRef, LIMITS } from '../../src/wire/index.js'
 import type { AttemptBinding, AuthenticatedEnvelope, ContractSource, Payloads } from '../../src/wire/types.js'
 import type { NativeBinding } from '../../src/connector/luvus/contract/index.js'
-import { clone, compiled, G, identity, json, request, T, view } from '../native-contract/helpers.js'
+import { clone, compiled, G, identity, json, request, T, view } from '../connector/luvus/contract/helpers.js'
 
 const adapters = new Set<ReturnType<typeof createLuvusWireAdapter>>()
 

@@ -11,11 +11,11 @@ import { initializeManagedLuvusRoot } from '../../src/connector/luvus/host/nativ
 import { observedLuvusContract, MANAGED_LUVUS_REVISION } from '../../src/connector/luvus/host/native-source.js'
 import { compileBundle, createNativeValidator } from '../../src/connector/luvus/contract/index.js'
 import type { LuvusLocalConfig } from '../../src/connector/luvus/types.js'
-import { unknownSchemaBundle } from '../native-contract/unknown-schema-fixture.js'
+import { unknownSchemaBundle } from '../connector/luvus/contract/unknown-schema-fixture.js'
 import { validateProviderSnapshot } from '../../src/wire/index.js'
 import { providerIsolationFixture } from '../transport/provider-isolation-helpers.js'
 import { until } from '../transport/helpers.js'
-import { G } from '../native-contract/helpers.js'
+import { G } from '../connector/luvus/contract/helpers.js'
 
 /** 为被测安装生成原字节摘要，与任何内嵌发行版摘要无关。 */
 function hash(value: string | Uint8Array): string {

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { compileBundle, createNativeValidator } from '../../src/connector/luvus/contract/index.js'
+import { compileBundle, createNativeValidator } from '../../../../src/connector/luvus/contract/index.js'
 import type {
   CapabilityView,
   Check,
@@ -12,10 +12,10 @@ import type {
   CheckedRequest,
   RawRequestCandidate,
   TrustedNativeContext
-} from '../../src/connector/luvus/contract/index.js'
+} from '../../../../src/connector/luvus/contract/index.js'
 
 // fixture 中只有 P0 自建内容；测试工厂的可信标志不代表生产认证实现。
-export const fixtureRoot = new URL('../fixtures/luvus/0.14.3/linux/', import.meta.url)
+export const fixtureRoot = new URL('../../../fixtures/luvus/0.14.3/linux/', import.meta.url)
 // 读取并解码指定 P0 JSON 样本，为测试提供独立输入。
 export const json = (name: string): any => JSON.parse(readFileSync(new URL(name, fixtureRoot), 'utf8'))
 // 通过 JSON 往返复制测试数据，去除原对象引用与内存句柄身份。

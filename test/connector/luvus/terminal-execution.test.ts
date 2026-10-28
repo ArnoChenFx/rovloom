@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { fixture } from './helpers.js'
-import { G, validator, view, rejects } from '../../native-contract/helpers.js'
+import { G, validator, view, rejects } from './contract/helpers.js'
 import { LuvusRpcAdapter } from '../../../src/connector/luvus/adapter.js'
 
 const method = 'terminal.backend.submit_text'

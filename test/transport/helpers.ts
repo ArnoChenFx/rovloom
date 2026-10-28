@@ -21,7 +21,7 @@ import {
 } from '../../src/runtime/connector-attempts.js'
 import type { ContractSource, ProviderBinding, V2Target, VersionOffer } from '../../src/wire/types.js'
 import { contractRef } from '../../src/wire/index.js'
-import { compiled, G, identity, json } from '../native-contract/helpers.js'
+import { compiled, G, identity, json } from '../connector/luvus/contract/helpers.js'
 import { source } from '../wire/helpers.js'
 import { management } from '../storage/helpers.js'
 

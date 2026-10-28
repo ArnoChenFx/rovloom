@@ -12,7 +12,7 @@ import { contractRef } from '../../../src/wire/index.js'
 import type { AttemptBinding, AuthenticatedEnvelope, ContractSource } from '../../../src/wire/types.js'
 import { LuvusRpcAdapter } from '../../../src/connector/luvus/index.js'
 import type { LuvusLocalConfig, LuvusRpcHost } from '../../../src/connector/luvus/index.js'
-import { bytes, clone, fixtureRoot, G, identity, json, request, unwrap, view } from '../../native-contract/helpers.js'
+import { bytes, clone, fixtureRoot, G, identity, json, request, unwrap, view } from './contract/helpers.js'
 
 // 每个 fixture 都写入相同受控脚本；编译只与这些固定字节及其来源身份有关，不含临时路径或用例状态。
 const script =

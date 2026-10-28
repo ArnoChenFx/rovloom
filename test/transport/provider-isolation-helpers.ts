@@ -8,7 +8,7 @@ import { boundedJson, hash } from '../../src/wire/index.js'
 import type { AttemptBinding, ProviderBinding, ProviderSnapshot, V2Target } from '../../src/wire/types.js'
 import { fixture } from './helpers.js'
 import { source } from '../wire/helpers.js'
-import { G } from '../native-contract/helpers.js'
+import { G } from '../connector/luvus/contract/helpers.js'
 import { LuvusAdapterError } from '../../src/connector/luvus/types.js'
 import type { NativeContractRecord } from '../../src/wire/backend.js'
 
