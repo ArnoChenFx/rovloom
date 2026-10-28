@@ -468,6 +468,7 @@ def main():
             status = 1
             # 验收脚本可以核对 Gateway 自己的持久化布局（两台机器部署时设备路径不可见）。
             then_env = {**os.environ, 'MCP_CONFIG': out,
+                        'ROVLOOM_EXPECT_LEGACY_SCHEMA': '1' if args.upgrade_from else '',
                         'ROVLOOM_GATEWAY_STATE': os.path.join(home_g, '.local', 'share', 'rovloom', 'gateway')}
             for attempt in range(8 if args.service else 1):
                 status = subprocess.call(shlex.split(args.then), env=then_env)

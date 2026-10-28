@@ -3,7 +3,7 @@
 本文说明 Luvus 与 Herdr 安装契约的编译、原生请求与响应的校验，以及宿主必须提供的可信来源。
 
 - `src/connector/luvus/contract/index.ts`：异步契约编译，同步的原生校验与授权内核。准确签名见 `src/connector/luvus/contract/types.ts`。
-- `src/wire/native.ts`：`createLuvusWireAdapter(backend, limits?)` 把内核接入 [Wire v2](WIRE-PROTOCOL.md)；中性后端接口在 `src/wire/backend.ts`。
+- `src/connector/luvus/wire.ts`：`createLuvusWireAdapter(backend, limits?)` 把内核接入 [Wire v2](WIRE-PROTOCOL.md)；Luvus 后端接口在 `src/connector/luvus/backend.ts`，公共 attempt 账本事实在 `src/wire/backend.ts`。
 - `src/connector/luvus/`、`src/connector/herdr/`：Connector 上的本机 adapter。
 - 设计取舍见 [ADR 0004](../adr/0004-multi-runtime-provider.md)。
 

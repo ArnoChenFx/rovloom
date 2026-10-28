@@ -55,7 +55,7 @@ MCP Client ──HTTP (Bearer)──▶ Gateway ◀──WS/WSS (设备凭据)�
 | `json/` | 与 provider 无关的有界 JSON 解析、冻结快照与结构比较 |
 | `connector/luvus/` | Luvus（UHP）的全部实现：方法表、参数规则、契约编译/校验、原生/Wire 适配、来源与宿主接线 |
 | `connector/` | 共享的发送账本、终端开关与两端 schema 落盘约定；Herdr（JSON socket）的本机 adapter |
-| `wire/native.ts`、`wire/backend.ts` | Luvus 契约内核与 Wire 的接缝，以及 provider 中性的原生后端接口 |
+| `connector/luvus/wire.ts`、`connector/luvus/backend.ts` | Luvus/UHP 契约与 Wire 接缝；`wire/backend.ts` 只保留两个 provider 实际共享的 attempt/结果账本事实 |
 | `admin/`、`webui/` | 独立 listener 的管理 API 与 Web UI |
 | `cli/`、`service/` | 单一可执行文件、角色配置、开机服务 |
 
@@ -175,3 +175,12 @@ runtime_call
 - Luvus：[UHP](https://luvus.dev/docs/uhp/getting-started/)、[方法](https://luvus.dev/docs/uhp/methods/)、[契约](https://luvus.dev/docs/uhp/conformance/)、[终端](https://luvus.dev/docs/uhp/terminal/)。固定输入见 [开发指引](DEVELOPMENT.md#固定输入与维护用途)。
 - MCP：[生命周期](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)、[传输](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)、[授权](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)；[TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)。
 - Herdr：研究边界见 [ADR 0004](adr/0004-multi-runtime-provider.md)。
+
+
+### Provider 装配与基础机制边界
+
+公共 `runtime/gateway.ts` 仅接收既有 provider 会话组，管理唯一 Store、认证、调度、结果与关闭生命周期。Luvus 的远端 pin/epoch、UHP 能力绑定、验证模式和参数预检位于 `connector/luvus/host/gateway-runtime.ts`；Luvus Connector 装配位于同目录 `connector-runtime.ts`。Herdr 保留自己的会话、原生 schema 和 endpoint 实证。公共预检错误在 `connector/preflight.ts`，provider 先生成脱敏诊断，MCP 门面只投影公共结构。
+
+两种编译器复用 `connector/compiler-worker.ts` 的 Worker 所有权、实例隔离、deadline、取消与结算。协议版本、产物字段、schema 身份、原生根及 Ajv 产物安装仍分别核验。Luvus 使用 UHP 多文档/方法分支并返回 Check，Herdr 使用三个完整根并拒绝 Promise；这些差异不通过公共框架伪造一致。
+
+进程基础机制审计：两种 provider 已实际共用 `storage/process-identity.ts` 的 PID/启动身份与死亡证明、`connector/native-record-files.ts` 的记录发布/代次核对、`connector/path-identity.ts` 的路径实证，以及 `connector/claims.ts` / `connector/crash-recovery.ts` 的唯一发送与锁恢复。Luvus managed 进程的 pidfd/endpoint 与 root Owner、Herdr 的 close 后清理 receipt 和不同 daemon 启动语义继续分别实现；取消等待、请求终止与确认真实退出不能合并为同一个成功信号。相关单测、真实 managed 崩溃恢复和 OS 回归分别验证这些边界。控制布局、迁移和退役规则见运维指南。

@@ -1,6 +1,6 @@
 # Wire v2：Gateway 与 Connector 的消息协议
 
-Wire 当前版本为 major **2** / minor **2**。每条 WebSocket 消息是一个 UTF-8 JSON 信封。编解码在 `src/wire/`，Luvus 原生校验经 `src/wire/native.ts` 接入（中性后端接口在 `src/wire/backend.ts`），见 [原生契约](NATIVE-CONTRACT.md)。认证、存储和传输由宿主提供可信实现，见 [通道](../TRANSPORT.md)。总览见 [协议总览](../PROTOCOL.md)。
+Wire 当前版本为 major **2** / minor **2**。每条 WebSocket 消息是一个 UTF-8 JSON 信封。编解码在 `src/wire/`，Luvus 原生校验经 `src/connector/luvus/wire.ts` 接入（Luvus 后端接口在 `src/connector/luvus/backend.ts`，公共 attempt 账本事实在 `src/wire/backend.ts`），见 [原生契约](NATIVE-CONTRACT.md)。认证、存储和传输由宿主提供可信实现，见 [通道](../TRANSPORT.md)。总览见 [协议总览](../PROTOCOL.md)。
 
 Luvus / Herdr 的原生协议、UHP 标识和 fixture 保持原样，Wire 不改写它们。
 

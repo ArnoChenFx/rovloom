@@ -25,11 +25,17 @@
 | `managed/schema_<sha256>.json` | Gateway / Connector | 配对时取得的原始 schema 字节，按内容寻址；Herdr 与 Luvus 共用同一布局 |
 | `managed/management.json`、`managed/mcp-callers.json`、`managed/management-sessions.json` | Gateway | 管理员、令牌注册表与登录绑定 |
 | `gateway.db`（及 `.lock`、`.degraded`） | Gateway | 唯一账本 |
-| `managed/{native-setup,herdr-setup,pairing,device,providers}.json` | Connector | 配对记录与原生准备记录 |
-| `control/luvus-claims.db`、`hr/control/claims.db`（及 `.lock`） | Connector | 每 provider 的唯一发送账本 |
-| `control/luvus-root.json`、`hr/…` 隔离根 | Connector | managed 原生根与运行记录 |
+| `managed/{pairing,device,providers}.json`、`control/{luvus,herdr}/setup.json` | Connector | 配对记录与原生准备记录 |
+| `control/{luvus,herdr}/claims.db`（及 `.lock`、SQLite sidecar） | Connector | 每 provider 的唯一发送账本 |
+| `control/luvus/root.json`（及 `.owner.lock`）、`control/herdr/owner.json`；`n/h/w` 与 `hr/…` 隔离根 | Connector | managed 原生根与运行记录 |
 
-schema 采用内容寻址：文件名即摘要，已有同摘要文件不会被不同字节覆盖。升级前的旧布局仍可读取——Herdr 的 `managed/herdr-schema_<配对批次>.json` 与 Luvus 内嵌在 `managed/providers.json` 的 `contract.schema_bundle` 都继续按同一摘要核验后编译，用户不需要重新配对或换 token。新配对写入引用形式，旧文件保留到所有者按退役批次清理。
+schema 采用内容寻址：文件名即摘要，已有同摘要文件不会被不同字节覆盖。升级前的旧布局仍可读取——Herdr 的 `managed/herdr-schema_<配对批次>.json` 与 Luvus 内嵌在 `managed/providers.json` 的 `contract.schema_bundle` 都继续按同一摘要核验后编译，用户不需要重新配对或换 token。新配对写入引用形式，现有 schema 配置只兼容读取，不在启动时强制改写 schema 或改变 contract_ref。schema 发布先同步临时文件内容，再排他发布并同步目录；文件已存在时逐字节核验，冲突不覆盖。编译预算仍按各原生协议保留，Luvus 不再额外受配对层 512 KiB 限制。
+
+Connector 首次升级在读取 provider 配置前，把 Rovloom 管理的旧 `native-setup.json` / `herdr-setup.json`、`control/luvus-claims.db`、`hr/control/claims.db` 和 root/运行记录迁到统一控制布局。原 SQLite 文件与 sidecar 原子搬移，不重新创建账本；凭据、token、配对身份、原生 HOME/XDG/状态根不改写。有活跃持有者或锁身份无法判断时拒绝迁移。`managed/control-migration.json` 与同名前缀的暂存文件记录中断恢复进度，下次启动继续同一批次；不要手删这些文件或用另一版本打开半迁移目录。手工配置的非标准原生 owner/账本路径保留旧读取能力，不自动移动用户 XDG 数据。
+
+`connector --unpair` / 换码会把 Connector 的配对记录、整个 control、隔离根以及内容寻址 schema 一并退役到 `retired/<批次>/`，批次内的 `manifest.json` 记录原目录和文件清单。`managed/retirement.json` 保证中断后继续同一批次；批次不再需要且已备份后可整体清理，不逐文件猜测活动引用。未知文件及用户附着实例不参与退役。
+
+Gateway 的 schema 文件是同摘要可共享的契约资料，不随一次调用或结果 TTL 删除。失败配对留下的已发布 schema 保留供重入，不会覆盖或自动删除。仅在停止 Gateway、备份完整状态后核对当前 providers、保留的旧配置/恢复资料及未完成配对引用，再清理确认无引用的文件；不能只凭 mtime 或某一个 provider 已撤销判断可删除。回滚/恢复使用完整同批状态备份。
 
 ### 升级与回滚
 

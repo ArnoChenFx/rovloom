@@ -57,6 +57,10 @@ try {
   }
   const route = { target, expected_binding_revision: 1 }
   const description = await tool('runtime_describe', { ...route, method: 'pane.list' })
+  if (phase === 'after') {
+    const previous = JSON.parse(readFileSync(process.env.UPGRADE_EVIDENCE, 'utf8'))
+    assert.equal(description.contract_ref, previous.contract_ref, 'same installation contract_ref must survive upgrade')
+  }
   let call = await tool('runtime_call', {
     ...route,
     contract_ref: description.contract_ref,
@@ -72,7 +76,7 @@ try {
   if (phase === 'before') {
     writeFileSync(
       process.env.UPGRADE_EVIDENCE,
-      JSON.stringify({ target, call_id: call.call_id, result: call.result }),
+      JSON.stringify({ target, contract_ref: description.contract_ref, call_id: call.call_id, result: call.result }),
       { mode: 0o600 }
     )
   }
