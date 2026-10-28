@@ -174,10 +174,14 @@ test('退役携带内容寻址 schema 与清单，中断重试继续同一批次
     const raw = '{ "keep": true }\n'
     writeFileSync(join(w.root, 'managed', name), raw, { mode: 0o600 })
     writeFileSync(join(w.root, 'managed', 'user-owned.json'), 'keep', { mode: 0o600 })
+    // journal 发布前退出只会遗留程序自己的暂存文件，也必须随批次保留。
+    writeFileSync(join(w.root, 'managed/control-migration-0.json'), '{"old":true}', { mode: 0o600 })
     const config = readConfig(w.path) as ConnectorConfig
     const retired = retirePairingState(config, { assertOwner() {} } as never)!
     assert.equal(readFileSync(join(retired, 'managed', name), 'utf8'), raw)
     assert.equal(existsSync(join(w.root, 'managed', name)), false)
+    assert.equal(existsSync(join(w.root, 'managed/control-migration-0.json')), false)
+    assert.equal(readFileSync(join(retired, 'managed/control-migration-0.json'), 'utf8'), '{"old":true}')
     assert(JSON.parse(readFileSync(join(retired, 'manifest.json'), 'utf8')).files.includes(name))
     // 模拟删除 journal 前进程退出：部分 source 已在同一批次，恢复不能新建另一批次。
     const batch = retired.split('/').at(-1)!

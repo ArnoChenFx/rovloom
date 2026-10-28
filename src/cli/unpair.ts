@@ -16,7 +16,7 @@ import { runtimeReference } from './runtime-files.js'
 import { readSetupJson, setupFileStamp, writeSetupFile, writeSetupJson } from './setup-files.js'
 import type { SetupConsole } from './setup-console.js'
 
-// 六份配对记录全部绑定旧 attempt/machine，留下任何一份都会让新 join 在"已配对/原生已准备"处短路。
+// 固定配对记录和中断前暂存文件一并退役，不能让新 join 复用旧身份或旧迁移字节。
 const PAIRING_FILES = [
   'device',
   'pairing',
@@ -24,7 +24,10 @@ const PAIRING_FILES = [
   'providers',
   'native-setup',
   'herdr-setup',
-  'retirement'
+  'retirement',
+  'control-migration-0',
+  'control-migration-1',
+  'control-migration-2'
 ] as const
 // 隔离 Luvus 的状态根/HOME/工作目录与隔离 Herdr 的私有根，以及两者共用的控制目录（root 记录与 claim 账本）。
 // managed 模式重新配对要求这些目录回到空白（initializeManagedLuvusRoot 的 not_blank 门禁），因此必须一并退役。
