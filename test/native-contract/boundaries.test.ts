@@ -22,8 +22,8 @@ import {
 } from './helpers.js'
 
 test(
-  '不在静态方法表中的方法一律拒绝，raw grant 和策略都不能代替',
-  /* 容器方法、token、终端和未来方法即使在线广告并持有 raw grant 也不可派发。 */ () => {
+  '不在静态方法表中的方法一律拒绝，raw 模式也不能代替',
+  /* 容器方法、token、终端和未来方法即使在线广告并以 raw 模式提交也不可派发。 */ () => {
     const caps = json('session-capabilities.json')
     caps.result.session = 'synthetic'
     caps.result.server_generation = G
@@ -47,8 +47,8 @@ test(
 )
 
 test(
-  '实际安装契约广告的原生提示必须与静态表一致，字符串策略也不能授权',
-  /* 把写方法广告成读方法、改幂等性或篡改 scope 都会使表项失效；畸形策略直接拒绝。 */ () => {
+  '实际安装契约广告的原生提示必须与静态表一致',
+  /* 把写方法广告成读方法、改幂等性或篡改 scope 都会使该方法失效，其它方法保持健康。 */ () => {
     for (const change of [{ access: 'read' }, { idempotent: true }, { scope: 'admin' }] as const) {
       const caps = json('session-capabilities.json')
       caps.result.session = 'synthetic'
@@ -75,8 +75,8 @@ test(
 )
 
 test(
-  '结果读取按派发主体、双端当前策略和内容状态检查',
-  /* 验证结果读取只给原主体，撤权或内容不可用时拒绝。 */ () => {
+  '结果读取按派发主体和内容状态检查',
+  /* 验证结果读取只给原主体，内容不可用时拒绝。 */ () => {
     const candidate = request(view(), { id: 'result', method: 'task.add', params: { title: 'synthetic' } })
     const permit = unwrap(checkDispatch(candidate, auth(candidate)))
     const ok = {

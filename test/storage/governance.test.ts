@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os'
 import { GATEWAY_LOCK_FORMAT, Store } from '../../src/store.js'
 import { currentProcessIdentity } from '../../src/storage/process-identity.js'
 import { Router } from '../../src/router.js'
-import { management, connected, options, policy, respond, responseFrame, evidenceContext } from './helpers.js'
+import { management, connected, options, respond, responseFrame, evidenceContext } from './helpers.js'
 import { planResponseEvidence } from '../../src/wire/index.js'
 import type { AttemptBinding } from '../../src/wire/types.js'
 
@@ -224,7 +224,7 @@ test(
             enabled: true
           })
           const second = { ...d.target, provider_id: 'second' }
-          const p = { id: 'alice', policy: policy(d.target) }
+          const p = { id: 'alice' }
           const router = new Router(s)
           assert.doesNotThrow(() => router.create(p, second, { method: 'ping' }, options()))
           const a = s.createCall('alice', d.target, { method: 'ping' }, options())
@@ -805,7 +805,7 @@ test(
     })
     try {
       const d = connected(s)
-      const p = { id: 'alice', policy: policy(d.target) }
+      const p = { id: 'alice' }
       const r = new Router(s)
       const c = r.create(p, d.target, { method: 'ping' }, options({ timeoutMs: 10 }))
       const waited = await r.wait(p, c.call_id, 1)

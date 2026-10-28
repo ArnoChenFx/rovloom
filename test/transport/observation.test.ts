@@ -595,9 +595,7 @@ test(
       assert.equal(verified(device(snapshot, a.machine_id).providers[0]!.dispatch_ready), false)
       assert.equal(verified(device(snapshot, b.machine_id).providers[0]!.dispatch_ready), true)
       f.configs.get(a.machine_id)!.native = true
-      f.configs.get(a.machine_id)!.peerPolicy = 'old_policy'
       assert.equal(verified(device(f.gateway.observations.snapshot(), a.machine_id).providers[0]!.dispatch_ready), true)
-      f.configs.get(a.machine_id)!.peerPolicy = 'trusted_policy1'
       const disabled = f.store.setProviderEnabled(a.machine_id, 'provider', 1, false)
       snapshot = f.gateway.observations.snapshot()
       assert.equal(device(snapshot, a.machine_id).providers[0]!.binding_revision, disabled.binding_revision)

@@ -244,7 +244,7 @@ test(
 )
 
 test(
-  '调用元数据来自实际Store且不交付正文；独立discard受归属、当前双端策略和专门权限保护',
+  '调用元数据来自实际Store且不交付正文；discard受归属与设备范围保护',
   /* 用实际清理事务验证授权失败不删、成功后正文和句柄均消失且审计记录实际principal。 */ async () => {
     const f = storeFixture()
     try {

@@ -27,8 +27,6 @@ export async function runtimeFixture(
   limits: GatewayRuntimeOptions['listener']['limits'] = {},
   extend?: (context: {
     state: ReturnType<typeof openGatewayState>
-    caller: ProviderPolicy
-    local: ProviderPolicy
     target: import('../../src/wire/types.js').V2Target
     root: string
   }) => Promise<{ hosted: readonly GatewayHostedProviders[]; release(): Promise<void> }>,
@@ -56,11 +54,6 @@ export async function runtimeFixture(
     config_ref: native.config.config_ref
   }
   state.store.defineProvider(binding)
-  const caller: ProviderPolicy = {
-    revision: 'caller1',
-    grants: [{ target, methods: [native.row.method], actions: ['dispatch', 'read', 'cancel'] }]
-  }
-  const local: ProviderPolicy = { ...structuredClone(caller), revision: 'local1' }
   let authorized = true
   let deviceScope: string[] | undefined
   const contract = {
@@ -90,7 +83,6 @@ export async function runtimeFixture(
       authorized && identity.principal_id === 'synthetic'
         ? {
             id: 'synthetic',
-            policy: caller,
             ...(deviceScope ? { device_scope: { mode: 'selected', machine_ids: deviceScope } } : {})
           }
         : null,
@@ -99,7 +91,7 @@ export async function runtimeFixture(
   }
   let extension: Awaited<ReturnType<NonNullable<typeof extend>>> | undefined
   try {
-    extension = await extend?.({ state, caller, local, target, root: native.root })
+    extension = await extend?.({ state, target, root: native.root })
   } catch (error) {
     state.close()
     await native.close()
@@ -112,7 +104,8 @@ export async function runtimeFixture(
     hosted: extension?.hosted,
     providers: [
       {
-        catalog_methods: Object.freeze(caller.grants.flatMap((grant) => grant.methods ?? [])),
+        // 测试 fixture 的暴露面固定为本次合成的单个方法，不依赖已删除的逐方法策略。
+        catalog_methods: Object.freeze([native.row.method]),
         binding,
         target,
         contract,
@@ -294,5 +287,3 @@ export async function runtimeFixture(
     }
   }
 }
-
-import type { ProviderPolicy } from '../legacy-policy.js'

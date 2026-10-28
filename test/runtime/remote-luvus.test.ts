@@ -610,3 +610,30 @@ test(
     }
   }
 )
+
+test(
+  'remote 原生 access-only 方法白名单收缩后，表内但未获原生许可的方法仍拒绝',
+  /** access.allowed_methods 是原生端点自己的授权面；静态方法表通过不能替代它。 */ async () => {
+    const factory = await createPinnedRemoteLuvus(checkedRemoteLuvusConfig(reference, input()))
+    try {
+      const limited = snapshot()
+      // 合成 access-only 端点的原生许可：只放行 workspace.get，其余同目录方法仍未获原生授权。
+      limited.capabilities.result.access = {
+        mode: 'read_only',
+        allowed_methods: ['workspace.get'],
+        limits: { connections: 1, requests_per_minute: 10 }
+      }
+      limited.capability_revision = hash(boundedJson(limited.capabilities.result))
+      const live = factory.provider.open(connection(), /** 合成连接 guard 不授予真实认证。 */ () => {}).accept(limited)
+      assert(live.ready())
+      const allowed = dispatch(live, attempt(live, 'epoch1', 'workspace.get'))
+      assert.equal(allowed.result.ok, true)
+      // 未获原生许可的方法必须被拒绝，且拒绝发生在签发许可之前。
+      const denied = dispatch(live, attempt(live, 'epoch1', 'workspace.rename'))
+      assert.equal(denied.result.ok, false)
+      assert.equal(denied.result.error?.code, 'forbidden')
+    } finally {
+      factory.close()
+    }
+  }
+)

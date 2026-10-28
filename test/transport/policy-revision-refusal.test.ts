@@ -14,9 +14,7 @@ test('生产准入后端忽略旧 revision 与方法动作清单，保持同一�
     const client = f.connector(() => device.credential)
     await until(() => client.status().phase === 'ready')
     const epoch = client.status().connection_epoch
-    f.local.revision = 'legacy_changed'
-    f.local.grants = []
-    f.principal.policy.grants = []
+    // 旧 revision 与方法/动作清单已不参与准入；同一设备范围下连接与调用都应保持。
     for (let i = 0; i < 2; i++) {
       const call = f.call(device.target)
       f.gateway.dispatch(call.call_id)

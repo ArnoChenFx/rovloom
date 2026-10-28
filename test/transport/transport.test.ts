@@ -204,7 +204,6 @@ test(
         () => unsupported.status().reconnects > 0
       )
       unsupported.stop()
-      f.configs.get(a.machine_id)!.peerPolicy = 'wrong_policy'
       const ca = f.connector(
         /** 提供预先创建的 mock 设备凭据，只供本次隔离连接使用。 */
         () => a.credential,
@@ -217,7 +216,6 @@ test(
         () => ca.status().phase === 'ready'
       )
       assert.equal(f.gateway.status().devices[0]!.ready, true)
-      f.configs.get(a.machine_id)!.peerPolicy = 'trusted_policy1'
       const binding = f.localBindings.get(a.machine_id + '/provider')!
       binding.binding_revision = 2
       assert.equal(f.gateway.status().devices[0]!.ready, false)
@@ -318,7 +316,6 @@ test(
       })
       f.localBindings.set(a.machine_id + '/second', second)
       const target = { ...a.target, provider_id: 'second' }
-      f.principal.policy.grants.push({ target, methods: ['task.add'], actions: ['dispatch', 'read', 'cancel'] })
       const client = f.connector(
         /** 提供预先创建的 mock 设备凭据，只供本次隔离连接使用。 */
         () => a.credential,

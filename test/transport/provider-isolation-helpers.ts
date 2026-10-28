@@ -95,7 +95,6 @@ export function providerIsolationFixture(discovered?: NativeContractRecord, term
   })
   f.localBindings.set(device.machine_id + '/second', second)
   const targets = [device.target, { ...device.target, provider_id: 'second' }] as V2Target[]
-  f.local.grants.push({ target: targets[1]!, methods: ['task.add'], actions: ['dispatch', 'read', 'cancel'] })
   for (const target of targets) {
     state.connector.set(target.provider_id, true)
     state.gateway.set(target.provider_id, true)

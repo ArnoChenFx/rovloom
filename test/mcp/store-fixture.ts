@@ -6,25 +6,10 @@ import { DatabaseSync } from 'node:sqlite'
 import { canonical, digest } from '../../src/contracts.js'
 import { Store } from '../../src/store.js'
 import type { Principal } from '../../src/router.js'
-import type { V2Target } from '../../src/wire/types.js'
 import { StoreGatewayService, type Administrator, type GatewayIdentitySource } from '../../src/mcp/index.js'
 import { syntheticCredential, target, secondTarget, syntheticSecret } from './fixture-values.js'
 
 export { syntheticCredential, target, secondTarget, syntheticSecret } from './fixture-values.js'
-
-// 生成明确的完整tuple政策；只有测试装配使用，生产不能导入这个授权工厂。
-export function policy(targets: V2Target[] = [target, secondTarget], revision = 'caller_1'): ProviderPolicy {
-  return {
-    revision,
-    grants: targets.map(
-      /* 每条grant保留一个完整目标与精确方法，不扩张为笛卡尔授权。 */ (route) => ({
-        target: route,
-        methods: ['pane.read'],
-        actions: ['dispatch', 'read', 'cancel']
-      })
-    )
-  }
-}
 
 // 建立并返回受测真实Store、共享政策来源和清理函数；全部资源均位于新建临时目录。
 export function storeFixture(mode: 'active' | 'storage_degraded' = 'active', mutateSeed?: (db: DatabaseSync) => void) {
@@ -151,5 +136,3 @@ export function storeFixture(mode: 'active' | 'storage_degraded' = 'active', mut
     }
   }
 }
-
-import type { ProviderPolicy } from '../legacy-policy.js'

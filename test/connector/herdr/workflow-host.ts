@@ -15,7 +15,6 @@ import { launchHerdrProcess, herdrEndpoint, inspectHerdrPath } from '../../../sr
 import type { HerdrLocalConfig } from '../../../src/connector/herdr/local.js'
 import { herdrDeadline, runHerdrCommand } from '../../../src/connector/herdr/io.js'
 import { createHerdrGatewayResources, createHerdrConnectorResources } from '../../../src/connector/herdr/provider.js'
-import { HERDR_WORKFLOW_METHODS } from '../../../src/connector/herdr/methods.js'
 import { contractRef, object } from '../../../src/wire/index.js'
 import type { JsonObject } from '../../../src/wire/types.js'
 import type { GatewayIdentitySource } from '../../../src/mcp/management.js'
@@ -193,10 +192,6 @@ export async function createHerdrWorkflowHost(options: HerdrWorkflowHostOptions)
       profile: 'session' as const,
       session: 'workflow'
     })
-    const caller: ProviderPolicy = {
-      revision: 'owned_caller_policy_1',
-      grants: [{ target, methods: [...HERDR_WORKFLOW_METHODS], actions: ['dispatch', 'read', 'cancel'] }]
-    }
     const binary = join(root, 'herdr')
     copyFileSync(options.binary, binary, constants.COPYFILE_EXCL)
     chmodSync(binary, 0o700)
@@ -292,7 +287,7 @@ export async function createHerdrWorkflowHost(options: HerdrWorkflowHostOptions)
     }
     const identities: GatewayIdentitySource = {
       /** 本自有 fixture 唯一 caller，与设备凭据走独立生产作用域。 */
-      principal: (identity) => (identity.principal_id === callerId ? { id: callerId, policy: caller } : null),
+      principal: (identity) => (identity.principal_id === callerId ? { id: callerId } : null),
       /** 普通 caller 不获得生产管理员或会话管理权。 */ administrator: () => null
     }
     runtime = await createProviderGatewayRuntime({
@@ -400,5 +395,3 @@ export async function createHerdrWorkflowHost(options: HerdrWorkflowHostOptions)
     throw error
   }
 }
-
-import type { ProviderPolicy } from '../../legacy-policy.js'

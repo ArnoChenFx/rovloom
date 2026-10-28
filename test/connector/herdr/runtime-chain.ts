@@ -18,7 +18,7 @@ import { createHerdrWireAdapter } from '../../../src/connector/herdr/wire.js'
 import { fixture, until } from '../../transport/helpers.js'
 
 /** 先完成现有 mock 配对并暴露完整 Target；调用方随后显式安装/监管自己的 Herdr，再传入 connect。 */
-export function createHerdrRuntimeChain(root: string, methods: readonly string[] = ['ping']) {
+export function createHerdrRuntimeChain(root: string) {
   inspectHerdrPath(root, 'directory')
   const config_ref = 'owned-herdr-runtime-chain'
   const binding_revision = 1
@@ -148,13 +148,6 @@ export function createHerdrRuntimeChain(root: string, methods: readonly string[]
     profile: 'session' as const,
     session: 'synthetic'
   })
-  // pair 原有 Luvus 授权只属于 fixture；只为本测试显式选择的 Herdr 方法建立完整 Target grants。
-  f.principal.policy.grants.splice(0, f.principal.policy.grants.length, {
-    target,
-    methods: [...methods],
-    actions: ['dispatch', 'read', 'cancel']
-  })
-
   /** 只查询本测试真实发送账本，不把 accepted、socket 写入或 native 完成当作 durable claim。 */
   function claimCount(): number {
     const reader = new DatabaseSync(claimPath, { readOnly: true })

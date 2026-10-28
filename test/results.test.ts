@@ -10,8 +10,8 @@ import { Router } from '../src/router.js'
 import { connected, management, options, respond } from './storage/helpers.js'
 
 test(
-  'results enforce ownership, policy, quota, TTL and byte-perfect pagination',
-  /* 在真实 provider 调用上验证结果授权、配额、原始 TTL 与跨 UTF-8 字节分页。 */ () => {
+  'results enforce ownership, quota, TTL and byte-perfect pagination',
+  /* 在真实 provider 调用上验证结果归属、配额、原始 TTL 与跨 UTF-8 字节分页。 */ () => {
     let now = 100
     const s = new Store(':memory:', /* 注入可推进时钟，精确触发结果句柄到期。 */ () => now, {
       management,

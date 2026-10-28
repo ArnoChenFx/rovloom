@@ -42,19 +42,6 @@ export function connected(store: Store, name = 'linux') {
   }
   return { ...device, epoch, target, enrollment }
 }
-// 为指定目标构造调用者或本地策略，仅授予测试所需的方法与操作。
-export function policy(target: V2Target, local = false): ProviderPolicy {
-  return {
-    revision: local ? 'local_policy_1' : 'caller_policy_1',
-    grants: [
-      {
-        target,
-        methods: ['pane.read', 'ping', 'host.capabilities'],
-        actions: ['dispatch', 'read', 'cancel']
-      }
-    ]
-  }
-}
 /* 为绑定尝试构造已认证连接上下文，并按存储当前状态解析 provider。 */ export function evidenceContext(
   store: Store,
   binding: AttemptBinding
@@ -102,5 +89,3 @@ export function responseFrame(
       planResponseEvidence(frame, evidenceContext(store, binding), store.responseAnchor(binding), now)
   )
 }
-
-import type { ProviderPolicy } from '../legacy-policy.js'

@@ -18,7 +18,6 @@ test(
     let herdr!: Awaited<ReturnType<typeof createHerdrGatewayResources>>
     let target!: V2Target
     let root: string | undefined
-    let revoke!: () => void
     let releases = 0
     const fixture = await runtimeFixture(
       {},
@@ -41,17 +40,6 @@ test(
             }
           })
           context.state.store.defineProvider(herdr.providers[0]!.binding)
-          for (const policy of [context.caller, context.local]) {
-            policy.grants.push({ target, methods: ['ping', 'agent.prompt'], actions: ['dispatch', 'read'] })
-          }
-          revoke = /** 只撤销Herdr完整tuple的read；主体与Luvus授权保持原来源。 */ () => {
-            for (const policy of [context.caller, context.local]) {
-              policy.grants = policy.grants.filter(
-                /** 只移除Herdr精确tuple，不改变Luvus授权。 */ (grant) =>
-                  boundedJson(grant.target) !== boundedJson(target)
-              )
-            }
-          }
           return {
             hosted: [herdr],
             release: /** 资源关闭仅回收原Herdr契约及会话，不宣称停止远端native。 */ async () => {
@@ -126,7 +114,7 @@ test(
         context
       )
       await fixture.responded(first.data.call_id)
-      revoke()
+      // 混合目录各自独立解析：Herdr 与 Luvus 目标同时可描述，互不借用对方契约。
       assert.equal(
         (await service.execute('runtime_describe', { target, expected_binding_revision: 1, method: 'ping' }, context))
           .data.method,

@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { Store } from '../../src/store.js'
 import type { CallAdmissionOptions, StoreOptions } from '../../src/store.js'
 import { Router } from '../../src/router.js'
-import { connected, management, options, policy } from './helpers.js'
+import { connected, management, options } from './helpers.js'
 
 // 为每例创建私有真实数据库路径，异常时也清理全部隔离资源。
 function disk(run: (path: string) => void) {
@@ -477,7 +477,7 @@ test(
     fixture(
       /* 对 Router 执行非有限值、缺值及相对混用校验，确认没有登记或审计。 */ (s, db) => {
         const d = connected(s)
-        const principal = { id: 'alice', policy: policy(d.target) }
+        const principal = { id: 'alice' }
         const router = new Router(s)
         const before = ledger(db)
         for (const deadline of [undefined, NaN, Infinity, 0, -1, Number.MAX_SAFE_INTEGER + 1]) {

@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { canonical } from '../src/contracts.js'
 import { Store } from '../src/store.js'
 import { Router } from '../src/router.js'
-import { connected, management, options, policy, respond } from './storage/helpers.js'
+import { connected, management, options, respond } from './storage/helpers.js'
 
 test(
   'bounded canonical JSON rejects cycles, sparse arrays, getters, excessive depth and size',
@@ -44,13 +44,13 @@ test(
 )
 test(
   'device scope gates dispatch, reads, cancellation and result access on the execution surface',
-  /* 范围是过滤器：越界设备 forbidden，收窄后既有调用同样被拒，但策略修订不变。 */ () => {
+  /* 范围是唯一调用过滤器：越界设备 forbidden，收窄后既有调用同样被拒。 */ () => {
     const now = 100
     const s = new Store(':memory:', /* 可控时钟，避免期限干扰授权断言。 */ () => now, { management })
     try {
       const d = connected(s)
       const router = new Router(s)
-      const wide = { id: 'alice', policy: policy(d.target) }
+      const wide = { id: 'alice' }
       const outOfScope = { ...wide, device_scope: { mode: 'selected' as const, machine_ids: [] } }
       // 越界设备在登记阶段就 forbidden，且不产生任何调用。
       assert.throws(() => router.create(outOfScope, d.target, { method: 'pane.read' }, options()), /forbidden/)
@@ -85,7 +85,7 @@ test(
     try {
       const d = connected(s)
       const router = new Router(s)
-      const wide = { id: 'alice', policy: policy(d.target) }
+      const wide = { id: 'alice' }
       const call = router.create(wide, d.target, { method: 'pane.read' }, options())
       const outOfScope = { ...wide, device_scope: { mode: 'selected' as const, machine_ids: [] } }
       await assert.rejects(/* 短等 */ () => router.wait(outOfScope, call.call_id, 0), /forbidden/)

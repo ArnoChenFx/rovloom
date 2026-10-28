@@ -41,7 +41,7 @@ type FixtureHost = {
     channel: SocketChannel,
     services: Parameters<typeof persistentBackend>[1]
   ): Session['adapter']
-  /** Connector 侧改用生产同款准入后端（快照 policies + 本机 attempt 锚点）；默认直连 Store。 */
+  /** Connector 侧改用生产同款准入后端（本机 attempt 锚点 + 当前 provider 配置）；默认直连 Store。 */
   connectorAdmission?: boolean
 }
 
@@ -91,14 +91,7 @@ export function fixture(
       canonical.set(machine, credential)
     }
   })
-  const grants: ProviderPolicy['grants'] = []
-  const principal: import('../../src/router.js').Principal & { policy: ProviderPolicy } = {
-    id: 'synthetic',
-    policy: { revision: 'caller1', grants }
-  }
-  const local: ProviderPolicy = { revision: 'local1', grants }
-  /** Connector 侧准入快照；与 gateway 的 local 分开维护，供测试制造双侧 revision 漂移。 */
-  const connectorSnapshot: ProviderPolicy = { revision: 'local1', grants }
+  const principal: import('../../src/router.js').Principal = { id: 'synthetic' }
   const router = new Router(store)
   const origin = host.contract?.source ?? { ...source, runtime_generation: G, classification_revision: 'review1' }
   const installedIdentity = host.contract?.identity ?? identity
@@ -108,7 +101,7 @@ export function fixture(
   const installedCapabilities = host.contract?.capabilities ?? capabilities
   const capabilityRevision = host.contract?.capability_revision ?? 'caps1'
   const localBindings = new Map<string, ProviderBinding>()
-  const configs = new Map<string, { native: boolean; peerPolicy: string; sourceVerified: boolean }>()
+  const configs = new Map<string, { native: boolean; sourceVerified: boolean }>()
   let openedSessions = 0
   let closedSessions = 0
   const encoded: string[] = []
@@ -154,8 +147,8 @@ export function fixture(
         binding: native
       }
     },
-    /** 提供离线测试分类权限，不在生产入口创建默认授权。 */
-    validateAttempt: () => ({ owner: false, raw_requested: false }),
+    /** 离线 fixture 不做 provider 参数预检；生产装配另行注入真实 validateAttempt。 */
+    validateAttempt: () => {},
     /** 取得测试当前 reader ID，验证读取与派发身份分别受控。 */
     currentPrincipal: () => principal.id
   })
@@ -271,7 +264,6 @@ export function fixture(
     localBindings.set(machine.machine_id + '/provider', binding)
     configs.set(machine.machine_id, {
       native: true,
-      peerPolicy: 'trusted_policy1',
       sourceVerified: true
     })
     const target: V2Target = {
@@ -280,7 +272,6 @@ export function fixture(
       profile: 'session',
       session: 'synthetic'
     }
-    grants.push({ target, methods: ['task.add'], actions: ['dispatch', 'read', 'cancel'] })
     return { machine_id: machine.machine_id, credential, enrollment, target }
   }
   /** 连接到隔离 Gateway 并注入可控 native 宿主；所有授权与 token 都是无生产效力 fixture。 */
@@ -335,7 +326,6 @@ export function fixture(
     store,
     router,
     principal,
-    local,
     admin,
     credentials,
     gateway,
@@ -343,7 +333,6 @@ export function fixture(
     backendServices,
     configs,
     localBindings,
-    connectorSnapshot,
     encoded,
     pair,
     connector,
@@ -436,5 +425,3 @@ export function rawConnect(
     }
   }
 }
-
-import type { ProviderPolicy } from '../legacy-policy.js'

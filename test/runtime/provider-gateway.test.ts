@@ -47,8 +47,7 @@ async function fixture(settings: Settings = {}) {
   const paired = base.pair('isolated_neutral_gateway')
   base.gateway.stop()
   const binding = base.store.provider(paired.machine_id, paired.target.provider_id)!
-  const principal = { ...base.principal, policy: structuredClone(base.principal.policy) }
-  const observerPolicy = structuredClone(base.principal.policy)
+  const principal = { ...base.principal }
   const reference = contractRef({ ...contractSource, runtime_generation: G, classification_revision: 'review1' })
   let runtime: Gateway | undefined
   let client: ReturnType<typeof base.connector> | undefined
@@ -82,7 +81,7 @@ async function fixture(settings: Settings = {}) {
         if (caller.principal_id === 'synthetic' && state.caller) {
           return principal
         }
-        return caller.principal_id === 'observer' && state.observer ? { id: 'observer', policy: observerPolicy } : null
+        return caller.principal_id === 'observer' && state.observer ? { id: 'observer' } : null
       },
       /** 本中性 Gateway 测试从不创建或升级管理员。 */ administrator() {
         return null
@@ -343,8 +342,8 @@ test(
 )
 
 test(
-  'neutral Gateway ignores legacy action lists and retains the original caller result',
-  /** 原caller撤权时另一HTTP主体仍获授权，也不能借最近请求身份保留原响应正文。 */ async () => {
+  'neutral Gateway keeps the original caller result while another HTTP reader is active',
+  /** 另一 HTTP 主体存续期间，后台响应仍按原派发主体提交并只对原主体可读。 */ async () => {
     const f = await fixture()
     try {
       await f.ready()
@@ -353,14 +352,7 @@ test(
         { principal_id: 'synthetic' },
         /** 先在真实read/dispatch授权下建立原请求。 */ () => f.gateway.admit(f.input())
       )
-      await until(/** 只在实际派发之后撤销原caller读取。 */ () => f.state.nativeCalls === 1)
-      const saved = structuredClone(f.principal.policy)
-      f.principal.policy.grants = f.principal.policy.grants.map(
-        /** 只撤销原caller的read，保留原派发及证据校验所需权限。 */ (grant) => ({
-          ...grant,
-          actions: grant.actions.filter(/** 不影响dispatch/cancel或另一reader。 */ (action) => action !== 'read')
-        })
-      )
+      await until(/** 只在实际派发之后切换另一个 reader。 */ () => f.state.nativeCalls === 1)
       await f.gateway.runAuthenticated(
         { principal_id: 'observer' },
         /** 保持另一个已授权reader活动，后台响应仍只能按原caller判保留。 */ async () => {
@@ -371,7 +363,6 @@ test(
       const stored = f.base.store.call('synthetic', admitted.call.call_id)
       assert.notEqual(stored.response, null)
       assert.equal(stored.content_status, 'available')
-      f.principal.policy = saved
       await f.gateway.runAuthenticated({ principal_id: 'synthetic' }, () => {
         const meta = f.gateway.results.open(stored.call_id)
         assert.equal(Buffer.from(f.gateway.results.read(meta.result_id).data, 'base64').toString(), stored.response)

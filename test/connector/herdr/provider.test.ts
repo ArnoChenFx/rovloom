@@ -236,16 +236,6 @@ test(
     }
     const expected = resources.providers[0]!.binding
     store.defineProvider(expected)
-    const policy: ProviderPolicies = {
-      caller: {
-        revision: 'caller1',
-        grants: [{ target: input.target, methods: ['ping'], actions: ['dispatch', 'read'] }]
-      },
-      local: {
-        revision: 'local1',
-        grants: [{ target: input.target, methods: ['ping'], actions: ['dispatch', 'read'] }]
-      }
-    }
     const value = store.createCall(
       'principal1',
       input.target,
@@ -282,7 +272,7 @@ test(
       assert.equal(described.source_basis, 'configured_connector_contract')
       assert.equal(described.methods.length, 65)
       assert.equal('schemas' in described, false)
-      const principal = { id: 'principal1', policy: policy.caller }
+      const principal = { id: 'principal1' }
       const catalog = resources.catalog.resolve(input.target, principal)!
       assert.equal(catalog.expires_at, 5100)
       assert.deepEqual(catalog.local_provider, expected)
@@ -295,7 +285,7 @@ test(
       assert.equal(typeof catalog.describe('ping').params_schema, 'object')
       assert.equal(catalog.describe('agent.prompt').method, 'agent.prompt')
       assert.equal(resources.catalog.resolve({ ...input.target, session: 'another' }, principal), undefined)
-      policy.caller.grants = []
+      // 目录不再按逐方法授权过滤：同一已认证主体在暴露面内始终可见已审方法。
       assert.equal(resources.catalog.resolve(input.target, principal)!.describe('agent.list').method, 'agent.list')
       assert.equal(catalog.describe('ping').method, 'ping')
       assert.equal(Object.hasOwn(catalog.methods[0]!, 'caller_actions'), false)
@@ -384,5 +374,3 @@ test(
     }
   }
 )
-
-import type { ProviderPolicies } from '../../legacy-policy.js'

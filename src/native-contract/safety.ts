@@ -1,7 +1,7 @@
-// 核验原生方法、参数覆盖程度与实际来源，登记本次请求的内存派发句柄。
+// 核验原生方法、原生访问面、参数覆盖程度与实际来源，登记本次请求的内存派发句柄。
 import { candidates, views } from './internal.js'
 import { luvusMethod } from './methods.js'
-import { attempt, equal, fail, snapshot } from './json.js'
+import { attempt, equal, fail, object, snapshot } from './json.js'
 import { verifySource } from './validator.js'
 import type { Check, DispatchAuthorization, DispatchCandidate, DispatchPermit, ResultAuthorization } from './types.js'
 
@@ -60,6 +60,19 @@ function checkListed(candidate: DispatchCandidate): void {
   }
 }
 
+// 原生 access-only 端点自带方法白名单；缺失或未包含本次方法一律拒绝，不用静态表替代原生授权。
+function checkNativeAccess(candidate: DispatchCandidate): void {
+  const stored = candidates.get(candidate)!
+  const capabilities = views.get(stored.view)!.capabilities
+  if (capabilities.access === undefined) {
+    return
+  }
+  const access = object(capabilities.access)
+  if (!Array.isArray(access.allowed_methods) || !access.allowed_methods.includes(candidate.method)) {
+    reject('forbidden', 'native_access')
+  }
+}
+
 // 全部安全门禁通过后签发内存许可；raw 仅豁免参数 schema 完整性要求。
 export function checkDispatch(candidate: DispatchCandidate, input: DispatchAuthorization): Check<DispatchPermit> {
   return attempt(
@@ -67,7 +80,8 @@ export function checkDispatch(candidate: DispatchCandidate, input: DispatchAutho
     /* 验证当前授权上下文并执行各项门禁，最后登记许可及其主体。 */ () => {
       const context = checkedAuthorization(candidate, input)
       checkListed(candidate)
-      // raw 只放宽参数 schema 覆盖要求；方法表、策略和传输门禁仍须全部通过。
+      checkNativeAccess(candidate)
+      // raw 只放宽参数 schema 覆盖要求；方法表、原生访问面和传输门禁仍须全部通过。
       if (context.mode === 'strict') {
         if (candidate.validation === 'generic') {
           reject('parameter_schema_incomplete')

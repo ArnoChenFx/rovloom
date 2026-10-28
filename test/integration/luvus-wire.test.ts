@@ -71,28 +71,12 @@ function fixture(method = 'task.add', raw = false, limits?: Parameters<typeof cr
     native_request: { method, params }
   }
   const rows = new Map([[binding.call_id, row]])
-  const policies: ProviderPolicies = {
-    caller: {
-      revision: 'caller1',
-      grants: [
-        {
-          target: clone(binding.target),
-          methods: [method],
-          actions: ['dispatch', 'read', 'cancel']
-        }
-      ]
-    },
-    local: { revision: 'local1', grants: [] }
-  }
-  policies.local.grants = clone(policies.caller.grants)
   const state = {
     active: true,
     enabled: true,
     sourceVerified: true,
     reader: 'synthetic',
     content: 'available' as 'available' | 'expired' | 'discarded' | 'unavailable',
-    owner: raw,
-    grant: raw,
     revision: 1,
     localConfig: 'config1',
     now: 100
@@ -373,8 +357,8 @@ test(
 )
 
 test(
-  '真实 generic 只能标 incomplete；raw 仍要求精确 grant、完整分类与当前双方权限',
-  /* 对通用参数 schema 分别测试 strict 和 raw，证明 raw 仍需精确 grant、完整分类及当前双端权限。 */ () => {
+  '真实 generic 只能标 incomplete；raw 只放宽参数覆盖，方法表与来源仍逐次核验',
+  /* 通用参数 schema 在 strict 下必须拒绝；raw 放行参数覆盖但仍受静态方法表和当前来源约束。 */ () => {
     const strict = fixture('workspace.list')
     rejects(
       /* 按当前消息方向执行完整解码校验，要求以 parameter_schema_incomplete 拒绝。 */ () =>
@@ -383,16 +367,15 @@ test(
     )
     const raw = fixture('workspace.list', true)
     assert.deepEqual(raw.decode(raw.opening), raw.opening)
-    raw.state.grant = false
-    // 表外方法即使持有 raw grant 也不可派发。
+    // 表外方法即使以 raw 模式提交也不可派发。
     const unlisted = fixture('ping', true)
     rejects(/* 方法表之外的方法一律拒绝。 */ () => unlisted.decode(unlisted.opening), 'method_not_listed')
   }
 )
 
 test(
-  '消息不能覆盖已登记参数、principal、权限、provider 或原生来源；双端配置必须完全一致',
-  /* 逐项篡改登记参数、外壳权限、双端配置和独立来源，确认消息不能覆盖宿主事实且异常不泄漏私密文本。 */ () => {
+  '消息不能覆盖已登记参数、principal、provider 或原生来源；双端配置必须完全一致',
+  /* 逐项篡改登记参数、外壳字段、双端配置和独立来源，确认消息不能覆盖宿主事实且异常不泄漏私密文本。 */ () => {
     const f = fixture()
     const altered = clone(f.opening)
     altered.payload.native_request.params = { server_generation: G, terminal_id: T, pane_id: '4' }
@@ -654,5 +637,3 @@ test(
     )
   }
 )
-
-import type { ProviderPolicies } from '../legacy-policy.js'

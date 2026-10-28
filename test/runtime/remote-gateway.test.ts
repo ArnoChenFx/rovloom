@@ -85,11 +85,6 @@ async function fixture(
     enabled: true
   }
   state.store.defineProvider(binding)
-  const caller: ProviderPolicy = {
-    revision: 'remote_caller',
-    grants: [{ target, methods: ['pane.list'], actions: ['dispatch', 'read', 'cancel'] }]
-  }
-  const local: ProviderPolicy = { ...structuredClone(caller), revision: 'remote_local' }
   const schema = readFileSync(new URL('../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8')
   const config: LuvusProductionRemoteConfig = {
     kind: 'luvus',
@@ -128,9 +123,6 @@ async function fixture(
         }
       })
       state.store.defineProvider(herdr.providers[0]!.binding)
-      for (const policy of [caller, local]) {
-        policy.grants.push({ target: herdrTarget, methods: ['ping'], actions: ['dispatch', 'read'] })
-      }
     } catch (error) {
       try {
         await herdr?.release()
@@ -315,8 +307,6 @@ async function fixture(
     databasePath: join(directory, 'gateway.db'),
     config,
     target,
-    local,
-    caller,
     peer,
     snapshot,
     credential,
@@ -343,7 +333,7 @@ test(
     const service = new RuntimeGatewayService({
       runtime: f.runtime,
       identities: {
-        principal: () => ({ id: 'remote_reader', policy: f.caller }),
+        principal: () => ({ id: 'remote_reader' }),
         administrator: () => null
       }
     })
@@ -447,12 +437,10 @@ test(
 
 test('直接 MCP 调用不能绕过 provider 暴露面，原生广告不额外开放静态表方法', { timeout: 45000 }, async () => {
   const f = await fixture()
-  f.caller.grants[0]!.methods = ['*']
-  f.local.grants[0]!.methods = ['*']
   const service = new RuntimeGatewayService({
     runtime: f.runtime,
     identities: {
-      principal: () => ({ id: 'remote_reader', policy: f.caller }),
+      principal: () => ({ id: 'remote_reader' }),
       administrator: () => null
     }
   })
@@ -524,9 +512,6 @@ test('直接 MCP 调用不能绕过 provider 暴露面，原生广告不额外�
 test('无静态 raw 清单也能派发，mixed 通道保留并发 Herdr 调用', { timeout: 45000 }, async () => {
   const f = await fixture({ mixed: true, isolated: true })
   try {
-    for (const policy of [f.caller, f.local]) {
-      policy.grants.push({ target: f.target, methods: ['workspace.rename'], actions: ['dispatch', 'read'] })
-    }
     const peer = await f.peer()
     peer.snapshot()
     await until(() => f.runtime.transport.status().devices[0]?.ready === true)
@@ -581,9 +566,6 @@ test('remote Gateway 策略 raw 授权允许多个 caller，调用和结果继�
     rawGrant: { methods: ['workspace.rename'] }
   })
   try {
-    for (const policy of [f.caller, f.local]) {
-      policy.grants.push({ target: f.target, methods: ['workspace.rename'], actions: ['dispatch', 'read'] })
-    }
     const peer = await f.peer()
     peer.snapshot()
     await until(() => f.runtime.transport.status().devices[0]?.ready === true)
@@ -622,8 +604,7 @@ test('remote Gateway 策略 raw 授权允许多个 caller，调用和结果继�
 /** 非空快照只使用真实Wire治理codec；所有native端口是明确拒绝执行的测试stub。 */
 function snapshotSession(
   connection: Connection,
-  route: Pick<ProviderSnapshot, 'binding' | 'target'>,
-  _legacyPolicy: string
+  route: Pick<ProviderSnapshot, 'binding' | 'target'>
 ): ConnectorWireSession {
   let closed = false
   const windows = new Map<Direction, MessageWindow>()
@@ -715,7 +696,7 @@ for (const isolated of [false, true]) {
           },
           session: /** 原host在实际认证welcome后建立一个组合会话。 */ (connection) => {
             connected = connection
-            const luvus = snapshotSession(connection, f.snapshot, f.local.revision)
+            const luvus = snapshotSession(connection, f.snapshot)
             const readiness = luvus.readiness
             luvus.readiness = /** 显式模拟单个原安装来源失效，不影响 Herdr 或认证通道。 */ () => {
               const state = readiness()
@@ -731,7 +712,7 @@ for (const isolated of [false, true]) {
             }
             luvus.providerSnapshot = /** 交付同一份非空原始快照，不复制或刷新generation。 */ () => nativeSnapshots
             const hosted = f.herdr!.providers[0]!
-            const herdr = snapshotSession(connection, hosted, f.local.revision)
+            const herdr = snapshotSession(connection, hosted)
             combined = composeConnectorSessions(
               connection,
               [
@@ -903,7 +884,7 @@ test(
           credential: /** 仅使用本轮合成设备身份。 */ () => f.credential
         },
         session: /** 实际welcome后仅建立健康原会话，不为Herdr生成adapter或来源。 */ (connection) => {
-          const luvus = snapshotSession(connection, f.snapshot, f.local.revision)
+          const luvus = snapshotSession(connection, f.snapshot)
           luvus.providerSnapshot = /** 原稳定快照不刷新generation。 */ () => snapshots
           return composeConnectorSessions(
             connection,
@@ -966,9 +947,6 @@ for (const { isolated, disconnectBeforeRead } of [
       let http: ReturnType<typeof httpFixture> | undefined
       let service: RuntimeGatewayService | undefined
       try {
-        for (const policy of [f.caller, f.local]) {
-          policy.grants.push({ target: f.target, methods: ['agent.wait'], actions: ['dispatch', 'read'] })
-        }
         const peer = await f.peer()
         peer.snapshot()
         await until(
@@ -1004,7 +982,7 @@ for (const { isolated, disconnectBeforeRead } of [
           catalog: f.runtime.catalog,
           identities: {
             principal: /** 沿用原 runtime 的当前 caller 来源。 */ (caller) =>
-              caller.principal_id === 'remote_reader' ? { id: 'remote_reader', policy: f.caller } : null,
+              caller.principal_id === 'remote_reader' ? { id: 'remote_reader' } : null,
             administrator: /** 本例不提供管理员会话。 */ () => null
           }
         })
@@ -1380,10 +1358,6 @@ test(
     const hosted = f.herdr!.providers[0]!
     const routes = [f.snapshot, hosted]
     const methods = ['pane.run', 'pane.send_text']
-    for (const policy of [f.caller, f.local]) {
-      policy.grants[0]!.methods!.push('pane.run', 'pane.read', 'agent.prompt')
-      policy.grants[1]!.methods!.push('pane.send_text')
-    }
     const snapshots = structuredClone([f.snapshot])
     /** 快照沿用生产固定深冻结要求，测试只更改独立布尔观察，不替换来源。 */
     function freeze(value: unknown): void {
@@ -1415,7 +1389,7 @@ test(
             routes.map(
               /** 各原目录保持自己的完整 binding，布尔值不生成能力或执行许可。 */ (route, index) => {
                 const current: ConnectorWireSession = {
-                  ...snapshotSession(connection, route, f.local.revision),
+                  ...snapshotSession(connection, route),
                   /** 只有本例来源 getter 可以报告对应原配置，且保留原方法接收对象。 */
                   terminalExecutionState() {
                     assert.equal(this, current)
@@ -1458,7 +1432,7 @@ test(
         runtime: f.runtime,
         identities: {
           principal: /** 与实际 runtime 使用同一合成 caller 和政策，不从参数取得身份。 */ (caller) =>
-            caller.principal_id === 'remote_reader' ? { id: 'remote_reader', policy: f.caller } : null,
+            caller.principal_id === 'remote_reader' ? { id: 'remote_reader' } : null,
           administrator: /** 本例没有管理员会话。 */ () => null
         },
         catalog: {
@@ -1592,5 +1566,3 @@ test(
     }
   }
 )
-
-import type { ProviderPolicy } from '../legacy-policy.js'

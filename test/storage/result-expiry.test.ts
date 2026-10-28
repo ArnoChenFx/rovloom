@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { Store } from '../../src/store.js'
 import type { ResultPage } from '../../src/store.js'
 import { Router } from '../../src/router.js'
-import { connected, management, options, policy, respond } from './helpers.js'
+import { connected, management, options, respond } from './helpers.js'
 
 // 创建已持久化响应与结果句柄，使用短 result_ttl 和独立检查连接观察句柄期限。
 function fixture(resultTtl = 10) {
@@ -22,9 +22,8 @@ function fixture(resultTtl = 10) {
     retention: { result_ttl: resultTtl }
   })
   const device = connected(store)
-  const state = { local: policy(device.target, true) }
   const router = new Router(store)
-  const principal = { id: 'alice', policy: policy(device.target) }
+  const principal = { id: 'alice' }
   const call = router.create(principal, device.target, { method: 'pane.read' }, options())
   const binding = router.dispatch(principal, call.call_id, device.epoch)
   respond(store, binding, { result: { text: '你好abc'.repeat(30) } }, clock.now)
@@ -35,7 +34,6 @@ function fixture(resultTtl = 10) {
     clock,
     store,
     device,
-    state,
     router,
     principal,
     call,

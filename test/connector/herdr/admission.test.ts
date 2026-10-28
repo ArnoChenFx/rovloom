@@ -153,7 +153,6 @@ async function admissionFixture(methods: readonly string[], approved = source) {
     }
   })
   base.store.defineProvider(resources.providers[0]!.binding)
-  base.principal.policy.grants.push({ target, methods: [...methods], actions: ['dispatch', 'read'] })
   const provider = resources.providers[0]!
   const preflightRequests: JsonObject[] = []
   const offer = { major: 2, minor: 0, capabilities: ['rpc'], required: ['rpc'] }

@@ -17,7 +17,7 @@ import {
   type ConnectorConfig
 } from '../../src/cli/index.js'
 import { FacadeServiceError, StoreGatewayService, type ServiceContext } from '../../src/mcp/index.js'
-import { storeFixture, policy } from '../mcp/store-fixture.js'
+import { storeFixture } from '../mcp/store-fixture.js'
 import { httpFixture, syntheticHeaders } from '../mcp/http-fixture.js'
 
 // 测试信号使用显式Promise握手，不以sleep推测角色已经启动或关闭。
@@ -197,7 +197,7 @@ test(
         identities: {
           principal: /* 只按受信caller返回对应合成身份；未知身份仍拒绝。 */ (caller) =>
             ['alice', 'bob'].includes(caller.principal_id) && (caller.principal_id !== 'alice' || aliceActive)
-              ? { id: caller.principal_id, policy: policy() }
+              ? { id: caller.principal_id }
               : null,
           administrator: /* 此测试不提供管理员会话。 */ () => null
         },
@@ -373,7 +373,7 @@ test(
         identities: {
           principal: /* ports.principal在await后必须重新读取本例当前身份，而非缓存HTTP初始化结果。 */ (caller) =>
             ['alice', 'bob'].includes(caller.principal_id) && (caller.principal_id !== 'alice' || aliceActive)
-              ? { id: caller.principal_id, policy: policy() }
+              ? { id: caller.principal_id }
               : null,
           administrator: /* MCP的合成身份不能取得管理员会话。 */ () => null
         },
