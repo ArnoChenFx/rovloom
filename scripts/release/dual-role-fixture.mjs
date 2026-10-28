@@ -233,7 +233,7 @@ export async function createDualRoleFixture({
       schema_ref: schemaPath,
       peer_policy_revision: localPolicy.revision
     }
-    const ownerPath = join(native.config_home, '.rovloom-herdr-smoke.owner.json')
+    const ownerPath = join(ledger, 'owner.json')
     const endpoint = join(native.config_home, 'herdr', 'sessions', 'smoke', 'herdr.sock')
     assert(Buffer.byteLength(endpoint) < 108, 'dual_role_native_socket_path_too_long')
     assert.equal(existsSync(endpoint), false)
