@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { configDocument, configTemplate, parseCommand, type ConnectorConfig } from '../../src/cli/index.js'
 import { readConfig } from '../../src/cli/config.js'
@@ -184,7 +184,7 @@ test('退役携带内容寻址 schema 与清单，中断重试继续同一批次
     assert.equal(readFileSync(join(retired, 'managed/control-migration-0.json'), 'utf8'), '{"old":true}')
     assert(JSON.parse(readFileSync(join(retired, 'manifest.json'), 'utf8')).files.includes(name))
     // 模拟删除 journal 前进程退出：部分 source 已在同一批次，恢复不能新建另一批次。
-    const batch = retired.split('/').at(-1)!
+    const batch = basename(retired)
     writeFileSync(
       join(w.root, 'managed/retirement.json'),
       JSON.stringify({ batch, files: [name, 'device.json'], directories: ['control'] }),
