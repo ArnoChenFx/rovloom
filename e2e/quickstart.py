@@ -304,6 +304,8 @@ def main():
             managed_g = os.path.join(home_g, '.local', 'share', 'rovloom', 'gateway', 'managed')
             connector_state = cfg.get('data', {}).get('directory') or os.path.join(home_c, '.local', 'share', 'rovloom', 'connector')
             managed_c = os.path.join(connector_state, 'managed')
+            # 新布局把 provider 准备记录放在 control/<provider>/，旧布局在 managed/；两处都要注入旧字段。
+            control_c = os.path.join(connector_state, 'control')
             registry = json.load(open(os.path.join(managed_g, 'mcp-callers.json')))
             assert registry['schema_version'] == 2
             assert 'local_policy' not in registry and 'gateway_policy' not in registry
@@ -333,19 +335,23 @@ def main():
                     changed += sum(downgrade(item) for item in value)
                 return changed
             counts = []
-            for directory in (managed_g, managed_c):
+            # 控制记录可能位于 managed/ 顶层（旧布局）或 control/<provider>/（新布局），两者都要覆盖。
+            for directory in (managed_g, managed_c, control_c):
                 changed = 0
-                for filename in os.listdir(directory):
-                    if not filename.endswith('.json'):
-                        continue
-                    path = os.path.join(directory, filename)
-                    value = json.load(open(path))
-                    updates = downgrade(value)
-                    if updates:
-                        open(path, 'w').write(json.dumps(value))
-                        changed += updates
-                assert changed > 0, 'legacy_fixture_missing_policies'
+                if not os.path.isdir(directory):
+                    continue
+                for root, _subdirs, files in os.walk(directory):
+                    for filename in files:
+                        if not filename.endswith('.json'):
+                            continue
+                        path = os.path.join(root, filename)
+                        value = json.load(open(path))
+                        updates = downgrade(value)
+                        if updates:
+                            open(path, 'w').write(json.dumps(value))
+                            changed += updates
                 counts.append(changed)
+            assert sum(counts) > 0, 'legacy_fixture_missing_policies'
             gateway = Term('gateway-upgraded', [rov, 'gateway'], env_g, home_g); terms.append(gateway)
             connector = Term('connector-upgraded', [rov, 'connector'], env_c, home_c); terms.append(connector)
             connector.expect('provider_ready=true', timeout=90)
