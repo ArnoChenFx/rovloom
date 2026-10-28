@@ -54,7 +54,7 @@ bun --no-env-file scripts/e2e/connector-disconnect.mjs
 - `src/connector/{claims,schema-store,terminal-execution}.ts`：两个 provider 实际共用的发送账本、原始 schema 落盘约定与终端开关。
 - `src/json/`：provider 中性的有界 JSON 工具。`src/wire/{native,backend}.ts` 是 Luvus 契约内核与 Wire 的接缝和中性原生后端接口；`wire`、`transport`、`storage`、`runtime`、`mcp`、`webui`、`admin`、`service` 按职责划分；根目录的 Store、Router 与协议文件是公共入口。
 - `scripts/{luvus,herdr}`：固定版本原生输入的采集、审计和验证工具。`scripts/bun`：构建与 smoke。`scripts/release`：发行。`scripts/webui`：管理页浏览器检查。`scripts/maintenance`：维护脚本。
-- `test/`：所有 Bun 回归，由 `bun run test` 执行。`test/fixtures/{luvus,herdr}` 按版本保存协议原文、来源与许可证，`test/fixtures/native-contract` 保存当前映射和矩阵。
+- `test/`：所有 Bun 回归，由 `bun run test` 执行。`test/fixtures/{luvus,herdr}` 按版本保存协议原文、来源与许可证，`test/fixtures/native-contract` 保存当前映射和矩阵（fixture 名沿用历史命名，被测实现已聚合到 `src/connector/luvus/`）。
 - 端到端验收见 [e2e/README](../e2e/README.md)，不属于单元测试门禁。
 
 ## 管理页面的隔离验证
