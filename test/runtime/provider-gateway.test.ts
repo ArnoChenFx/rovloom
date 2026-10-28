@@ -7,8 +7,8 @@ import type {
   ProviderGatewayRuntimeOptions,
   RuntimeCallInput
 } from '../../src/runtime/types.js'
-import { persistentBackend } from '../../src/wire/persistence.js'
-import { createLuvusWireAdapter } from '../../src/wire/native.js'
+import { persistentBackend } from '../../src/connector/luvus/persistence.js'
+import { createLuvusWireAdapter } from '../../src/connector/luvus/wire.js'
 import type { Adapter, Session } from '../../src/transport/index.js'
 import type { ProviderBinding } from '../../src/wire/types.js'
 import { contractRef, LIMITS } from '../../src/wire/index.js'

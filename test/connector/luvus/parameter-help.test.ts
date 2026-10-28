@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { compiled } from './contract/helpers.js'
-import { createLuvusRequestPreflight, NativeRequestPreflightError } from '../../../src/connector/luvus/preflight.js'
+import { NativeRequestPreflightError } from '../../../src/connector/preflight.js'
+import { createLuvusRequestPreflight } from '../../../src/connector/luvus/preflight.js'
 import { validateLuvusOperationParams } from '../../../src/connector/luvus/operations.js'
 import {
   luvusParameterHelp,
@@ -44,7 +45,7 @@ test('常见选择器、wait 依赖与 generic 必填字段在登记前得到固
       () => preflight({ id: 'native_invalid', method, params }),
       (error) => {
         assert(error instanceof NativeRequestPreflightError)
-        const detail = publicLuvusParameterDiagnostic(error.parameterDiagnostic!)!
+        const detail = error.parameterDiagnostic!
         assert(detail.issues.some((issue) => issue.path === path && issue.rule === rule))
         assert(!JSON.stringify(detail).includes(secret))
         return true
@@ -65,7 +66,7 @@ test('未知字段和非法枚举的真实 preflight 拒绝提供根路径诊断
       () => preflight({ id: 'native_invalid', method, params }),
       (error) => {
         assert(error instanceof NativeRequestPreflightError)
-        const detail = publicLuvusParameterDiagnostic(error.parameterDiagnostic!)!
+        const detail = error.parameterDiagnostic!
         assert.deepEqual(detail.issues, [{ path: '/params', rule: 'invalid_value' }])
         assert.deepEqual(detail.parameter_help, luvusParameterHelp(method))
         assert(!JSON.stringify(detail).includes(secret))

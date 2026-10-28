@@ -9,6 +9,6 @@ export type ParameterIssueRule =
   | 'invalid_value'
 
 export type ParameterDiagnostic = Readonly<{
-  method: string
   issues: readonly Readonly<{ path: string; rule: ParameterIssueRule }>[]
+  parameter_help?: import('../wire/types.js').JsonObject
 }>

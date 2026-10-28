@@ -1,20 +1,15 @@
 // Luvus 登记前复用既有请求结构校验，不建立调用、来源、候选或执行许可。
+import { NativeRequestPreflightError } from '../preflight.js'
 import { GatewayError } from '../../contracts.js'
 import { createNativeValidator } from './contract/index.js'
 import type { CompiledContract } from './contract/index.js'
 import { luvusOperationDescriptor, luvusOperationValidation, validateLuvusOperationParams } from './operations.js'
-import { luvusParameterDiagnostic } from './parameter-help.js'
+import { luvusParameterDiagnostic, publicLuvusParameterDiagnostic } from './parameter-help.js'
 import { LuvusAdapterError } from './types.js'
 
-export class NativeRequestPreflightError extends GatewayError {
-  readonly outcome = 'not_dispatched' as const
-  readonly parameterDiagnostic: ReturnType<typeof luvusParameterDiagnostic>
-
-  /** 仅由登记前参数拒绝产生固定错误，不携带参数值、本机路径或原生输出。 */
-  constructor(request?: unknown) {
-    super('native_request_invalid')
-    this.parameterDiagnostic = luvusParameterDiagnostic(request)
-  }
+function invalidRequest(request?: unknown): NativeRequestPreflightError {
+  const diagnostic = luvusParameterDiagnostic(request)
+  return new NativeRequestPreflightError(diagnostic ? publicLuvusParameterDiagnostic(diagnostic) : undefined)
 }
 
 /** Store 首次登记事务传入其分配的真实原生 ID，失败回滚原登记，不触及 transport。 */
@@ -24,7 +19,7 @@ export function createLuvusRequestPreflight(contract: CompiledContract): (reques
     const checked = validator.checkRequestShape(request)
     if (!checked.ok) {
       if (checked.error.code === 'native_request_invalid') {
-        throw new NativeRequestPreflightError(request)
+        throw invalidRequest(request)
       }
       throw new GatewayError(checked.error.code)
     }
@@ -35,7 +30,7 @@ export function createLuvusRequestPreflight(contract: CompiledContract): (reques
         validateLuvusOperationParams(native.method, native.params)
       } catch (error) {
         if (error instanceof LuvusAdapterError && error.code === 'luvus_operation_params_invalid') {
-          throw new NativeRequestPreflightError(request)
+          throw invalidRequest(request)
         }
         throw error
       }
@@ -61,7 +56,7 @@ export function luvusValidation<T extends { validation?: 'strict' | 'raw-contrac
     return { ...options, validation: required }
   }
   if (options.validation !== required) {
-    throw new NativeRequestPreflightError()
+    throw invalidRequest()
   }
   return options
 }

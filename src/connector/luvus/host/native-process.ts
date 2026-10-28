@@ -14,7 +14,7 @@ import { readMacosLuvusPeer, readWindowsLuvusPeer } from '../peer.js'
 import { WINDOWS_PIPE } from '../local.js'
 import { macosProcessArgv, macosProcessImage, macosProcessState, macosProcessUid } from '../../../platform/macos.js'
 import { windowsProcessFacts, windowsProcessState } from '../../../platform/windows.js'
-import { ownedPathStamp as stampOwnedPath } from '../../../connector/path-identity.js'
+import { ownedPathStamp as stampOwnedPath } from '../../path-identity.js'
 
 /** Luvus 端点命名规则固定为 `luvus-<16 hex>`；其余语义交给 provider 中立的路径核验。 */
 export function ownedPathStamp(path: string, kind: 'directory' | 'binary' | 'socket'): string {

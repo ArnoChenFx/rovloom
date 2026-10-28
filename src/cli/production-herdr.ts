@@ -1,7 +1,7 @@
 /** 唯一 CLI 的 Herdr 生产来源：Gateway 委托原工厂，Connector 只持有本次显式启动的真实 child。 */
 import { ChildProcess } from 'node:child_process'
-import { lstatSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, lstatSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { setTimeout as pause } from 'node:timers/promises'
 import { HerdrInstallation } from '../connector/herdr/installation.js'
 import {
@@ -264,7 +264,11 @@ export function createHerdrProductionSources(): ProductionCliSources {
         }
         return startAttachedHerdr(selected, terminalExecution ? { terminalExecution } : {})
       }
-      const ownerPath = join(local.config_home, `.rovloom-herdr-${local.target.session}.owner.json`)
+      const legacyOwner = join(local.config_home, `.rovloom-herdr-${local.target.session}.owner.json`)
+      // 手工旧布局仅兼容读取，不移动用户 XDG 中的附着/原生数据。
+      const ownerPath = existsSync(legacyOwner)
+        ? legacyOwner
+        : join(dirname(config.connector.claims.path), 'owner.json')
       // 上一个 Connector 若崩溃，只有证明其已死且端点无人监听才清理；否则下面仍按原样拒绝。
       if (
         await recoverHerdrCrashResidue({

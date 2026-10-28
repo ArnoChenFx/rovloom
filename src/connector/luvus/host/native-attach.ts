@@ -22,7 +22,7 @@ import type { ObservedNativeProcess } from './native-process.js'
 import { MANAGED_LUVUS_REVISION, registerLocalOwnerLuvus, observedLuvusContract } from './native-source.js'
 import type { LocalOwnerLuvusInstance } from './native-source.js'
 import { discoverLuvusInstallation } from './native-control.js'
-import type { NativeContractRecord } from '../../../wire/backend.js'
+import type { NativeContractRecord } from '../backend.js'
 
 export interface AttachedLuvusInstance extends LocalOwnerLuvusInstance {
   close(): void

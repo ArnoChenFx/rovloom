@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { configDocument, configTemplate, parseCommand, type ConnectorConfig } from '../../src/cli/index.js'
 import { readConfig } from '../../src/cli/config.js'
-import { handleConnectorUnpair } from '../../src/cli/unpair.js'
+import { handleConnectorUnpair, retirePairingState } from '../../src/cli/unpair.js'
 import { CliSetup } from '../../src/cli/setup-runtime.js'
 
 const secret = 's'.repeat(43)
@@ -110,7 +110,7 @@ test('--join 换 Gateway：旧状态自动退役、地址换写，无需先手�
     assert.equal(retiredRoots(w.root).length, 1)
     const retired = join(w.root, 'retired', retiredRoots(w.root)[0]!)
     assert.equal(existsSync(join(retired, 'managed', 'device.json')), true)
-    assert.equal(existsSync(join(retired, 'control', 'luvus-root.json')), true)
+    assert.equal(existsSync(join(retired, 'control', 'luvus', 'root.json')), true)
     assert.equal(existsSync(join(retired, 'n', 'deep', 'session.db')), true)
     assert.equal((readConfig(w.path) as { gateway_url: string }).gateway_url, 'ws://127.0.0.1:10')
     assert.match(out.text(), /Joining a different Gateway|正在加入另一台 Gateway/)
@@ -165,4 +165,31 @@ test('CLI 解析：connector --unpair 可用且可与 --non-interactive 合用�
   assert.equal('nonInteractive' in unattended && unattended.nonInteractive, true)
   assert.throws(() => parseCommand(['connector', '--unpair', 'extra']), { code: 'invalid_arguments' })
   assert.throws(() => parseCommand(['gateway', '--unpair']), { code: 'invalid_arguments' })
+})
+
+test('退役携带内容寻址 schema 与清单，中断重试继续同一批次且保留未知文件', () => {
+  const w = pairedWorkspace('ws://127.0.0.1:9')
+  try {
+    const name = 'schema_' + 'a'.repeat(64) + '.json'
+    const raw = '{ "keep": true }\n'
+    writeFileSync(join(w.root, 'managed', name), raw, { mode: 0o600 })
+    writeFileSync(join(w.root, 'managed', 'user-owned.json'), 'keep', { mode: 0o600 })
+    const config = readConfig(w.path) as ConnectorConfig
+    const retired = retirePairingState(config, { assertOwner() {} } as never)!
+    assert.equal(readFileSync(join(retired, 'managed', name), 'utf8'), raw)
+    assert.equal(existsSync(join(w.root, 'managed', name)), false)
+    assert(JSON.parse(readFileSync(join(retired, 'manifest.json'), 'utf8')).files.includes(name))
+    // 模拟删除 journal 前进程退出：部分 source 已在同一批次，恢复不能新建另一批次。
+    const batch = retired.split('/').at(-1)!
+    writeFileSync(
+      join(w.root, 'managed/retirement.json'),
+      JSON.stringify({ batch, files: [name, 'device.json'], directories: ['control'] }),
+      { mode: 0o600 }
+    )
+    assert.equal(retirePairingState(config, { assertOwner() {} } as never), retired)
+    assert.equal(existsSync(join(w.root, 'managed/retirement.json')), false)
+    assert.equal(readFileSync(join(w.root, 'managed/user-owned.json'), 'utf8'), 'keep')
+  } finally {
+    rmSync(w.root, { recursive: true, force: true })
+  }
 })

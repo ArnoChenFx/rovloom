@@ -20,15 +20,20 @@ import type {
   Direction,
   VersionOffer
 } from '../wire/types.js'
-import type { createLuvusWireAdapter } from '../wire/native.js'
+import type { AttemptBinding, JsonObject, WireEnvelope } from '../wire/types.js'
+import type { ResponseEvidencePlan } from '../wire/evidence.js'
 
 export type Connection = AuthenticatedContext['connection']
-/** checkResultRetention 同次核验当前读取及独立保留许可，不能只检查保留位。 */
-export type Adapter = Pick<
-  ReturnType<typeof createLuvusWireAdapter>,
-  'encode' | 'decode' | 'checkResult' | 'checkResultRetention' | 'observeMessage' | 'planEvidence' | 'release' | 'close'
-> & {
-  /** 共享桥接只观察关闭及执行/响应上下文计数，不要求 provider 暴露协议专有状态。 */
+/** 两个 provider 的实际 Wire 会话契约；实现各自负责原生校验与读取许可。 */
+export interface Adapter {
+  encode(frame: WireEnvelope, direction: Direction): string
+  decode(input: string | Uint8Array, direction: Direction): WireEnvelope
+  checkResult(binding: AttemptBinding, response?: JsonObject): void
+  checkResultRetention(binding: AttemptBinding, response: JsonObject): void
+  observeMessage(frame: AuthenticatedEnvelope, direction: Direction): 'new' | 'duplicate'
+  planEvidence(frame: Extract<AuthenticatedEnvelope, { type: 'response' }>): ResponseEvidencePlan
+  release(binding: AttemptBinding): void
+  close(): void
   stats(): { closed: boolean; executions: number; responses: number }
 }
 export type Readiness = {

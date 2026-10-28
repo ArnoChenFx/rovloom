@@ -5,7 +5,7 @@ import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { canonical, digest, GatewayError, validateRequest } from './contracts.js'
 import type { NativeRequest } from './contracts.js'
-import { NativeRequestPreflightError } from './connector/luvus/preflight.js'
+import { NativeRequestPreflightError } from './connector/preflight.js'
 import {
   assertBinding,
   boundedJson,

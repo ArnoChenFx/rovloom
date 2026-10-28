@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { Store } from '../../src/store.js'
 import { createProviderResultAccess } from '../../src/runtime/results.js'
 import type { ProviderResultAccessOptions } from '../../src/runtime/results.js'
-import { commitLuvusResponse } from '../../src/wire/persistence.js'
+import { commitNativeResponse } from '../../src/wire/persistence.js'
 import type { Principal } from '../../src/router.js'
 import { management, responseFrame } from '../storage/helpers.js'
 import { nativeBackend } from '../storage/native-backend.js'
@@ -40,7 +40,7 @@ function fixture(contentBytes?: number) {
       const frame = responseFrame(binding, {
         error: { code: 'isolated', message: 'preserved', data: { text: 'x'.repeat(256) } }
       })
-      commitLuvusResponse(store, native.adapter, frame)
+      commitNativeResponse(store, native.adapter, frame)
       return store.call('synthetic', call.call_id)
     }
   )

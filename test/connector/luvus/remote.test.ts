@@ -21,7 +21,7 @@ import {
   MANAGED_LUVUS_CLASSIFICATION,
   MANAGED_LUVUS_REVISION
 } from '../../../src/connector/luvus/host/native-source.js'
-import type { RuntimeProvider } from '../../../src/runtime/types.js'
+import type { RuntimeProvider } from '../../../src/connector/luvus/host/runtime-types.js'
 
 const schema = readFileSync(new URL('../../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8')
 const capabilitiesBytes = readFileSync(

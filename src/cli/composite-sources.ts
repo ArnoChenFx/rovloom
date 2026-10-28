@@ -1,5 +1,5 @@
 // 唯一CLI只组合原owner资源；协议路由、执行许可及会话隔离均交给现有runtime。
-import { createLuvusConnectorSessions } from '../runtime/connector.js'
+import { createLuvusConnectorSessions } from '../connector/luvus/host/connector-runtime.js'
 import { composeConnectorSessions } from '../runtime/provider-sessions.js'
 import type { GatewayHostedProviders } from '../runtime/types.js'
 import type { ProviderSessionGroup } from '../runtime/provider-sessions.js'

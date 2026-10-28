@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { probePlatform, parseOsRelease, supportedArch, supportedOs } from '../../src/platform/device.js'
-import { fixture, rawConnect, until } from '../transport/helpers.js'
+import { fixture, rawConnect, until } from './helpers.js'
 import { checkManagementReadReply } from '../../src/webui/validate.js'
 import { createManagementTransportProjection } from '../../src/mcp/transport-observations.js'
 import type { DeviceSnapshot } from '../../src/mcp/management.js'

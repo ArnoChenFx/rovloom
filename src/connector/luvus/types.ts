@@ -1,7 +1,7 @@
 /** 定义本地适配配置、传输身份证据、宿主可信接口和不携带敏感内容的失败语义。 */
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { Socket } from 'node:net'
-import type { NativeWireBackend } from '../../wire/backend.js'
+import type { NativeWireBackend } from './backend.js'
 import type { AttemptBinding, V2Target } from '../../wire/types.js'
 
 export type LuvusLocalConfig = Readonly<{

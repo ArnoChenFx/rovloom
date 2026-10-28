@@ -5,7 +5,7 @@ import { assertLocalOwnerLuvus } from './host/native-source.js'
 import type { LocalOwnerLuvusInstance } from './host/native-source.js'
 import { assertLuvusOperationsContract, createLuvusOperationsValidation } from './operations-validation.js'
 import { LUVUS_OPERATION_METHODS } from './operations.js'
-import type { RuntimeProvider } from '../../runtime/types.js'
+import type { RuntimeProvider } from './host/runtime-types.js'
 
 /** 只有原受控进程交付的真实 Owner 句柄可装配；普通 JSON、缺 token 或 ready 自报不能成为来源。 */
 export function createLuvusOperationsProvider(owner: LocalOwnerLuvusInstance): RuntimeProvider {

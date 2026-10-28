@@ -4,8 +4,8 @@ import { join } from 'node:path'
 import { listening, ownerIsDead } from '../../../storage/process-identity.js'
 import { ownedFile, recordedProcess } from '../../../storage/lock-recovery.js'
 import type { ProcessIdentity } from '../../../storage/process-identity.js'
-import { nativeRecordStamp, readNativeRecord, removeNativeRecord } from '../../../connector/native-record-files.js'
-import { lockOwnerFields, recoverDispatchClaimsLock } from '../../../connector/crash-recovery.js'
+import { nativeRecordStamp, readNativeRecord, removeNativeRecord } from '../../native-record-files.js'
+import { lockOwnerFields, recoverDispatchClaimsLock } from '../../crash-recovery.js'
 import type { LuvusLocalConfig } from '../types.js'
 
 export { lockOwnerFields, recoverDispatchClaimsLock }

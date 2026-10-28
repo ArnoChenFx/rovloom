@@ -82,7 +82,7 @@ const rules: readonly ParameterIssueRule[] = [
   'invalid_value'
 ]
 type Rule = ParameterIssueRule
-export type LuvusParameterDiagnostic = ParameterDiagnostic & Readonly<{ method: string }>
+export type LuvusParameterDiagnostic = Readonly<{ method: string; issues: ParameterDiagnostic['issues'] }>
 
 /** 每次返回独立数据；提示不改变 generic_params_only 或 conditional_branch 的原生事实。 */
 export function luvusParameterHelp(
@@ -160,7 +160,7 @@ export function luvusParameterDiagnostic(request: unknown): LuvusParameterDiagno
 }
 
 /** MCP 只投影固定路径/规则与程序自带提示；服务即使误带额外字段也不能回显请求或异常正文。 */
-export function publicLuvusParameterDiagnostic(value: LuvusParameterDiagnostic) {
+export function publicLuvusParameterDiagnostic(value: LuvusParameterDiagnostic): ParameterDiagnostic | undefined {
   if (!Object.hasOwn(help, value.method)) {
     return undefined
   }

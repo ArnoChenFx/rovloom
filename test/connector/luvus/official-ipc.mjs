@@ -9,8 +9,9 @@ import { dlopen, FFIType, ptr } from 'bun:ffi'
 import { DatabaseSync } from 'node:sqlite'
 import { Store } from '../../../src/store.ts'
 import { Router } from '../../../src/router.ts'
-import { persistentBackend, commitLuvusResponse } from '../../../src/wire/persistence.ts'
-import { createLuvusWireAdapter } from '../../../src/wire/native.ts'
+import { persistentBackend } from '../../../src/connector/luvus/persistence.ts'
+import { commitNativeResponse } from '../../../src/wire/persistence.ts'
+import { createLuvusWireAdapter } from '../../../src/connector/luvus/wire.ts'
 import { compileBundle, createNativeValidator } from '../../../src/connector/luvus/contract/index.ts'
 import { assertBinding, boundedJson, contractRef } from '../../../src/wire/index.ts'
 import {
@@ -559,7 +560,7 @@ export async function officialIpc(binaryPath) {
         payload: { attempt: p.attempt, native_response: result.native_response }
       }
       const envelope = wire.decode(responseWire.encode(response, 'connector_to_gateway'), 'connector_to_gateway')
-      const committed = commitLuvusResponse(store, wire, envelope)
+      const committed = commitNativeResponse(store, wire, envelope)
       assert.equal(committed.state, 'responded')
       assert.deepEqual(JSON.parse(committed.response), result.native_response)
       last = { ...p, response: result.native_response }

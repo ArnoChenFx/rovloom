@@ -1,6 +1,6 @@
 // Luvus/UHP 原生校验器与 Wire 的接缝：隔离派发上下文、仅响应上下文及其回收预算。
-import { checkDispatch, checkResultBoundary, createNativeValidator } from '../connector/luvus/contract/index.js'
-import { checkResultRetention } from '../connector/luvus/contract/safety.js'
+import { checkDispatch, checkResultBoundary, createNativeValidator } from './contract/index.js'
+import { checkResultRetention } from './contract/safety.js'
 import type {
   Check,
   CapabilityView,
@@ -11,7 +11,7 @@ import type {
   NativeBinding,
   NativeValidator,
   TrustedNativeContext
-} from '../connector/luvus/contract/index.js'
+} from './contract/index.js'
 import {
   assertBinding,
   boundedJson,
@@ -28,8 +28,9 @@ import {
   uint,
   validateAttempt,
   WireError
-} from './index.js'
-import type { NativeContractRecord, NativeWireBackend, TrustedAttempt } from './backend.js'
+} from '../../wire/index.js'
+import type { TrustedAttempt } from '../../wire/backend.js'
+import type { NativeContractRecord, NativeWireBackend } from './backend.js'
 import type {
   AttemptBinding,
   AttemptIdentity,
@@ -43,8 +44,8 @@ import type {
   ResolvedAttempt,
   V2Target,
   WireEnvelope
-} from './types.js'
-import type { LedgerInvalidation } from '../storage/model.js'
+} from '../../wire/types.js'
+import type { LedgerInvalidation } from '../../storage/model.js'
 
 type State = {
   attempt: TrustedAttempt

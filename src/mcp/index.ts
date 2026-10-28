@@ -44,7 +44,5 @@ export type {
   ProviderCatalogSource,
   AuthorizedCatalogOptions
 } from './catalog.js'
-export { luvusCatalogProvider } from '../connector/luvus/catalog-provider.js'
-export type { GatewayCatalogProvider, GatewayCatalogSource } from '../connector/luvus/catalog-provider.js'
 export { RuntimeGatewayService } from './runtime-service.js'
 export type { RuntimeGateway, RuntimeGatewayPort, RuntimeGatewayServiceOptions } from './runtime-service.js'

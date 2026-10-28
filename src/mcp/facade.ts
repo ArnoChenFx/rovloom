@@ -8,7 +8,6 @@ import {
   type CallToolResult
 } from '@modelcontextprotocol/sdk/types.js'
 import { canonical, digest } from '../contracts.js'
-import { publicLuvusParameterDiagnostic } from '../connector/luvus/parameter-help.js'
 import { cliMessages, type CliLanguage } from '../cli/messages.js'
 import { validateHostProfile } from '../wire/index.js'
 import {
@@ -263,7 +262,12 @@ export function createMcpFacade(options: FacadeOptions): Server {
             error.code,
             error instanceof NativeRequestNotDispatchedError ? error.outcome : undefined,
             error instanceof NativeRequestNotDispatchedError && error.parameterDiagnostic
-              ? publicLuvusParameterDiagnostic(error.parameterDiagnostic)
+              ? {
+                  issues: error.parameterDiagnostic.issues.map(({ path, rule }) => ({ path, rule })),
+                  ...(error.parameterDiagnostic.parameter_help
+                    ? { parameter_help: error.parameterDiagnostic.parameter_help }
+                    : {})
+                }
               : undefined
           )
         }

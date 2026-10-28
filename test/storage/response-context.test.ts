@@ -8,8 +8,8 @@ import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { Store } from '../../src/store.js'
 import type { StoreOptions } from '../../src/store.js'
-import { createLuvusWireAdapter } from '../../src/wire/native.js'
-import { commitLuvusResponse } from '../../src/wire/persistence.js'
+import { createLuvusWireAdapter } from '../../src/connector/luvus/wire.js'
+import { commitNativeResponse } from '../../src/wire/persistence.js'
 import { nativeBackend } from './native-backend.js'
 import { management, responseFrame } from './helpers.js'
 import {} from '../../src/wire/index.js'
@@ -347,7 +347,7 @@ test(
       const wrong = responseFrame(binding, { id: 'wrong-id', result: { id: 'done' } })
       assert.throws(
         /* 原生请求编号错配的响应必须被拒绝，不能使密封上下文恢复为可执行状态。 */ () =>
-          commitLuvusResponse(f.store, f.native.adapter, wrong),
+          commitNativeResponse(f.store, f.native.adapter, wrong),
         /native_id_mismatch/
       )
       assert.equal(f.native.adapter.stats().executions, 0)
@@ -543,7 +543,7 @@ test(
       const frame = responseFrame(binding, { result: { id: 'done' } })
       assert.throws(
         /* 冷适配器没有原活响应句柄，不能只凭持久化锚点接纳迟到响应。 */ () =>
-          commitLuvusResponse(f.store, cold, frame),
+          commitNativeResponse(f.store, cold, frame),
         /attempt_anchor_unavailable/
       )
       assert.equal(cold.stats().responses, 0)

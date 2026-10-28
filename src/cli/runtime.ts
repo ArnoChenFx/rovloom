@@ -1,8 +1,10 @@
 // 唯一CLI组合实际角色工厂；受保护身份、策略、凭据和native来源由宿主解析，不从argv补造。
-import { createGatewayRuntime, createProviderGatewayRuntime } from '../runtime/gateway.js'
-import { createConnectorRuntime } from '../runtime/connector.js'
+import { createProviderGatewayRuntime } from '../runtime/gateway.js'
+import { createGatewayRuntime } from '../connector/luvus/host/gateway-runtime.js'
+import { createConnectorRuntime } from '../connector/luvus/host/connector-runtime.js'
 import { createProviderConnectorRuntime } from '../runtime/connector-host.js'
-import type { GatewayRuntimeOptions, ProviderGatewayRuntimeOptions, ConnectorRuntimeOptions } from '../runtime/types.js'
+import type { ProviderGatewayRuntimeOptions } from '../runtime/types.js'
+import type { GatewayRuntimeOptions, ConnectorRuntimeOptions } from '../connector/luvus/host/runtime-types.js'
 import type { ConnectorHostOptions } from '../runtime/connector-host.js'
 import type { ManagementSessionAuthority } from '../runtime/management-session.js'
 import { scopeManagementService } from './management-scope.js'

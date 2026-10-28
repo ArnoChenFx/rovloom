@@ -1,7 +1,7 @@
 // 用受保护静态 pin 和实际认证 epoch 的快照建立 Gateway 来源；不读取远端路径或重建本机 Owner。
 import { compileBundle, createNativeValidator, parseNativeJson } from '../contract/index.js'
 import type { NativeBinding, TrustedNativeContext } from '../contract/index.js'
-import type { NativeContractRecord } from '../../../wire/backend.js'
+import type { NativeContractRecord } from '../backend.js'
 import type { Connection } from '../../../transport/index.js'
 import {
   assertBinding,
@@ -21,7 +21,7 @@ import { LuvusAdapterError } from '../types.js'
 import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from './native-source.js'
 import { assertLuvusOperationsContract, createLuvusOperationsValidation } from '../operations-validation.js'
 import { LUVUS_OPERATION_METHODS } from '../operations.js'
-import type { RemoteLuvusRuntimeProvider, RuntimeProvider } from '../../../runtime/types.js'
+import type { RemoteLuvusRuntimeProvider, RuntimeProvider } from './runtime-types.js'
 import { createLuvusRequestPreflight } from '../preflight.js'
 
 export type LuvusProductionRemoteConfig = Readonly<{

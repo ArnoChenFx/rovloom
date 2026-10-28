@@ -1,4 +1,5 @@
 /** 装配唯一 CLI 已解析的本机 Owner 或远端 pin，不复制入口协议或打开第二个 Gateway writer。 */
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { DispatchClaims, LuvusAdapterError } from '../index.js'
@@ -6,7 +7,7 @@ import type {} from '../../../wire/backend.js'
 import type { Connection } from '../../../transport/index.js'
 import type { AttemptBinding } from '../../../wire/types.js'
 import { boundedJson, contractRef, fields, hash, id, object, uint } from '../../../wire/index.js'
-import type { LuvusConnectorAdmissionSource } from '../../../runtime/connector-attempts.js'
+import type { LuvusConnectorAdmissionSource } from '../backend.js'
 import {
   ConnectorAttemptBook,
   CONNECTOR_MAX_DEADLINE_MS,
@@ -26,7 +27,7 @@ import type { LuvusLocalConfig } from '../types.js'
 import { OwnedProcessShutdownError } from './native-process.js'
 import { startManagedLuvus } from './native-source.js'
 import type { ControlledLuvusProcess } from './native-source.js'
-import type { ConnectorRuntimeOptions, RemoteLuvusRuntimeProvider, RuntimeProvider } from '../../../runtime/types.js'
+import type { ConnectorRuntimeOptions, RemoteLuvusRuntimeProvider, RuntimeProvider } from './runtime-types.js'
 import { checkedRemoteLuvusConfig, createPinnedRemoteLuvus } from './remote-luvus.js'
 import type { LuvusProductionRemoteConfig } from './remote-luvus.js'
 import { pinTerminalExecution } from '../../terminal-execution.js'
@@ -386,11 +387,14 @@ export function createLuvusProductionSources() {
           : hash(boundedJson([selected.reference, 'user', fixed.target]))
         // 正常启动只 open；任何缺库、崩溃锁或容量问题先拒绝，不能为了继续启动而清墓碑。
         // 上一个 Connector 崩溃留下的锁：持有者已死才接管，其余仍按原样 fail-closed 拒绝。
-        if (recoverDispatchClaimsLock(join(config.state_dir, 'luvus-claims.db.lock'))) {
+        const claimsPath = existsSync(join(config.state_dir, 'luvus-claims.db'))
+          ? join(config.state_dir, 'luvus-claims.db')
+          : join(config.state_dir, 'claims.db')
+        if (recoverDispatchClaimsLock(claimsPath + '.lock')) {
           process.stderr.write('luvus_crash_residue_cleared claims_lock\n')
         }
         claims = new DispatchClaims({
-          path: join(config.state_dir, 'luvus-claims.db'),
+          path: claimsPath,
           mode: selected.value.storage_mode,
           ledger_id: ledgerId,
           limits: { entries: 1024, bytes: 4_194_304 },

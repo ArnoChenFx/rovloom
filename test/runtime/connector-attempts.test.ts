@@ -1,7 +1,7 @@
 // 使用既有真实 Wire/原生契约 fixture 检查 Connector 独立准入，不把测试来源当生产认证。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createLuvusWireAdapter } from '../../src/wire/native.js'
+import { createLuvusWireAdapter } from '../../src/connector/luvus/wire.js'
 import {
   ConnectorAttemptBook,
   connectorAdmissionAdapter,

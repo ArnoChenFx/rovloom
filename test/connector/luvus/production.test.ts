@@ -248,7 +248,7 @@ test(
       const incomplete = f.refs()
       delete (incomplete[0]!.value as unknown as Record<string, unknown>).storage_mode
       await assert.rejects(sources.connector({ state_dir: f.state }, incomplete), /production_reference_invalid/)
-      assert.equal(existsSync(join(f.state, 'luvus-claims.db')), false)
+      assert.equal(existsSync(join(f.state, 'claims.db')), false)
     } finally {
       f.close()
     }
@@ -265,7 +265,7 @@ test(
       await assert.rejects(sources.connector({ state_dir: f.state }, aliased), /production_config_ref_mismatch/)
       f.value.native = { ...f.value.native, expected_root_id: 'other_root' }
       await assert.rejects(sources.connector({ state_dir: f.state }, f.refs()), /native_root_record_invalid/)
-      assert.equal(existsSync(join(f.state, 'luvus-claims.db')), false)
+      assert.equal(existsSync(join(f.state, 'claims.db')), false)
     } finally {
       f.close()
     }
@@ -283,8 +283,8 @@ test(
         createLuvusProductionSources().connector({ state_dir: f.state }, refs),
         /claim_ledger_missing/
       )
-      assert.equal(existsSync(join(f.state, 'luvus-claims.db')), false)
-      assert.equal(existsSync(join(f.state, 'luvus-claims.db.lock')), false)
+      assert.equal(existsSync(join(f.state, 'claims.db')), false)
+      assert.equal(existsSync(join(f.state, 'claims.db.lock')), false)
     } finally {
       f.close()
     }
@@ -300,13 +300,13 @@ test(
         createLuvusProductionSources().connector({ state_dir: f.state }, f.refs()),
         /binary_identity_changed/
       )
-      for (const name of ['luvus-claims.db']) {
+      for (const name of ['claims.db']) {
         assert.equal(existsSync(join(f.state, name)), true)
         assert.equal(existsSync(join(f.state, name + '.lock')), false)
       }
       const ledgerId = hash(boundedJson(['config1', 'root1', 1, f.config.target]))
       const claims = new DispatchClaims({
-        path: join(f.state, 'luvus-claims.db'),
+        path: join(f.state, 'claims.db'),
         mode: 'open',
         ledger_id: ledgerId,
         limits: { entries: 1024, bytes: 4_194_304 },

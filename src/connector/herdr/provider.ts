@@ -2,7 +2,7 @@
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs'
 import { dirname, isAbsolute, normalize } from 'node:path'
 import { GatewayError } from '../../contracts.js'
-import { NativeRequestPreflightError } from '../luvus/preflight.js'
+import { NativeRequestPreflightError } from '../preflight.js'
 import { privateFile } from '../../storage/files.js'
 import {
   ConnectorAttemptBook,

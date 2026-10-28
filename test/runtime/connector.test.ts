@@ -1,8 +1,8 @@
 // 检查 Connector 角色工厂的异步启动清理、长期关闭及释放失败语义，不创建真实设备身份。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createConnectorRuntime } from '../../src/runtime/connector.js'
-import type { ConnectorRuntimeOptions } from '../../src/runtime/types.js'
+import { createConnectorRuntime } from '../../src/connector/luvus/host/connector-runtime.js'
+import type { ConnectorRuntimeOptions } from '../../src/connector/luvus/host/runtime-types.js'
 import { join } from 'node:path'
 import { DispatchClaims } from '../../src/connector/luvus/index.js'
 import { fixture as localFixture } from '../connector/luvus/helpers.js'

@@ -8,7 +8,7 @@ import { configTemplate } from '../../src/cli/config.js'
 import { createManagementSessionAuthority } from '../../src/runtime/management-session.js'
 import type { ProductionCliSources, ProductionGatewayResources } from '../../src/cli/production.js'
 import type { RuntimeCliGateway } from '../../src/cli/runtime.js'
-import type { RuntimeProvider } from '../../src/runtime/types.js'
+import type { RuntimeProvider } from '../../src/connector/luvus/host/runtime-types.js'
 import type { ProviderBinding, V2Target } from '../../src/wire/types.js'
 
 const references = [

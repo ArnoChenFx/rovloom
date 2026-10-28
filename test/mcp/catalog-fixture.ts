@@ -1,5 +1,6 @@
+import type { GatewayCatalogSource } from '../../src/connector/luvus/catalog-provider.js'
 // 为真实目录/Store接线建立人工在线状态与合成来源；不建立设备或原生会话，不替代生产证明。
-import { StoreGatewayService, type GatewayCatalogSource } from '../../src/mcp/index.js'
+import { StoreGatewayService } from '../../src/mcp/index.js'
 import { contractRef, type ContractSource } from '../../src/wire/index.js'
 import { compiled, json, source as nativeSource, G } from '../connector/luvus/contract/helpers.js'
 import { storeFixture, target, syntheticCredential } from './store-fixture.js'

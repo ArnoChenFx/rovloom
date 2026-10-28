@@ -1,3 +1,4 @@
+import { migrateConnectorControls, providerControl, providerSetupPath } from './provider-control.js'
 // Herdr首次准备只使用实际binary/schema和既有编译、私有路径及账本工厂；不启动Agent或复制普通HOME认证。
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -19,7 +20,6 @@ import type { HerdrProductionOwnerConfig } from './production-herdr.js'
 import { readSetupJson, writeSetupJson } from './setup-files.js'
 import { assertSetupNativePath, setupAgentDirectories, setupBinary } from './setup-native.js'
 import { setupReference, setupTarget } from './setup-targets.js'
-import { runtimeReference } from './runtime-files.js'
 import type { SetupConsole } from './setup-console.js'
 import { cliMessages, formatMessage } from './messages.js'
 
@@ -126,7 +126,8 @@ export async function prepareSetupHerdr(
   authorization: Readonly<{ principal_id: string }>
 ): Promise<PreparedSetupHerdr> {
   console.assertOwner()
-  const path = runtimeReference(config.state_dir, 'herdr-setup')
+  migrateConnectorControls(config.state_dir)
+  const path = providerSetupPath(config.state_dir, 'herdr')
   const existing = readSetupJson(path, 1_048_576)
   if (existing !== undefined) {
     return prepared(existing, config, attempt, machine)
@@ -156,7 +157,7 @@ export async function prepareSetupHerdr(
   assertSetupNativePath(config, console)
   const root = join(config.state_dir, 'hr')
   privateDirectory(root)
-  for (const name of ['h', 'c', 's', 'k', 't', 'w', 'control']) {
+  for (const name of ['h', 'c', 's', 'k', 't', 'w']) {
     privateDirectory(join(root, name))
   }
   const target = setupTarget(machine, 'herdr')
@@ -207,7 +208,9 @@ export async function prepareSetupHerdr(
     config_ref: reference,
     expected_source: source
   }
-  const control = join(root, 'control')
+  privateDirectory(join(config.state_dir, 'control'))
+  const control = providerControl(config.state_dir, 'herdr')
+  privateDirectory(control)
   // 原始 schema 与 Luvus 使用同一内容寻址布局（Connector 的 `managed/`）；旧 `schema_path` 仍可读取。
   const schemaPath = schemaReference(config.state_dir, source.schema_sha256)
   const limits = { entries: 1024, bytes: 4_194_304 }

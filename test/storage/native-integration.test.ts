@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from '../../src/store.js'
-import { commitLuvusResponse } from '../../src/wire/persistence.js'
+import { commitNativeResponse } from '../../src/wire/persistence.js'
 import { management, responseFrame } from './helpers.js'
 import { nativeBackend } from './native-backend.js'
 
@@ -26,10 +26,10 @@ test(
       now = 110
       store.expire()
       const frame = responseFrame(binding, { result: { id: 'task-created' } })
-      const result = commitLuvusResponse(store, native.adapter, frame)
+      const result = commitNativeResponse(store, native.adapter, frame)
       assert.equal(result.state, 'responded')
       assert.equal(JSON.parse(result.response!).result.id, 'task-created')
-      const duplicate = commitLuvusResponse(store, native.adapter, frame)
+      const duplicate = commitNativeResponse(store, native.adapter, frame)
       assert.equal(duplicate.call_id, call.call_id)
       assert.throws(
         /* 尝试重新派发已有响应的调用，确认不会创建额外尝试或发送。 */ () =>

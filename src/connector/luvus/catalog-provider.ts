@@ -3,7 +3,7 @@
  * 这里保留 Luvus 自己的方法规则与参数提示；公共身份/分页门禁在 MCP 层。
  */
 import { createLuvusCatalog, LuvusAdapterError } from './index.js'
-import type { NativeContractRecord } from '../../wire/backend.js'
+import type { NativeContractRecord } from './backend.js'
 import type { TrustedNativeContext } from './contract/index.js'
 import type { Principal } from '../../router.js'
 import type { ProviderCatalogProvider, ProviderCatalogSource } from '../../mcp/catalog.js'

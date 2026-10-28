@@ -1,12 +1,8 @@
+import type { GatewayCatalogSource } from '../../src/connector/luvus/catalog-provider.js'
 // 验证实际Luvus目录按当前ACL/来源/epoch分页及即时撤权；不声称原生执行。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import {
-  FacadeServiceError,
-  StoreGatewayService,
-  type ServiceContext,
-  type GatewayCatalogSource
-} from '../../src/mcp/index.js'
+import { FacadeServiceError, StoreGatewayService, type ServiceContext } from '../../src/mcp/index.js'
 import { target } from './store-fixture.js'
 import { catalogFixture, catalogMethods } from './catalog-fixture.js'
 import { luvusCatalogProvider } from '../../src/connector/luvus/catalog-provider.js'

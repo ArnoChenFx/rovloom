@@ -1,3 +1,4 @@
+import { providerSetupPath } from '../../src/cli/provider-control.js'
 // 配对的真实失败边界：错误秘密不消费、并发兑换不互相终结、关闭打断 body、重载保留交付结果。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -304,7 +305,7 @@ for (const sameCode of [false, true]) {
     try {
       const value = `ws://127.0.0.1:9#${sameCode ? 'm_old.a_old' : 'm_new.a_new'}.` + 's'.repeat(43)
       await assert.rejects(joinConnector(config, path, io(), value), { code: 'configuration_required' })
-      assert.equal(existsSync(runtimeReference(root, 'native-setup')), sameCode)
+      assert.equal(existsSync(providerSetupPath(root, 'luvus')), sameCode)
       assert.equal(existsSync(join(root, 'n', 'fixture-data')), sameCode)
       const retired = join(root, 'retired')
       if (sameCode) {

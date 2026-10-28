@@ -1,7 +1,7 @@
 /** 复用固定 Luvus 普通方法的契约审核、参数检查和逐次授权；原生来源与 raw 决定仍由受信宿主交付。 */
 import { isDeepStrictEqual } from 'node:util'
 import { LuvusAdapterError } from './types.js'
-import type { NativeContractRecord, NativeWireBackend } from '../../wire/backend.js'
+import type { NativeContractRecord, NativeWireBackend } from './backend.js'
 import type { TrustedNativeContext } from './contract/index.js'
 import { object } from '../../wire/index.js'
 import type { AttemptBinding } from '../../wire/types.js'
