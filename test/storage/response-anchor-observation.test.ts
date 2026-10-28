@@ -109,9 +109,7 @@ test(
       binding.call_id = binding.attempt_id = binding.native_request_id = long
       binding.target = { machine_id: long, provider_id: long, profile: 'session', session: long }
       binding.registration = {
-        ...binding.registration,
-        caller_policy_revision: long,
-        local_policy_revision: long
+        ...binding.registration
       }
       f.time(1001)
       const measured = clockWrites(

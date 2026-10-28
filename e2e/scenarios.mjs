@@ -36,10 +36,14 @@ export const scenarios = [
       assert.equal(providers.items[0].kind, 'herdr')
       const discovered = await ok(client, 'runtime_discover', {
         target: stack.target,
-        expected_binding_revision: 1
+        expected_binding_revision: 1,
+        limit: 100
       })
       const names = discovered.items.map((item) => item.method).sort()
-      assert.deepEqual(names, ['ping', 'session.snapshot', 'workspace.create'], 'terminal write must be hidden')
+      for (const method of ['ping', 'session.snapshot', 'workspace.create', 'pane.list']) {
+        assert(names.includes(method), `exposed method missing: ${method}`)
+      }
+      assert(!names.includes('pane.send_text'), 'terminal write must be hidden')
       const described = await ok(client, 'runtime_describe', {
         target: stack.target,
         expected_binding_revision: 1,
@@ -126,7 +130,7 @@ export const scenarios = [
       const written = await stack.readResult(client, allowed)
       assert.equal(written.error, undefined, `e2e_native_error:${JSON.stringify(written)}`)
       const names = (
-        await ok(client, 'runtime_discover', { target: stack.target, expected_binding_revision: 1 })
+        await ok(client, 'runtime_discover', { target: stack.target, expected_binding_revision: 1, limit: 100 })
       ).items.map((i) => i.method)
       assert(names.includes('pane.send_text'), 'catalog shows the method once the switch is on')
       return { switch_off: denied.state, switch_on: allowed.state, native_reply: written.result?.type }

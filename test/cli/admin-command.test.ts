@@ -10,7 +10,7 @@ import type { GatewayConfig } from '../../src/cli/config.js'
 import { handleAdminCommand, managementSourceExists, writeAdminFiles } from '../../src/cli/admin-command.js'
 import { isAdminPlaceholder } from '../../src/cli/admin-registry.js'
 import { handleTokenCommand } from '../../src/cli/token-command.js'
-import { ADMIN_POLICY_REVISION, emptyManagement, issueAdmin, revokeAdmin } from '../../src/cli/admin-registry.js'
+import { emptyManagement, issueAdmin, revokeAdmin } from '../../src/cli/admin-registry.js'
 import { digestToken, parseRegistry } from '../../src/cli/token-registry.js'
 import type { CallerRegistry } from '../../src/cli/token-registry.js'
 import { DEFAULT_PAIRING_POLICY_REF } from '../../src/pairing-policy.js'
@@ -25,7 +25,7 @@ function callers(now = 1_000): CallerRegistry {
     local_policy: { revision: 'local1', grants: [] },
     callers: [
       {
-        principal: { id: 'owner', policy },
+        principal: { id: 'owner' },
         token_sha256: digestToken('o'.repeat(43)),
         issued_at: now,
         expires_at: now + DAY
@@ -45,8 +45,8 @@ test('issue creates a hash-only admin session plus a permissionless MCP placehol
   assert.deepEqual(first.management.pairing_policy_refs, [DEFAULT_PAIRING_POLICY_REF])
   assert(!JSON.stringify({ callers: first.callers, management: first.management }).includes(first.secret))
   const placeholder = first.callers.callers.find((entry) => entry.principal.id === 'admin')!
-  assert.equal(placeholder.principal.policy.revision, ADMIN_POLICY_REVISION)
-  assert.deepEqual(placeholder.principal.policy.grants, [])
+  assert.equal(placeholder.management_only, true)
+  assert(!Object.hasOwn(placeholder.principal, 'policy'))
   // 管理员口令摘要与任何 MCP 令牌摘要都不同，注册表仍然合法。
   assert.notEqual(placeholder.token_sha256, session.credential_sha256)
   parseRegistry(JSON.parse(JSON.stringify(first.callers)))
@@ -96,7 +96,7 @@ test('admin create and reissue accept valid caller registries larger than 16 KiB
     const after = parseRegistry(JSON.parse(readFileSync(path, 'utf8')))
     assert.deepEqual(
       after.callers.filter((entry) => entry.principal.id !== 'admin'),
-      registry.callers
+      parseRegistry(registry).callers
     )
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -260,7 +260,7 @@ test(
       assert.match(created.out.trim(), /^[A-Za-z0-9_-]{43}$/)
       const registry = parseRegistry(JSON.parse(readFileSync(callerPath, 'utf8')))
       assert.equal(registry.resource, `http://127.0.0.1:${config.mcp_port}/mcp`)
-      assert.equal(registry.local_policy.grants.length, 0)
+      assert(!Object.hasOwn(registry, 'local_policy'))
       assert.equal(registry.callers.length, 1)
       assert.equal(registry.callers[0]!.principal.id, 'admin')
       assert.equal(isAdminPlaceholder(registry.callers[0]!), true)

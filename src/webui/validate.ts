@@ -393,8 +393,6 @@ function permissionShape(value: PermissionSnapshot): void {
     'target',
     'principal_id',
     'policy_revision',
-    'caller_policy_revision',
-    'local_policy_revision',
     'recovery_generation',
     'observed_at',
     'expires_at',
@@ -407,8 +405,6 @@ function permissionShape(value: PermissionSnapshot): void {
   }
   text(value.principal_id)
   text(value.policy_revision)
-  text(value.caller_policy_revision)
-  nullableText(value.local_policy_revision)
   text(value.recovery_generation)
   time(value.observed_at)
   time(value.expires_at)

@@ -7,7 +7,7 @@
 
 用法：python3 e2e/quickstart.py --binary /path/rovloom --herdr /path/herdr-0.9.5 [--work DIR] [--then 'cmd ...']
 """
-import argparse, fcntl, getpass, json, os, pty, re, select, shlex, shutil, signal, subprocess, sys, tempfile, termios, time
+import argparse, socket, hashlib, fcntl, getpass, json, os, pty, re, select, shlex, shutil, signal, subprocess, sys, tempfile, termios, time
 
 ANSI = re.compile(rb'\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]|\r')
 CODE = re.compile(r'm_[0-9a-f-]{36}\.[0-9a-f-]{36}\.[A-Za-z0-9_-]+')
@@ -110,6 +110,7 @@ def redact(text):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--binary', required=True)
+    ap.add_argument('--upgrade-from', help='先用旧 Rovloom 二进制配对并读取，再原位替换两端，验证原 token/设备凭据/结果句柄')
     ap.add_argument('--herdr', help='官方 herdr 0.9.5 可执行文件')
     ap.add_argument('--luvus', help='官方 luvus 0.14.3 可执行文件（与 --herdr 二选一；走默认的 Luvus 引导）')
     ap.add_argument('--work', help='工作目录（需位于祖先不可被其它用户写入的位置；默认 ~/.rq-*）')
@@ -120,6 +121,8 @@ def main():
     ap.add_argument('--kill-luvus', action='store_true',
                     help='就绪后 kill -9 Luvus server：Connector 应自行重建并恢复调用')
     ap.add_argument('--crash', action='store_true', help='就绪后 kill -9 Connector 再重启，验证无需人工清理即可恢复')
+    ap.add_argument('--legacy-wait-output', action='store_true',
+                    help='（Luvus）注入旧 policy/raw 字段，重启后用原 test token 验证字段不再限制输出等待')
     ap.add_argument('--unknown-outcome', action='store_true',
                     help='（Luvus）暂停原生后提交写调用并杀掉 Connector：调用必须收敛为 outcome_unknown，且不被重发')
     ap.add_argument('--revoke', action='store_true',
@@ -141,6 +144,8 @@ def main():
         ap.error('--service is a macOS Herdr scenario')
     if (args.unknown_outcome or args.revoke) and not args.luvus:
         ap.error('--unknown-outcome / --revoke are Luvus scenarios')
+    if args.legacy_wait_output and not args.luvus:
+        ap.error('--legacy-wait-output is a Luvus scenario')
     work = os.path.abspath(args.work or tempfile.mkdtemp(prefix='.rq-', dir=os.path.expanduser('~')))
     os.makedirs(work, mode=0o700, exist_ok=True)
     home_g, home_c, tools, herdr_dir = (os.path.join(work, n) for n in ('g', 'c', 'bin', 'hb'))
@@ -150,7 +155,7 @@ def main():
     for d in (home_g, home_c, tools, herdr_dir):
         os.makedirs(d, mode=0o700, exist_ok=True)
     rov = os.path.join(tools, 'rovloom')
-    shutil.copy(args.binary, rov); os.chmod(rov, 0o755)
+    shutil.copy(args.upgrade_from or args.binary, rov); os.chmod(rov, 0o755)
     source, name = (args.herdr, 'herdr') if args.herdr else (args.luvus, 'luvus')
     shutil.copy(source, os.path.join(herdr_dir, name)); os.chmod(os.path.join(herdr_dir, name), 0o700)
     # ROVLOOM_LANG 固定英文输出，宿主 locale 不影响这些脚本的提示标记。
@@ -190,6 +195,21 @@ def main():
             existing = luvus_servers(herdr_dir)
             assert len(existing) == 1, f'pre-existing server not found: {existing}'
             print('PRE_EXISTING', existing, flush=True)
+        # 每轮使用独立端口，避免与同机已有 Gateway 或其它验收进程冲突。
+        initialized_gateway = subprocess.run([rov, 'config', 'init', 'gateway'],
+                                            env=env_g, cwd=home_g, capture_output=True, text=True, timeout=10)
+        assert initialized_gateway.returncode == 0, 'gateway_init_failed'
+        gateway_path = os.path.join(home_g, '.config', 'rovloom', 'gateway.json')
+        gateway_cfg = json.load(open(gateway_path))
+        reserved = [socket.socket() for _ in range(3)]
+        try:
+            for listener, bound in zip(('devices', 'mcp', 'management'), reserved):
+                bound.bind(('127.0.0.1', 0))
+                gateway_cfg[listener]['port'] = bound.getsockname()[1]
+            open(gateway_path, 'w').write(json.dumps(gateway_cfg, indent=2) + '\n')
+        finally:
+            for bound in reserved:
+                bound.close()
         def issue_join():
             """（重）启动 Gateway 签发一张一机一码，返回完整 join 命令值（ws://...#m...）。"""
             nonlocal gateway
@@ -224,7 +244,7 @@ def main():
         if created.returncode == 0:
             password = re.search(r'(\S{20,})', created.stdout)
             if password:
-                info['admin'] = {'user': 'admin', 'password': password.group(1), 'url': 'http://127.0.0.1:9445/'}
+                info['admin'] = {'user': 'admin', 'password': password.group(1), 'url': f"http://127.0.0.1:{gateway_cfg['management']['port']}/"}
         out = os.path.join(work, 'mcp.json')
         open(out, 'w').write(json.dumps(info)); os.chmod(out, 0o600)
         print('READY', json.dumps({'mcp_url': info['url'], 'targets': info['targets'], 'config': out}), flush=True)
@@ -234,6 +254,104 @@ def main():
             print('LUVUS_SERVERS', servers, flush=True)
             if args.pre_existing:
                 assert servers == existing, f'Connector must attach, not start another: {existing} -> {servers}'
+        if args.upgrade_from:
+            made = subprocess.run([rov, 'token', 'create', '--principal', 'upgrade_test', '--like', 'operator_simple_pairing'],
+                                  env=env_g, cwd=home_g, capture_output=True, text=True, timeout=10)
+            assert made.returncode == 0, 'upgrade_token_create_failed'
+            info['token'] = made.stdout.strip()
+            assert re.fullmatch(r'[A-Za-z0-9_-]{43}', info['token']), 'upgrade_token_format'
+            open(out, 'w').write(json.dumps(info))
+            evidence = os.path.join(work, 'upgrade-evidence.json')
+            probe = os.path.join(os.path.dirname(__file__), 'upgrade-client.mjs')
+            probe_env = {**os.environ, 'MCP_CONFIG': out, 'UPGRADE_EVIDENCE': evidence}
+            subprocess.run(['bun', '--no-env-file', probe, 'before'], env=probe_env, check=True, timeout=60)
+            connector.stop(); gateway.stop()
+            connector_state = cfg.get('data', {}).get('directory') or os.path.join(home_c, '.local', 'share', 'rovloom', 'connector')
+            credential_path = os.path.join(connector_state, 'managed', 'device.json')
+            credential_digest = hashlib.sha256(open(credential_path, 'rb').read()).digest()
+            # 只替换二进制，不重新 join、不编辑 managed 配对配置或设备凭据。
+            shutil.copy(args.binary, rov); os.chmod(rov, 0o755)
+            gateway = Term('gateway-upgraded', [rov, 'gateway'], env_g, home_g); terms.append(gateway)
+            connector = Term('connector-upgraded', [rov, 'connector'], env_c, home_c); terms.append(connector)
+            connector.expect('provider_ready=true', timeout=90)
+            assert hashlib.sha256(open(credential_path, 'rb').read()).digest() == credential_digest, 'upgrade_changed_device_credential'
+            subprocess.run(['bun', '--no-env-file', probe, 'after'], env=probe_env, check=True, timeout=60)
+            # 范围命令触发真实 v2 写盘，原 token 不轮换，旧方法/动作策略不再落盘。
+            scoped = subprocess.run([rov, 'token', 'scope', '--principal', 'upgrade_test', '--devices', info['targets'][0]['machine_id']],
+                                    env=env_g, cwd=home_g, capture_output=True, text=True, timeout=10)
+            assert scoped.returncode == 0, 'upgrade_scope_write_failed'
+            registry_path = os.path.join(home_g, '.local', 'share', 'rovloom', 'gateway', 'managed', 'mcp-callers.json')
+            registry = json.load(open(registry_path))
+            assert registry['schema_version'] == 2
+            assert 'local_policy' not in registry and 'gateway_policy' not in registry
+            assert all(set(entry['principal']) == {'id'} for entry in registry['callers'])
+            subprocess.run(['bun', '--no-env-file', probe, 'after'], env=probe_env, check=True, timeout=60)
+            if args.luvus:
+                subprocess.run(['bun', '--no-env-file', os.path.join(os.path.dirname(__file__), 'luvus-wait-output.mjs')],
+                               env=probe_env, check=True, timeout=90)
+            print('NATIVE_UPGRADE_OK', json.dumps({'provider': 'herdr' if args.herdr else 'luvus',
+                                                 'credential_preserved': True, 'token_preserved': True,
+                                                 'registry_version': 2, 'old_result_readable': True}), flush=True)
+        if args.legacy_wait_output:
+            # 真实 CLI 创建非配对主体，之后仍使用同一个 token；所有文件仅属于本轮隔离 HOME。
+            made = subprocess.run([rov, 'token', 'create', '--principal', 'test', '--like', 'operator_simple_pairing'],
+                                  env=env_g, cwd=home_g, capture_output=True, text=True, timeout=10)
+            assert made.returncode == 0, 'test_token_create_failed'
+            info['token'] = made.stdout.strip()
+            assert re.fullmatch(r'[A-Za-z0-9_-]{43}', info['token']), 'test_token_format'
+            open(out, 'w').write(json.dumps(info))
+            connector.stop(); gateway.stop()
+            managed_g = os.path.join(home_g, '.local', 'share', 'rovloom', 'gateway', 'managed')
+            connector_state = cfg.get('data', {}).get('directory') or os.path.join(home_c, '.local', 'share', 'rovloom', 'connector')
+            managed_c = os.path.join(connector_state, 'managed')
+            registry = json.load(open(os.path.join(managed_g, 'mcp-callers.json')))
+            assert registry['schema_version'] == 2
+            assert 'local_policy' not in registry and 'gateway_policy' not in registry
+            assert all('policy' not in entry['principal'] for entry in registry['callers'])
+            def downgrade(value):
+                changed = 0
+                if isinstance(value, dict):
+                    if value.get('kind') == 'mcp-caller-source':
+                        value['local_policy'] = {'revision': 'legacy_local', 'grants': []}
+                        value['gateway_policy'] = {'revision': 'legacy_caller', 'grants': []}
+                        for entry in value['callers']:
+                            entry['principal']['policy'] = {'revision': 'legacy_caller', 'grants': []}
+                        changed += 1
+                    if value.get('kind') == 'luvus' and value.get('authentication') == 'local_owner':
+                        value['policies'] = {'caller': {'revision': 'legacy_caller', 'grants': []}, 'local': {'revision': 'legacy_local', 'grants': []}}
+                        value['peer_policy_revision'] = 'legacy_different'
+                        changed += 1
+                    if value.get('kind') == 'luvus' and value.get('authentication') == 'remote_connector':
+                        value['raw_grant'] = {'principal_id': 'operator_simple_pairing', 'methods': ['session.snapshot']}
+                        changed += 1
+                    if 'target' in value and isinstance(value.get('actions'), list):
+                        value['methods'] = ['pane.list']
+                        changed += 1
+                    for item in value.values():
+                        changed += downgrade(item)
+                elif isinstance(value, list):
+                    changed += sum(downgrade(item) for item in value)
+                return changed
+            counts = []
+            for directory in (managed_g, managed_c):
+                changed = 0
+                for filename in os.listdir(directory):
+                    if not filename.endswith('.json'):
+                        continue
+                    path = os.path.join(directory, filename)
+                    value = json.load(open(path))
+                    updates = downgrade(value)
+                    if updates:
+                        open(path, 'w').write(json.dumps(value))
+                        changed += updates
+                assert changed > 0, 'legacy_fixture_missing_policies'
+                counts.append(changed)
+            gateway = Term('gateway-upgraded', [rov, 'gateway'], env_g, home_g); terms.append(gateway)
+            connector = Term('connector-upgraded', [rov, 'connector'], env_c, home_c); terms.append(connector)
+            connector.expect('provider_ready=true', timeout=90)
+            subprocess.run(['bun', '--no-env-file', os.path.join(os.path.dirname(__file__), 'luvus-wait-output.mjs')],
+                           env={**os.environ, 'MCP_CONFIG': out}, check=True, timeout=90)
+            print('LEGACY_WAIT_OUTPUT_OK', json.dumps({'legacy_policy_blocks': counts}), flush=True)
         if args.kill_luvus:
             before = luvus_servers(herdr_dir)
             for pid, _ in before:
@@ -361,6 +479,13 @@ def main():
     finally:
         for term in reversed(terms):
             term.stop()
+        if args.legacy_wait_output or args.upgrade_from:
+            # 此场景的 daemon 来自本轮私有 binary/HOME，不属于用户已有实例。
+            for pid, _ in luvus_servers(herdr_dir):
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
         if args.service:
             # 先让服务收到正常停止请求，再撤销开机登记；尽力而为，不影响测试结论。
             for step in (['stop', '--role', 'connector'], ['uninstall', '--role', 'connector']):

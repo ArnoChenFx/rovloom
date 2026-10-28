@@ -13,7 +13,6 @@ async function completed() {
     store: { retention: { result_ttl: 10 } }
   })
   const data = { text: '你好🌍'.repeat(8_000), nested: [{ preserved: true, code: -7 }] }
-  let discardAllowed = false
   f.native.respond(
     /** 使用 IPC 实际收到的 native id，返回有界、跨多页读取的多字节 error.data。 */
     (socket, input) => {
@@ -33,12 +32,7 @@ async function completed() {
     )
     const ports = {
       store: f.f.store,
-      /** 每次返回独立当前快照；此正向用例不在同步查询中改变其它授权事实。 */
-      localPolicies: () => structuredClone(f.f.local),
-      /** 专门丢弃权限与读取 grant 独立，不能因已有结果就默认授予。 */
-      principal: () => ({ ...f.f.principal, permissions: { discard_response: discardAllowed } }),
-      /** 直接使用 PR47 的当前原上下文查询，不重建 Wire 或模拟保留门禁。 */
-      resolveOriginalRead: (id: string) => f.f.gateway.resolveOriginalRead(id)
+      principal: () => f.f.principal
     }
     return {
       f,
@@ -47,11 +41,7 @@ async function completed() {
       binding,
       data,
       ports,
-      access: createLuvusResultAccess(ports),
-      /** 只改变本测试主体的专门清理权限，不影响 native grant。 */
-      allowDiscard() {
-        discardAllowed = true
-      }
+      access: createLuvusResultAccess(ports)
     }
   } catch (error) {
     await f.close()
@@ -124,40 +114,24 @@ test(
 )
 
 test(
-  '真实组合读取每页受当前快照和原 Wire 生命周期限制，独立授权后才允许清理',
+  '真实组合结果断线后仍可读取，设备范围撤销即时拒绝读取与清理',
   { timeout: 20_000 },
   /** 在操作之间撤销当前事实，保留独立 discard 权限及正文与原上下文的不同生命周期。 */
   async () => {
-    const { f, call, client, access, allowDiscard } = await completed()
+    const { f, call, client, access } = await completed()
     try {
       const meta = access.open(call.call_id)
-      const grant = f.f.local.grants[0]!
-      const actions = [...grant.actions]
-      grant.actions = ['dispatch', 'cancel']
-      assert.throws(
-        /** 独立 clone 必须反映操作开始前已提交的当前撤权。 */
-        () => access.read(meta.result_id, 0, 32),
-        /forbidden/
-      )
-      grant.actions = actions
-      assert.equal(Buffer.from(access.read(meta.result_id, 0, 32).data, 'base64').length, 32)
-      assert.throws(
-        /** 读取允许不等于具备丢弃响应的专门权限。 */
-        () => access.discard(call.call_id),
-        /discard_forbidden/
-      )
+      f.f.principal.device_scope = { mode: 'selected', machine_ids: [] }
+      assert.throws(() => access.read(meta.result_id, 0, 32), /forbidden/)
+      assert.throws(() => access.discard(call.call_id), /forbidden/)
+      delete f.f.principal.device_scope
       client.stop()
       await until(
         /** 等 Gateway 确认连接已关闭后再查询原上下文，不以客户端本地 close 代替。 */
         () => f.f.gateway.status().connections === 0
       )
       assert.equal(f.f.gateway.resolveOriginalRead(call.call_id), undefined)
-      assert.throws(
-        /** 持久正文和有效句柄不能替代关闭后的原读取许可。 */
-        () => access.read(meta.result_id, 0, 32),
-        /result_context_unavailable/
-      )
-      allowDiscard()
+      assert.equal(Buffer.from(access.read(meta.result_id, 0, 32).data, 'base64').length, 32)
       access.discard(call.call_id)
       assert.equal(f.f.store.call(f.f.principal.id, call.call_id).response, null)
       assert.throws(
@@ -165,41 +139,6 @@ test(
         () => f.f.store.resultCall(f.f.principal.id, meta.result_id),
         /result_not_found/
       )
-      assert.equal(f.claimCount(), 1)
-      assert.equal(f.native.state.responses, 1)
-    } finally {
-      await f.close()
-    }
-  }
-)
-
-test(
-  '实际组合在最后本地策略查询同步丢弃正文时拒绝旧页',
-  { timeout: 20_000 },
-  /** 将已修复的 Store 快照窗口接入真实通道，不扩称其它回调一致性问题也已解决。 */
-  async () => {
-    const { f, call, access, ports } = await completed()
-    try {
-      const meta = access.open(call.call_id)
-      let reads = 0
-      const racing = createLuvusResultAccess({
-        ...ports,
-        /** 第四次本模块查询位于旧页准备之后；实际删除会发布 Store 失效通知。 */
-        localPolicies() {
-          if (++reads === 4) {
-            f.f.store.discardResponse(f.f.principal.id, call.call_id)
-          }
-          return structuredClone(f.f.local)
-        }
-      })
-      assert.throws(
-        /** 不允许把授权回调前准备的 32 字节返回给调用方。 */
-        () => racing.read(meta.result_id, 0, 32),
-        /result_not_ready|result_context_unavailable|result_not_found/
-      )
-      assert.equal(reads, 4)
-      assert.equal(f.f.store.call(f.f.principal.id, call.call_id).response, null)
-      assert.equal(f.f.gateway.resolveOriginalRead(call.call_id), undefined)
       assert.equal(f.claimCount(), 1)
       assert.equal(f.native.state.responses, 1)
     } finally {

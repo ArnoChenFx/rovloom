@@ -149,3 +149,17 @@ OpenCode JSON 事件字段参考 [v1.19.3 CLI](https://github.com/anomalyco/open
 - **LLM Agent 单独脚本**：`e2e/agent.mjs` 让 opencode（DeepSeek `deepseek-chat`）经 MCP 完成 list → discover → ping → `workspace.create`，再由独立 MCP 客户端读回 workspace 数（0→1）。依赖模型 API 域名可达与 `DEEPSEEK_API_KEY`，不在默认场景集里；模型输出有随机性，仅作冒烟。
 - `unknown-outcome` 证明“新 native 未被重发”；被暂停后又恢复的旧 native 是否执行了该请求，不在 Rovloom 可观察范围内
   （这正是 `outcome_unknown` 的含义）。
+
+
+## 原位升级回归
+
+`quickstart.py --upgrade-from /absolute/old/rovloom --binary /absolute/new/rovloom` 先使用旧二进制真实配对、创建普通 MCP token 并提交 `pane.list`；停止两端后只替换程序，不重新 join、不编辑 managed 配对文件。新版必须沿用原 token/设备凭据、读取旧结果句柄（完整 bytes/hash/TTL），并完成新调用。随后真实 `token scope` 写盘应生成无策略字段的 v2 注册表，同一 token 仍可调用。Luvus 还验证 `wait.output` 的命中、超时与连接存活。
+
+```sh
+python3 e2e/quickstart.py --upgrade-from /absolute/old/rovloom --binary /absolute/new/rovloom \
+  --herdr /absolute/herdr --work /absolute/private/upgrade-herdr
+python3 e2e/quickstart.py --upgrade-from /absolute/old/rovloom --binary /absolute/new/rovloom \
+  --luvus /absolute/luvus --work /absolute/private/upgrade-luvus
+```
+
+Luvus 增加 `--luvus-mode managed` 可覆盖托管模式；缺省覆盖附着模式。目录必须隔离且足够短，以满足 Unix socket 路径长度限制。本地回归从 0.6.9 发布提交构建的旧程序升级到当前候选；不代表未测过的更早版本均兼容。

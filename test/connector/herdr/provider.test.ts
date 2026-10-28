@@ -18,7 +18,7 @@ import type { Connection } from '../../../src/transport/index.js'
 import { Store } from '../../../src/store.js'
 import { Router } from '../../../src/router.js'
 import { boundedJson, contractRef } from '../../../src/wire/index.js'
-import type { JsonObject, ProviderBinding, ProviderPolicies } from '../../../src/wire/types.js'
+import type { JsonObject, ProviderBinding } from '../../../src/wire/types.js'
 import { backendFixture, fixture, raw, source } from './helpers.js'
 import { privateHerdrTestRoot } from './private-root.js'
 import { connected, management, responseFrame } from '../../storage/helpers.js'
@@ -32,8 +32,7 @@ function config(root: string) {
     binding_revision: 1,
     config_ref: 'owned-herdr',
     expected_source: { ...source },
-    schema_path: join(root, 'schema.json'),
-    peer_policy_revision: 'local1'
+    schema_path: join(root, 'schema.json')
   }
   return {
     ...shared,
@@ -237,16 +236,6 @@ test(
     }
     const expected = resources.providers[0]!.binding
     store.defineProvider(expected)
-    const policy: ProviderPolicies = {
-      caller: {
-        revision: 'caller1',
-        grants: [{ target: input.target, methods: ['ping'], actions: ['dispatch', 'read'] }]
-      },
-      local: {
-        revision: 'local1',
-        grants: [{ target: input.target, methods: ['ping'], actions: ['dispatch', 'read'] }]
-      }
-    }
     const value = store.createCall(
       'principal1',
       input.target,
@@ -254,8 +243,6 @@ test(
       {
         binding_revision: 1,
         contract_ref: contractRef(source),
-        caller_policy_revision: 'caller1',
-        local_policy_revision: 'local1',
         timeoutMs: 100
       }
     )
@@ -274,13 +261,8 @@ test(
     let local: ProviderBinding = { ...expected }
     const session = resources.session(connection, channel, {
       store,
-      router: new Router(store, /** 真实 Router 使用本轮受保护本地策略。 */ () => policy.local),
+      router: new Router(store),
       localProvider: /** 与唯一 Store 独立的固定本机配置，可验证 revision 漂移。 */ () => local,
-      localPolicies: /** 每次重新取当前本机策略。 */ () => policy.local,
-      policies: /** 仅按原 principal 返回当前双端授权。 */ (principal) => {
-        assert.equal(principal, 'principal1')
-        return policy
-      },
       currentPrincipal: /** 组件原读者由宿主提供，不能由 Wire 参数覆盖。 */ () => 'principal1'
     })
     channel.attach(session)
@@ -290,39 +272,23 @@ test(
       assert.equal(described.source_basis, 'configured_connector_contract')
       assert.equal(described.methods.length, 65)
       assert.equal('schemas' in described, false)
-      const principal = { id: 'principal1', policy: policy.caller }
+      const principal = { id: 'principal1' }
       const catalog = resources.catalog.resolve(input.target, principal)!
       assert.equal(catalog.expires_at, 5100)
       assert.deepEqual(catalog.local_provider, expected)
       assert.equal(catalog.contract_ref, contractRef(source))
-      assert.deepEqual(
-        catalog.methods.map(/** 只有当前 caller 可读或可派发的方法可见。 */ (method) => method.method),
-        ['ping']
-      )
+      assert(catalog.methods.some((entry) => entry.method === 'ping'))
+      assert(catalog.methods.some((entry) => entry.method === 'pane.list'))
       assert.equal(catalog.methods[0]!.params_schema, undefined)
       assert.equal((catalog.methods[0]!.limits as JsonObject).response_frame_bytes, 65_536)
       assert.equal((catalog.describe('ping').limits as JsonObject).response_pagination, 'unavailable')
       assert.equal(typeof catalog.describe('ping').params_schema, 'object')
-      assert.throws(
-        /** 目录中不存在的方法不能借 describe 探测。 */ () => catalog.describe('agent.prompt'),
-        /runtime_method_unavailable/
-      )
+      assert.equal(catalog.describe('agent.prompt').method, 'agent.prompt')
       assert.equal(resources.catalog.resolve({ ...input.target, session: 'another' }, principal), undefined)
-      policy.caller.grants[0]!.actions = ['cancel']
-      assert.equal(resources.catalog.resolve(input.target, principal), undefined)
-      assert.throws(
-        /** 已发视图也重新检查原 caller 对象中的当前 grants。 */ () => catalog.describe('ping'),
-        /runtime_method_unavailable/
-      )
-      policy.caller.grants[0]!.actions = ['read']
-      assert.deepEqual(resources.catalog.resolve(input.target, principal)!.methods[0]!.caller_actions, ['read'])
-      policy.caller.grants[0]!.methods.push('agent.list')
-      assert.throws(
-        /** 旧视图不能因后来授予新方法而扩大。 */ () => catalog.describe('agent.list'),
-        /runtime_method_unavailable/
-      )
-      policy.caller.grants[0]!.methods = ['ping']
-      policy.caller.grants[0]!.actions = ['dispatch', 'read']
+      // 目录不再按逐方法授权过滤：同一已认证主体在暴露面内始终可见已审方法。
+      assert.equal(resources.catalog.resolve(input.target, principal)!.describe('agent.list').method, 'agent.list')
+      assert.equal(catalog.describe('ping').method, 'ping')
+      assert.equal(Object.hasOwn(catalog.methods[0]!, 'caller_actions'), false)
       catalogTime = 5100
       assert.throws(
         /** 五秒目录视图到期需要重新 resolve，不延长实际调用期限。 */ () => catalog.describe('ping'),
@@ -394,9 +360,6 @@ test(
           config: input,
           installation: JSON.parse('{}'),
           now: Date.now,
-          policies: /** 本反例不应进入政策回调。 */ () => {
-            throw new Error('unexpected_policy')
-          },
           releaseOwner: /** 未交付合法安装时资源 ownership 保持在原调用者。 */ async () => {
             released++
           }

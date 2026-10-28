@@ -21,8 +21,7 @@ test(
           policy: { revision: 'test_1', grants: [] }
         }),
         administrator: /* 未配置独立管理认证时明确拒绝，MCP身份不升级。 */ () => null
-      },
-      localPolicies: /* 本地政策同样为空，数据库存在不能创造授权。 */ () => ({ revision: 'local_1', grants: [] })
+      }
     })
     let running = await runtime.gateway!(config)
     try {

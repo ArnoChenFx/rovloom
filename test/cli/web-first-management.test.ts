@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
 import { hash } from '../../src/wire/index.js'
-import { SIMPLE_SETUP_ACTOR, SIMPLE_SETUP_LINEAGE, setupReference, setupTarget } from '../../src/cli/setup-policy.js'
+import { SIMPLE_SETUP_ACTOR, setupReference, setupTarget } from '../../src/cli/setup-targets.js'
 import type { GatewayConfig } from '../../src/cli/config.js'
 import { initializeRoleConfig } from '../../src/cli/config-init.js'
 import { writeAdminFiles } from '../../src/cli/admin-command.js'
@@ -128,7 +128,6 @@ for (const lan of [false, true]) {
                     target: setupTarget(machine_id, 'herdr'),
                     binding_revision: 1,
                     config_ref: reference,
-                    peer_policy_revision: 'setup_local_' + SIMPLE_SETUP_LINEAGE,
                     expected_source: {
                       ...fixedHerdrSource(),
                       binary_version: 'synthetic-future',

@@ -44,13 +44,7 @@ export type { GatewayStateOptions } from './state.js'
 export type * from './types.js'
 
 export { createProviderResultAccess } from './results.js'
-export type {
-  ProviderResultAccessOptions,
-  ProviderOriginalRead,
-  ProviderResultMetadata,
-  ProviderResultPage,
-  ResultProvider
-} from './results.js'
+export type { ProviderResultAccessOptions, ProviderResultMetadata, ProviderResultPage } from './results.js'
 
 export { composeGatewaySessions, composeConnectorSessions } from './provider-sessions.js'
 export type { ProviderSessionGroup } from './provider-sessions.js'

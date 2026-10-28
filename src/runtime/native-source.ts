@@ -32,10 +32,7 @@ export interface LocalOwnerLuvusInstance {
   readonly config: LuvusLocalConfig & { readonly transport: 'ipc' }
   readonly contract: NativeContractRecord
   source(binding: AttemptBinding): TrustedNativeContext
-  catalogSource(
-    connection: Connection,
-    policies: Readonly<{ caller_policy_revision: string; local_policy_revision: string }>
-  ): TrustedNativeContext
+  catalogSource(connection: Connection): TrustedNativeContext
   verifyPeer(socket: Socket, endpoint: EndpointIdentity, binding: AttemptBinding): Promise<PeerIdentity>
   assertEvidence(binding: AttemptBinding, evidence: NativeTransportEvidence): void
   nativeAuth(binding: AttemptBinding, evidence: NativeTransportEvidence): Readonly<{ kind: 'local_owner' }>
@@ -173,10 +170,8 @@ class ManagedProcess extends NativeInstanceContext implements ControlledLuvusPro
       config: this.config,
       contract: this.contract,
       source: /* 每个原调用继续绑定同一实际 native 来源。 */ (binding: AttemptBinding) => this.source(binding),
-      catalogSource: /* 目录只绑定当前实际认证连接及本次当前政策，不创建虚构 attempt。 */ (
-        connection: Connection,
-        policies: Readonly<{ caller_policy_revision: string; local_policy_revision: string }>
-      ) => this.catalogSource(connection, policies),
+      catalogSource: /* 目录只绑定当前实际认证连接及本次当前政策，不创建虚构 attempt。 */ (connection: Connection) =>
+        this.catalogSource(connection),
       verifyPeer: /* 原 adapter 的同一 IPC socket 继续进行实际 peer 检查。 */ (
         socket: Socket,
         endpoint: EndpointIdentity,

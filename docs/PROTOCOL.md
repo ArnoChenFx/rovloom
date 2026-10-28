@@ -11,6 +11,7 @@ AI 客户端 ──MCP Streamable HTTP──▶ Gateway ──Wire v2 (WS/WSS)�
 - 传输：Streamable HTTP，`http://<mcp.hostname>:<mcp.port>/mcp`。每个请求带 `Authorization: Bearer <令牌>`。令牌由 `rovloom token` 管理，热生效。
 - 监听网卡由配置决定。远程访问可经 HTTPS 反向代理，无需公网 URL 配置，客户端仍须提供 Bearer。
 - 不是 stdio MCP 服务器。客户端退出不影响 Gateway。
+- MCP 原生调用的权限只由 token 设备范围与 Connector 终端执行开关决定，Herdr、Luvus、混合模式一致。移除 caller/local/gateway 策略、methods/actions、raw grant 和策略 revision；来源/binding、schema、幂等与期限仍需正确。
 - 共 11 个工具，参数形状见 `src/mcp/schema.ts`：
 
 | 工具 | 作用 |

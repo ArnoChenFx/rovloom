@@ -1,5 +1,4 @@
-// 独立执行调用与结果读取门禁：按静态方法表、双端策略和 raw 授权校验后登记内存派发许可。
-import { authorize } from '../contracts.js'
+// 核验原生方法、原生访问面、参数覆盖程度与实际来源，登记本次请求的内存派发句柄。
 import { candidates, views } from './internal.js'
 import { luvusMethod } from './methods.js'
 import { attempt, equal, fail, object, snapshot } from './json.js'
@@ -61,73 +60,16 @@ function checkListed(candidate: DispatchCandidate): void {
   }
 }
 
-// 检查原生访问列表与双方策略；调用方与本机都必须授权该方法。
-function checkPolicies(candidate: DispatchCandidate, context: DispatchAuthorization): void {
+// 原生 access-only 端点自带方法白名单；缺失或未包含本次方法一律拒绝，不用静态表替代原生授权。
+function checkNativeAccess(candidate: DispatchCandidate): void {
   const stored = candidates.get(candidate)!
   const capabilities = views.get(stored.view)!.capabilities
-  if (capabilities.access !== undefined) {
-    const access = object(capabilities.access)
-    if (!Array.isArray(access.allowed_methods) || !access.allowed_methods.includes(candidate.method)) {
-      reject('forbidden', 'native_access')
-    }
+  if (capabilities.access === undefined) {
+    return
   }
-  for (const policy of [context.caller_policy, context.local_policy]) {
-    if (
-      !policy ||
-      typeof policy.host !== 'boolean' ||
-      ['machines', 'sessions', 'methods'].some(
-        /* 检查每个策略列表的类型、非空条目和重复值。 */ (key) => {
-          const items = (policy as unknown as Record<string, unknown>)[key]
-          return (
-            !Array.isArray(items) ||
-            !items.every(
-              /* 要求策略列表中的每项都是非空字符串。 */ (item) => typeof item === 'string' && item.length > 0
-            ) ||
-            new Set(items).size !== items.length
-          )
-        }
-      )
-    ) {
-      reject('invalid_authorization_context')
-    }
-  }
-  try {
-    authorize(candidate.binding.target, candidate.method, context.caller_policy, context.local_policy)
-  } catch {
-    reject('forbidden', 'policy')
-  }
-}
-
-// 核验 raw 的显式选择、Owner 身份和授权范围、有效期及完整绑定。
-function checkRaw(candidate: DispatchCandidate, context: DispatchAuthorization): void {
-  const grant = context.raw_grant
-  if (
-    context.owner !== true ||
-    context.raw_requested !== true ||
-    !grant ||
-    grant.source_verified !== true ||
-    typeof grant.id !== 'string' ||
-    !grant.id.length ||
-    Object.keys(grant).some(
-      // 拒绝 raw grant 中未受支持的额外字段。
-      (key) => !['id', 'source_verified', 'principal_id', 'binding', 'methods', 'expires_at'].includes(key)
-    )
-  ) {
-    reject('raw_contract_not_authorized')
-  }
-  if (
-    grant.principal_id !== context.principal_id ||
-    !Array.isArray(grant.methods) ||
-    !grant.methods.includes(candidate.method) ||
-    !equal(grant.binding?.target, candidate.binding.target)
-  ) {
-    reject('raw_contract_scope_mismatch')
-  }
-  if (!Number.isSafeInteger(grant.expires_at) || grant.expires_at <= context.now) {
-    reject('raw_contract_grant_expired')
-  }
-  if (!equal(grant.binding, candidate.binding)) {
-    reject('raw_contract_grant_stale')
+  const access = object(capabilities.access)
+  if (!Array.isArray(access.allowed_methods) || !access.allowed_methods.includes(candidate.method)) {
+    reject('forbidden', 'native_access')
   }
 }
 
@@ -138,8 +80,8 @@ export function checkDispatch(candidate: DispatchCandidate, input: DispatchAutho
     /* 验证当前授权上下文并执行各项门禁，最后登记许可及其主体。 */ () => {
       const context = checkedAuthorization(candidate, input)
       checkListed(candidate)
-      checkPolicies(candidate, context)
-      // raw 只放宽参数 schema 覆盖要求；方法表、策略和传输门禁仍须全部通过。
+      checkNativeAccess(candidate)
+      // raw 只放宽参数 schema 覆盖要求；方法表、原生访问面和传输门禁仍须全部通过。
       if (context.mode === 'strict') {
         if (candidate.validation === 'generic') {
           reject('parameter_schema_incomplete')
@@ -147,9 +89,7 @@ export function checkDispatch(candidate: DispatchCandidate, input: DispatchAutho
         if (candidate.validation === 'unavailable') {
           reject('schema_unavailable')
         }
-      } else if (context.mode === 'raw_contract') {
-        checkRaw(candidate, context)
-      } else {
+      } else if (context.mode !== 'raw_contract') {
         reject('invalid_execution_mode')
       }
       return Object.freeze({
@@ -159,25 +99,20 @@ export function checkDispatch(candidate: DispatchCandidate, input: DispatchAutho
         binding: candidate.binding,
         method: candidate.method,
         mode: context.mode,
-        validation: candidate.validation,
-        ...(context.mode === 'raw_contract' ? { raw_grant_id: context.raw_grant!.id } : {})
+        validation: candidate.validation
       })
     }
   )
 }
 
-// 在结果读取时重新核验许可主体、当前双端策略与内容状态。
+// 在执行上下文内核验原请求主体与内容状态。
 export function checkResultBoundary(permit: DispatchPermit, input: ResultAuthorization): Check<void> {
   return attempt(
     'result',
     /* 读取真实许可并检查结果仍可用，拒绝其它主体或已撤权的读取。 */ () => {
       checkedPermit(permit)
       const context = snapshot(input) as unknown as ResultAuthorization
-      if (
-        permit.principal_id !== context.principal_id ||
-        context.caller_policy_allowed !== true ||
-        context.local_policy_allowed !== true
-      ) {
+      if (permit.principal_id !== context.principal_id) {
         reject('forbidden')
       }
       if (context.content_status !== 'available') {

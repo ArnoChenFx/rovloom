@@ -106,9 +106,9 @@ test(
 )
 
 test(
-  '真实 RPC 完成后宿主等待期间撤销 read，小响应正文不离开 Connector',
+  '真实 RPC 完成后宿主等待期间只按设备范围与归属放行，小响应正文正常交付',
   { timeout: 15_000 },
-  /** 暂停 executeWire 返回，再撤回当前读取许可；单帧和分片发送均须重新核对 read。 */
+  /** 暂停 executeWire 返回；当前调用权限只来自 token 设备范围，同一主体与设备仍须交付。 */
   async () => {
     const f = await wireFixture()
     const late = gate()
@@ -127,20 +127,18 @@ test(
         () => f.state.nativeCompleted === 1
       )
       assert.equal(f.state.receivedResponses, 0)
-      f.f.principal.policy.grants[0]!.actions = ['dispatch', 'cancel']
       late.release()
       await until(
-        /** 撤权拒绝发送并关闭旧通道，Gateway 只能保留 unknown 元数据。 */
-        () => f.f.store.call(f.f.principal.id, call.call_id).state === 'outcome_unknown'
+        /** 同一主体与设备范围下响应正常提交，连接与 epoch 都不需要更换。 */
+        () => f.f.store.call(f.f.principal.id, call.call_id).state === 'responded'
       )
-      assert.equal(f.state.receivedResponses, 0)
-      assert.equal(f.f.store.call(f.f.principal.id, call.call_id).response, null)
-      assert.equal(f.f.gateway.resolveOriginalRead(call.call_id), undefined)
+      assert.equal(f.state.receivedResponses, 1)
+      assert(f.f.store.call(f.f.principal.id, call.call_id).response)
       assert.equal(f.claimCount(), 1)
       assert.equal(f.native.state.responses, 1)
       await until(
-        /** fresh epoch 不会因旧结果被撤权而自动重发同一请求。 */
-        () => client.status().phase === 'ready' && client.status().connection_epoch !== epoch
+        /** 旧结果不会触发重发，连接 epoch 保持不变。 */
+        () => client.status().phase === 'ready' && client.status().connection_epoch === epoch
       )
       assert.equal(f.claimCount(), 1)
       assert.equal(f.state.hook, 1)
@@ -202,9 +200,9 @@ test(
 )
 
 test(
-  '原始读取仅引用活 Wire，每次重新授权；撤权不误删所有者状态，discard/TTL 后不重建',
+  '原始读取仅引用活 Wire，每次重新核对当前 caller；discard/TTL 后不重建',
   { timeout: 15_000 },
-  /** 核对冷 adapter 无读取许可，当前 caller/grant、内容清理和固定 TTL 都约束活上下文。 */
+  /** 核对冷 adapter 无读取许可，当前 caller、内容清理和固定 TTL 都约束活上下文。 */
   async () => {
     const f = await wireFixture()
     try {
@@ -238,14 +236,6 @@ test(
       )
       f.f.principal.id = caller
       assert.equal(f.f.gateway.resolveOriginalRead(call.call_id)!.wire, original.wire)
-      const grant = f.f.principal.policy.grants[0]!
-      grant.actions = ['dispatch', 'cancel']
-      assert.equal(f.f.gateway.resolveOriginalRead(call.call_id), undefined)
-      assert.throws(
-        /** 活 permit 不能代替被撤销的当前读取 grant。 */
-        () => original.wire.checkResult(original.binding)
-      )
-      grant.actions = ['dispatch', 'read', 'cancel']
       f.f.store.discardResponse(caller, call.call_id)
       assert.equal(f.f.gateway.resolveOriginalRead(call.call_id), undefined)
       assert.throws(

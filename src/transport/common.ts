@@ -32,8 +32,8 @@ export type Adapter = Pick<
   stats(): { closed: boolean; executions: number; responses: number }
 }
 export type Readiness = {
-  policy_revision: string
-  peer_policy_revision: string
+  policy_revision?: string
+  peer_policy_revision?: string
   providers: { expected: ProviderBinding; local: ProviderBinding; native_ready: boolean }[]
 }
 export type Session = {
@@ -141,12 +141,7 @@ export function providerHealth(connection: Connection, state: Readiness) {
       seen.add(expected.provider_id)
       return {
         provider_id: expected.provider_id,
-        ready:
-          state.policy_revision.length > 0 &&
-          state.policy_revision === state.peer_policy_revision &&
-          boundedJson(expected) === boundedJson(local) &&
-          expected.enabled &&
-          native_ready === true
+        ready: boundedJson(expected) === boundedJson(local) && expected.enabled && native_ready === true
       }
     }
   )

@@ -1,5 +1,5 @@
 // 定义当前 Luvus 原生契约、宿主可信来源、校验证明、派发许可及仅响应上下文的类型边界。
-import type { Policy, Target } from '../contracts.js'
+import type { Target } from '../contracts.js'
 
 export type Json = null | boolean | number | string | readonly Json[] | JsonObject
 export type JsonObject = { readonly [key: string]: Json }
@@ -25,8 +25,8 @@ export type NativeBinding = Readonly<{
   connection_epoch: string
   recovery_generation: string
   capability_revision: string
-  caller_policy_revision: string
-  local_policy_revision: string
+  caller_policy_revision?: string
+  local_policy_revision?: string
   classification_revision: string
   contract: ContractIdentity
 }>
@@ -101,23 +101,10 @@ export type CheckedResponse = Readonly<{
   bound: boolean
 }>
 
-export type RawContractGrant = Readonly<{
-  id: string
-  source_verified: boolean
-  principal_id: string
-  binding: NativeBinding
-  methods: readonly string[]
-  expires_at: number
-}>
 export type DispatchAuthorization = Readonly<{
   source: TrustedNativeContext
   principal_id: string
-  caller_policy: Policy
-  local_policy: Policy
-  owner: boolean
   mode: 'strict' | 'raw_contract'
-  raw_requested: boolean
-  raw_grant?: RawContractGrant
   now: number
 }>
 // 一次派发授权的结果：携带通过门禁的候选与授权主体，供响应校验、封存和结果读取复核使用。
@@ -129,15 +116,12 @@ export type DispatchPermit = Readonly<{
   method: string
   mode: 'strict' | 'raw_contract'
   validation: ParameterValidation
-  raw_grant_id?: string
 }>
 // 只能由真实 RPC permit 封存；独立 WeakMap 校验，不能用于派发或读取原文。
 // retained_bytes 是封存元数据按契约身份编码后的 JSON 字节数，不代表共享编译状态或堆内存大小。
 export type ResponseOnlyContext = Readonly<{ kind: 'response_context'; retained_bytes: number }>
 export type ResultAuthorization = Readonly<{
   principal_id: string
-  caller_policy_allowed: boolean
-  local_policy_allowed: boolean
   content_status: 'available' | 'expired' | 'discarded'
 }>
 

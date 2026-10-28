@@ -161,7 +161,7 @@ for (const revoked of ['identity', 'read'] as const) {
             if (revoked === 'identity') {
               f.authorize(false)
             } else {
-              f.allowRead(false)
+              f.deviceScope([])
             }
           }
         }
@@ -185,7 +185,7 @@ for (const revoked of ['identity', 'read'] as const) {
           revoked === 'identity' ? /unauthenticated/ : /forbidden/
         )
         f.authorize(true)
-        f.allowRead(true)
+        f.deviceScope(undefined)
         const duplicate = await f.gateway.runAuthenticated(
           f.caller,
           /** 身份恢复后原历史记录仍保留，只能查回原 ID，不重新派发。 */ () => f.gateway.admit(request)

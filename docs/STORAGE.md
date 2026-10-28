@@ -136,3 +136,9 @@ Store 的备份接口导出一份脱敏快照，包含设备记录、provider �
 ## 物理删除
 
 SQL 删除、`secure_delete` 和 TTL 到期都不承诺物理擦除。空闲页、journal、文件系统快照、外部副本和已移走的备份中仍可能残留数据。需要物理销毁时，应使用单独的存储生命周期机制。
+
+## MCP 身份与持久结果
+
+调用授权只使用 token 的 device_scope 和 Connector 的 allow_terminal_execution，不保存 caller/local/gateway 方法或动作策略。mcp-callers.json 新写入为 v2；旧普通 caller 仅迁移自己的设备 ID，显式设备范围优先，不借 local_policy 扩大可见性。管理会话角色独立保留。
+
+原生来源、binding 与结构在响应提交时核验；已提交原文与句柄在固定 TTL 内可断连读取，仍核对当前身份、设备范围及原主体归属。结果访问不恢复旧 permit，也不需要活 Wire。生产运行时完成后释放执行上下文；内容与句柄仍受唯一 Store 预算约束，EOF 不删除，discard 不续期。

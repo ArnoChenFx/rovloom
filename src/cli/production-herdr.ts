@@ -14,8 +14,7 @@ import {
 import { createHerdrConnectorResources, parseHerdrProviderRefConfig } from '../connector/herdr/provider.js'
 import type { HerdrProviderRefConfig } from '../connector/herdr/provider.js'
 import { createNativeRecord, nativeRecordStamp, removeNativeRecord } from '../runtime/native-record-files.js'
-import { boundedJson, fields, hash, object, parseJson, validatePolicies } from '../wire/index.js'
-import type { ProviderPolicies } from '../wire/types.js'
+import { boundedJson, fields, hash, object, parseJson } from '../wire/index.js'
 import type { Connection } from '../transport/index.js'
 import { CliError } from './config.js'
 import type { ProductionCliSources, ProductionProviderReference } from './production.js'
@@ -31,7 +30,6 @@ export type HerdrProductionOwnerConfig = Readonly<{
   kind: 'herdr'
   config: HerdrProviderRefConfig & { connector: NonNullable<HerdrProviderRefConfig['connector']> }
   native: Readonly<{ mode: 'managed' | 'attach' }>
-  policies: ProviderPolicies
 }>
 
 /** 只在内存复制受保护引用；JSON 只能选择明确 managed 配置，不能构造 installation 或 attach 来源。 */
@@ -43,7 +41,7 @@ function reference(input: readonly ProductionProviderReference[]): HerdrProducti
     const entry = object(parseJson(boundedJson(input[0], 16_384)))
     fields(entry, ['reference', 'value'])
     const value = object(entry.value)
-    fields(value, ['kind', 'config', 'native', 'policies'])
+    fields(value, ['kind', 'config', 'native'], ['policies'])
     const native = object(value.native)
     fields(native, ['mode'])
     const config = parseHerdrProviderRefConfig(value.config)
@@ -57,13 +55,10 @@ function reference(input: readonly ProductionProviderReference[]): HerdrProducti
     ) {
       throw new CliError('invalid_config')
     }
-    const policies = value.policies as ProviderPolicies
-    validatePolicies(policies)
     return {
       kind: 'herdr',
       config: { ...config, connector: config.connector },
-      native: { mode: native.mode },
-      policies
+      native: { mode: native.mode }
     }
   } catch {
     throw new CliError('invalid_config')
@@ -350,13 +345,6 @@ export function createHerdrProductionSources(): ProductionCliSources {
           installation,
           now: Date.now,
           ...(terminalExecution ? { terminalExecution } : {}),
-          /** 固定 principal 的策略来自受保护配置快照，不读取消息自报身份或打开 Gateway Store。 */
-          policies(principal) {
-            if (stopping || principal !== config.connector.principal_id) {
-              throw new HerdrLocalError('herdr_production_principal_unavailable')
-            }
-            return structuredClone(selected.policies)
-          },
           /** installation 关闭不等于进程退出，原 child 始终由本 owner 有界停止。 */
           releaseOwner: childOwner.release
         })

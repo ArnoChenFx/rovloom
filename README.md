@@ -17,8 +17,8 @@ port is opened on the machines that run them.
 - **Multi-device access.** Every device runs one Connector that dials out to a shared Gateway.
 - **Explicit targets.** Each call names a device, runtime and session; nothing is chosen implicitly.
 - **Native runtimes.** Herdr and Luvus keep their own contracts and capabilities.
-- **Layered access control.** The Gateway and each device's local policy both apply to every call;
-  terminal execution is off unless the device owner enables it.
+- **Two authorization controls.** Tokens select visible devices; each Connector controls direct
+  terminal execution. Every exposed method on a visible device is available to its token.
 - **Honest results.** A call whose outcome is uncertain after a disconnect is reported as unknown
   and is never resent automatically.
 - **Management page.** Review devices and providers, rename, disconnect or revoke them, and issue

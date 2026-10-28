@@ -9,7 +9,6 @@ import {
   contractRef,
   fields,
   hash,
-  id,
   object,
   sha,
   validateContractSource,
@@ -19,7 +18,7 @@ import {
 import type { AttemptBinding, ProviderBinding, ProviderSnapshot, V2Target } from '../wire/types.js'
 import { LuvusAdapterError } from '../connector/luvus/types.js'
 import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from './native-source.js'
-import { assertLuvusOperationsContract, createLuvusOperationsAuthority } from './luvus-operations-authority.js'
+import { assertLuvusOperationsContract, createLuvusOperationsValidation } from './luvus-operations-validation.js'
 import { LUVUS_OPERATION_METHODS } from './luvus-operations.js'
 import type { RemoteLuvusRuntimeProvider, RuntimeProvider } from './types.js'
 import { createLuvusRequestPreflight } from './request-preflight.js'
@@ -38,25 +37,17 @@ export type LuvusProductionRemoteConfig = Readonly<{
     // 原始安装版 schema 字节的 UTF-8 文本，由唯一配置入口交付，不能先解析再序列化。
     schema_bundle: string
   }>
-  peer_policy_revision: string
-  // raw 显式绑定主体或 caller 策略修订；两者互斥，本次原 Wire 仍复验双端策略、完整来源和截止。
-  raw_grant?: Readonly<
-    (
-      | { principal_id: string; caller_policy_revision?: never }
-      | { caller_policy_revision: string; principal_id?: never }
-    ) & {
-      methods: readonly string[]
-    }
-  >
+  peer_policy_revision?: string
+  // 兼容旧配置的只读字段，不再充当授权来源；原 Wire 仍逐次复验动作、来源和截止。
+  raw_grant?: unknown
 }>
 
 /** 所有静态配置先有界复制和完整核验；调用方仍负责受保护配置文件的来源及读取。 */
 export function checkedRemoteLuvusConfig(reference: string, input: unknown): LuvusProductionRemoteConfig {
   const config = object(JSON.parse(boundedJson(input)))
-  fields(config, ['kind', 'authentication', 'binding', 'target', 'contract', 'peer_policy_revision'], ['raw_grant'])
+  fields(config, ['kind', 'authentication', 'binding', 'target', 'contract'], ['raw_grant', 'peer_policy_revision'])
   validateProvider(config.binding)
   validateTarget(config.target)
-  id(config.peer_policy_revision)
   const pin = object(config.contract)
   fields(pin, [
     'binary_version',
@@ -86,27 +77,12 @@ export function checkedRemoteLuvusConfig(reference: string, input: unknown): Luv
   ) {
     throw new LuvusAdapterError('remote_luvus_pin_invalid')
   }
-  if (config.raw_grant !== undefined) {
-    const grant = object(config.raw_grant)
-    const subject = Object.hasOwn(grant, 'principal_id') ? 'principal_id' : 'caller_policy_revision'
-    fields(grant, [subject, 'methods'])
-    id(grant[subject])
-    if (
-      !Array.isArray(grant.methods) ||
-      grant.methods.length > LUVUS_OPERATION_METHODS.length ||
-      new Set(grant.methods).size !== grant.methods.length ||
-      grant.methods.some(
-        /** raw 许可不能扩大已审普通方法集合。 */ (method) => !LUVUS_OPERATION_METHODS.includes(method)
-      )
-    ) {
-      throw new LuvusAdapterError('remote_luvus_raw_grant_invalid')
-    }
-    Object.freeze(grant.methods)
-    Object.freeze(grant)
+
+  delete config.raw_grant
+  delete config.peer_policy_revision
+  for (const value of [config.binding, config.target, config.contract]) {
+    Object.freeze(value)
   }
-  Object.freeze(config.binding)
-  Object.freeze(config.target)
-  Object.freeze(pin)
   return Object.freeze(config) as LuvusProductionRemoteConfig
 }
 
@@ -162,17 +138,12 @@ export async function createPinnedRemoteLuvus(config: LuvusProductionRemoteConfi
     }
   }
   /** 当前连接、完整静态 binding 与已接纳快照共同建立来源，不能凭一个认证布尔值放行。 */
-  function nativeBinding(
-    epoch: Epoch,
-    policies: Readonly<{ caller_policy_revision: string; local_policy_revision: string }>
-  ): TrustedNativeContext {
+  function nativeBinding(epoch: Epoch): TrustedNativeContext {
     assertEpoch(epoch)
     const record = epoch.record
     if (!record) {
       throw new LuvusAdapterError('remote_luvus_snapshot_required')
     }
-    id(policies.caller_policy_revision)
-    id(policies.local_policy_revision)
     const target = config.target
     if (target.profile !== 'session') {
       throw new LuvusAdapterError('remote_luvus_pin_invalid')
@@ -187,8 +158,6 @@ export async function createPinnedRemoteLuvus(config: LuvusProductionRemoteConfi
       connection_epoch: epoch.connection.connection_epoch,
       recovery_generation: epoch.connection.recovery_generation,
       capability_revision: record.capability_revision,
-      caller_policy_revision: policies.caller_policy_revision,
-      local_policy_revision: policies.local_policy_revision,
       classification_revision: pin.classification_revision,
       contract: contractHandle.identity
     })
@@ -211,7 +180,6 @@ export async function createPinnedRemoteLuvus(config: LuvusProductionRemoteConfi
     remote_luvus: true,
     binding: config.binding,
     target: config.target,
-    peer_policy_revision: config.peer_policy_revision,
     preflightRequest: createLuvusRequestPreflight(contractHandle),
     ready,
     /** 只由 Gateway 的实际认证 session 调用；静态 pin 不预先构造任何 live 来源。 */
@@ -307,36 +275,22 @@ export async function createPinnedRemoteLuvus(config: LuvusProductionRemoteConfi
             ) {
               throw new LuvusAdapterError('remote_luvus_binding_mismatch')
             }
-            return nativeBinding(epoch, binding.registration)
+            return nativeBinding(epoch)
           }
           const live: RuntimeProvider = Object.freeze({
+            catalog_methods: LUVUS_OPERATION_METHODS,
             binding: config.binding,
             target: config.target,
-            peer_policy_revision: config.peer_policy_revision,
             contract: record,
             source: sourceFor,
             /** 目录无需虚构 attempt，直接使用同一真实连接和本次实际 caller/local 修订。 */
-            catalogSource(current, policies) {
+            catalogSource(current) {
               if (boundedJson(current) !== boundedJson(epoch.connection)) {
                 throw new LuvusAdapterError('remote_luvus_epoch_unavailable')
               }
-              return nativeBinding(epoch, policies)
+              return nativeBinding(epoch)
             },
-            authority: createLuvusOperationsAuthority(
-              record,
-              sourceFor,
-              /** 策略授权服务于共享策略的 caller；签出的 grant 始终绑定真实调用主体，而非配对主体。 */
-              (attempt) => {
-                const grant = config.raw_grant
-                return (
-                  !!grant &&
-                  grant.methods.includes(attempt.method) &&
-                  (grant.principal_id !== undefined
-                    ? grant.principal_id === attempt.principal_id
-                    : grant.caller_policy_revision === attempt.binding.registration.caller_policy_revision)
-                )
-              }
-            ),
+            validateAttempt: createLuvusOperationsValidation(record, sourceFor),
             /** 旧 live 对象即使仍被原句柄引用，也只能检查其原 epoch。 */
             ready() {
               try {

@@ -1,7 +1,6 @@
 // 根据独立调用锚点和当前内容权限规划响应证据及原文保留意图。
 import type { AttemptBinding, AuthenticatedEnvelope, CodecContext, JsonObject, ValidationMode } from './types.js'
 import { assertBinding, decodeWireFrame } from './codec.js'
-import { providerScopeAllowed } from './provider.js'
 import { boundedJson, uint, hash, fail, LIMITS, sha } from './validation.js'
 
 export type ResponseAnchor = {
@@ -34,18 +33,12 @@ export type ResponseEvidencePlan = {
   }
 }
 
-// 当前保存权限，不能取自持久化旧 ACL、response 内容或 caller 自报。
-export type ResponseContentPolicy = {
-  retain_content_authorized: boolean
-}
-
 // 返回响应证据的待提交计划；存储层负责事务持久化与保留，宿主、Router 和 adapter 负责当前读取授权及最终发布。
 export function planResponseEvidence(
   frame: Extract<AuthenticatedEnvelope, { type: 'response' }>,
   context: CodecContext,
   anchor: ResponseAnchor | undefined,
-  now: number,
-  policy?: ResponseContentPolicy
+  now: number
 ): ResponseEvidencePlan {
   if (!anchor) {
     fail('attempt_anchor_unavailable')
@@ -101,11 +94,7 @@ export function planResponseEvidence(
     fail('invalid_content_status')
   }
   const duplicate = anchor.evidence !== undefined
-  const retain =
-    status === 'available' &&
-    !duplicate &&
-    policy?.retain_content_authorized === true &&
-    providerScopeAllowed(binding, anchor.method, 'read', context.policies)
+  const retain = status === 'available' && !duplicate
   return {
     action: duplicate ? 'duplicate' : 'append',
     late_evidence: anchor.state === 'outcome_unknown',

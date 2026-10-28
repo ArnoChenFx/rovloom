@@ -87,7 +87,7 @@ export function backendFixture() {
     provider_kind: 'herdr',
     binding_revision: 1,
     contract_ref: contractRef(source),
-    registration: { deadline: 1000, caller_policy_revision: 'caller1', local_policy_revision: 'local1' }
+    registration: { deadline: 1000 }
   }
   const { machine_id: _machine, recovery_generation: _recovery, connection_epoch: _epoch, ...identity } = binding
   const record = {
@@ -110,16 +110,6 @@ export function backendFixture() {
       authenticated: true,
       active: true,
       negotiated: { major: 2, minor: 0, capabilities: ['rpc'] }
-    },
-    policies: {
-      caller: {
-        revision: 'caller1',
-        grants: [{ target: binding.target, methods: ['ping'], actions: ['dispatch', 'read'] }]
-      },
-      local: {
-        revision: 'local1',
-        grants: [{ target: binding.target, methods: ['ping'], actions: ['dispatch', 'read'] }]
-      }
     },
     resolveProvider: /** 返回本测试唯一明确的 provider 配置，不从消息建立生产绑定。 */ () => ({
       machine_id: binding.machine_id,

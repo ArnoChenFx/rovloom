@@ -204,7 +204,6 @@ test(
         () => unsupported.status().reconnects > 0
       )
       unsupported.stop()
-      f.configs.get(a.machine_id)!.peerPolicy = 'wrong_policy'
       const ca = f.connector(
         /** 提供预先创建的 mock 设备凭据，只供本次隔离连接使用。 */
         () => a.credential,
@@ -214,10 +213,9 @@ test(
       )
       await until(
         /** 等待握手认证完成，同时观察配置不一致时保持不可 ready。 */
-        () => ca.status().phase === 'authenticated'
+        () => ca.status().phase === 'ready'
       )
-      assert.equal(f.gateway.status().devices[0]!.ready, false)
-      f.configs.get(a.machine_id)!.peerPolicy = 'trusted_policy1'
+      assert.equal(f.gateway.status().devices[0]!.ready, true)
       const binding = f.localBindings.get(a.machine_id + '/provider')!
       binding.binding_revision = 2
       assert.equal(f.gateway.status().devices[0]!.ready, false)
@@ -268,7 +266,7 @@ test(
         /** 等待真实 Store 的响应事务完成，避免把 accepted 当成业务结果。 */
         () => f.router.get(f.principal, call.call_id).state === 'responded'
       )
-      f.principal.policy.grants.splice(0, 1)
+      f.principal.device_scope = { mode: 'selected', machine_ids: [b.machine_id] }
       assert.throws(
         /** 撤回 caller grant 后读取原响应，确认当前读取授权即时拒绝。 */
         () => f.router.get(f.principal, call.call_id),
@@ -318,7 +316,6 @@ test(
       })
       f.localBindings.set(a.machine_id + '/second', second)
       const target = { ...a.target, provider_id: 'second' }
-      f.principal.policy.grants.push({ target, methods: ['task.add'], actions: ['dispatch', 'read', 'cancel'] })
       const client = f.connector(
         /** 提供预先创建的 mock 设备凭据，只供本次隔离连接使用。 */
         () => a.credential,

@@ -167,7 +167,7 @@ for (const role of ['gateway', 'connector']) {
 }
 assert.deepEqual(
   Object.keys(contracts).sort(),
-  ['GatewayError', 'authorize', 'canonical', 'digest', 'validateRequest', 'validateTarget'].sort()
+  ['GatewayError', 'canonical', 'digest', 'validateRequest', 'validateTarget'].sort()
 )
 assert.deepEqual(
   Object.keys(protocol).sort(),
@@ -258,10 +258,7 @@ const attempt = {
   binding_revision: 1,
   contract_ref: wire.contractRef(origin),
   registration: {
-    deadline: 1000,
-
-    caller_policy_revision: 'caller',
-    local_policy_revision: 'local'
+    deadline: 1000
   }
 }
 const binding = {
@@ -299,13 +296,10 @@ const proof = {
     connection_epoch: 'epoch',
     recovery_generation: 'recovery',
     capability_revision: 'caps',
-    caller_policy_revision: 'caller',
-    local_policy_revision: 'local',
     classification_revision: 'review',
     contract: compiled.value.identity
   }
 }
-const grants = [{ target, methods: ['task.add'], actions: ['dispatch', 'read'] }]
 const adapter = integration.createLuvusWireAdapter({
   /** 为构建产物的隔离 adapter 提供固定 mock 连接，不接入真实设备。 */
   connection: () => connection,
@@ -324,13 +318,6 @@ const adapter = integration.createLuvusWireAdapter({
   }),
   /** 提供仅限 smoke 的原生来源证明，供真实 validator 校验来源关联。 */
   nativeSource: () => proof,
-  /** 提供同一 mock 目标的双端 grant，验证构建后的授权交集路径。 */
-  policies: () => ({
-    caller: { revision: 'caller', grants },
-    local: { revision: 'local', grants }
-  }),
-  /** 为固定 task.add fixture 提供合成授权事实，方法表与双端策略仍由原生模块检查。 */
-  authority: () => ({ owner: false, raw_requested: false }),
   /** 提供 smoke 专用 caller ID，不从业务输入构造 principal。 */
   currentPrincipal: () => 'principal',
   /** 固定 smoke 可信时间，使许可和期限判断可重复。 */

@@ -20,11 +20,7 @@ test(
   /* 用结果未知锚点规划追加与重复回复，核对固定期限、锚点不变及冲突证据拒绝。 */ () => {
     const saved = structuredClone(anchor)
     const ctx = context('connector_to_gateway')
-    const policy = {
-      classification_status: 'trusted_complete' as const,
-      retain_content_authorized: true
-    }
-    const plan = planResponseEvidence(response, ctx, anchor, 400, policy)
+    const plan = planResponseEvidence(response, ctx, anchor, 400)
     assert.equal(plan.action, 'append')
     assert.equal(plan.late_evidence, true)
     assert.equal(plan.dispatch, false)
@@ -103,8 +99,13 @@ test(
       }
     }
     assert.equal(planResponseEvidence(error, context('connector_to_gateway'), anchor, 400).evidence.category, 'error')
-    for (const policy of [undefined, { retain_content_authorized: false }]) {
-      const plan = planResponseEvidence(response, context('connector_to_gateway'), anchor, 400, policy)
+    for (const status of ['expired', 'discarded', 'unavailable'] as const) {
+      const plan = planResponseEvidence(
+        response,
+        context('connector_to_gateway'),
+        { ...anchor, content_status: status },
+        400
+      )
       assert.equal(plan.content.delivery, 'metadata_only')
       assert.equal(plan.content.native_response, undefined)
     }
@@ -148,15 +149,7 @@ test(
         ...binding,
         target: { ...binding.target, profile: 'session' as const, session: 'other_session' }
       },
-      { ...binding, registration: { ...binding.registration, deadline: 2000 } },
-      {
-        ...binding,
-        registration: { ...binding.registration, caller_policy_revision: 'other_policy' }
-      },
-      {
-        ...binding,
-        registration: { ...binding.registration, local_policy_revision: 'other_policy' }
-      }
+      { ...binding, registration: { ...binding.registration, deadline: 2000 } }
     ]) {
       rejects(
         /* 替换 provider、目标或登记事实，要求完整绑定比较拒绝。 */ () =>

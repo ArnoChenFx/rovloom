@@ -22,33 +22,8 @@ import {
 } from './helpers.js'
 
 test(
-  'raw 需要 Owner 显式选择及独立 grant，不能放宽身份/恢复代次/契约',
-  /* 验证 raw 必须由 Owner 显式选择，并拒绝越界主体或过时绑定的独立 grant。 */ () => {
-    const candidate = request(view(), { id: 'raw', method: 'workspace.list', params: {} })
-    rejects(checkDispatch(candidate, { ...raw(candidate), owner: false }), 'raw_contract_not_authorized')
-    rejects(checkDispatch(candidate, { ...raw(candidate), raw_requested: false }), 'raw_contract_not_authorized')
-    for (const field of ['recovery_generation', 'connection_epoch', 'capability_revision'] as const) {
-      const context: any = clone(raw(candidate))
-      context.raw_grant.binding[field] += '-stale'
-      rejects(checkDispatch(candidate, context), 'raw_contract_grant_stale')
-    }
-    const wrongPrincipal = clone(raw(candidate))
-    rejects(
-      checkDispatch(candidate, {
-        ...wrongPrincipal,
-        raw_grant: { ...wrongPrincipal.raw_grant!, principal_id: 'other' }
-      }),
-      'raw_contract_scope_mismatch'
-    )
-    // raw 只豁免参数 schema 完整性；strict 对 generic 参数仍拒绝。
-    rejects(checkDispatch(candidate, auth(candidate)), 'parameter_schema_incomplete')
-    assert.equal(unwrap(checkDispatch(candidate, raw(candidate))).validation, 'generic')
-  }
-)
-
-test(
-  '不在静态方法表中的方法一律拒绝，raw grant 和策略都不能代替',
-  /* 容器方法、token、终端和未来方法即使在线广告并持有 raw grant 也不可派发。 */ () => {
+  '不在静态方法表中的方法一律拒绝，raw 模式也不能代替',
+  /* 容器方法、token、终端和未来方法即使在线广告并以 raw 模式提交也不可派发。 */ () => {
     const caps = json('session-capabilities.json')
     caps.result.session = 'synthetic'
     caps.result.server_generation = G
@@ -72,8 +47,8 @@ test(
 )
 
 test(
-  '实际安装契约广告的原生提示必须与静态表一致，字符串策略也不能授权',
-  /* 把写方法广告成读方法、改幂等性或篡改 scope 都会使表项失效；畸形策略直接拒绝。 */ () => {
+  '实际安装契约广告的原生提示必须与静态表一致',
+  /* 把写方法广告成读方法、改幂等性或篡改 scope 都会使该方法失效，其它方法保持健康。 */ () => {
     for (const change of [{ access: 'read' }, { idempotent: true }, { scope: 'admin' }] as const) {
       const caps = json('session-capabilities.json')
       caps.result.session = 'synthetic'
@@ -96,31 +71,21 @@ test(
       params: { target: '3', text: 'synthetic' }
     })
     unwrap(checkDispatch(candidate, auth(candidate)))
-    const malformed: any = clone(auth(candidate))
-    malformed.caller_policy.methods = 'prefix-agent.prompt-suffix'
-    rejects(checkDispatch(candidate, malformed), 'invalid_authorization_context')
-    const denied = clone(auth(candidate))
-    denied.local_policy.methods = []
-    rejects(checkDispatch(candidate, denied), 'forbidden')
   }
 )
 
 test(
-  '结果读取按派发主体、双端当前策略和内容状态检查',
-  /* 验证结果读取只给原主体，撤权或内容不可用时拒绝。 */ () => {
+  '结果读取按派发主体和内容状态检查',
+  /* 验证结果读取只给原主体，内容不可用时拒绝。 */ () => {
     const candidate = request(view(), { id: 'result', method: 'task.add', params: { title: 'synthetic' } })
     const permit = unwrap(checkDispatch(candidate, auth(candidate)))
     const ok = {
       principal_id: 'synthetic',
-      caller_policy_allowed: true,
-      local_policy_allowed: true,
       content_status: 'available' as const
     }
     unwrap(checkResultBoundary(permit, ok))
     rejects(checkResultBoundary(clone(permit), ok), 'invalid_permit_handle')
     rejects(checkResultBoundary(permit, { ...ok, principal_id: 'other' }), 'forbidden')
-    rejects(checkResultBoundary(permit, { ...ok, caller_policy_allowed: false }), 'forbidden')
-    rejects(checkResultBoundary(permit, { ...ok, local_policy_allowed: false }), 'forbidden')
     rejects(checkResultBoundary(permit, { ...ok, content_status: 'expired' }), 'content_unavailable')
     rejects(checkResultBoundary(permit, { ...ok, content_status: 'discarded' }), 'content_unavailable')
   }

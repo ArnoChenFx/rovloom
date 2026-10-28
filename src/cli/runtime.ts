@@ -111,7 +111,6 @@ export function createRuntimeCliRuntime(host: RuntimeCliHost): CliRuntime {
         service = new RuntimeGatewayService({
           runtime: gateway,
           identities: resource.options.identities,
-          localPolicies: resource.options.localPolicies,
           catalog: resource.catalog ?? gateway.catalog,
           // 管理页的连接、认证与 provider 就绪来自同一个实际传输的只读观测。
           transportObservations: gateway.transport.observations,

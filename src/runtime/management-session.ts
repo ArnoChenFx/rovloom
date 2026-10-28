@@ -5,7 +5,7 @@ import { GatewayError } from '../contracts.js'
 import type { ManagementSessionSource } from '../admin/session-adapter.js'
 import type { Administrator, CallerIdentity, GatewayIdentitySource } from '../mcp/management.js'
 import type { Principal } from '../router.js'
-import { boundedJson, validatePolicies } from '../wire/index.js'
+import { boundedJson } from '../wire/index.js'
 import type { ManagementSessionPersistence, PersistedManagementSession } from './management-session-store.js'
 
 export type ManagementSessionLease = Readonly<{
@@ -244,7 +244,6 @@ export function createManagementSessionAuthority(
     ) {
       throw new GatewayError('unauthenticated')
     }
-    validatePolicies({ caller: current.principal.policy, local: current.principal.policy })
     if (time() >= session.expires_at) {
       throw new GatewayError('unauthenticated')
     }

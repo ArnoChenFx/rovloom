@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { GatewayError } from '../contracts.js'
 import type { Principal } from '../router.js'
 import type { GatewayIdentitySource, CallerIdentity } from '../mcp/management.js'
-import { boundedJson, id, validatePolicies } from '../wire/index.js'
+import { boundedJson, id } from '../wire/index.js'
 import type { AuthenticatedRuntimeOperation, TrustedRequestScope } from './types.js'
 
 /** 不把整个 principal 快照当长期权限；每次读取都回到同一可信身份来源。 */
@@ -20,8 +20,9 @@ export function createTrustedRequestScope(identities: GatewayIdentitySource): Tr
     if (!current || current.id !== caller.principal_id) {
       throw new GatewayError('unauthenticated')
     }
-    const copy = JSON.parse(boundedJson(current)) as Principal
-    validatePolicies({ caller: copy.policy, local: copy.policy })
+    const copy = JSON.parse(
+      boundedJson({ id: current.id, ...(current.device_scope ? { device_scope: current.device_scope } : {}) })
+    ) as Principal
     if (closed) {
       throw new GatewayError('unauthenticated')
     }

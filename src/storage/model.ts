@@ -26,8 +26,6 @@ export type StoreOptions = {
 export type CallOptions = {
   binding_revision: number
   contract_ref: string
-  caller_policy_revision: string
-  local_policy_revision: string
   validation?: ValidationMode
   timeoutMs?: number
   client_request_key?: string

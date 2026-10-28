@@ -3,18 +3,17 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { StoreGatewayService } from '../../src/mcp/store-service.js'
 import type { GatewayTransportSnapshot } from '../../src/transport/observation.js'
-import { policy, storeFixture, target } from './store-fixture.js'
+import { storeFixture, target } from './store-fixture.js'
 
 test('Luvus/Herdr 的 list/get 以取样后的 Store 时钟核对 readiness，真实未来/过期观测仍拒绝', async () => {
   const f = storeFixture()
   const routes = [target, { ...target, provider_id: 'herdr_a' }]
-  f.setCaller({ id: 'alice', policy: policy(routes) })
-  f.setLocal(policy(routes, 'local_1'))
+  f.setCaller({ id: 'alice' })
   let drift = 0
   const service = new StoreGatewayService({
+    targets: f.targets,
     store: f.store,
     identities: f.identities,
-    localPolicies: f.localPolicies,
     transportObservations: {
       snapshot(): GatewayTransportSnapshot {
         f.advance(1)

@@ -18,7 +18,7 @@ import { parseCommand, runCli, type CliPrepareOptions, type CliRuntime } from '.
 import { joinConnector } from '../../src/cli/join-connector.js'
 import { runtimeReference } from '../../src/cli/runtime-files.js'
 import { writeSetupJson } from '../../src/cli/setup-files.js'
-import { setupReference, setupTarget } from '../../src/cli/setup-policy.js'
+import { setupReference, setupTarget } from '../../src/cli/setup-targets.js'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
 import { hash } from '../../src/wire/index.js'
 
@@ -66,7 +66,6 @@ function installation(code: string) {
             target: setupTarget(machine, 'herdr'),
             binding_revision: 1,
             config_ref: reference,
-            peer_policy_revision: 'setup_local_simple',
             expected_source: {
               ...fixedHerdrSource(),
               binary_version: 'synthetic-future',

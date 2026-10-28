@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os'
 import { GATEWAY_LOCK_FORMAT, Store } from '../../src/store.js'
 import { currentProcessIdentity } from '../../src/storage/process-identity.js'
 import { Router } from '../../src/router.js'
-import { management, connected, options, policy, respond, responseFrame, evidenceContext } from './helpers.js'
+import { management, connected, options, respond, responseFrame, evidenceContext } from './helpers.js'
 import { planResponseEvidence } from '../../src/wire/index.js'
 import type { AttemptBinding } from '../../src/wire/types.js'
 
@@ -224,16 +224,9 @@ test(
             enabled: true
           })
           const second = { ...d.target, provider_id: 'second' }
-          const p = { id: 'alice', policy: policy(d.target) }
-          const router = new Router(
-            s,
-            /* 返回仅授权首个目标的本地策略，供路由目标元组校验。 */ () => policy(d.target, true)
-          )
-          assert.throws(
-            /* 通过只获首个目标授权的主体访问第二目标，检查同机器不同 provider 仍被隔离。 */ () =>
-              router.create(p, second, { method: 'ping' }, options()),
-            /forbidden/
-          )
+          const p = { id: 'alice' }
+          const router = new Router(s)
+          assert.doesNotThrow(() => router.create(p, second, { method: 'ping' }, options()))
           const a = s.createCall('alice', d.target, { method: 'ping' }, options())
           const b = s.createCall('alice', second, { method: 'ping' }, options())
           respond(s, s.dispatch('alice', a.call_id, d.epoch), { result: { name: 'a' } }, 100)
@@ -812,11 +805,8 @@ test(
     })
     try {
       const d = connected(s)
-      const p = { id: 'alice', policy: policy(d.target) }
-      const r = new Router(
-        s,
-        /* 提供与测试目标匹配的本地策略，使前端等待和创建走真实路由授权。 */ () => policy(d.target, true)
-      )
+      const p = { id: 'alice' }
+      const r = new Router(s)
       const c = r.create(p, d.target, { method: 'ping' }, options({ timeoutMs: 10 }))
       const waited = await r.wait(p, c.call_id, 1)
       assert.equal(waited.state, 'created')
@@ -884,8 +874,7 @@ test(
                 responseFrame(b, { result: { pong: true } }),
                 evidenceContext(s, b),
                 s.responseAnchor(b),
-                s.clock(),
-                { retain_content_authorized: true }
+                s.clock()
               )
             }
           )

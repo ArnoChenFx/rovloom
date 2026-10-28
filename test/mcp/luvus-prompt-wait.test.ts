@@ -56,11 +56,32 @@ test('prompt 等待超时保留原生证据，describe 提供两段式指导而�
       )
     )
     assert.equal(help.examples[0]!.wait, undefined)
+    assert(help.rules.some((rule) => rule.includes('wait.output is not exposed for this target')))
+    const listed = await call('runtime_discover', route)
+    assert.deepEqual(
+      (listed.structuredContent!.data as { items: { method: string }[] }).items.map((row) => row.method),
+      ['agent.prompt']
+    )
+    for (const method of ['wait.output', 'nope.nope']) {
+      const hidden = await call('runtime_describe', { ...route, method })
+      assert.deepEqual(hidden.structuredContent, { gateway_error: { code: 'not_found' } })
+    }
+    const denied = await call('runtime_call', {
+      ...route,
+      contract_ref: f.reference,
+      deadline: f.state.store.clock() + 30_000,
+      native_request: { method: 'wait.output', params: { pane: '3', match: 'sentinel', timeout_s: 0 } }
+    })
+    assert.deepEqual(denied.structuredContent, { gateway_error: { code: 'forbidden' } })
+    assert.equal(f.claims(), 0)
+    assert.equal(f.native.state.responses, 0)
     const epoch = f.connector.transport.status().connection_epoch
     for (const scenario of [
       { observed: null, status: 'idle', until: ['idle'] },
       { observed: 'working', status: 'idle', until: ['idle'] },
       { observed: null, status: 'done', until: ['idle'] },
+      { observed: null, status: 'done', until: ['working'] },
+      { observed: null, status: 'done', until: ['done'] },
       { observed: null, status: 'done', until: ['done', 'idle'] }
     ] as const) {
       observed = scenario.observed
@@ -87,7 +108,7 @@ test('prompt 等待超时保留原生证据，describe 提供两段式指导而�
       assert.equal(JSON.parse(content).result.status, scenario.status)
       assert.deepEqual(received.at(-1), requestParams)
     }
-    assert.equal(f.native.state.responses, 4)
+    assert.equal(f.native.state.responses, 6)
     assert.equal(f.connector.transport.status().connection_epoch, epoch)
   } finally {
     await http.close()

@@ -49,7 +49,7 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
   ]
   const store = options.lifecycle.store
   const scope = createTrustedRequestScope(options.identities)
-  const router = new Router(store, localPolicies)
+  const router = new Router(store)
   const providers = new Map<string, RuntimeProviderBinding>()
   const nativeProviders = new Map<string, RuntimeProvider>()
   const remoteProviders = new Map<string, RemoteLuvusRuntimeProvider>()
@@ -68,19 +68,6 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
     }
   )
   void closed.catch(/** 关闭失败始终被观察，调用者仍从同一 Promise 取得失败结果。 */ () => {})
-  /** 在外部政策回调前后都核对关闭 fence，并复制其返回值，不能放行回调中的同步关闭。 */
-  function localPolicies(target: V2Target) {
-    if (closing) {
-      throw new GatewayError('runtime_closed')
-    }
-    const policy = JSON.parse(boundedJson(options.localPolicies(structuredClone(target)))) as ReturnType<
-      typeof options.localPolicies
-    >
-    if (closing) {
-      throw new GatewayError('runtime_closed')
-    }
-    return policy
-  }
   /** 使用完整机器/provider 键，不按名称或最近上线实例选目标。 */
   function key(target: Pick<V2Target, 'machine_id' | 'provider_id'>): string {
     return target.machine_id + '/' + target.provider_id
@@ -263,7 +250,6 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
       principal,
       identity: options.lifecycle.identityHost,
       channels: options.channels,
-      retainOriginalRead: true,
       /** 每个实际认证 socket 建立独立 backend/Wire；身份随该 socket fence 失效。 */
       session(connection, channel) {
         let retaining: string | undefined
@@ -416,56 +402,19 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
           contract: (ref) => contracts.get(ref),
           nativeSource: /** 只从原账本取 attempt，再排除本 epoch 已永久失效的来源。 */ (call, attempt) =>
             source(call, attempt, fencedNative),
-          /** caller 及本机策略始终重新取当前来源；未认证的持久引用不能继续授权。 */
-          policies(principalId) {
-            const caller = options.identities.principal({ principal_id: principalId })
-            if (!caller || caller.id !== principalId) {
-              fail('unauthenticated')
-            }
-            const policies = [...providers.values()]
-              .filter(
-                /** 只组合此机器受保护配置中的目标，不从 caller grant 补造实例。 */
-                (provider) => provider.binding.machine_id === connection.machine_id
-              )
-              .map(
-                /** 对每个固定目标重新读取当前本机策略。 */
-                (provider) => ({ policy: localPolicies(provider.target), target: provider.target })
-              )
-            const revision = policies[0]?.policy.revision
-            if (
-              !revision ||
-              policies.some(/** 一个连接上的政策必须属于同一全局修订。 */ ({ policy }) => policy.revision !== revision)
-            ) {
-              fail('policy_revision_conflict')
-            }
-            return {
-              caller: caller.policy,
-              local: {
-                revision,
-                grants: policies.flatMap(
-                  /** 每次查询只为该精确 tuple 提供权限，禁止其它查询里的多余 grant 覆盖当前撤权。 */ ({
-                    policy,
-                    target
-                  }) =>
-                    policy.grants.filter(
-                      /** 保留当前被查询目标的完整 tuple。 */ (grant) =>
-                        boundedJson(grant.target) === boundedJson(target)
-                    )
-                )
-              }
-            }
-          },
           /** 分类权限从固定 provider 的独立宿主读取，普通请求不能提升 Owner/custody。 */
-          authority(attempt, binding) {
+          validateAttempt(attempt, binding) {
             const provider = nativeProviders.get(key(attempt.binding.target))
             if (!provider) {
               fail('provider_binding_unavailable')
             }
-            const authority = provider.authority(attempt, binding)
+            if (provider.catalog_methods && !provider.catalog_methods.includes(attempt.method)) {
+              throw new GatewayError('forbidden')
+            }
+            provider.validateAttempt?.(attempt, binding)
             if (closing) {
               throw new GatewayError('runtime_closed')
             }
-            return authority
           },
           currentPrincipal
         }
@@ -546,8 +495,6 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
                 store,
                 router,
                 localProvider,
-                localPolicies,
-                policies: services.policies,
                 currentPrincipal
               })
               parts.push({
@@ -646,23 +593,13 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
           }
           /** Luvus原组只报告自己的来源，不递归读取组合会话或借用Herdr就绪。 */
           function nativeReadiness(entries: readonly RuntimeProviderBinding[]): Readiness {
-            const revision = entries[0] ? localPolicies(entries[0].target).revision : ''
-            const peer = entries[0]?.peer_policy_revision ?? ''
             return {
-              policy_revision: revision,
-              peer_policy_revision: peer,
               providers: entries.map(
                 /** 原Luvus就绪逐项核对canonical配置和当前政策。 */ (provider) => ({
                   expected:
                     store.provider(provider.binding.machine_id, provider.binding.provider_id) ?? provider.binding,
                   local: provider.binding,
-                  native_ready:
-                    providerReady(provider) &&
-                    !closing &&
-                    !!localProvider(provider.target) &&
-                    localPolicies(provider.target).revision === revision &&
-                    provider.peer_policy_revision === peer &&
-                    !closing
+                  native_ready: providerReady(provider) && !closing && !!localProvider(provider.target) && !closing
                 })
               )
             }
@@ -673,9 +610,6 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
               /** 此 socket 只能观察和承载所属机器的实例。 */
               (provider) => provider.binding.machine_id === connection.machine_id
             )
-            const local = entries[0]
-            const policyRevision = local ? localPolicies(local.target).revision : ''
-            const peerRevision = local?.peer_policy_revision ?? ''
             const sessionHealth = isolated
               ? new Map(
                   providerHealth(connection, native.readiness()).map(
@@ -687,8 +621,6 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
                 )
               : undefined
             return {
-              policy_revision: policyRevision,
-              peer_policy_revision: peerRevision,
               providers: entries.map(
                 /** canonical、双端政策、来源和原生会话须同时保持就绪。 */
                 (provider) => ({
@@ -703,8 +635,6 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
                         : ready(native, connection, provider.binding.provider_id))) &&
                     !closing &&
                     !!localProvider(provider.target) &&
-                    localPolicies(provider.target).revision === policyRevision &&
-                    provider.peer_policy_revision === peerRevision &&
                     !closing
                 })
               )
@@ -754,24 +684,7 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
       }
     })
     const active = transport
-    const results = createProviderResultAccess({
-      store,
-      localPolicies,
-      principal,
-      /** 本结果层在策略回调前后分别执行带正文的原 Wire 门禁；解析只取当前 peer/ACL/期限核对后的引用。 */
-      resolveOriginalRead: (callId) => active.resolveOriginalRead(callId, false),
-      /** 每次读取重新核对当前受保护配置；所有 provider 共用 Store 的内容和 handle 总预算。 */
-      provider(target) {
-        const configured = providers.get(key(target))
-        const binding = localProvider(target)
-        return configured && binding
-          ? {
-              binding,
-              max_response_bytes: configured.max_response_bytes ?? LIMITS.frame_bytes
-            }
-          : undefined
-      }
-    })
+    const results = createProviderResultAccess({ store, principal })
     const catalog: RuntimeCatalogProvider = Object.freeze({
       /** 目录复用唯一 Store 与当前实际认证 epoch；Owner 无 token 到期，实例/连接寿命逐次复核。 */
       resolve(target, requesting) {
@@ -784,15 +697,10 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
         if (boundedJson(principal()) !== boundedJson(requesting)) {
           fail('principal_changed')
         }
-        const local = localPolicies(target)
-        const native = provider.catalogSource(connection, {
-          caller_policy_revision: requesting.policy.revision,
-          local_policy_revision: local.revision
-        })
+        const native = provider.catalogSource(connection)
         store.assertConnection(connection)
         if (
           boundedJson(principal()) !== boundedJson(requesting) ||
-          boundedJson(localPolicies(target)) !== boundedJson(local) ||
           boundedJson(active.currentConnection(target.machine_id) ?? null) !== boundedJson(connection) ||
           boundedJson(localProvider(target) ?? null) !== boundedJson(binding) ||
           closing
@@ -804,7 +712,8 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
           source: native,
           local_provider: binding,
           // 该字段满足既有目录有限整数格式；它不建立委托寿命，真实 Owner/epoch 失效即拒绝。
-          expires_at: Number.MAX_SAFE_INTEGER
+          expires_at: Number.MAX_SAFE_INTEGER,
+          ...(provider.catalog_methods ? { supported_methods: provider.catalog_methods } : {})
         })
       }
     })
@@ -814,6 +723,7 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
       transport: active,
       terminalExecutionState: active.terminalExecutionState.bind(active),
       principal,
+      targets: () => [...providers.values()].map((provider) => structuredClone(provider.target)),
       runAuthenticated: scope.runAuthenticated,
       results,
       catalog,
@@ -835,6 +745,11 @@ async function assembleGateway(options: GatewayRuntimeOptions | ProviderGatewayR
           /** 首次登记在授权事务内比对当前批准契约；旧 key 仍返回原意图，不受新契约影响。 */
           (request) => {
             const native = nativeProviders.get(providerKey)
+            // 目录与新调用共用 provider 的实际暴露面；原生广告不能扩大后端实现范围。
+            const method = request.method
+            if (native?.catalog_methods && (typeof method !== 'string' || !native.catalog_methods.includes(method))) {
+              throw new GatewayError('forbidden')
+            }
             const expected = configured.contract_ref ?? (native ? contractRef(native.contract.wire.source) : undefined)
             if (
               (expected !== undefined && requestedContract !== expected) ||

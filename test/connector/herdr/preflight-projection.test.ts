@@ -29,8 +29,7 @@ async function herdrFixture() {
       binding_revision: 1,
       config_ref: 'safe_ref',
       expected_source: fixedHerdrSource(),
-      schema_path: schemaPath,
-      peer_policy_revision: 'fixture_local'
+      schema_path: schemaPath
     },
     now: () => 1_000_000
   })

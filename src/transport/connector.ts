@@ -539,9 +539,7 @@ export function createConnector(options: ConnectorOptions) {
         binding_revision: Number(attempt.binding_revision),
         contract_ref: String(attempt.contract_ref),
         registration: {
-          deadline: Number(registration.deadline),
-          caller_policy_revision: String(registration.caller_policy_revision),
-          local_policy_revision: String(registration.local_policy_revision)
+          deadline: Number(registration.deadline)
         }
       }
     } catch {

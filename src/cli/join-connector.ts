@@ -21,7 +21,7 @@ import { readSetupJson, setupFileStamp, writeSetupFile, writeSetupJson } from '.
 import { runtimeReference } from './runtime-files.js'
 import { assertSetupNativePath, prepareSetupNative } from './setup-native.js'
 import { prepareSetupHerdr } from './setup-herdr.js'
-import { simpleSetupAuthorization, setupSessionsFor } from './setup-policy.js'
+import { SIMPLE_SETUP_ACTOR } from './setup-targets.js'
 import { readRuntimeConfig } from './runtime-config.js'
 import { silentConsole } from './setup-console.js'
 import { hasPairingState, retirePairingState } from './unpair.js'
@@ -177,11 +177,7 @@ export async function joinConnector(
   privateDirectory(config.state_dir)
   privateDirectory(join(config.state_dir, 'managed'))
   assertSetupNativePath(config, console)
-  const authorization = simpleSetupAuthorization(
-    code.machine,
-    selectedNativeProviders(config),
-    setupSessionsFor(config)
-  )
+  const authorization = { principal_id: SIMPLE_SETUP_ACTOR }
   const prepared = []
   for (const kind of selectedNativeProviders(config)) {
     prepared.push(

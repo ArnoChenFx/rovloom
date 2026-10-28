@@ -8,9 +8,7 @@ import { tmpdir } from 'node:os'
 import { Store } from '../../src/store.js'
 import type { CallAdmissionOptions, StoreOptions } from '../../src/store.js'
 import { Router } from '../../src/router.js'
-import { connected, management, options, policy } from './helpers.js'
-import { nativeBackend } from './native-backend.js'
-import type { ProviderAction } from '../../src/wire/types.js'
+import { connected, management, options } from './helpers.js'
 
 // 为每例创建私有真实数据库路径，异常时也清理全部隔离资源。
 function disk(run: (path: string) => void) {
@@ -138,8 +136,6 @@ test(
           { deadline: 111 },
           { deadline: 109 },
           { validation: 'raw-contract' as const },
-          { caller_policy_revision: 'caller_changed' },
-          { local_policy_revision: 'local_changed' },
           { contract_ref: 'f'.repeat(64) }
         ]) {
           assert.throws(
@@ -476,114 +472,13 @@ test(
 )
 
 test(
-  'Router admits with a single current local policy and reauthorizes duplicate intents inside writer',
-  /* Router 首次与重复均在 writer 内重验同一份当前本地策略，任一端撤权不能命中旧 key 绕过。 */ () =>
-    fixture(
-      /* 统计策略读取次数并在相同 revision 下撤销 grants 检查当前 ACL。 */ (s, db) => {
-        const d = connected(s)
-        const principal = { id: 'alice', policy: policy(d.target) }
-        let local = policy(d.target, true)
-        let reads = 0
-        const router = new Router(
-          s,
-          /* 每次返回当前策略，不能分别使用授权和 revision 两份不同值。 */ () => {
-            reads++
-            return local
-          }
-        )
-        const o = absolute(200, { client_request_key: 'router' })
-        const first = router.admit(principal, d.target, { method: 'ping' }, o)
-        assert.equal(first.created, true)
-        assert.equal(reads, 2)
-        const before = ledger(db)
-        assert.equal(router.admit(principal, d.target, { method: 'ping' }, o).created, false)
-        assert.equal(reads, 4)
-        local = { ...local, grants: [] }
-        assert.throws(
-          /* 本地策略撤权后旧 key 仍须拒绝。 */ () => router.admit(principal, d.target, { method: 'ping' }, o),
-          /forbidden/
-        )
-        local = policy(d.target, true)
-        principal.policy = { ...principal.policy, grants: [] }
-        assert.throws(
-          /* 调用方策略撤权同样不能查询原意图绕过。 */ () => router.admit(principal, d.target, { method: 'ping' }, o),
-          /forbidden/
-        )
-        assert.deepEqual(ledger(db), before)
-      }
-    )
-)
-
-test(
-  'Router rejects policy revision drift and freezes target request history before host callbacks',
-  /* 检查宿主策略解析期间的外部对象变化不能改写完整意图，事务内 revision 漂移则拒绝。 */ () =>
-    fixture(
-      /* 在策略回调中修改原请求及其 history，确认私有快照仍使用登记前输入。 */ (s, db) => {
-        const d = connected(s)
-        const principal = { id: 'alice', policy: policy(d.target) }
-        const target = { ...d.target }
-        const request = { method: 'ping', params: { value: 1 } }
-        const o = absolute(200, { client_request_key: 'snapshot' })
-        let mutate = true
-        const router = new Router(
-          s,
-          /* 改写调用方可变引用和解析器收到的目标副本，不能污染持久快照。 */ (received) => {
-            if (mutate) {
-              mutate = false
-              request.params.value = 2
-              target.session = 'changed'
-              o.deadline = 300
-              o.client_request_key = 'changed'
-            }
-            received.session = 'resolver_changed'
-            return policy(d.target, true)
-          }
-        )
-        const first = router.admit(principal, target, request, o)
-        assert.equal(first.call.deadline, 200)
-        assert.equal(JSON.parse(first.call.target_json).session, d.target.session)
-        assert.equal(
-          JSON.parse(String(db.prepare('SELECT request_json FROM calls').get()!.request_json)).params.value,
-          1
-        )
-        assert.equal(
-          router.admit(
-            principal,
-            d.target,
-            { method: 'ping', params: { value: 1 } },
-            absolute(200, {
-              client_request_key: 'snapshot'
-            })
-          ).created,
-          false
-        )
-        const before = ledger(db)
-        let reads = 0
-        const drifting = new Router(
-          s,
-          /* 在事务前后给出不同策略版本，要求整体登记失败。 */ () => ({
-            ...policy(d.target, true),
-            revision: ++reads === 1 ? 'local_policy_1' : 'local_policy_changed'
-          })
-        )
-        assert.throws(
-          /* 不能把外层 revision 与事务内授权策略拼为同一许可。 */ () =>
-            drifting.admit(principal, d.target, { method: 'ping' }, absolute()),
-          /policy_revision_changed/
-        )
-        assert.deepEqual(ledger(db), before)
-      }
-    )
-)
-
-test(
   'Router malformed deadlines match Store errors before optional input normalization',
   /* 绝对期限形状错误在 JSON 快照前统一返回 invalid_deadline，不泄漏不同入口的规范化差异。 */ () =>
     fixture(
       /* 对 Router 执行非有限值、缺值及相对混用校验，确认没有登记或审计。 */ (s, db) => {
         const d = connected(s)
-        const principal = { id: 'alice', policy: policy(d.target) }
-        const router = new Router(s, /* 返回稳定的 fixture 本地策略。 */ () => policy(d.target, true))
+        const principal = { id: 'alice' }
+        const router = new Router(s)
         const before = ledger(db)
         for (const deadline of [undefined, NaN, Infinity, 0, -1, Number.MAX_SAFE_INTEGER + 1]) {
           assert.throws(
@@ -601,45 +496,6 @@ test(
           /invalid_deadline/
         )
         assert.deepEqual(ledger(db), before)
-      }
-    )
-)
-
-test(
-  'Router rejects caller identity and revision drift within the registration boundary',
-  /* 宿主解析策略期间更换主体或调用方 revision，不能把原登记身份和新授权拼接。 */ () =>
-    fixture(
-      /* 分别在事务内策略解析阶段改变外部主体引用，检查两种登记入口都回滚。 */ (s, db) => {
-        const d = connected(s)
-        for (const field of ['id', 'revision'] as const) {
-          const principal = { id: 'alice', policy: policy(d.target) }
-          let reads = 0
-          const router = new Router(
-            s,
-            /* 在第二次即事务内解析时改变可信主体的身份或版本。 */ () => {
-              if (++reads === 2) {
-                if (field === 'id') {
-                  principal.id = 'bob'
-                } else {
-                  principal.policy.revision = 'caller_changed'
-                }
-              }
-              return policy(d.target, true)
-            }
-          )
-          const before = ledger(db)
-          assert.throws(
-            /* 相对与绝对入口均不得接受登记期间的身份漂移。 */ () => {
-              if (field === 'id') {
-                router.admit(principal, d.target, { method: 'ping' }, absolute())
-              } else {
-                router.create(principal, d.target, { method: 'ping' }, options())
-              }
-            },
-            /policy_revision_changed/
-          )
-          assert.deepEqual(ledger(db), before)
-        }
       }
     )
 )
@@ -675,69 +531,6 @@ test(
           storage_reserve_bytes: 17_000,
           content_bytes: 100_000,
           backup_bytes: 100_000
-        }
-      }
-    )
-)
-
-test(
-  'Router registration and terminal cancel cannot bypass read grants for real native response content',
-  /* 真实原生校验响应落盘后，登记和取消仅返回元数据，读取仍逐次核对双方 read grant。 */ () =>
-    fixture(
-      /* 保留 dispatch/cancel 并分别撤销两端 read 权限，用原生 Wire 链路验证旧 key 不泄漏正文。 */ (s, db) => {
-        const native = nativeBackend(s)
-        try {
-          const client_request_key = 'read-gate'
-          const call = native.create({ client_request_key, timeoutMs: 50 })
-          const binding = native.dispatch(call.call_id)
-          native.respond(binding, { text: 'synthetic-private-response' })
-          const grants = /* 为真实方法产生完整目标且可独立撤销 read 的策略。 */ (read: boolean) => [
-            {
-              target: native.target,
-              methods: ['task.add'],
-              actions: (read ? ['dispatch', 'read', 'cancel'] : ['dispatch', 'cancel']) as ProviderAction[]
-            }
-          ]
-          const principal = { id: 'synthetic', policy: { revision: 'caller1', grants: grants(true) } }
-          let local = { revision: 'local1', grants: grants(true) }
-          const router = new Router(s, /* 返回当前本地策略，读取撤权不改变登记 revision。 */ () => local)
-          const request = { method: 'task.add', params: { title: 'synthetic' } }
-          const o = absolute(150, { contract_ref: binding.contract_ref, client_request_key })
-          const before = ledger(db)
-          for (const revoked of ['caller', 'local', 'none']) {
-            principal.policy.grants = grants(revoked !== 'caller')
-            local = { ...local, grants: grants(revoked !== 'local') }
-            const repeated = router.admit(principal, native.target, request, o)
-            assert.equal(repeated.created, false)
-            assert.equal(repeated.call.state, 'responded')
-            assert.equal(repeated.call.response, null)
-            assert.equal(
-              router.create(
-                principal,
-                native.target,
-                request,
-                options({
-                  contract_ref: binding.contract_ref,
-                  client_request_key,
-                  timeoutMs: 50
-                })
-              ).response,
-              null
-            )
-            assert.equal(router.cancel(principal, call.call_id).response, null)
-            if (revoked === 'none') {
-              assert(router.get(principal, call.call_id).response?.includes('synthetic-private-response'))
-            } else {
-              assert.throws(
-                /* 正式读取在任一端撤权时拒绝，登记不能替代它。 */ () => router.get(principal, call.call_id),
-                /forbidden/
-              )
-            }
-            assert.deepEqual(ledger(db), before)
-            assert.equal(native.state.sends, 1)
-          }
-        } finally {
-          native.adapter.close()
         }
       }
     )

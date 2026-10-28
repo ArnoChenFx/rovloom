@@ -128,7 +128,7 @@ test(
         /** 健康调用仍用原 permit 完成响应及结果读取绑定。 */ () =>
           active.f.store.call(active.f.principal.id, healthy.call_id).state === 'responded'
       )
-      assert(active.f.gateway.resolveOriginalRead(healthy.call_id))
+      assert.equal(active.f.store.call(active.f.principal.id, healthy.call_id).state, 'responded')
       assert.equal(active.f.gateway.resolveOriginalRead(failed.call_id), undefined)
       assert.equal(active.f.store.call(active.f.principal.id, failed.call_id).state, 'outcome_unknown')
       assert.equal(active.f.gateway.status().connections, 1)
@@ -288,8 +288,6 @@ test(
         connection_epoch: 'synthetic',
         recovery_generation: 'synthetic',
         capability_revision: 'synthetic',
-        caller_policy_revision: 'synthetic',
-        local_policy_revision: 'synthetic',
         classification_revision: 'synthetic',
         contract: compiled.value.identity
       }

@@ -9,26 +9,10 @@ import { compileBundle } from '../../../src/native-contract/index.js'
 import type { CompiledContract, NativeBinding } from '../../../src/native-contract/index.js'
 import type { NativeWireBackend, TrustedAttempt } from '../../../src/integration/luvus-wire.js'
 import { contractRef } from '../../../src/wire/index.js'
-import type {
-  AttemptBinding,
-  AuthenticatedEnvelope,
-  ContractSource,
-  ProviderPolicies
-} from '../../../src/wire/types.js'
+import type { AttemptBinding, AuthenticatedEnvelope, ContractSource } from '../../../src/wire/types.js'
 import { LuvusRpcAdapter } from '../../../src/connector/luvus/index.js'
 import type { LuvusLocalConfig, LuvusRpcHost } from '../../../src/connector/luvus/index.js'
-import {
-  auth,
-  bytes,
-  clone,
-  fixtureRoot,
-  G,
-  identity,
-  json,
-  request,
-  unwrap,
-  view
-} from '../../native-contract/helpers.js'
+import { bytes, clone, fixtureRoot, G, identity, json, request, unwrap, view } from '../../native-contract/helpers.js'
 
 // 每个 fixture 都写入相同受控脚本；编译只与这些固定字节及其来源身份有关，不含临时路径或用例状态。
 const script =
@@ -87,7 +71,6 @@ export async function fixture(
     mode === 'raw-contract'
       ? request(view(), { id: 'native_1', method, params }, true)
       : request(view(), { id: 'native_1', method, params })
-  const initial = auth(candidate)
   const origin: ContractSource = {
     provider_kind: 'luvus',
     protocol_family: 'uhp',
@@ -115,10 +98,7 @@ export async function fixture(
     contract_ref: contractRef(origin),
     target: { machine_id: 'm1', provider_id: 'p1', profile: 'session', session: 'synthetic' },
     registration: {
-      deadline: 30_100,
-
-      caller_policy_revision: 'caller1',
-      local_policy_revision: 'local1'
+      deadline: 30_100
     }
   }
   const row: TrustedAttempt = {
@@ -145,16 +125,6 @@ export async function fixture(
     claims: 0,
     auth: 'test-only-token',
     responses: 0
-  }
-  const policies: ProviderPolicies = {
-    caller: {
-      revision: 'caller1',
-      grants: [{ target: clone(binding.target), methods: [method], actions: ['dispatch', 'read', 'cancel'] }]
-    },
-    local: {
-      revision: 'local1',
-      grants: [{ target: clone(binding.target), methods: [method], actions: ['dispatch', 'read', 'cancel'] }]
-    }
   }
   const provider = /* 返回随启用状态变化的合成本地 provider，供 Wire 当前绑定复核使用。 */ () => ({
     machine_id: 'm1',
@@ -192,38 +162,7 @@ export async function fixture(
           }
         : undefined,
     nativeSource: source,
-    policies: /* 返回本用例的 caller 与本地策略快照。 */ () => policies,
-    authority: /* raw 只由测试显式选择，每次仍绑定本轮真实 attempt、当前 native 上下文和固定期限。 */ (
-      attempt,
-      context
-    ) => {
-      const {
-        source: _source,
-        principal_id: _principal,
-        caller_policy: _caller,
-        local_policy: _local,
-        now: _now,
-        mode: _mode,
-        ...rest
-      } = initial
-      return {
-        ...rest,
-        owner: mode === 'raw-contract',
-        raw_requested: mode === 'raw-contract',
-        ...(mode === 'raw-contract'
-          ? {
-              raw_grant: {
-                id: attempt.binding.call_id,
-                source_verified: true,
-                principal_id: attempt.principal_id,
-                binding: context,
-                methods: [attempt.method],
-                expires_at: attempt.binding.registration.deadline
-              }
-            }
-          : {})
-      }
-    },
+    validateAttempt: /* raw 只由测试显式选择，每次仍绑定本轮真实 attempt、当前 native 上下文和固定期限。 */ () => {},
     currentPrincipal: /* 根据测试读取开关切换当前 principal，模拟结果读取权限撤销。 */ () =>
       state.read ? 'synthetic' : 'other',
     now: /* 返回可控测试时钟，供期限和时间回退用例使用。 */ () => state.now,
@@ -353,7 +292,6 @@ export async function fixture(
     native,
     capabilities,
     compiled,
-    policies,
     state,
     response,
     source,

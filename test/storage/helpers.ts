@@ -2,13 +2,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { contractRef, planResponseEvidence } from '../../src/wire/index.js'
-import type {
-  AttemptBinding,
-  AuthenticatedContext,
-  AuthenticatedEnvelope,
-  ProviderPolicy,
-  V2Target
-} from '../../src/wire/types.js'
+import type { AttemptBinding, AuthenticatedContext, AuthenticatedEnvelope, V2Target } from '../../src/wire/types.js'
 import { Store } from '../../src/store.js'
 import type { CallOptions, StoreOptions } from '../../src/store.js'
 import { context, fixtureValidator, source } from '../wire/helpers.js'
@@ -24,8 +18,6 @@ export const options = /* 生成与固定 fixture 契约及策略版本匹配的
 ): CallOptions => ({
   binding_revision: 1,
   contract_ref: contractRef(source),
-  caller_policy_revision: 'caller_policy_1',
-  local_policy_revision: 'local_policy_1',
   ...extra
 })
 // 注册并连接合成设备，启用测试 provider 后返回凭据、连接 epoch 和目标。
@@ -49,19 +41,6 @@ export function connected(store: Store, name = 'linux') {
     session: 'test'
   }
   return { ...device, epoch, target, enrollment }
-}
-// 为指定目标构造调用者或本地策略，仅授予测试所需的方法与操作。
-export function policy(target: V2Target, local = false): ProviderPolicy {
-  return {
-    revision: local ? 'local_policy_1' : 'caller_policy_1',
-    grants: [
-      {
-        target,
-        methods: ['pane.read', 'ping', 'host.capabilities'],
-        actions: ['dispatch', 'read', 'cancel']
-      }
-    ]
-  }
 }
 /* 为绑定尝试构造已认证连接上下文，并按存储当前状态解析 provider。 */ export function evidenceContext(
   store: Store,
@@ -101,15 +80,12 @@ export function responseFrame(
   store: Store,
   binding: AttemptBinding,
   nativeResponse: Record<string, unknown>,
-  now: number,
-  retain = true
+  now: number
 ) {
   const frame = responseFrame(binding, nativeResponse)
   return store.commitEvidence(
     binding,
     /* 在提交事务中按当前锚点和认证上下文规划响应证据，保留真实校验路径。 */ () =>
-      planResponseEvidence(frame, evidenceContext(store, binding), store.responseAnchor(binding), now, {
-        retain_content_authorized: retain
-      })
+      planResponseEvidence(frame, evidenceContext(store, binding), store.responseAnchor(binding), now)
   )
 }

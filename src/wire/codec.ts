@@ -14,14 +14,7 @@ import type {
 } from './types.js'
 import { boundedJson, fields, object, id, uint, sha, text, oneOf, fail, parseJson, LIMITS } from './validation.js'
 import { validateNegotiated, validateOffer, WIRE_MAJOR } from './negotiation.js'
-import {
-  assertProviderAccess,
-  providerFor,
-  validateContractSource,
-  validateProvider,
-  validateTarget,
-  validatorFor
-} from './provider.js'
+import { providerFor, validateContractSource, validateProvider, validateTarget, validatorFor } from './provider.js'
 
 const BASE = ['protocol_major', 'protocol_minor', 'type', 'message_id', 'payload']
 const CONNECTION = ['machine_id', 'recovery_generation', 'connection_epoch']
@@ -109,10 +102,8 @@ export function validateAttempt(value: unknown): asserts value is AttemptIdentit
   oneOf(a.provider_kind, ['luvus', 'herdr'])
   validateTarget(a.target)
   const r = object(a.registration)
-  fields(r, ['deadline', 'caller_policy_revision', 'local_policy_revision'])
+  fields(r, ['deadline'], ['caller_policy_revision', 'local_policy_revision'])
   uint(r.deadline, true)
-  id(r.caller_policy_revision)
-  id(r.local_policy_revision)
 }
 
 // 从完整连接绑定中提取可随消息传输的调用身份。
@@ -125,7 +116,7 @@ function pickAttempt(a: AttemptBinding): AttemptIdentity {
     provider_kind: a.provider_kind,
     binding_revision: a.binding_revision,
     contract_ref: a.contract_ref,
-    registration: a.registration
+    registration: { deadline: a.registration.deadline }
   }
 }
 
@@ -310,14 +301,6 @@ function validateRequestPayload(frame: JsonObject, payload: JsonObject, ctx: Aut
   if (nativeRequest.method !== native.method || payload.validation !== native.mode) {
     fail('attempt_binding_mismatch')
   }
-  assertProviderAccess(native.binding, native.method, 'dispatch', ctx)
-  if (
-    ctx.policies!.caller.revision !== native.binding.registration.caller_policy_revision ||
-    ctx.policies!.local.revision !== native.binding.registration.local_policy_revision
-  ) {
-    fail('policy_revision_stale')
-  }
-
   // Wire 授权通过后仍须由原生校验器执行方法表、策略与参数校验。
   const validator = validatorFor(native.binding, ctx)
   const full = { ...nativeRequest, id: native.binding.native_request_id }
@@ -497,8 +480,7 @@ function decode(input: string | Uint8Array, context: CodecContext, limit: number
     case 'cancel': {
       fields(p, ['attempt', 'reason'])
       oneOf(p.reason, ['caller_cancelled', 'deadline_exceeded'])
-      const n = anchored(frame, p, context)
-      assertProviderAccess(n.binding, n.method, 'cancel', context)
+      anchored(frame, p, context)
       break
     }
     case 'response': {

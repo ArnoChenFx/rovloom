@@ -1,5 +1,3 @@
-// 管理页管理员：只保存口令摘要与固定租期；管理员同时是一个没有任何 MCP 权限的调用方主体，口令原值只在签发时显示一次。
-import type { ProviderPolicy } from '../wire/types.js'
 import { CliError } from './config.js'
 import { MAX_CALLERS, digestToken, newToken, type CallerRegistry } from './token-registry.js'
 import { DEFAULT_PAIRING_POLICY_REF } from '../pairing-policy.js'
@@ -43,7 +41,7 @@ export function emptyManagement(port: number): ManagementFile {
 
 /** 管理员主体在 MCP 注册表里的占位条目：策略为空且令牌无人知晓，因此不能经 MCP 调用任何东西。 */
 export function isAdminPlaceholder(entry: CallerRegistry['callers'][number]): boolean {
-  return entry.principal.policy.revision === ADMIN_POLICY_REVISION && entry.principal.policy.grants.length === 0
+  return entry.management_only === true
 }
 
 function ttl(days: number | undefined): number {
@@ -76,9 +74,9 @@ export function issueAdmin(
   }
   const expires_at = now + ttl(days)
   const secret = newToken()
-  const policy: ProviderPolicy = { revision: ADMIN_POLICY_REVISION, grants: [] }
   const placeholder = {
-    principal: { id: principal, policy },
+    principal: { id: principal },
+    management_only: true as const,
     token_sha256: digestToken(newToken()),
     issued_at: now,
     expires_at

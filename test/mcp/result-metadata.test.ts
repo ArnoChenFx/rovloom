@@ -4,7 +4,6 @@ import { test } from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
 import type { Store } from '../../src/store.js'
 import { projectionFixture } from './runtime-service-fixture.js'
-import { policy } from './store-fixture.js'
 
 // 只观察本测试实例的全量预算入口，保留原实现与接收者，结束后恢复。
 function budgetCalls(store: Store) {
@@ -59,7 +58,7 @@ test(
   /** 命中结果行不能绕过原 Router 与 Store 的实时门禁。 */ async (t) => {
     const f = projectionFixture()
     t.after(/** 回收本例私有文件库和服务。 */ () => f.close())
-    f.setLocal(policy([], 'revoked'))
+    f.setCaller({ id: 'alice', device_scope: { mode: 'selected', machine_ids: [] } })
     await assert.rejects(f.service.execute('runtime_call_get', { call_id: 'call_fixture' }, f.context), {
       code: 'forbidden'
     })
@@ -67,7 +66,7 @@ test(
       /** Store 本身也必须隐藏其它主体的句柄归属。 */ () => f.store.findResult('bob', 'call_fixture'),
       /call_not_found/
     )
-    f.setLocal(policy())
+    f.setCaller({ id: 'alice' })
     f.advance(1)
     assert(f.store.findResult('alice', 'call_fixture'))
     f.advance(-1)

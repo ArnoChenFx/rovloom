@@ -2,25 +2,10 @@
 import { createLuvusCatalog, LuvusAdapterError } from '../connector/luvus/index.js'
 import type { NativeContractRecord } from '../integration/luvus-wire.js'
 import type { TrustedNativeContext } from '../native-contract/index.js'
-import type { Principal, LocalPolicies } from '../router.js'
+import type { Principal } from '../router.js'
 import type { Store } from '../store.js'
-import {
-  boundedJson,
-  contractRef,
-  hash,
-  LIMITS,
-  providerScopeAllowed,
-  validatePolicies,
-  WireError
-} from '../wire/index.js'
-import type {
-  AttemptBinding,
-  ContractRecord,
-  JsonObject,
-  ProviderBinding,
-  ProviderPolicy,
-  V2Target
-} from '../wire/types.js'
+import { boundedJson, contractRef, hash, LIMITS, WireError } from '../wire/index.js'
+import type { ContractRecord, JsonObject, ProviderBinding, V2Target } from '../wire/types.js'
 import { FacadeServiceError } from './types.js'
 import { terminalExecutionCatalog } from '../connector/terminal-execution.js'
 import { luvusParameterHelp } from '../runtime/luvus-parameter-help.js'
@@ -30,6 +15,7 @@ export type GatewayCatalogSource = Readonly<{
   source: TrustedNativeContext
   local_provider: ProviderBinding
   expires_at: number
+  supported_methods?: readonly string[]
 }>
 export interface GatewayCatalogProvider {
   kind?: 'luvus'
@@ -63,7 +49,6 @@ type CatalogOptions = {
   principal: Principal
   // 目录扫描及describe再次核对当前身份，不能保留已经撤销的政策快照。
   currentPrincipal(): Principal
-  localPolicies: LocalPolicies
   provider: GatewayCatalogProvider
   target: V2Target
   expected_binding_revision: number
@@ -73,8 +58,6 @@ type CatalogOptions = {
 // 只在当前精确binding和可信来源有效时创建目录，沿用原生validator并按授权后的集合分页。
 export function authorizedLuvusCatalog(options: CatalogOptions) {
   const { store, target, principal } = options
-  const local = JSON.parse(boundedJson(options.localPolicies(target))) as ProviderPolicy
-  validatePolicies({ caller: principal.policy, local })
   const binding = store.provider(target.machine_id, target.provider_id)
   if (!binding) {
     throw new FacadeServiceError('not_found')
@@ -108,7 +91,6 @@ export function authorizedLuvusCatalog(options: CatalogOptions) {
     if (
       !provider ||
       boundedJson(options.currentPrincipal()) !== boundedJson(principal) ||
-      boundedJson(options.localPolicies(target)) !== boundedJson(local) ||
       boundedJson(provider) !== boundedJson(binding)
     ) {
       throw new FacadeServiceError('contract_unavailable')
@@ -129,6 +111,7 @@ export function authorizedLuvusCatalog(options: CatalogOptions) {
           capabilities: resolved.record.capabilities,
           capability_revision: resolved.record.capability_revision,
           compiled: resolved.record.compiled.identity,
+          supported_methods: resolved.supported_methods ?? null,
           expires_at: resolved.expires_at
         },
         LIMITS.object_bytes
@@ -150,8 +133,6 @@ export function authorizedLuvusCatalog(options: CatalogOptions) {
       resolved.record.compiled.identity.binary_sha256 !== origin.binary_sha256 ||
       resolved.record.compiled.identity.schema_sha256 !== origin.schema_sha256 ||
       boundedJson(resolved.local_provider) !== boundedJson(binding) ||
-      native.caller_policy_revision !== principal.policy.revision ||
-      native.local_policy_revision !== local.revision ||
       native.capability_revision !== resolved.record.capability_revision ||
       native.classification_revision !== resolved.record.wire.source.classification_revision ||
       native.server_generation !== resolved.record.wire.source.runtime_generation ||
@@ -169,12 +150,10 @@ export function authorizedLuvusCatalog(options: CatalogOptions) {
       throw new FacadeServiceError('contract_unavailable')
     }
     const currentPrincipal = options.currentPrincipal()
-    const currentLocal = options.localPolicies(target)
     const currentProvider = store.provider(target.machine_id, target.provider_id)
     const now = store.clock()
     if (
       boundedJson(currentPrincipal) !== boundedJson(principal) ||
-      boundedJson(currentLocal) !== boundedJson(local) ||
       boundedJson(currentProvider) !== boundedJson(binding) ||
       !Number.isSafeInteger(resolved.expires_at) ||
       now >= resolved.expires_at
@@ -203,8 +182,8 @@ export function authorizedLuvusCatalog(options: CatalogOptions) {
       for (const method of page.methods) {
         const entry = terminalExecutionCatalog('luvus', method.method, terminal)
         if (
-          entry.visible &&
-          providerScopeAllowed({ target } as AttemptBinding, method.method, 'read', { caller: principal.policy, local })
+          (resolved.supported_methods === undefined || resolved.supported_methods.includes(method.method)) &&
+          entry.visible
         ) {
           methods.push(
             JSON.parse(
@@ -237,8 +216,7 @@ export function authorizedLuvusCatalog(options: CatalogOptions) {
         source: resolved.source.binding,
         capability_revision: resolved.record.capability_revision,
         expires_at: resolved.expires_at,
-        capability_digest: stamp!,
-        local
+        capability_digest: stamp!
       },
       describe: /* 精确方法必须位于当前授权集合；原生read标签不自动授予任何方法。 */ (method: string): JsonObject => {
         if (
@@ -248,7 +226,10 @@ export function authorizedLuvusCatalog(options: CatalogOptions) {
         }
         try {
           const entry = terminalExecutionCatalog('luvus', method, terminal)
-          const parameterHelp = luvusParameterHelp(method)
+          const parameterHelp = luvusParameterHelp(
+            method,
+            methods.map((row) => row.method as string)
+          )
           return JSON.parse(
             boundedJson({
               ...catalog.describe(method),

@@ -28,7 +28,6 @@ import { SimplePairingHttp, PairingReplayCache } from './simple-pairing.js'
 import type { CliSetup } from './setup-runtime.js'
 import { boundedJson, object, fields, WIRE_MAJOR, WIRE_MINOR } from '../wire/index.js'
 import { readRuntimeConfig } from './runtime-config.js'
-import { migrateSetupLuvusGrant } from './setup-luvus-grant.js'
 import { canonicalLoopbackHost } from '../mcp/listen.js'
 import { createManagementResources } from './management-resources.js'
 import { loadProductManagementAssets } from './management-assets.js'
@@ -120,7 +119,6 @@ function unpairedCaller() {
       administrator: /* 未配对没有管理员。 */ () => null
     } as GatewayIdentitySource,
     authentication: { authenticate: /* 拒绝全部未建立的Bearer身份。 */ () => null },
-    localPolicies: /* 没有设备或原生授权。 */ () => ({ revision: 'unpaired', grants: [] }),
     /* 无外部身份源需要释放。 */
     close() {}
   }
@@ -171,10 +169,6 @@ function bootstrappingCaller(config: GatewayConfig, administrator?: GatewayIdent
         promote()
         return current.authentication.authenticate(request, signal)
       }
-    },
-    localPolicies: () => {
-      promote()
-      return current.localPolicies()
     },
     close() {
       current.close()
@@ -281,7 +275,7 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
         return closing
       }
       try {
-        provider = await sources.gateway?.(config, settings.providers.map(migrateSetupLuvusGrant), authority)
+        provider = await sources.gateway?.(config, settings.providers, authority)
         if (sources.gateway && !provider) {
           throw new CliError('invalid_config')
         }
@@ -387,7 +381,6 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
           lifecycle: state.lifecycle,
           channels: state.channels,
           identities: authority.identities,
-          localPolicies: caller.localPolicies,
           listener: {
             hostname: settings.device_listener.hostname,
             port: settings.device_listener.port,

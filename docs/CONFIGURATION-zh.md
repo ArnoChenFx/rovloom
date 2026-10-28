@@ -71,7 +71,7 @@ Connector，通常为 `~/.config/rovloom/connector.json`：
 | `management.hostname` | string，可选 | `127.0.0.1`，也接受 `0.0.0.0`。仅决定监听网卡，不限定反向代理域名。管理页支持 HTTP/HTTPS、保留或改写 Host 的代理，无需公网 URL 配置。登录、会话与 CSRF 校验仍生效。 |
 | Connector `gateway` | object，必填 | 仅含 `url`。 |
 | `gateway.url` | string，必填 | 初始化前为 `""`；其余为 ≤2048 字符的 WS/WSS origin，如 `ws://192.0.2.10:9443` 或 `wss://gateway.example`。不带凭据/查询/片段/路径，可带末尾 `/`；产品固定使用 `/connector`。 |
-| Connector `allow_terminal_execution` | boolean，可选 | `false`；省略也关闭。只有字面量 `true` 开启直接终端输入及自定义启动/恢复命令。修改这一份用户文件并重启 Connector，不改变安装设置或 caller/local grants。 |
+| Connector `allow_terminal_execution` | boolean，可选 | `false`；省略也关闭。只有字面量 `true` 开启直接终端输入及自定义启动/恢复命令。修改这一份用户文件并重启 Connector，不改变安装设置或 token 设备范围。 |
 | Connector `native` | object，可选 | 默认省略，只接受以下来源选择及安装目录字段，在首次原生初始化时应用。 |
 | `native.provider` | string enum，可选 | 省略时为 `luvus`；`herdr` 仅选 Herdr，`mixed` 各选一个。须在首次初始化前选定，之后不能更改。 |
 | `native.runtime_bin_dirs` | 1–16 个互不重复的规范绝对目录 string 数组（每项≤4096字符），可选 | 查找所选 `luvus`/`herdr` 程序的位置。搜索顺序：数组内目录依序，其后是 Connector 启动时 `PATH` 中可用的条目，最后是 `/usr/bin:/bin`（Windows 无此项）。不同程序可装在不同目录。不接受 shell 展开或可执行 argv。 |
@@ -144,55 +144,36 @@ rovloom token scope  --principal worker --all-devices true
 rovloom token scope  --principal worker --no-devices true
 ```
 
-令牌注册表（Gateway 状态目录下的 `managed/mcp-callers.json`）保存 SHA-256 摘要、新签发令牌的原文、主体策略和固定到期；
+令牌注册表（Gateway 状态目录下的 `managed/mcp-callers.json`）保存 SHA-256 摘要、新签发令牌的原文、主体身份、设备范围和固定到期；
 Gateway 每次认证都重读它，因此创建、续期、轮换和吊销**无需重启**，吊销同时使已建立的 MCP 会话失效。
-`create`/`rotate` 把新令牌原值只写到 stdout 一次（其余信息写 stderr）；新主体的权限克隆自 `--like`，不会扩大。
+`create`/`rotate` 把新令牌原值只写到 stdout 一次（其余信息写 stderr）；新主体的设备范围克隆自 `--like`。
 `rotate` 默认立即让旧令牌失效，`--grace-minutes` 给客户端一个有界的切换窗口。本机 `mcp-client.json`
 属于同一主体时会同步更新。注册表损坏时拒绝全部认证，修复前一直如此。
 
 ### 设备可见范围
 
-可以给单个令牌收窄到部分设备。`device_scope` 是调用方条目上的**可选**字段，不推进注册表
-`schema_version`；没有该字段的注册表行为与今天完全相同，因此无需迁移：
+Herdr、Luvus 和混合模式共用两个权限开关：token 的设备范围，以及 Connector 的 `allow_terminal_execution`（直接终端输入、执行及自定义命令）。不再配置按方法、provider 或 read/dispatch/cancel 动作划分的授权。
+
+新注册表为 `schema_version: 2`，调用方只保存身份、凭据、期限及可选的 `device_scope`：
 
 ```jsonc
 {
-  "principal": { "id": "worker", "policy": { "…": "…" } },
+  "principal": { "id": "worker" },
   "token_sha256": "…",
   "device_scope": { "mode": "selected", "machine_ids": ["m_ab12", "m_cd34"] },
-  "issued_at": 0,
-  "expires_at": 0
+  "issued_at": 1000,
+  "expires_at": 86401000
 }
 ```
 
-- 缺省 = 今天的行为：令牌能看到当前 grants 覆盖的全部设备。
-- `mode: "selected"` = 只在这些稳定 `machine_id` 上可见。**不接受设备名**（名字可变，改名不应
-  改变授权）。列表里已撤销或不存在的 `machine_id` 按不匹配处理；重新配对会生成新的
-  `machine_id`，该设备因此自动不可见——有意失败关闭。
-- 指定列表可包含 0–256 个去重 ID；空列表禁用全部设备，可通过 `--no-devices true` 设置。`--devices ""`、重复项或空项仍被拒绝。
-- 清除必须显式 `--all-devices true`；不存在静默放开令牌的路径。
+- 不设范围即全部活跃设备，包含后来加入的设备。`selected` 接受 0–256 个去重稳定 ID；不接受设备名，空列表禁止所有设备。
+- `token scope --devices ...`、`--no-devices true`、`--all-devices true` 热生效；`token create --like` 克隆范围，配对不修改已有范围。
+- 枚举和描述隐藏范围外设备，返回 `not_found`；派发、取消及结果访问返回 `forbidden`。每次操作重读当前身份和范围，收窄范围不会停止已经派发的原生操作。
+- 可见设备上的全部已暴露方法可调用，仍遵守 Connector 终端开关和实际原生可用性。参数、来源、binding、期限、幂等性属于正确性校验；调用和结果仍属于原主体。
 
-范围是**过滤器，不是第二套 ACL**：只能从 grants 已允许的设备中再减去，不可能扩大。
-`machines_list`、`machines_get`（含精确名称查询）、`providers_list`、`providers_get`、
-`runtime_discover`、`runtime_describe` 全部随之收窄，越界设备仍返回 `not_found`——与「没有授权」
-不可区分，不提供设备存在性探测。派发、短等、取消、结果读取与结果删除在 Router 里核对，返回
-`forbidden`，与缺少 grant 时逐字一致。
+旧 v1 注册表只读加载时不改盘。普通旧 caller 仅从其自己的 grants 提取 machine ID，迁为设备范围；已有显式范围优先。旧 Gateway scope 和配对主体保持全设备范围，不借 `local_policy` 扩权。下次写注册表时保存 v2，去掉旧 caller/local/gateway 策略、methods/actions/revision 和结果删除权限。管理专用身份不能认证 MCP，管理角色独立保留。
 
-范围变更**不推进** `policy.revision`：Connector 侧仍只比对 `caller_policy_revision`，因此收窄
-不会让已经派发出去的 native attempt 在设备上停下（与运行中吊销令牌同一限制）。此后所有读取、
-短等、取消与结果访问都会重新核对并被拒绝。Gateway 每次请求都重读注册表，因此
-`rovloom token scope` 无需重启即生效。`token create --like` 连同范围一起克隆；加入新设备只改策略，
-`device_scope` 原样保留。`token list` 增加 `all` / `selected(N)` 一列。
-
-降级到不识别该字段的旧二进制时，注册表被判为 `invalid_config`，全部认证被拒绝：失败关闭，
-不会静默放宽令牌。
-
-管理页令牌（`scope: "gateway"`）保留各自的主体 ID 和结果归属，调用授权跟随独立保存的
-`gateway_policy`。配对和加入设备时更新这份 caller 策略，不能与 `local_policy` 的修订混用。
-旧版单码配对注册表没有此字段时，从 `operator_simple_pairing` 恢复 caller 策略，下一次写入
-注册表时独立保留；两处绑定都缺失时，Gateway 令牌不获得方法授权。吊销原配对令牌不会
-连带吊销另行签发的 Gateway 令牌。设备范围同样适用于这类令牌（管理页提供同一个控件），
-但它不会影响 `Administrator.grants`，管理页自身的可见性不变。
+升级并重启 Gateway 和 Connector，原 token、配对凭据继续使用，无需重新配对或补方法授权。旧 Connector 的 policy/raw 字段仅兼容读取，不参与授权；新配对不再生成它们。升级前停止两端，备份完整私有数据目录和配置；回滚需恢复配套备份及二进制，旧版不兼容新注册表/配置格式。
 
 ### 配对
 
@@ -325,7 +306,7 @@ Agent/模型访问配置位于 runtime 的私有 HOME/XDG。managed 模式下其
 
 直接终端操作使用原生方法：Luvus `pane.run` 接受显式 `pane` 与 `command`，随后用
 `pane.read` 读取输出。`ok` 仅确认 PTY 输入，不表示命令完成或退出码。
-本地开关关闭或未知时，Gateway 目录隐藏直接输入。开关开启之前创建的策略可能仍不含 `pane.run`。
+本地开关关闭或未知时，Gateway 目录隐藏直接输入。所有 token 都可调用当前暴露的 `pane.run`，不需要补方法授权。
 详见[终端执行](TERMINAL-EXECUTION.md)。
 
 ## CLI 参考
@@ -428,15 +409,8 @@ macOS 和 Windows 上 Connector 附着你已在运行的 Herdr / Luvus，仅在�
 求助时保留错误码，不要贴出真实配置、Bearer、管理员密码或配对码。
 
 
-### 结果清理权限
+### 结果清理
 
-Caller 注册表可设置 `principal.permissions: { "discard_response": true }`，缺省为 false。本机操作员无需重启 Gateway 即可修改：
+读取并保存所需结果后，以 `call_id` 调用 `runtime_response_discard`，删除原文和句柄。只检查当前身份、设备范围及原主体归属，没有独立删除权限或 `token permissions` 命令。读到 EOF 不会删除或续期。
 
-```sh
-rovloom token permissions --principal owner --discard-response true
-rovloom token permissions --principal owner --discard-response false
-```
-
-使用 `rovloom token list` 中的实际主体 ID。此权限只允许删除当前主体自己的结果，并仍核对原方法当前双端读取策略；不会改变方法 grants、token 或到期时间。`token create --like` 同时复制方法策略和该权限。
-
-读取并保存所需结果后，以 `call_id` 调用 `runtime_response_discard`，删除原文和句柄并释放读取容量。读到 EOF 不会删除结果，结果仍按首次固定 TTL 保留。Gateway 默认最多保留 128 条读取上下文；连续调用的客户端应显式释放不再需要的结果，其他保留结果仍可读取。删除不可撤销。
+原生响应在入库时完成来源和结构校验，已保存结果在固定 TTL 内可在断连后读取，仍服从 Store 内容/句柄预算及设备生命周期。分页不再要求原 Wire 存活或重复验证 schema。生产运行时完成后释放执行上下文，持久结果不会各自占住一个读取上下文。

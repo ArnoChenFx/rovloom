@@ -71,20 +71,18 @@ pairs the first Connector (generate a per-device code, then run the displayed jo
   rovloom token renew --principal ID [--ttl-days N]
   rovloom token rotate --principal ID [--ttl-days N] [--grace-minutes M]
   rovloom token revoke --principal ID
-  rovloom token permissions --principal ID --discard-response true|false
   rovloom token scope --principal ID --devices MACHINE_ID[,MACHINE_ID...]
   rovloom token scope --principal ID --all-devices true
   rovloom token scope --principal ID --no-devices true
 
 The token registry lives in the Gateway state directory; the Gateway re-reads it on every authentication, so changes apply immediately without a restart.
 create/rotate write the new token value to stdout once (new tokens are kept in the private registry and can be viewed again in the Dashboard); everything else goes to stderr.
-create clones the new principal's permissions from the existing principal named by --like, without widening them. renew extends the expiry; the token stays the same.
+create clones the existing principal's device scope from --like. renew extends the expiry; the token stays the same.
 rotate issues a new token; the old one keeps working within --grace-minutes (default 0, immediate invalidation). revoke removes the principal.
-permissions manages the explicit result-discard permission, hot-reloaded and off by default. Read and save anything you need before discarding results.
 scope narrows which devices a token can see and call (machines/providers/runtime tools): only the listed stable machine_ids remain visible, and
 everything else answers not_found or forbidden exactly as if it were not granted. Without a scope a token keeps today's visibility, which is every
-device its current grants cover. Use --no-devices true to block all devices; clearing a scope requires --all-devices true. Device names are never accepted.
-A scope change does not bump the policy revision, so an attempt already dispatched keeps running on the Connector; every later read, short wait,
+active device. Use --no-devices true to block all devices; clearing a scope requires --all-devices true. Device names are never accepted.
+A scope change does not stop an attempt already dispatched on the Connector; every later read, short wait,
 cancel and result access is re-checked. Creating with --like clones the scope too. list adds an all / selected(N) column.
 ttl defaults to 30 days (1-365).
 `,
@@ -138,7 +136,6 @@ Windows uses the explicitly selected existing user with S4U, without storing a p
   'token.created': 'created {principal} expires {expires}\n',
   'token.renewed': 'renewed {principal} expires {expires}\n',
   'token.rotated': 'rotated {principal} expires {expires}\n',
-  'token.permissions': 'permissions {principal} discard_response={discard}\n',
   'token.scope': 'device scope {principal} {scope}\n',
   'token.revoked': 'revoked {principal}\n',
   'mcp.instructions':
@@ -163,7 +160,7 @@ Windows uses the explicitly selected existing user with S4U, without storing a p
   'mcp.tool.runtime_result_read':
     'Read bounded result pages under the current read authorization and deadlines; the cursor is bound by the service to the caller and the original result.',
   'mcp.tool.runtime_response_discard':
-    'After processing, explicitly delete the raw text and handle and release read capacity; ownership, the current original-method policy and the independent discard_response permission must be verified. Reading to EOF does not delete the result.'
+    'After processing, explicitly delete the raw text and handle and release read capacity; current identity, device scope and result ownership must be verified. Reading to EOF does not delete the result.'
 })
 
 export type MessageKey = keyof typeof english
@@ -223,19 +220,17 @@ Agent 与模型登录需独立准备；原生 ready 不代表模型已回复。
   rovloom token renew --principal ID [--ttl-days N]
   rovloom token rotate --principal ID [--ttl-days N] [--grace-minutes M]
   rovloom token revoke --principal ID
-  rovloom token permissions --principal ID --discard-response true|false
   rovloom token scope --principal ID --devices MACHINE_ID[,MACHINE_ID...]
   rovloom token scope --principal ID --all-devices true
   rovloom token scope --principal ID --no-devices true
 
 令牌注册表位于 Gateway 状态目录；Gateway 每次认证重读，修改立即生效、无需重启。
 create/rotate 把新令牌原值只写到 stdout 一次（新令牌保存在私有注册表，可在管理员面板再次查看）；其余信息写到 stderr。
-create 的新主体权限克隆自 --like 指定的现有主体，不扩大权限。renew 延长到期时间、令牌不变。
+create 克隆 --like 指定主体的设备范围。renew 延长到期时间、令牌不变。
 rotate 签发新令牌；--grace-minutes 内旧令牌继续有效（默认 0，立即失效）。revoke 删除主体。
-permissions 显式管理结果删除权限，热生效；默认关闭。删除结果前应先读取并保存所需内容。
 scope 收窄令牌能看到的设备（machines/providers/runtime 工具）：只有列出的稳定 machine_id 仍可见，其余一律与「未授权」逐字一致地
-返回 not_found 或 forbidden。不设范围时保持现状，即当前 grants 覆盖的全部设备。使用 --no-devices true 禁用全部设备；清除范围必须显式写 --all-devices true。
-不接受设备名。范围变更不推进策略修订，已派发出去的 attempt 仍在 Connector 上继续；此后的读取、短等、取消与结果访问都会重新核对。
+返回 not_found 或 forbidden。不设范围时可访问全部活跃设备。使用 --no-devices true 禁用全部设备；清除范围必须显式写 --all-devices true。
+不接受设备名。范围变更不停止已派发出去的 attempt；此后的读取、短等、取消与结果访问都会重新核对。
 create --like 连同范围一起克隆。list 增加 all / selected(N) 一列。
 ttl 默认 30 天（1-365）。
 `,
@@ -287,7 +282,6 @@ Windows 使用显式选择的既有用户与 S4U，不保存密码、不要求�
   'token.created': '已创建 {principal}，到期时间 {expires}\n',
   'token.renewed': '已续期 {principal}，到期时间 {expires}\n',
   'token.rotated': '已轮换 {principal}，到期时间 {expires}\n',
-  'token.permissions': '已设置 {principal} 的权限 discard_response={discard}\n',
   'token.scope': '已设置 {principal} 的设备可见范围 {scope}\n',
   'token.revoked': '已撤销 {principal}\n',
   'mcp.instructions': '工具存在不表示后端可用；执行、授权、确认、去重与结果保留由受信服务负责。',
@@ -304,7 +298,7 @@ Windows 使用显式选择的既有用户与 S4U，不保存密码、不要求�
   'mcp.tool.runtime_call_cancel': '请求停止等待或桥接；仅报告服务可确认程度，不承诺原生回滚。',
   'mcp.tool.runtime_result_read': '按当前读取授权和期限读取有界结果页；cursor 由服务绑定 caller 和原结果。',
   'mcp.tool.runtime_response_discard':
-    '处理完结果后显式删除原文与句柄并释放读取容量；必须验证归属、当前原方法策略及独立 discard_response 权限。读取到 EOF 不会自动删除结果。'
+    '处理完结果后显式删除原文与句柄并释放读取容量；必须验证当前身份、设备范围与结果归属。读取到 EOF 不会自动删除结果。'
 })
 
 // 词典键集由 english 的字面键类型固定；两种语言共享同一套键与占位符。

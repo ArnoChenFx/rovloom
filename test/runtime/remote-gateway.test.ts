@@ -25,13 +25,7 @@ import {
   decodeWireFrame,
   MessageWindow
 } from '../../src/wire/index.js'
-import type {
-  AuthenticatedEnvelope,
-  ProviderSnapshot,
-  ProviderBinding,
-  ProviderPolicy,
-  Direction
-} from '../../src/wire/types.js'
+import type { AuthenticatedEnvelope, ProviderSnapshot, ProviderBinding, Direction } from '../../src/wire/types.js'
 import type { Adapter, Connection, ConnectorWireSession } from '../../src/transport/index.js'
 import { envelope } from '../../src/transport/common.js'
 import { until } from '../transport/helpers.js'
@@ -40,6 +34,8 @@ import { RuntimeGatewayService } from '../../src/mcp/runtime-service.js'
 import { httpFixture } from '../mcp/http-fixture.js'
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import { SERVICE_ERROR_CODES, type ReplyData, type ServiceErrorCode } from '../../src/mcp/types.js'
+import { LUVUS_TABLE_METHODS } from '../../src/native-contract/methods.js'
+import { LUVUS_OPERATION_METHODS } from '../../src/runtime/luvus-operations.js'
 
 /** Gateway 只建立自身状态目录；没有 binary、HOME、native root 或 socket 输入。 */
 async function fixture(
@@ -52,6 +48,7 @@ async function fixture(
   } = {}
 ) {
   const { mixed = false, isolated = false, fastObservation = false } = options
+  let deviceScope: string[] | undefined
   const root = mixed
     ? privateHerdrTestRoot('.remote-gateway-')
     : mkdtempSync(join(fileURLToPath(new URL('../../', import.meta.url)), '.remote-gateway-'))
@@ -88,18 +85,12 @@ async function fixture(
     enabled: true
   }
   state.store.defineProvider(binding)
-  const caller: ProviderPolicy = {
-    revision: 'remote_caller',
-    grants: [{ target, methods: ['pane.list'], actions: ['dispatch', 'read', 'cancel'] }]
-  }
-  const local: ProviderPolicy = { ...structuredClone(caller), revision: 'remote_local' }
   const schema = readFileSync(new URL('../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8')
   const config: LuvusProductionRemoteConfig = {
     kind: 'luvus',
     authentication: 'remote_connector',
     binding,
     target,
-    peer_policy_revision: local.revision,
     ...(options.rawGrant ? { raw_grant: options.rawGrant } : {}),
     contract: {
       binary_version: '0.14.3',
@@ -128,14 +119,10 @@ async function fixture(
           binding_revision: 1,
           config_ref: 'herdr_snapshot',
           expected_source: fixedHerdrSource(),
-          schema_path: schema,
-          peer_policy_revision: local.revision
+          schema_path: schema
         }
       })
       state.store.defineProvider(herdr.providers[0]!.binding)
-      for (const policy of [caller, local]) {
-        policy.grants.push({ target: herdrTarget, methods: ['ping'], actions: ['dispatch', 'read'] })
-      }
     } catch (error) {
       try {
         await herdr?.release()
@@ -182,11 +169,13 @@ async function fixture(
     identities: {
       principal: /** 合成 caller 与设备身份独立。 */ (identity) =>
         (options.principals ?? ['remote_reader']).includes(identity.principal_id)
-          ? { id: identity.principal_id, policy: caller }
+          ? {
+              id: identity.principal_id,
+              ...(deviceScope ? { device_scope: { mode: 'selected' as const, machine_ids: deviceScope } } : {})
+            }
           : null,
       administrator: /** 普通读取不取得管理身份。 */ () => null
     },
-    localPolicies: /** 每次门禁读取当前完整目标策略。 */ () => local,
     providers: resources.providers,
     ...(herdr ? { hosted: [herdr] } : {}),
     listener: {
@@ -311,12 +300,13 @@ async function fixture(
   }
   return {
     runtime,
+    setScope: (scope?: string[]) => {
+      deviceScope = scope
+    },
     state,
     databasePath: join(directory, 'gateway.db'),
     config,
     target,
-    local,
-    caller,
     peer,
     snapshot,
     credential,
@@ -343,10 +333,9 @@ test(
     const service = new RuntimeGatewayService({
       runtime: f.runtime,
       identities: {
-        principal: () => ({ id: 'remote_reader', policy: f.caller }),
+        principal: () => ({ id: 'remote_reader' }),
         administrator: () => null
-      },
-      localPolicies: () => f.local
+      }
     })
     const http = httpFixture(service, {
       authentication: { authenticate: () => ({ principal_id: 'remote_reader' }) }
@@ -376,11 +365,10 @@ test(
             http.client.callTool({ name: 'runtime_call', arguments: input }, CallToolResultSchema, { timeout: 5000 })
           const rows = reader.prepare('SELECT count(*) AS n FROM calls').get()!.n
           const writes = f.writes()
-          const policy = structuredClone(f.caller.grants)
-          f.caller.grants.length = 0
+          f.setScope([])
           const forbidden = await invoke()
           assert.deepEqual(forbidden.structuredContent, { gateway_error: { code: 'forbidden' } })
-          f.caller.grants.push(...policy)
+          f.setScope()
           const revision = await invoke({ ...args, expected_binding_revision: 99 })
           assert.deepEqual(revision.structuredContent, { gateway_error: { code: 'binding_revision_conflict' } })
           const refused = await invoke()
@@ -447,12 +435,83 @@ test(
   }
 )
 
-test('同一真实 mixed 通道中 Luvus raw 拒绝不打断已接受的 Herdr 调用', { timeout: 45000 }, async () => {
+test('直接 MCP 调用不能绕过 provider 暴露面，原生广告不额外开放静态表方法', { timeout: 45000 }, async () => {
+  const f = await fixture()
+  const service = new RuntimeGatewayService({
+    runtime: f.runtime,
+    identities: {
+      principal: () => ({ id: 'remote_reader' }),
+      administrator: () => null
+    }
+  })
+  const http = httpFixture(service, { authentication: { authenticate: () => ({ principal_id: 'remote_reader' }) } })
+  try {
+    const peer = await f.peer()
+    peer.snapshot()
+    await until(() => f.runtime.transport.status().devices[0]?.ready === true)
+    await http.client.connect(http.transport, { timeout: 5000 })
+    const reader = new DatabaseSync(f.databasePath, { readOnly: true })
+    try {
+      const rows = reader.prepare('SELECT count(*) AS n FROM calls').get()!.n
+      const outside = LUVUS_TABLE_METHODS.filter((method) => !LUVUS_OPERATION_METHODS.includes(method))
+      assert(outside.includes('task.delete'))
+      assert(outside.includes('terminal.backend.close'))
+      for (const method of [...outside, 'automation.run', 'automation.delete', 'module.load', 'module.unload']) {
+        const result = await http.client.callTool(
+          {
+            name: 'runtime_call',
+            arguments: {
+              target: f.target,
+              expected_binding_revision: 1,
+              contract_ref: contractRef(f.snapshot.source),
+              native_request: { method, params: {} },
+              deadline: f.state.store.clock() + 30_000,
+              client_request_key: 'unexposed_' + method.replaceAll('.', '_')
+            }
+          },
+          CallToolResultSchema
+        )
+        assert.equal(result.isError, true, JSON.stringify({ method, response: result.structuredContent }))
+        assert.deepEqual(result.structuredContent, { gateway_error: { code: 'forbidden' } }, method)
+      }
+      assert.equal(reader.prepare('SELECT count(*) AS n FROM calls').get()!.n, rows)
+      assert.equal(f.writes(), 0)
+      assert.equal(peer.socket.readyState, WebSocket.OPEN)
+      assert.equal(
+        f.runtime.transport.currentConnection(f.target.machine_id)!.connection_epoch,
+        peer.connection.connection_epoch
+      )
+      // 拒绝不消耗请求 key；同一连接仍可正常调用暴露方法。
+      const healthy = await http.client.callTool(
+        {
+          name: 'runtime_call',
+          arguments: {
+            target: f.target,
+            expected_binding_revision: 1,
+            contract_ref: contractRef(f.snapshot.source),
+            native_request: { method: 'pane.list', params: {} },
+            deadline: f.state.store.clock() + 30_000,
+            client_request_key: 'unexposed_task_delete',
+            wait_ms: 2000
+          }
+        },
+        CallToolResultSchema
+      )
+      assert(!healthy.isError, JSON.stringify(healthy.structuredContent))
+      assert.equal((healthy.structuredContent as { data: ReplyData['runtime_call'] }).data.state, 'responded')
+      assert.equal(f.writes(), 1)
+    } finally {
+      reader.close()
+    }
+  } finally {
+    await http.client.close()
+    await f.close()
+  }
+})
+
+test('无静态 raw 清单也能派发，mixed 通道保留并发 Herdr 调用', { timeout: 45000 }, async () => {
   const f = await fixture({ mixed: true, isolated: true })
   try {
-    for (const policy of [f.caller, f.local]) {
-      policy.grants.push({ target: f.target, methods: ['workspace.rename'], actions: ['dispatch', 'read'] })
-    }
     const peer = await f.peer()
     peer.snapshot()
     await until(() => f.runtime.transport.status().devices[0]?.ready === true)
@@ -471,7 +530,7 @@ test('同一真实 mixed 通道中 Luvus raw 拒绝不打断已接受的 Herdr �
     )
     await until(() => f.state.store.call('remote_reader', first.call.call_id).state === 'connector_accepted')
     const epoch = peer.connection.connection_epoch
-    const refused = await f.runtime.runAuthenticated({ principal_id: 'remote_reader' }, () =>
+    const second = await f.runtime.runAuthenticated({ principal_id: 'remote_reader' }, () =>
       f.runtime.admit({
         target: f.target,
         native_request: { method: 'workspace.rename', params: { workspace_id: 'synthetic', name: 'literal' } },
@@ -482,11 +541,13 @@ test('同一真实 mixed 通道中 Luvus raw 拒绝不打断已接受的 Herdr �
         }
       })
     )
-    assert.equal(refused.call.state, 'not_dispatched')
-    assert.equal(f.writes(), 1)
+    await until(() => f.state.store.call('remote_reader', second.call.call_id).state === 'connector_accepted')
+    assert.equal(f.writes(), 2)
     assert.equal(f.runtime.transport.currentConnection(f.target.machine_id)!.connection_epoch, epoch)
     assert.equal(f.state.store.call('remote_reader', first.call.call_id).state, 'connector_accepted')
     peer.reply(peer.requests[0]!)
+    peer.reply(peer.requests[1]!)
+    await until(() => f.state.store.call('remote_reader', second.call.call_id).state === 'responded')
     await until(() => f.state.store.call('remote_reader', first.call.call_id).state === 'responded')
     await f.runtime.runAuthenticated({ principal_id: 'remote_reader' }, () => {
       const result = f.runtime.results.open(first.call.call_id)
@@ -502,12 +563,9 @@ test('remote Gateway 策略 raw 授权允许多个 caller，调用和结果继�
   const principals = ['remote_reader', 'test', 'admin']
   const f = await fixture({
     principals,
-    rawGrant: { caller_policy_revision: 'remote_caller', methods: ['workspace.rename'] }
+    rawGrant: { methods: ['workspace.rename'] }
   })
   try {
-    for (const policy of [f.caller, f.local]) {
-      policy.grants.push({ target: f.target, methods: ['workspace.rename'], actions: ['dispatch', 'read'] })
-    }
     const peer = await f.peer()
     peer.snapshot()
     await until(() => f.runtime.transport.status().devices[0]?.ready === true)
@@ -546,8 +604,7 @@ test('remote Gateway 策略 raw 授权允许多个 caller，调用和结果继�
 /** 非空快照只使用真实Wire治理codec；所有native端口是明确拒绝执行的测试stub。 */
 function snapshotSession(
   connection: Connection,
-  route: Pick<ProviderSnapshot, 'binding' | 'target'>,
-  policy: string
+  route: Pick<ProviderSnapshot, 'binding' | 'target'>
 ): ConnectorWireSession {
   let closed = false
   const windows = new Map<Direction, MessageWindow>()
@@ -586,8 +643,6 @@ function snapshotSession(
   return {
     adapter,
     readiness: /** 只有本组的受保护配置；不宣称原生执行就绪。 */ () => ({
-      policy_revision: policy,
-      peer_policy_revision: policy,
       providers: [{ expected: route.binding, local: route.binding, native_ready: true }]
     }),
     executeWire: /** 该合成Connector仅发布快照，没有业务成功stub。 */ async () => native(),
@@ -641,7 +696,7 @@ for (const isolated of [false, true]) {
           },
           session: /** 原host在实际认证welcome后建立一个组合会话。 */ (connection) => {
             connected = connection
-            const luvus = snapshotSession(connection, f.snapshot, f.local.revision)
+            const luvus = snapshotSession(connection, f.snapshot)
             const readiness = luvus.readiness
             luvus.readiness = /** 显式模拟单个原安装来源失效，不影响 Herdr 或认证通道。 */ () => {
               const state = readiness()
@@ -657,7 +712,7 @@ for (const isolated of [false, true]) {
             }
             luvus.providerSnapshot = /** 交付同一份非空原始快照，不复制或刷新generation。 */ () => nativeSnapshots
             const hosted = f.herdr!.providers[0]!
-            const herdr = snapshotSession(connection, hosted, f.local.revision)
+            const herdr = snapshotSession(connection, hosted)
             combined = composeConnectorSessions(
               connection,
               [
@@ -829,7 +884,7 @@ test(
           credential: /** 仅使用本轮合成设备身份。 */ () => f.credential
         },
         session: /** 实际welcome后仅建立健康原会话，不为Herdr生成adapter或来源。 */ (connection) => {
-          const luvus = snapshotSession(connection, f.snapshot, f.local.revision)
+          const luvus = snapshotSession(connection, f.snapshot)
           luvus.providerSnapshot = /** 原稳定快照不刷新generation。 */ () => snapshots
           return composeConnectorSessions(
             connection,
@@ -892,9 +947,6 @@ for (const { isolated, disconnectBeforeRead } of [
       let http: ReturnType<typeof httpFixture> | undefined
       let service: RuntimeGatewayService | undefined
       try {
-        for (const policy of [f.caller, f.local]) {
-          policy.grants.push({ target: f.target, methods: ['agent.wait'], actions: ['dispatch', 'read'] })
-        }
         const peer = await f.peer()
         peer.snapshot()
         await until(
@@ -930,10 +982,9 @@ for (const { isolated, disconnectBeforeRead } of [
           catalog: f.runtime.catalog,
           identities: {
             principal: /** 沿用原 runtime 的当前 caller 来源。 */ (caller) =>
-              caller.principal_id === 'remote_reader' ? { id: 'remote_reader', policy: f.caller } : null,
+              caller.principal_id === 'remote_reader' ? { id: 'remote_reader' } : null,
             administrator: /** 本例不提供管理员会话。 */ () => null
-          },
-          localPolicies: /** 与原 Gateway 使用同一政策对象。 */ () => f.local
+          }
         })
         http = httpFixture(service, {
           authentication: {
@@ -1057,8 +1108,8 @@ for (const { isolated, disconnectBeforeRead } of [
           })
         )
         if (disconnectBeforeRead) {
-          assert.equal(page.isError, true)
-          assert.deepEqual(page.structuredContent, { gateway_error: { code: 'content_unavailable' } })
+          assert.equal(page.isError, undefined)
+          assert((page.structuredContent!.data as { chunk: string }).chunk)
           const afterLoss = CallToolResultSchema.parse(
             await http.client.callTool({ name: 'runtime_call_get', arguments: { call_id: healthyId } })
           )
@@ -1307,10 +1358,6 @@ test(
     const hosted = f.herdr!.providers[0]!
     const routes = [f.snapshot, hosted]
     const methods = ['pane.run', 'pane.send_text']
-    for (const policy of [f.caller, f.local]) {
-      policy.grants[0]!.methods.push('pane.run', 'pane.read', 'agent.prompt')
-      policy.grants[1]!.methods.push('pane.send_text')
-    }
     const snapshots = structuredClone([f.snapshot])
     /** 快照沿用生产固定深冻结要求，测试只更改独立布尔观察，不替换来源。 */
     function freeze(value: unknown): void {
@@ -1342,7 +1389,7 @@ test(
             routes.map(
               /** 各原目录保持自己的完整 binding，布尔值不生成能力或执行许可。 */ (route, index) => {
                 const current: ConnectorWireSession = {
-                  ...snapshotSession(connection, route, f.local.revision),
+                  ...snapshotSession(connection, route),
                   /** 只有本例来源 getter 可以报告对应原配置，且保留原方法接收对象。 */
                   terminalExecutionState() {
                     assert.equal(this, current)
@@ -1385,10 +1432,9 @@ test(
         runtime: f.runtime,
         identities: {
           principal: /** 与实际 runtime 使用同一合成 caller 和政策，不从参数取得身份。 */ (caller) =>
-            caller.principal_id === 'remote_reader' ? { id: 'remote_reader', policy: f.caller } : null,
+            caller.principal_id === 'remote_reader' ? { id: 'remote_reader' } : null,
           administrator: /** 本例没有管理员会话。 */ () => null
         },
-        localPolicies: /** 目录仍使用同一双端完整目标授权。 */ () => f.local,
         catalog: {
           kind: 'mixed',
           select: /** 委托两种真实原生目录，不自造描述或参数 schema。 */ (target) =>
@@ -1407,7 +1453,8 @@ test(
             name: 'runtime_discover',
             arguments: {
               target: route.target,
-              expected_binding_revision: 1
+              expected_binding_revision: 1,
+              limit: 100
             }
           },
           CallToolResultSchema,
@@ -1466,7 +1513,8 @@ test(
             name: 'runtime_discover',
             arguments: {
               target: route.target,
-              expected_binding_revision: 1
+              expected_binding_revision: 1,
+              limit: 100
             }
           },
           CallToolResultSchema,

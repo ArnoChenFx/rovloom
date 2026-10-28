@@ -168,7 +168,7 @@ function dummySession(
     /** 空 provider 集合只表示没有实例就绪，不能据此建立任何 native 来源。 */
     readiness() {
       callbacks.readiness()
-      return { policy_revision: 'isolated_policy', peer_policy_revision: 'isolated_policy', providers: [] }
+      return { providers: [] }
     },
     /** 此生命周期 fixture 从不派发原生请求；意外调用必须立即失败。 */
     async executeWire() {
@@ -223,8 +223,6 @@ for (const mixed of [false, true]) {
               resourceClose() {}
             })
             session.readiness = () => ({
-              policy_revision: 'synthetic',
-              peer_policy_revision: 'synthetic',
               providers: [{ expected: binding, local: binding, native_ready: true }]
             })
             session.nativeVersions = function () {

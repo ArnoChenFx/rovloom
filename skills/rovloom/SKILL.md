@@ -121,7 +121,7 @@ runtime_call {
 
 **6. Query and read the result**
 
-For a Luvus output sentinel, discover and describe `wait.output`, then submit native params `{ "pane": "<observed pane ID>", "match": "<literal marker>", "timeout_s": 35 }` through the same `runtime_call` flow. Give its absolute deadline extra RPC time and poll the original call. It matches existing recent output too; use a fresh marker where needed. `matched:false` is an ordinary native observation result, not proof a command stopped. This read-only method still needs explicit grants; it does not return command stdout or exit code. See [runtime semantics](references/runtimes.md).
+For a Luvus output sentinel, discover `wait.output` on the exact target, describe it, and call it with `{ "pane": "<observed pane ID>", "match": "<literal marker>", "timeout_s": 35 }`. Approved targets and read/dispatch/cancel actions apply uniformly to every exposed method; read-only access does not grant dispatch. Do not edit caller/local/raw method lists. New pairing stores no method snapshot and old lists are ignored. Allow RPC overhead before the call deadline and poll the original call. Historical output and prompt echo can match, so verify the actual reply. If discovery omits the method, the current provider does not expose it; continue reading state/output.
 
 ```
 runtime_call_get { "call_id": "<call_id from step 5>", "wait_ms": 2000 }
@@ -143,7 +143,7 @@ These are not style advice. Violating them loses data or repeats side effects.
 2. **A `wait_ms` timeout is not a failure.** It only means this short wait ended; `call_id` is still valid. Keep querying the original call with `runtime_call_get`.
 3. **`contract_ref` and `binding_revision` do not transfer across providers.** A revision mismatch returns `binding_revision_conflict`; a stale contract on a new call returns `contract_unavailable` before registration. Refresh `providers_get` and `runtime_discover/describe` after upgrades or either mismatch. An existing request key still refers to its original call; changing its contract is a different intent and returns `conflict`. Never resend an existing unknown call with a fresh key just to use a newer contract.
 4. **Never guess a session name.** `providers_list` returns neither `profile` nor `session`; only `targets` on `machines_*` has them. Without an authorized tuple, do not construct a target.
-5. **`runtime_discover` and `runtime_describe` are not authorization.** Whether a call executes is decided jointly by the Gateway and the device's local policy. When refused, do not keep trying other method names.
+5. **Use the current provider contract.** For both Herdr and Luvus, tokens control visible devices and the Connector controls direct terminal execution. Every exposed method on a visible device is callable; there are no method, provider, action or policy-revision grants. Identity, original result ownership, provider availability, native parameters, binding, deadlines and idempotency still apply. Do not invent an unexposed method or resend an unknown call.
 6. **Result handles expire.** A `runtime_result_read` cursor is bound to the caller, result, page size and deadline; paging and retries never extend it. After expiry, call `runtime_call_get` again for a fresh handle (content still obeys the original deadline).
 7. **Do not manage devices over MCP.** You also cannot supply a principal, admin, `discard_response`, or a native `id` or `auth` through parameters; the schema rejects them.
 8. **Terminal input is off by default.** A device's `allow_terminal_execution` defaults to `false`. With it off, `agent.prompt` / `agent.send` must carry an explicit `strict: true`, and `agent.keys` plus custom launch arguments are refused outright. The device owner configures that switch locally; you cannot turn it on remotely.
@@ -155,11 +155,11 @@ A Gateway refusal returns `isError: true` with `gateway_error: { code }`.
 | Code | Meaning | Action |
 |---|---|---|
 | `unauthenticated` | Bearer missing, invalid or expired | Ask the user to renew or reissue; do not retry the same token |
-| `forbidden` | Authenticated, but policy denies this target, method or action | Report the missing grant; do not hunt for another target |
-| `not_found` | The target tuple is outside your grants, or the object is gone | Re-run `machines_list`; do not fuzzy-match |
+| `forbidden` | Token device scope or the Connector terminal switch rejects the request | Report the refusal and check the device/provider state; do not edit method lists or hunt for another target |
+| `not_found` | The target tuple is outside your visible devices, the method is not exposed, or the object is gone | Re-run `machines_list` and `runtime_discover`; do not fuzzy-match |
 | `binding_revision_conflict` | The revision changed | Re-run `providers_get` and `runtime_discover` |
 | `unavailable` / `backend_unavailable` | Device offline or backend unavailable | Check `link` from `machines_get`; do not hammer it |
-| `contract_unavailable` | Native contract, capabilities or policy changed mid-read | Re-run discover and describe |
+| `contract_unavailable` | Native contract, capabilities or binding changed mid-read | Re-run discover and describe |
 | `native_request_invalid` | Native schema or reviewed parameter checks rejected the request before registration; **definitely not dispatched** | Read optional `details.issues` / `details.parameter_help` and `runtime_describe`, correct the parameters, then resubmit |
 | `invalid_arguments` | MCP parameter shape is wrong | Fix against the schema |
 | `conflict` | One `client_request_key` used for a different intent | Use a new key for the new intent; keep the old key for the same intent |
@@ -193,6 +193,8 @@ Luvus `host.info` / `host.capabilities` are native host-profile methods, not ses
 
 Most Luvus methods (such as `workspace.list` and `pane.list`) have the validation mode chosen for you by the Gateway, so you never fill in `validation`. The `strict` group is `pane.list`, `agent.prompt`, `agent.send`, `agent.wait` and `agent.keys` — still chosen for you.
 
+Luvus `agent.start` requires `name` and `kind`, both matching `^[a-z][a-z0-9_-]{0,31}$`. `pane` is optional: omit it to create a new pane, or supply an observed pane to use it; optional `anchor` selects a split anchor and cannot be combined with `pane`. Use the returned pane ID for later calls. Invalid names receive `/params/name` with rule `pattern` in `gateway_error.details.issues`; read `runtime_describe.parameter_help` for the full reviewed guide.
+
 ### Reading a terminal
 
 ```json
@@ -211,7 +213,7 @@ For Luvus, `agent.prompt` selects an Agent **`target`**; `agent.wait` selects a 
 
 For fast tasks, use `agent.prompt` without waiting → `agent.wait` on the resolved pane with `statuses:["done","idle"]` → `agent.read` on the same Agent, and verify the actual reply against this turn. An old idle/done state can match immediately. One-step `wait:true` can still time out without a new transition even if its reported `status:"done"` is in `until`; the transport fix does not change this native behavior.
 
-`evidence:"timeout"` with explicit `observed_state:null` means no qualifying transition was observed; with `observed_state:"working"` or `"blocked"` it means the wait did not match before its deadline. Neither proves the Agent failed to reply; a fast answer can already be visible in `agent.read`. Missing `observed_state` in an older response is not explicit null. Treat `state_source:"no_positive_state_evidence"` as unknown even when status says idle; do not turn it into success or resend a submitted prompt. For authorized output sentinels use `wait.output`, but recent text and prompt echo can match, so verify the actual reply separately.
+`evidence:"timeout"` with explicit `observed_state:null` means no qualifying transition was observed; with `observed_state:"working"` or `"blocked"` it means the wait did not match before its deadline. Neither proves the Agent failed to reply; a fast answer can already be visible in `agent.read`. Missing `observed_state` in an older response is not explicit null. Treat `state_source:"no_positive_state_evidence"` as unknown even when status says idle; do not turn it into success or resend a submitted prompt. Use output sentinels only if `wait.output` is listed in the current discovery; otherwise keep reading state/output. Recent text and prompt echo can match, so verify the actual reply separately.
 
 A two-turn conversation must keep the same complete target, the same pane or alias, the same `terminal_id`, and the known Agent `session`. When checking turn two, verify it recalls turn one's content; terminal echo is not a reply.
 
@@ -245,3 +247,11 @@ The script performs `initialize` → `notifications/initialized` → call → `D
 - [references/tools.md](references/tools.md): full parameters, returned fields, limits and cursor rules for all 11 tools.
 - [references/runtimes.md](references/runtimes.md): the Luvus method families, selectors, coordinate traps and `if_revision`; Herdr contrast; what the terminal-execution switch covers.
 - In-repo authorities: `docs/protocol/MCP-HTTP.md`, `docs/LUVUS-OPERATIONS.md`, `docs/TERMINAL-EXECUTION.md`. The authoritative parameter definition is `src/mcp/schema.ts`.
+
+### Authorization model and upgrades
+
+Herdr, Luvus and mixed installations use the same two authorization controls: token device visibility and Connector `allow_terminal_execution`. No caller/local/gateway policy snapshots, per-method lists, action grants, raw grants or policy revision agreement are required. The current backend still defines which native methods it implements and exposes; discovery does not promise every method in the native schema is implemented.
+
+Upgrade and restart both roles while preserving tokens and pairing credentials; re-pairing is unnecessary. Legacy ordinary tokens keep their existing device boundary through migration to `device_scope`; new registry writes use version 2. Restore complete matching pre-upgrade config/data backups when rolling back to an older release.
+
+Validated results are stored when they arrive. Read their original handles after a disconnect within the fixed TTL; do not resend the native operation. Result pages and explicit discard check current identity, device scope and original principal ownership, without requiring the original Wire or a separate discard permission.

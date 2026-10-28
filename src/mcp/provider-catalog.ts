@@ -1,17 +1,9 @@
 // provider中性目录只投影宿主的原生方法描述；执行仍交同一runtime/Wire，不从目录建立许可。
 import { isDeepStrictEqual } from 'node:util'
 import type { Store } from '../store.js'
-import type { LocalPolicies, Principal } from '../router.js'
-import {
-  boundedJson,
-  contractRef,
-  hash,
-  LIMITS,
-  providerScopeAllowed,
-  validateContractSource,
-  validatePolicies
-} from '../wire/index.js'
-import type { AttemptBinding, JsonObject, ProviderBinding, ProviderPolicy, V2Target } from '../wire/types.js'
+import type { Principal } from '../router.js'
+import { boundedJson, contractRef, hash, LIMITS, validateContractSource } from '../wire/index.js'
+import type { JsonObject, ProviderBinding, V2Target } from '../wire/types.js'
 import type { ProviderCatalogProvider, ProviderCatalogSource } from './native-catalog.js'
 import { FacadeServiceError } from './types.js'
 import { terminalExecutionCatalog } from '../connector/terminal-execution.js'
@@ -21,15 +13,12 @@ export function authorizedProviderCatalog(options: {
   store: Store
   principal: Principal
   currentPrincipal(): Principal
-  localPolicies: LocalPolicies
   provider: ProviderCatalogProvider
   target: V2Target
   expected_binding_revision: number
   terminalExecutionState?(binding: ProviderBinding): boolean | undefined
 }) {
   const { store, principal, target } = options
-  const local = JSON.parse(boundedJson(options.localPolicies(target))) as ProviderPolicy
-  validatePolicies({ caller: principal.policy, local })
   const binding = store.provider(target.machine_id, target.provider_id)
   if (!binding) {
     throw new FacadeServiceError('not_found')
@@ -58,7 +47,6 @@ export function authorizedProviderCatalog(options: {
     if (
       store.generation() !== generation ||
       !isDeepStrictEqual(options.currentPrincipal(), principal) ||
-      !isDeepStrictEqual(options.localPolicies(target), local) ||
       !isDeepStrictEqual(store.provider(target.machine_id, target.provider_id), binding)
     ) {
       throw new FacadeServiceError('contract_unavailable')
@@ -148,11 +136,8 @@ export function authorizedProviderCatalog(options: {
     return { source, methods, describe: describe.bind(resolved) }
   }
   const { source, methods } = current()
-  const allowed = /* 同一完整Target和方法继续使用现有双端read交集。 */ (method: string) =>
-    providerScopeAllowed({ target } as AttemptBinding, method, 'read', { caller: principal.policy, local })
   const visible = methods.filter(
     /* 不把原生目录中的其它方法作为隐式授权。 */ (method) =>
-      allowed(method.method as string) &&
       terminalExecutionCatalog(binding.kind, method.method as string, terminal).visible
   )
   current()
@@ -179,8 +164,7 @@ export function authorizedProviderCatalog(options: {
       generation,
       contract_ref: source.contract_ref,
       capability_revision: source.capability_revision,
-      capability_digest: stamp!,
-      local
+      capability_digest: stamp!
     },
     expires_at: expiresAt!,
     describe: /* 原生描述返回前再复验当前目录、身份与原绑定。 */ (method: string): JsonObject => {

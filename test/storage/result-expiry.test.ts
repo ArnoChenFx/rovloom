@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { Store } from '../../src/store.js'
 import type { ResultPage } from '../../src/store.js'
 import { Router } from '../../src/router.js'
-import { connected, management, options, policy, respond } from './helpers.js'
+import { connected, management, options, respond } from './helpers.js'
 
 // 创建已持久化响应与结果句柄，使用短 result_ttl 和独立检查连接观察句柄期限。
 function fixture(resultTtl = 10) {
@@ -22,9 +22,8 @@ function fixture(resultTtl = 10) {
     retention: { result_ttl: resultTtl }
   })
   const device = connected(store)
-  const state = { local: policy(device.target, true) }
-  const router = new Router(store, /* 每次读取都取得当前本地授权，不缓存既有句柄的历史授权。 */ () => state.local)
-  const principal = { id: 'alice', policy: policy(device.target) }
+  const router = new Router(store)
+  const principal = { id: 'alice' }
   const call = router.create(principal, device.target, { method: 'pane.read' }, options())
   const binding = router.dispatch(principal, call.call_id, device.epoch)
   respond(store, binding, { result: { text: '你好abc'.repeat(30) } }, clock.now)
@@ -35,7 +34,6 @@ function fixture(resultTtl = 10) {
     clock,
     store,
     device,
-    state,
     router,
     principal,
     call,
@@ -158,7 +156,7 @@ for (const action of ['discard', 'revoke', 'provider_disabled'] as const) {
   )
 }
 
-for (const side of ['caller', 'local'] as const) {
+for (const side of ['device_scope'] as const) {
   test(
     `${side} 撤回读取授权后不返回含 expires 的结果页，其他 principal 也不能探测元数据`,
     // Router 仍逐次核验双端策略，新增字段不能成为独立的未授权 metadata 读取路径。
@@ -172,11 +170,7 @@ for (const side of ['caller', 'local'] as const) {
             f.router.readResult({ ...f.principal, id: 'other' }, f.handle.result_id),
           /call_not_found/
         )
-        const principal =
-          side === 'caller' ? { ...f.principal, policy: { ...f.principal.policy, grants: [] } } : f.principal
-        if (side === 'local') {
-          f.state.local = { ...f.state.local, grants: [] }
-        }
+        const principal = { ...f.principal, device_scope: { mode: 'selected' as const, machine_ids: [] } }
         assert.throws(
           /* 先前已经读过的句柄也必须经过本次双端授权。 */ () => f.router.readResult(principal, f.handle.result_id),
           /forbidden/

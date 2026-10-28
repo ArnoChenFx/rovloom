@@ -84,10 +84,9 @@ export function callerResource(config: GatewayConfig): string {
 /** 全新 Gateway 的空调用方注册表：只含空本机策略，不含任何 MCP 主体或令牌摘要。 */
 export function emptyCallerRegistry(resource: string): import('./token-registry.js').CallerRegistry {
   return {
-    schema_version: 1,
+    schema_version: 2,
     kind: 'mcp-caller-source',
     resource,
-    local_policy: { revision: 'rovloom_unpaired', grants: [] },
     callers: []
   }
 }

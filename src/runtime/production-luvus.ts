@@ -4,8 +4,8 @@ import { isDeepStrictEqual } from 'node:util'
 import { LuvusDispatchClaims, LuvusAdapterError } from '../connector/luvus/index.js'
 import type {} from '../integration/luvus-wire.js'
 import type { Connection } from '../transport/index.js'
-import type { AttemptBinding, ProviderPolicies } from '../wire/types.js'
-import { boundedJson, contractRef, fields, hash, id, object, uint, validatePolicies } from '../wire/index.js'
+import type { AttemptBinding } from '../wire/types.js'
+import { boundedJson, contractRef, fields, hash, id, object, uint } from '../wire/index.js'
 import type { LuvusConnectorAdmissionSource } from './connector-attempts.js'
 import {
   ConnectorAttemptBook,
@@ -41,9 +41,7 @@ export type LuvusProductionOwnerConfig = Readonly<{
     expected_root_id: string
     expected_root_revision: number
   }>
-  peer_policy_revision: string
   principal_id: string
-  policies: ProviderPolicies
   // 首次 create 与正常 open 必须显式选择；丢失任一持久库不能自动重建。
   storage_mode: 'create' | 'open'
 }>
@@ -52,9 +50,7 @@ export type LuvusProductionUserConfig = Readonly<{
   kind: 'luvus'
   authentication: 'local_owner'
   native: Readonly<{ mode: 'user'; config: LuvusLocalConfig }>
-  peer_policy_revision: string
   principal_id: string
-  policies: ProviderPolicies
   storage_mode: 'create' | 'open'
 }>
 type CheckedReference = Readonly<{ reference: string; value: LuvusProductionOwnerConfig }>
@@ -79,22 +75,16 @@ function references(input: readonly LuvusProductionReference[], mode: 'managed' 
         }
         names.add(entry.reference)
         const value = object(entry.value)
-        fields(value, [
-          'kind',
-          'authentication',
-          'native',
-          'peer_policy_revision',
-          'principal_id',
-          'policies',
-          'storage_mode'
-        ])
+        fields(
+          value,
+          ['kind', 'authentication', 'native', 'principal_id', 'storage_mode'],
+          ['peer_policy_revision', 'policies']
+        )
         const native = object(value.native)
         fields(native, ['mode', 'root_record', 'expected_root_id', 'expected_root_revision'])
         id(native.expected_root_id)
         uint(native.expected_root_revision, true)
         id(value.principal_id)
-        id(value.peer_policy_revision)
-        validatePolicies(value.policies as ProviderPolicies)
         if (
           value.kind !== 'luvus' ||
           value.authentication !== 'local_owner' ||
@@ -104,6 +94,8 @@ function references(input: readonly LuvusProductionReference[], mode: 'managed' 
         ) {
           throw new LuvusAdapterError('production_reference_invalid')
         }
+        delete value.policies
+        delete value.peer_policy_revision
         return { reference: entry.reference, value: value as LuvusProductionOwnerConfig }
       }
     )
@@ -132,20 +124,14 @@ function userReference(input: readonly LuvusProductionReference[]): UserReferenc
     fields(entry, ['reference', 'value'])
     id(entry.reference)
     const value = object(entry.value)
-    fields(value, [
-      'kind',
-      'authentication',
-      'native',
-      'peer_policy_revision',
-      'principal_id',
-      'policies',
-      'storage_mode'
-    ])
+    fields(
+      value,
+      ['kind', 'authentication', 'native', 'principal_id', 'storage_mode'],
+      ['peer_policy_revision', 'policies']
+    )
     const native = object(value.native)
     fields(native, ['mode', 'config'])
     id(value.principal_id)
-    id(value.peer_policy_revision)
-    validatePolicies(value.policies as ProviderPolicies)
     const pinned = pinConfig(native.config as LuvusLocalConfig)
     if (
       value.kind !== 'luvus' ||
@@ -316,7 +302,7 @@ export function createLuvusProductionSources() {
           } else {
             const instance = await attachExistingLuvus(roots.get(entry)!.config)
             attached.push(instance)
-            providers.push(createLuvusOperationsProvider(instance, entry.value.peer_policy_revision))
+            providers.push(createLuvusOperationsProvider(instance))
           }
         }
         return Object.freeze({ providers: Object.freeze(providers), release })
@@ -426,7 +412,7 @@ export function createLuvusProductionSources() {
         }
         /** 每个实例各自一份 provider、契约引用与快照；来源被替换后只重新绑定，新 epoch 才使用。 */
         function bind(owner: typeof first) {
-          const provider = createLuvusOperationsProvider(owner, selected.value.peer_policy_revision)
+          const provider = createLuvusOperationsProvider(owner)
           return {
             owner,
             provider,
@@ -458,12 +444,7 @@ export function createLuvusProductionSources() {
           }
         })
         /** 双方策略只来自已解析受保护配置，按完整路由的固定 principal 返回独立快照。 */
-        function policies(principal: string): ProviderPolicies {
-          if (stopping || principal !== selected.value.principal_id) {
-            throw new LuvusAdapterError('production_principal_unavailable')
-          }
-          return structuredClone(selected.value.policies)
-        }
+
         return Object.freeze({
           provider_snapshot: true as const,
           ...(userSource
@@ -500,8 +481,7 @@ export function createLuvusProductionSources() {
                   const row = admitted.backend?.attempt(call, attempt)
                   return row ? provider.source(row.binding) : undefined
                 },
-                policies,
-                authority: provider.authority,
+                validateAttempt: provider.validateAttempt,
                 now: Date.now
               }
             })
@@ -540,8 +520,6 @@ export function createLuvusProductionSources() {
                   owner.assertEvidence(binding, evidence),
                 dedupExpires: backend.dedupExpires,
                 readiness: /** 就绪复核原真实 Owner，政策修订取固定双方配置，不能自报永久 true。 */ () => ({
-                  policy_revision: selected.value.policies.local.revision,
-                  peer_policy_revision: selected.value.peer_policy_revision,
                   providers: [{ expected: provider.binding, local: provider.binding, native_ready: provider.ready() }]
                 }),
                 close: /** 关闭只释放本 epoch 请求正文；原 claims 和 native 工作均不重放。 */ () => {

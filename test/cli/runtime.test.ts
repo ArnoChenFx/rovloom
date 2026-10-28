@@ -78,10 +78,6 @@ test(
               lifecycle: state.lifecycle,
               channels: state.channels,
               identities,
-              localPolicies: /* 不给空provider角色提供任何隐式dispatch/read授权。 */ () => ({
-                revision: 'one',
-                grants: []
-              }),
               providers: [],
               listener: {
                 hostname: '127.0.0.1',

@@ -56,7 +56,7 @@ The detail also returns `last_seen_at` and `link_since` (Unix milliseconds or `n
 
 This is a connection-time report, not a live probe. Gateway timestamps receipt; reading and heartbeats do not refresh it. Provider, kernel or resource changes during a connection do not trigger periodic refresh; reconnect the Connector at an appropriate time if a new report is needed. Query `providers_get/list` separately for current verified contract metadata. Unknown scalar measurements are null; container detection without a positive marker is `unknown`. `cpus` is the system-visible logical CPU count from the Connector runtime's `os.cpus().length`, not the physical core count, available process parallelism or container CPU quota. Four visible logical CPUs with a 0.5-CPU quota still report 4; do not infer that the process can fully use all four. An empty CPU list reports null. Connectors through v0.6.8 reported available parallelism instead: upgrade and reconnect the Connector for the new meaning; the Gateway does not convert old reports. Memory is the OS-visible total, not the container memory limit. No network, environment, credentials, paths or toolchain inventory is collected. Only currently visible providers appear. Host/timing history is bounded to 4096 machines in the current Gateway process; restart, recovery-generation change or eviction can make it unknown. A new epoch clears the previous host until a new report arrives. Do not infer that an old report proves the current kernel, container or online state.
 
-The management device detail uses the same optional host report and timing fields, validated by the browser DTO boundary. It labels the report as connection-time data and shows its receipt time/source. Provider versions inside the report follow the independent administrator providers_read grants; MCP dispatch/read grants are not substituted for management permissions. Device lists omit the full block. See [storage lifetimes](../../../docs/STORAGE.md#主机报告与连接时间缓存).
+The management device detail uses the same optional host report and timing fields, validated by the browser DTO boundary. It labels the report as connection-time data and shows its receipt time/source. Provider versions inside the report follow the independent administrator providers_read grants; MCP token device scopes are not substituted for management permissions. Device lists omit the full block. See [storage lifetimes](../../../docs/STORAGE.md#主机报告与连接时间缓存).
 
 ## 3. providers_list
 
@@ -95,7 +95,7 @@ Returns `{ items: MethodEntry[], next_cursor? }`. Each entry carries:
 - `native_contract`: native method metadata
 - `terminal_execution?`: `{ local_state: "enabled"|"disabled"|"unknown", request_parameters_checked?, requires_explicit_strict? }`
 
-The catalog contains only methods you are currently authorized for **and** that the terminal switch allows to be visible. Discovery is not execution permission.
+The catalog contains the provider's exposed methods on visible devices, filtered by native capabilities and the terminal switch. Valid tokens have no separate method whitelist. Discovery does not bypass native validation or device operating settings.
 
 ## 6. runtime_describe
 
@@ -108,9 +108,11 @@ Returns the available native description plus `method`, `contract_ref` and `term
 | `params_schema?` | Native parameter schema with a self-contained local `$defs` closure; preserves references, sibling constraints, enums, numeric bounds, `description` and `$comment` |
 | `schema_status` (Luvus) | `conditional_branch` / `generic_params_only` / `unavailable`; native coverage, not execution authorization |
 | `schema_annotations?` (Luvus) | Native document-root notes: `{ document_uri, pointer, text }[]`, currently `$comment` and `description` from the request/response documents |
-| `parameter_help?` (Luvus) | Reviewed guide for `agent.wait`, `agent.prompt`, `pane.run`, `wait.output`: `{ source: "rovloom_reviewed_subset", required, optional, rules, examples }` |
+| `parameter_help?` (Luvus) | Reviewed guide for `agent.start`, `agent.wait`, `agent.prompt`, `pane.run`, `wait.output`: `{ source: "rovloom_reviewed_subset", required, optional, rules, examples }` |
 
 Herdr exposes native schemas for its supported methods. In Luvus 0.14.3, the reviewed ordinary methods with native parameter branches are `pane.list` and `agent.prompt/send/wait/keys`. Other methods remain `generic_params_only`; no native `params_schema` is fabricated. A conditional branch whose extra envelope conditions cannot be accurately projected can also omit `params_schema`.
+
+A token can call every exposed method on its visible devices, for Herdr, Luvus and mixed mode. There are no method/provider/action grants, caller/local policy snapshots or revision checks. The Connector terminal switch is the second authorization control. Native parameters, current source/binding, provider availability, deadlines, idempotency and original call/result ownership remain correctness requirements. A missing method is outside the backend's exposed catalog; do not edit a token method list.
 
 Use `params_schema` when present, read native annotations for behavioral semantics, and use the reviewed guide/runtime reference for coverage gaps. Document-root annotations apply to the source document, not necessarily only this method. A guide does not change `schema_status` or authorize execution. Luvus and Herdr often use different parameter names for the same idea. Discovery summaries do not include these schemas, notes or examples.
 
@@ -137,7 +139,7 @@ When `validation` is omitted the Gateway picks per provider and method:
 
 Explicitly supplying a mode the method does not accept is refused before registration as `native_request_invalid`. Unless you have a reason, **do not fill in `validation`** yourself.
 
-Native schema and reviewed-parameter rejection returns `gateway_error.code: "native_request_invalid"` with `outcome: "not_dispatched"`. The four guided Luvus methods (`agent.wait`, `agent.prompt`, `pane.run`, `wait.output`) can also return `details: { issues: [{ path, rule }], parameter_help }`. Common fixed paths locate missing `pane`/`command`/`match`, the `wait:true` dependency, mutually exclusive state selectors or `timeout_s` bounds; values and unknown field names are not echoed. If no specific safe diagnostic is available, `/params` with `invalid_value` reports a general parameter rejection. Fix against the guide and original schema, rather than treating every rejection as a connection failure.
+Native schema and reviewed-parameter rejection returns `gateway_error.code: "native_request_invalid"` with `outcome: "not_dispatched"`. The guided Luvus methods (`agent.start`, `agent.wait`, `agent.prompt`, `pane.run`, `wait.output`) can also return `details: { issues: [{ path, rule }], parameter_help }`. Common fixed paths locate missing `pane`/`command`/`match`, invalid `agent.start` name/kind (`/params/name` or `/params/kind`, rule `pattern`), the `wait:true` dependency, mutually exclusive selectors or `timeout_s` bounds; values and unknown field names are not echoed. `agent.start` requires name and kind, both matching `^[a-z][a-z0-9_-]{0,31}$`; pane is optional and omitting it creates a new pane. Read its guide before choosing between pane and anchor. If no specific safe diagnostic is available, `/params` with `invalid_value` reports a general parameter rejection. Fix against the guide and original schema, rather than treating every rejection as a connection failure.
 
 `client_request_key` deduplicates over `metadata_ttl`. The same key with the same intent returns the original `call_id`; the same key with a different intent returns `conflict`. The Gateway neither generates nor replaces keys, so idempotent retries must reuse the original.
 
@@ -206,7 +208,7 @@ Verify `sha256` and `total_bytes` after concatenating every page; otherwise repo
 
 Parameters: `call_id`. Returns `{ call_id, content_status: "discarded" }`.
 
-A standalone action: it requires ownership, the method's current read policy, and a dedicated `discard_response` permission. Callers cannot declare `discard_response` in parameters.
+A standalone action: it requires current identity, device access and original principal ownership. No separate discard permission is needed. It deletes original content and handles without resending the native operation.
 
 ## Transport and limits
 
@@ -234,11 +236,13 @@ A standalone action: it requires ownership, the method's current read policy, an
 
 ## Paging
 
-Cursors for `machines_list`, `providers_list` and `runtime_discover` are generated by the service, signed with a private HMAC-SHA256 key, and bound to the caller, query, position, current authorization and deadline, without consuming server-side slots. A cursor is not authorization: every page re-verifies the current identity and grants. Using an old cursor across callers, after a query change, or after a service restart returns `invalid_cursor`.
+Cursors for `machines_list`, `providers_list` and `runtime_discover` are generated by the service, signed with a private HMAC-SHA256 key, and bound to the caller, query, position, current authorization and deadline, without consuming server-side slots. A cursor is not authorization: every page re-verifies current identity and device scope. Using an old cursor across callers, after a query change, or after a service restart returns `invalid_cursor`.
 
 ## Semantic boundaries
 
-- Every list, count and description is filtered by the caller's grants.
+- Every list, count and description respects the caller's device scope and current provider exposure; tokens do not have per-method grants.
 - No streaming, no Host-privileged shortcut, no provider management, no `luvus_*` aliases.
 - Callers cannot submit a principal, admin, `discard_response`, or a native `id` or `auth` inside `native_request`.
 - Device registration/rename/revoke, provider enable/disable, and token management happen only in the management listener and the CLI, never over MCP.
+
+Stored results do not require the original connection or Wire to remain live. Native source and response validation happen on receipt; paging reads the committed bytes under the fixed TTL and Store budgets. Completed execution contexts are released; stored handles do not each retain a live execution context.

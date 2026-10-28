@@ -123,9 +123,6 @@ for (const entry of cases) {
       const state = backendFixture()
       state.record.method = entry.method
       state.record.native_request = { method: entry.method, params: entry.params }
-      for (const side of [state.context.policies!.caller, state.context.policies!.local]) {
-        side.grants[0]!.methods = [entry.method]
-      }
       const request = { ...state.record.native_request, id: state.binding.native_request_id }
       const response = { id: request.id, result: entry.result }
       const bytes = Buffer.from(JSON.stringify(response) + '\n')

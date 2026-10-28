@@ -6,25 +6,10 @@ import { DatabaseSync } from 'node:sqlite'
 import { canonical, digest } from '../../src/contracts.js'
 import { Store } from '../../src/store.js'
 import type { Principal } from '../../src/router.js'
-import type { ProviderPolicy, V2Target } from '../../src/wire/types.js'
 import { StoreGatewayService, type Administrator, type GatewayIdentitySource } from '../../src/mcp/index.js'
 import { syntheticCredential, target, secondTarget, syntheticSecret } from './fixture-values.js'
 
 export { syntheticCredential, target, secondTarget, syntheticSecret } from './fixture-values.js'
-
-// 生成明确的完整tuple政策；只有测试装配使用，生产不能导入这个授权工厂。
-export function policy(targets: V2Target[] = [target, secondTarget], revision = 'caller_1'): ProviderPolicy {
-  return {
-    revision,
-    grants: targets.map(
-      /* 每条grant保留一个完整目标与精确方法，不扩张为笛卡尔授权。 */ (route) => ({
-        target: route,
-        methods: ['pane.read'],
-        actions: ['dispatch', 'read', 'cancel']
-      })
-    )
-  }
-}
 
 // 建立并返回受测真实Store、共享政策来源和清理函数；全部资源均位于新建临时目录。
 export function storeFixture(mode: 'active' | 'storage_degraded' = 'active', mutateSeed?: (db: DatabaseSync) => void) {
@@ -45,10 +30,7 @@ export function storeFixture(mode: 'active' | 'storage_degraded' = 'active', mut
     binding_revision: 1,
     contract_ref: 'a'.repeat(64),
     registration: {
-      deadline: now + 30_000,
-
-      caller_policy_revision: 'caller_1',
-      local_policy_revision: 'local_1'
+      deadline: now + 30_000
     }
   }
   try {
@@ -106,8 +88,7 @@ export function storeFixture(mode: 'active' | 'storage_degraded' = 'active', mut
     seed.close()
   }
   const store = new Store(path, /* 重新打开真实数据库并保留固定fixture内容期限。 */ () => now)
-  let caller: Principal | null = { id: 'alice', policy: policy(), permissions: { discard_response: true } }
-  let local = policy([target, secondTarget], 'local_1')
+  let caller: Principal | null = { id: 'alice' }
   let admin: Administrator | null = {
     principal_id: 'alice',
     session_ref: 'admin_session',
@@ -131,21 +112,17 @@ export function storeFixture(mode: 'active' | 'storage_degraded' = 'active', mut
     administrator: /* 仅在合成管理会话仍有效且引用匹配时返回当前管理授权。 */ (_caller, session) =>
       admin?.session_ref === session ? admin : null
   }
-  const localPolicies = /* 返回可被测试撤销的当前本地政策，真实Router直接消费该来源。 */ () => local
-  const service = new StoreGatewayService({ store, identities, localPolicies })
+  const service = new StoreGatewayService({ store, identities, targets: () => [target, secondTarget] })
   return {
     store,
     service,
     identities,
-    localPolicies,
+    targets: () => [target, secondTarget],
     path,
     directory,
     current: /* 读取同一合成身份来源，测试不另造运行时Principal。 */ () => caller!,
     setCaller: /* 替换当前身份或政策，验证每次服务调用重新授权。 */ (next: Principal | null) => {
       caller = next
-    },
-    setLocal: /* 替换当前本地tuple政策，验证双端求交与旧游标失效。 */ (next: ProviderPolicy) => {
-      local = next
     },
     setAdmin: /* 撤销或替换独立管理会话，验证MCP身份不能替代管理员会话。 */ (next: Administrator | null) => {
       admin = next

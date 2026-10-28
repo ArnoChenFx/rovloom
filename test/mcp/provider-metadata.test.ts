@@ -25,7 +25,10 @@ test('Luvus provider 的版本、契约状态与摘要穿过 HTTP 白名单，�
         )
         assert(!result.isError)
         const data = result.structuredContent!.data as Record<string, unknown>
-        const provider = name === 'providers_list' ? (data.items as Record<string, unknown>[])[0]! : data
+        const provider =
+          name === 'providers_list'
+            ? (data.items as Record<string, unknown>[]).find((item) => item.provider_id === target.provider_id)!
+            : data
         values.push({
           native_version: provider.native_version,
           schema_status: provider.schema_status,
@@ -80,9 +83,9 @@ test('元数据 resolver 同步撤销 caller 时仍拒绝整条读取，不以 u
   const f = catalogFixture()
   const source = f.source()
   const service = new StoreGatewayService({
+    targets: f.targets,
     store: f.store,
     identities: f.identities,
-    localPolicies: f.localPolicies,
     catalog: {
       resolve: () => {
         f.setCaller(null)

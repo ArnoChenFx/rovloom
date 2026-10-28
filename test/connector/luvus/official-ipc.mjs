@@ -12,7 +12,7 @@ import { Router } from '../../../src/router.ts'
 import { persistentBackend, commitLuvusResponse } from '../../../src/integration/persistence.ts'
 import { createLuvusWireAdapter } from '../../../src/integration/luvus-wire.ts'
 import { compileBundle, createNativeValidator } from '../../../src/native-contract/index.ts'
-import { assertBinding, boundedJson, contractRef, providerScopeAllowed } from '../../../src/wire/index.ts'
+import { assertBinding, boundedJson, contractRef } from '../../../src/wire/index.ts'
 import {
   LuvusRpcAdapter,
   LuvusAdapterError,
@@ -463,7 +463,6 @@ export async function officialIpc(binaryPath) {
         const record = store.attempt(binding.call_id, binding.attempt_id)
         assertBinding(binding, record.binding)
         assert.equal(store.provider(target.machine_id, target.provider_id).config_ref, provider.config_ref)
-        assert(providerScopeAllowed(binding, record.method, 'dispatch', policies))
         assert(store.clock() < binding.registration.deadline)
         claimsEntered++
         try {
@@ -600,11 +599,7 @@ export async function officialIpc(binaryPath) {
     const access = createLuvusResultAccess({
       store,
       principal,
-      localPolicies: /* 当前双方 ACL 分开进入 Router 门禁。 */ () => structuredClone(policies.local),
-      resolveOriginalRead: /* 返回持有原请求 permit 的同一冻结 Wire，绝不包装或从 JSON 恢复。 */ (callId) => {
-        const binding = bindings.get(callId)
-        return binding ? { binding, wire } : undefined
-      }
+      localPolicies: /* 当前双方 ACL 分开进入 Router 门禁。 */ () => structuredClone(policies.local)
     })
     const meta = access.open(last.call.call_id)
     assert(meta.bytes > 65_535)

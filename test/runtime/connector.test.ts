@@ -175,7 +175,7 @@ async function welcomeReentry(stage: ReentrantStage, failingClose = false): Prom
             if (stage === 'readiness') {
               stopFromCallback()
             }
-            return { policy_revision: 'isolated', peer_policy_revision: 'isolated', providers: [] }
+            return { providers: [] }
           },
           /** 真实资源返回后即归角色所有；清理失败必须影响同一个 closed 结果。 */
           close() {

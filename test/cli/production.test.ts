@@ -143,7 +143,6 @@ test(
       authentication: 'remote_connector',
       binding,
       target,
-      peer_policy_revision: f.source.local_policy.revision,
       contract: {
         binary_version: '0.14.3',
         binary_sha256: FIXED_LUVUS_SHA256,
@@ -180,8 +179,7 @@ test(
           binding_revision: 1,
           config_ref: 'fixture_herdr',
           expected_source: fixedHerdrSource(),
-          schema_path: herdrSchema,
-          peer_policy_revision: f.source.local_policy.revision
+          schema_path: herdrSchema
         }
       }
       f.providers({ fixture_remote: reference, fixture_herdr: herdrReference })
@@ -506,7 +504,6 @@ test(
               {
                 binding,
                 target,
-                peer_policy_revision: 'fixture_local',
                 max_response_bytes: 16_384,
                 ready: /* 无原生实例不能报告ready。 */ () => false
               }
@@ -869,7 +866,6 @@ test(
             expected_root_id: 'fixture_root',
             expected_root_revision: 1
           },
-          peer_policy_revision: 'fixture_local',
           principal_id: 'fixture_caller',
           policies: { caller: f.source.callers[0]!.principal.policy, local: f.source.local_policy },
           storage_mode: 'open'

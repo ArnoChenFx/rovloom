@@ -7,7 +7,6 @@ import {
   decodeWireFrame,
   contractRef,
   validateContractSource,
-  assertProviderAccess,
   providerFor,
   planResponseEvidence,
   registeredRequestDigest
@@ -185,8 +184,7 @@ test(
       'provider_disabled'
     )
     rejects(
-      /* 提交该用例输入，确认当前 provider 已被禁用时被拒绝。 */ () =>
-        assertProviderAccess(binding, 'ping', 'read', disabled),
+      /* 提交该用例输入，确认当前 provider 已被禁用时被拒绝。 */ () => providerFor(binding, disabled),
       'provider_disabled'
     )
     rejects(
@@ -220,69 +218,8 @@ test(
         decode(frame('request', { ...request.payload, attempt: otherAttempt }), otherContext)
     )
     assert.doesNotThrow(
-      /* 验证禁用其他 provider 不影响当前 provider 的读取权限。 */ () =>
-        assertProviderAccess(otherBinding, 'ping', 'read', otherContext)
+      /* 验证禁用其他 provider 不影响当前 provider 的读取权限。 */ () => providerFor(otherBinding, otherContext)
     )
-  }
-)
-
-test(
-  '权限按完整 Target 行在 caller/local 求交，禁止跨 provider/session/方法的笛卡尔授权',
-  /* 验证权限按完整 Target 行在 caller/local 求交，禁止跨 provider/session/方法的笛卡尔授权。 */ () => {
-    const ctx = context()
-    ctx.policies!.caller.grants = [
-      {
-        target: { ...attempt.target, provider_id: 'provider_2' },
-        methods: ['ping'],
-        actions: ['dispatch']
-      },
-      {
-        target: {
-          machine_id: provider.machine_id,
-          provider_id: provider.provider_id,
-          profile: 'session',
-          session: 'other'
-        },
-        methods: ['ping'],
-        actions: ['dispatch']
-      },
-      { target: attempt.target, methods: ['pane.read'], actions: ['dispatch'] }
-    ]
-    rejects(
-      /* 提交该用例输入，确认双端策略未共同允许完整目标操作时被拒绝。 */ () => decode(request, ctx),
-      'provider_scope_forbidden'
-    )
-    const disjoint = context()
-    disjoint.policies!.local.grants[0]!.target = { ...attempt.target, provider_id: 'provider_2' }
-    rejects(
-      /* 提交该用例输入，确认双端策略未共同允许完整目标操作时被拒绝。 */ () => decode(request, disjoint),
-      'provider_scope_forbidden'
-    )
-    const missing = context()
-    delete missing.policies
-    rejects(
-      /* 提交该用例输入，确认双端策略未共同允许完整目标操作时被拒绝。 */ () => decode(request, missing),
-      'provider_scope_forbidden'
-    )
-    const flat = context()
-    ;(flat.policies!.caller as any).machines = ['machine_1']
-    rejects(
-      /* 提交该用例输入，确认消息字段缺失或包含额外字段时被拒绝。 */ () => decode(request, flat),
-      'invalid_frame_fields'
-    )
-    const stale = context()
-    stale.policies!.caller.revision = 'new_policy'
-    rejects(
-      /* 提交该用例输入，确认调用登记的策略版本已经过期时被拒绝。 */ () => decode(request, stale),
-      'policy_revision_stale'
-    )
-    const noRead = context('connector_to_gateway')
-    noRead.policies!.caller.grants[0]!.actions = ['dispatch']
-    const plan = planResponseEvidence(response, noRead, responseAnchor, 400, {
-      retain_content_authorized: true
-    })
-    assert.equal(plan.content.delivery, 'metadata_only')
-    assert.equal(plan.content.native_response, undefined)
   }
 )
 

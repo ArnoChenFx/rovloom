@@ -61,10 +61,6 @@ function gatewayFixture() {
     lifecycle: state.lifecycle,
     channels: state.channels,
     identities: identities(),
-    /** 没有 provider 的关闭回归始终使用拒绝全部目标的本机策略。 */
-    localPolicies() {
-      return { revision: 'isolated_local1', grants: [] }
-    },
     providers: [],
     listener: { hostname: '127.0.0.1', port: 0, developmentLoopback: true }
   }
@@ -298,14 +294,13 @@ test(
               profile: 'session',
               session: 'synthetic'
             },
-            peer_policy_revision: 'isolated_local1',
             contract: record,
             /** 没有设备连接，不能为此构造回归生成原生来源。 */
             source() {
               throw new Error('unexpected_native_source')
             },
             /** 没有调用登记，不能询问原生执行权限。 */
-            authority() {
+            validateAttempt() {
               throw new Error('unexpected_native_authority')
             },
             /** 启动拒绝应发生在 provider 就绪检查之前。 */

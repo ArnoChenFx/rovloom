@@ -218,24 +218,11 @@ test(
         () => f.gateway.cancel(call.call_id)
       )
       f.principal.id = owner
-      const localGrants = f.local.grants
-      f.local.grants = []
-      assert.throws(
-        /** 本地端单独撤销 cancel 也必须拒绝，不能只看调用方 grant。 */
-        () => f.gateway.cancel(call.call_id),
-        /forbidden/
-      )
-      f.local.grants = localGrants
-      const grant = f.principal.policy.grants[0]!
-      grant.actions = ['read', 'dispatch']
-      assert.throws(
-        /** 当前双端取消权限缺失即拒绝，不能借用原 dispatch 许可。 */
-        () => f.gateway.cancel(call.call_id),
-        /forbidden/
-      )
+      f.principal.device_scope = { mode: 'selected', machine_ids: [] }
+      assert.throws(() => f.gateway.cancel(call.call_id), /forbidden/)
       assert.equal(cancels(f).length, 0)
       assert.equal(work.get(call.call_id)!.signal.aborted, false)
-      grant.actions = ['cancel']
+      delete f.principal.device_scope
       assert.equal(f.gateway.cancel(call.call_id).state, 'outcome_unknown')
       await until(
         /** 不要求 read 的取消仍须经过 Wire 双端 cancel 门禁才能到达。 */

@@ -80,13 +80,8 @@ test(
       )
       assert.equal(f.gateway.transport.status().stopped, false)
       assert.equal(f.state.store.health().mode, 'active')
-      await assert.rejects(
-        f.gateway.runAuthenticated(
-          f.caller,
-          /** 断连后的旧 Wire 不允许从数据库恢复读许可。 */ () => f.gateway.results.read(result.result_id)
-        ),
-        /result_context_unavailable/
-      )
+      const offline = await f.gateway.runAuthenticated(f.caller, () => f.gateway.results.read(result.result_id))
+      assert.deepEqual(offline, page)
     } finally {
       await f.close()
     }

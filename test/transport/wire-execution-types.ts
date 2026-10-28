@@ -1,6 +1,5 @@
 // 在完整严格类型检查中固定 Wire/原生执行互斥及真实 adapter、读取 port 的公开类型边界；不执行原生工作。
 import type { LuvusRpcAdapter } from '../../src/connector/luvus/index.js'
-import type { LuvusOriginalRead } from '../../src/connector/luvus/results.js'
 import type { JsonObject } from '../../src/wire/types.js'
 import type {
   ConnectorOptions,
@@ -58,9 +57,6 @@ export function connectorTypeChecks(
   /** 结果层只取得当前原 Wire 的受保护保留检查，不取得私有 permit。 */
   const retention: (nativeFrame: JsonObject) => void = (nativeFrame) =>
     original.wire.checkResultRetention(original.binding, nativeFrame)
-  const resultRead: LuvusOriginalRead = original
-  // @ts-expect-error 结果读取只取得原 Wire 的读取/保留门禁，没有派发编码入口。
-  const resultEncode = resultRead.wire.encode
   // @ts-expect-error 保留检查必须带精确原生响应，不能只提供 binding。
   original.wire.checkResultRetention(original.binding)
   // @ts-expect-error 读取 port 不提供 Wire 私有 context。
@@ -76,8 +72,6 @@ export function connectorTypeChecks(
     legacyBudget,
     executeWire,
     retention,
-    resultRead,
-    resultEncode,
     context,
     validator
   }

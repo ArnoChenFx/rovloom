@@ -28,9 +28,9 @@ export type RuntimeGateway =
   | Awaited<ReturnType<typeof createProviderGatewayRuntime>>
 export type RuntimeGatewayPort = Pick<
   RuntimeGateway,
-  'router' | 'principal' | 'runAuthenticated' | 'admit' | 'get' | 'cancel' | 'results' | 'originalAttempt'
+  'router' | 'principal' | 'runAuthenticated' | 'admit' | 'get' | 'cancel' | 'results' | 'targets'
 > & { store: Store; terminalExecutionState?: RuntimeGateway['terminalExecutionState'] }
-export type RuntimeGatewayServiceOptions = Omit<StoreGatewayOptions, 'store' | 'router'> & {
+export type RuntimeGatewayServiceOptions = Omit<StoreGatewayOptions, 'store' | 'router' | 'targets'> & {
   runtime: RuntimeGatewayPort
 }
 type Request = { [K in ToolName]: { name: K; args: ToolArguments[K] } }[ToolName]
@@ -80,6 +80,7 @@ export class RuntimeGatewayService implements GatewayService {
     this.reads = new StoreGatewayService({
       ...options,
       store: options.runtime.store,
+      targets: options.runtime.targets,
       router: options.runtime.router,
       terminalExecutionState: options.terminalExecutionState ?? options.runtime.terminalExecutionState
     })
@@ -112,19 +113,7 @@ export class RuntimeGatewayService implements GatewayService {
     const runtime = this.options.runtime
     const call = runtime.get(callId)
     let view = publicCallView(call)
-    let original: ReturnType<RuntimeGatewayPort['originalAttempt']>
-    try {
-      original = call.attempt_id ? runtime.originalAttempt(callId, call.attempt_id) : undefined
-    } catch (error) {
-      // 原连接/上下文失效不抹掉调用登记；再次授权后只交付最新元数据，绝不恢复旧许可或正文。
-      await this.reads.execute('runtime_call_get', { call_id: callId }, context)
-      this.current(context)
-      view = publicCallView(runtime.get(callId))
-      view.content_reason_code = publicError(error).code
-      this.current(context)
-      return view
-    }
-    view.contract_ref = original?.binding.contract_ref ?? null
+    view.contract_ref = runtime.store.callContractRef(runtime.principal().id, callId)
     if (call.state === 'responded' && call.content_status === 'available') {
       try {
         const result = runtime.results.open(callId)

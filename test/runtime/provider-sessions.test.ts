@@ -301,8 +301,6 @@ function group(kind: ProviderKind) {
   const session: ConnectorWireSession = {
     adapter,
     readiness: /** 只报告本synthetic组件的固定配置。 */ () => ({
-      policy_revision: 'local1',
-      peer_policy_revision: 'local1',
       providers: [{ expected: binding, local: binding, native_ready: true }]
     }),
     executeWire: /** 无原生后端，意外执行始终失败。 */ async () => native(),
@@ -322,7 +320,7 @@ function group(kind: ProviderKind) {
     provider_kind: kind,
     binding_revision: 1,
     contract_ref: (kind === 'luvus' ? 'a' : 'b').repeat(64),
-    registration: { deadline: 1000, caller_policy_revision: 'caller1', local_policy_revision: 'local1' }
+    registration: { deadline: 1000 }
   }
   return { descriptor, state, target, binding, session, attempt }
 }

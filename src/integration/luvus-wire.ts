@@ -26,7 +26,6 @@ import {
   object,
   planResponseEvidence,
   providerFor,
-  providerScopeAllowed,
   uint,
   validateAttempt,
   WireError
@@ -42,7 +41,6 @@ import type {
   NativePayloadValidator,
   NativeValidationContext,
   ProviderBinding,
-  ProviderPolicies,
   ResolvedAttempt,
   V2Target,
   WireEnvelope
@@ -65,10 +63,6 @@ export type NativeContractRecord = {
   capability_revision: string
 }
 
-type Authority = Omit<
-  DispatchAuthorization,
-  'source' | 'principal_id' | 'caller_policy' | 'local_policy' | 'mode' | 'now'
->
 // 仅由宿主认证、双端配置及账本实现。这里没有默认授权、设备广告或从消息导入上下文的工厂。
 // persistence 模块只提供持久化事实；当前认证、配置与原生来源仍必须由宿主独立实现。
 export interface NativeWireBackend {
@@ -84,10 +78,8 @@ export interface NativeWireBackend {
   contract(ref: string): NativeContractRecord | undefined
   // 独立核验指定尝试所连接的原生 endpoint 和身份。
   nativeSource(callId: string, attemptId: string): TrustedNativeContext | undefined
-  // 取得指定 principal 当前的调用方与本地双端策略。
-  policies(principal: string): ProviderPolicies
-  // 提供独立核验的 Owner 与 raw 授权事实，不能从消息自报导入。
-  authority(attempt: TrustedAttempt, binding: NativeBinding): Authority
+  // 可选的 provider 参数与来源预检；不承担 caller/local 方法授权。
+  validateAttempt?(attempt: TrustedAttempt, binding: NativeBinding): void
   // 取得当前结果读取方身份，避免借用原调用者的派发许可。
   currentPrincipal(): string | undefined
   // 返回宿主可信时钟，用于不可延长的期限检查。
@@ -457,7 +449,7 @@ export function createLuvusWireAdapter(
   }
   // 只用当前连接、独立来源及原锚点复核密封上下文，拒绝期限被改写或能力漂移。
   function refreshResponse(state: ResponseState) {
-    const ctx = context('connector_to_gateway', state.attempt.principal_id)
+    const ctx = context('connector_to_gateway')
     assertBinding({ ...ctx.connection, ...attemptIdentity(state.attempt.binding) }, state.attempt.binding)
     const anchor = backend.responseAnchor?.(state.attempt.binding)
     if (!anchor) {
@@ -553,8 +545,6 @@ export function createLuvusWireAdapter(
       connection_epoch: attempt.binding.connection_epoch,
       recovery_generation: attempt.binding.recovery_generation,
       capability_revision: registry.capability_revision,
-      caller_policy_revision: attempt.binding.registration.caller_policy_revision,
-      local_policy_revision: attempt.binding.registration.local_policy_revision,
       classification_revision: origin.classification_revision!,
       contract: registry.compiled.identity
     }
@@ -573,12 +563,11 @@ export function createLuvusWireAdapter(
   }
 
   // 为当前消息方向构造认证上下文，仅在响应方向解析已密封的 RPC 句柄。
-  function context(direction: Direction, principal?: string): AuthenticatedContext {
+  function context(direction: Direction): AuthenticatedContext {
     const ctx: AuthenticatedContext = {
       phase: 'authenticated',
       direction,
       connection: copy(backend.connection()),
-      ...(principal ? { policies: copy(backend.policies(principal)) } : {}),
       resolveProvider: provider,
       // 从宿主固定契约注册表解析 Wire 来源，不接受消息自报契约。
       resolveContract: (ref) => backend.contract(ref)?.wire,
@@ -592,7 +581,6 @@ export function createLuvusWireAdapter(
           }
           assertBinding({ ...ctx.connection, ...value }, response.attempt.binding)
           refreshResponse(response)
-          ctx.policies = copy(backend.policies(response.attempt.principal_id))
           return {
             binding: copy(response.attempt.binding),
             method: response.attempt.method,
@@ -601,8 +589,6 @@ export function createLuvusWireAdapter(
           }
         }
         const resolved = resolve(value)
-        const state = states.get(key(value))!
-        ctx.policies = copy(backend.policies(state.attempt.principal_id))
         return resolved
       }
     }
@@ -615,7 +601,7 @@ export function createLuvusWireAdapter(
     if (boundedJson(attempt) !== boundedJson(state.attempt)) {
       fail('attempt_binding_mismatch')
     }
-    const ctx = context('gateway_to_connector', attempt.principal_id)
+    const ctx = context('gateway_to_connector')
     const current = source(attempt, ctx)
     if (
       boundedJson(current.source) !== boundedJson(state.source) ||
@@ -629,7 +615,7 @@ export function createLuvusWireAdapter(
   // 按真实账本建立或复核有界执行缓存，缓存原锚点期限并返回私有原生句柄。
   function resolve(value: AttemptIdentity): ResolvedAttempt {
     const attempt = record(value)
-    const ctx = context('gateway_to_connector', attempt.principal_id)
+    const ctx = context('gateway_to_connector')
     const current = source(attempt, ctx)
     let state = states.get(key(value))
     remember(key(value))
@@ -697,36 +683,14 @@ export function createLuvusWireAdapter(
     return state
   }
 
-  // 从当前双端策略和宿主权限构造原生派发授权，不继承旧的读取权限。
+  // 核验本次原生来源、参数与验证模式，并保留原派发主体。
   function authorization(state: State): DispatchAuthorization {
-    const { ctx, attempt } = refresh(state)
-    const binding = state.source.binding
-    if (
-      ctx.policies!.caller.revision !== binding.caller_policy_revision ||
-      ctx.policies!.local.revision !== binding.local_policy_revision
-    ) {
-      fail('policy_revision_stale')
-    }
-    // 只投影当前完整 Target 上的 dispatch grants；流 input 和结果读取另过各自门禁。
-    const project = (side: ProviderPolicies['caller']) => ({
-      machines: [binding.target.machine_id],
-      sessions: binding.target.profile === 'session' ? [binding.target.session] : [],
-      methods: side.grants
-        .filter(
-          /* 只保留目标完全相同且含 dispatch 动作的当前 grant。 */ (g) =>
-            boundedJson(g.target) === boundedJson(attempt.binding.target) && g.actions.includes('dispatch')
-        )
-        .flatMap(/* 展开当前目标已授权的原生方法，供双端方法集合校验。 */ (g) => g.methods)
-        .filter(/* 去除双端策略投影中的重复方法，保持方法集合稳定。 */ (m, i, all) => all.indexOf(m) === i),
-      host: binding.target.profile === 'host'
-    })
+    const { attempt } = refresh(state)
+    backend.validateAttempt?.(copy(attempt), state.source.binding)
     return {
-      ...copy(backend.authority(copy(attempt), binding)),
       source: state.source,
       principal_id: attempt.principal_id,
       now: time(),
-      caller_policy: project(ctx.policies!.caller),
-      local_policy: project(ctx.policies!.local),
       mode: attempt.mode === 'raw-contract' ? 'raw_contract' : 'strict'
     }
   }
@@ -791,7 +755,7 @@ export function createLuvusWireAdapter(
       fail('dispatch_permit_unavailable')
     }
     assertBinding(binding, state.attempt.binding)
-    const { ctx } = refresh(state)
+    refresh(state)
     const principal = backend.currentPrincipal()
     if (principal !== state.attempt.principal_id) {
       fail('forbidden')
@@ -811,12 +775,9 @@ export function createLuvusWireAdapter(
       fail('content_unavailable')
     }
     // 原派发 permit 不能替代当前读取授权，也不能让过期/丢弃的内容重新可见。
-    const allowed = providerScopeAllowed(binding, state.attempt.method, 'read', ctx.policies)
     unwrap(
       checkResultBoundary(granted, {
         principal_id: principal,
-        caller_policy_allowed: allowed,
-        local_policy_allowed: allowed,
         content_status: status
       })
     )
@@ -869,8 +830,7 @@ export function createLuvusWireAdapter(
           snapshot,
           context('connector_to_gateway'),
           backend.responseAnchor?.(retained.attempt.binding),
-          time(),
-          { retain_content_authorized: false }
+          time()
         )
       }
       const attempt = record(snapshot.payload.attempt)
@@ -879,16 +839,7 @@ export function createLuvusWireAdapter(
       if (!state) {
         fail('dispatch_permit_unavailable')
       }
-      let retain = false
-      try {
-        resultRetention(attempt.binding, snapshot.payload.native_response)
-        retain = true
-      } catch {
-        /* 撤权/过期/禁存仍允许可信最小证据。 */
-      }
-      return planResponseEvidence(snapshot, ctx, backend.responseAnchor?.(attempt.binding), time(), {
-        retain_content_authorized: retain
-      })
+      return planResponseEvidence(snapshot, ctx, backend.responseAnchor?.(attempt.binding), time())
     },
 
     // 释放指定尝试的适配器缓存与预算；仅响应分支同时撤销密封登记，执行分支仅移除缓存关联。

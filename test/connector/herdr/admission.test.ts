@@ -149,12 +149,10 @@ async function admissionFixture(methods: readonly string[], approved = source) {
       binding_revision: 1,
       config_ref: 'owned-herdr-admission',
       expected_source: approved,
-      schema_path: schemaPath,
-      peer_policy_revision: 'local1'
+      schema_path: schemaPath
     }
   })
   base.store.defineProvider(resources.providers[0]!.binding)
-  base.principal.policy.grants.push({ target, methods: [...methods], actions: ['dispatch', 'read'] })
   const provider = resources.providers[0]!
   const preflightRequests: JsonObject[] = []
   const offer = { major: 2, minor: 0, capabilities: ['rpc'], required: ['rpc'] }
@@ -165,10 +163,6 @@ async function admissionFixture(methods: readonly string[], approved = source) {
         caller.principal_id === base.principal.id ? base.principal : null,
       administrator: /** 本测试没有管理员会话。 */ () => null
     },
-    localPolicies: /** 固定当前双方权限，故意错误仅来自原生 prompt 参数。 */ () => ({
-      revision: 'local1',
-      grants: base.principal.policy.grants
-    }),
     providers: [
       {
         ...provider,

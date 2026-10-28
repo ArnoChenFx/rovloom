@@ -25,7 +25,7 @@ function binding(call = 'call1'): AttemptBinding {
     binding_revision: 1,
     contract_ref: 'a'.repeat(64),
     target: { machine_id: 'm1', provider_id: 'p1', profile: 'session', session: 'synthetic' },
-    registration: { deadline: 500, caller_policy_revision: 'caller1', local_policy_revision: 'local1' }
+    registration: { deadline: 500 }
   }
 }
 

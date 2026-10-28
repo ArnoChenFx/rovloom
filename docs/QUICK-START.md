@@ -241,7 +241,7 @@ See the [management page guide](GATEWAY-WEBUI.md).
 | Task | How |
 |---|---|
 | Start again | Run `rovloom gateway --non-interactive` on the Gateway machine and `rovloom connector --non-interactive` on the Connector machine; saved pairing state is reused. For Docker Gateway, use `docker compose up -d`. |
-| Add another device | Keep the Gateway running, generate a new pairing code on the management page (or `rovloom gateway --issue-code`), and run the displayed join command on the new device. The original MCP caller's access expands to the new device; tokens made with `rovloom token create --like` must be re-created. |
+| Add another device | Keep the Gateway running, generate a new pairing code on the management page (or `rovloom gateway --issue-code`), and run the displayed join command on the new device. Full Gateway tokens created in the dashboard, and their clones, follow current paired targets within device_scope. Legacy ordinary tokens and their clones retain their approved targets and actions; newly exposed methods need no token recreation or method-list update. |
 | Credential lost or leaked | Delete the device on the management page (or simply) generate a new pairing code and run the join command on that machine; the local pairing state retires and the device re-pairs as a new identity. In-flight calls become unknown. |
 | Moving to another Gateway | Stop that Connector and run the new Gateway's join command (previous state retires automatically); or run `rovloom connector --unpair` first for a clean slate. |
 | Run at boot | `rovloom service install --role gateway` (or `connector`) — see [Boot services](SERVICE.md). |

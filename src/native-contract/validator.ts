@@ -34,7 +34,9 @@ export function verifySource(source: TrustedNativeContext, expected?: NativeBind
   if (!source || source.authenticated !== true || source.source_verified !== true) {
     fail('native_source_untrusted', 'source')
   }
-  const binding = snapshot(source.binding) as unknown as NativeBinding
+  const legacy = snapshot(source.binding) as unknown as NativeBinding
+  const { caller_policy_revision: _caller, local_policy_revision: _local, ...current } = legacy
+  const binding = Object.freeze(current) as NativeBinding
   if (binding.kind !== 'luvus') {
     fail('native_source_untrusted', 'source', 'runtime_kind')
   }
@@ -58,8 +60,6 @@ export function verifySource(source: TrustedNativeContext, expected?: NativeBind
     'connection_epoch',
     'recovery_generation',
     'capability_revision',
-    'caller_policy_revision',
-    'local_policy_revision',
     'classification_revision'
   ] as const) {
     if (typeof binding[field] !== 'string' || !binding[field].length || binding[field].length > 512) {

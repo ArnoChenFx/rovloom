@@ -25,8 +25,7 @@ test(
               : new LuvusAdapterError('native_request_invalid', 'outcome_unknown')
           }
         },
-        identities: f.identities,
-        localPolicies: f.localPolicies
+        identities: f.identities
       })
       try {
         await assert.rejects(
@@ -46,38 +45,23 @@ test(
   }
 )
 
-test(
-  '原attempt连接失效仍返回重新授权后的unknown元数据，不交付旧结果且不重派',
-  /* 真实Store/Router，只有原Wire查找明确为失效stub。 */ async () => {
-    const f = projectionFixture()
-    try {
-      f.override({ attempt_id: 'old_attempt', state: 'outcome_unknown' })
-      f.originalFailure(/* 失去原连接不能借持久记录重建许可。 */ () => new GatewayError('connection_unavailable'))
-      const view = (await f.service.execute('runtime_call_get', { call_id: 'call_fixture' }, f.context)).data
-      assert.equal(view.call_id, 'call_fixture')
-      assert.equal(view.state, 'outcome_unknown')
-      assert.equal(view.content_delivery, 'unavailable')
-      assert.equal(view.content_reason_code, 'unavailable')
-      assert.equal(view.contract_ref, null)
-      assert.equal(view.result, undefined)
-      assert.equal(f.calls.length, 0)
-      assert.equal(f.cancelled(), 0)
-      f.originalFailure(
-        /* 错误回调中同步撤权，不能把先前查到的ID交付出去。 */ () => {
-          f.setCaller(null)
-          return new GatewayError('connection_unavailable')
-        }
-      )
-      await assert.rejects(
-        /* 错误分支必须重新授权，不能回传撤权前的元数据。 */ () =>
-          f.service.execute('runtime_call_get', { call_id: 'call_fixture' }, f.context),
-        { code: 'unauthenticated' }
-      )
-    } finally {
-      f.close()
-    }
+test('未定调用保留持久契约引用，原连接丢失不重派', async () => {
+  const f = projectionFixture()
+  try {
+    f.override({ attempt_id: 'old_attempt', state: 'outcome_unknown' })
+    const view = (await f.service.execute('runtime_call_get', { call_id: 'call_fixture' }, f.context)).data
+    assert.equal(view.state, 'outcome_unknown')
+    assert.equal(view.contract_ref, 'a'.repeat(64))
+    assert.equal(view.result, undefined)
+    assert.equal(f.calls.length, 0)
+    f.setCaller(null)
+    await assert.rejects(f.service.execute('runtime_call_get', { call_id: 'call_fixture' }, f.context), {
+      code: 'unauthenticated'
+    })
+  } finally {
+    f.close()
   }
-)
+})
 
 test(
   'runtime投影保持原参数/期限，分页绑定主体与大小并逐页重新验权',

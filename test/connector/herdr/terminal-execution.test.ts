@@ -20,9 +20,6 @@ async function fixture(method: string, enabled?: boolean, installedEnabled = ena
   mkdirSync(join(root, 'claims'), { mode: 0o700 })
   state.record.method = method
   state.record.native_request = { method, params: { pane_id: 'owned', text: 'printf synthetic' } }
-  for (const side of [state.context.policies!.caller, state.context.policies!.local]) {
-    side.grants[0]!.methods = [method]
-  }
   const nativeSource = state.backend.nativeSource
   state.backend.nativeSource = /** 将 fixture 来源明确标为合成本机安装，不冒充认证远端报告。 */ (binding) => ({
     ...nativeSource(binding)!,

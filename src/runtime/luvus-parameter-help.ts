@@ -1,5 +1,24 @@
 // 已审核子集的调用提示与固定字段诊断；不冒充安装版原生 JSON Schema，不返回请求值。
+const sentinelAdvice =
+  'Use wait.output when runtime_discover lists it for this target. If it is not listed, it is not exposed by this provider; do not probe runtime_call. Old output and prompt echo can match, so verify the reply separately.'
+const sentinelUnavailable =
+  'wait.output is not exposed for this target and is unavailable. Do not call it; continue observing agent.read and pane.status. Its presence in the native schema does not mean this provider implements it.'
 const help = {
+  'agent.start': {
+    required: ['name', 'kind'],
+    optional: ['pane', 'anchor', 'direction', 'timeout_s', 'args'],
+    rules: [
+      'name and kind must each match ^[a-z][a-z0-9_-]{0,31}$: 1 to 32 lowercase ASCII letters, digits, underscores or hyphens, starting with a letter. kind must also identify an installed agent.',
+      'pane is optional. Omitting pane creates a new pane; anchor optionally selects the pane to split. To use an existing pane, supply pane. pane and anchor are mutually exclusive.',
+      'direction is auto, right or down. timeout_s is seconds (0..3600), with a native default of 30 seconds; leave RPC overhead before the runtime_call deadline.',
+      'Custom launch args require the local terminal-execution switch. A ready result means the agent was recognized as interactive, not that a prompt completed.'
+    ],
+    examples: [
+      { name: 'worker', kind: 'pi' },
+      { name: 'worker', kind: 'pi', pane: '2' },
+      { name: 'worker', kind: 'pi', anchor: '2', direction: 'right' }
+    ]
+  },
   'wait.output': {
     required: ['pane', 'match'],
     optional: ['timeout_s'],
@@ -28,8 +47,10 @@ const help = {
       'Select an agent target. until or timeout_s requires wait:true.',
       'timeout_s is seconds (0..3600). The runtime_call deadline must cover the requested wait and RPC overhead.',
       'wait:true requires a new working or blocked transition before matching until. A fast reply or missing positive state evidence can leave the wait unmatched.',
+      'A working state already present when the wait is registered is its baseline, not a new transition. Even until:["working"] can time out without a later active transition; observed_state records a transition, not the current status snapshot.',
       'evidence:timeout with observed_state:null means no qualifying transition was observed; with observed_state:working or blocked it means the requested until state was not matched before the deadline. Neither proves the agent failed to reply.',
-      'Prefer submitting without wait, then observing agent.read and pane.status. Use wait.output for an explicitly authorized literal output sentinel; old output and prompt echo can match, so verify the reply separately. Do not resend a submitted prompt on an observation timeout.',
+      'Prefer submitting without wait, then observing agent.read and pane.status. Do not resend a submitted prompt on an observation timeout.',
+      sentinelAdvice,
       'For fast-completing tasks, use two phases: agent.prompt without wait, followed by agent.wait on the resolved pane and agent.read. agent.wait matches current state, so verify the reply belongs to this turn even when matched:true.',
       'submitted/queued does not prove the agent consumed the prompt or finished replying.'
     ],
@@ -50,7 +71,7 @@ const help = {
 } as const
 
 type Method = keyof typeof help
-const rules = ['required', 'object', 'required_true', 'one_of', 'range', 'invalid_value'] as const
+const rules = ['required', 'object', 'required_true', 'one_of', 'range', 'pattern', 'invalid_value'] as const
 type Rule = (typeof rules)[number]
 export type LuvusParameterDiagnostic = Readonly<{
   method: Method
@@ -58,10 +79,18 @@ export type LuvusParameterDiagnostic = Readonly<{
 }>
 
 /** 每次返回独立数据；提示不改变 generic_params_only 或 conditional_branch 的原生事实。 */
-export function luvusParameterHelp(method: string): Record<string, unknown> | undefined {
-  return Object.hasOwn(help, method)
-    ? { source: 'rovloom_reviewed_subset', ...JSON.parse(JSON.stringify(help[method as Method])) }
-    : undefined
+export function luvusParameterHelp(
+  method: string,
+  visibleMethods?: readonly string[]
+): Record<string, unknown> | undefined {
+  if (!Object.hasOwn(help, method)) {
+    return undefined
+  }
+  const guide = { source: 'rovloom_reviewed_subset', ...JSON.parse(JSON.stringify(help[method as Method])) }
+  if (method === 'agent.prompt' && visibleMethods && !visibleMethods.includes('wait.output')) {
+    guide.rules = guide.rules.map((rule: string) => (rule === sentinelAdvice ? sentinelUnavailable : rule))
+  }
+  return guide
 }
 
 /** 只定位固定方法的已知字段和依赖关系，不复制未知键、参数值或原生/Ajv 错误文本。 */
@@ -85,6 +114,19 @@ export function luvusParameterDiagnostic(request: unknown): LuvusParameterDiagno
     for (const key of help[method].required) {
       if (values[key] === undefined) {
         issues.push({ path: '/params/' + key, rule: 'required' })
+      }
+    }
+    if (method === 'agent.start') {
+      for (const key of ['name', 'kind']) {
+        if (
+          values[key] !== undefined &&
+          (typeof values[key] !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(values[key]))
+        ) {
+          issues.push({ path: '/params/' + key, rule: 'pattern' })
+        }
+      }
+      if (values.pane !== undefined && values.anchor !== undefined) {
+        issues.push({ path: '/params/pane', rule: 'one_of' })
       }
     }
     if (method === 'agent.wait' && (values.status === undefined) === (values.statuses === undefined)) {

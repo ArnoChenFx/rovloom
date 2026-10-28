@@ -15,7 +15,6 @@ import {
   revokeCaller,
   rotateCaller,
   setDeviceScope,
-  setDiscardPermission,
   summarize
 } from './token-registry.js'
 import type { CallerRegistry } from './token-registry.js'
@@ -28,13 +27,12 @@ type Flags = {
   like?: string
   days?: number
   grace?: number
-  discard?: boolean
   devices?: string[]
   allDevices?: boolean
   noDevices?: boolean
 }
 
-const SUBCOMMANDS = ['list', 'create', 'renew', 'rotate', 'revoke', 'permissions', 'scope'] as const
+const SUBCOMMANDS = ['list', 'create', 'renew', 'rotate', 'revoke', 'scope'] as const
 
 function parse(args: readonly string[]): Flags {
   const sub = args[1]
@@ -70,8 +68,6 @@ function parse(args: readonly string[]): Flags {
       flags.noDevices = true
     } else if (name === '--all-devices' && flags.allDevices === undefined && value === 'true') {
       flags.allDevices = true
-    } else if (name === '--discard-response' && flags.discard === undefined && ['true', 'false'].includes(value)) {
-      flags.discard = value === 'true'
     } else if (name === '--ttl-days' && flags.days === undefined) {
       flags.days = number()
     } else if (name === '--grace-minutes' && flags.grace === undefined) {
@@ -86,7 +82,6 @@ function parse(args: readonly string[]): Flags {
     renew: ['principal', 'days'],
     rotate: ['principal', 'days', 'grace'],
     revoke: ['principal'],
-    permissions: ['principal', 'discard'],
     scope: ['principal', 'devices', 'allDevices', 'noDevices']
   }
   const required: Record<string, readonly (keyof Flags)[]> = {
@@ -95,10 +90,9 @@ function parse(args: readonly string[]): Flags {
     renew: ['principal'],
     rotate: ['principal'],
     revoke: ['principal'],
-    permissions: ['principal', 'discard'],
     scope: ['principal']
   }
-  for (const key of ['principal', 'like', 'days', 'grace', 'discard', 'devices', 'allDevices', 'noDevices'] as const) {
+  for (const key of ['principal', 'like', 'days', 'grace', 'devices', 'allDevices', 'noDevices'] as const) {
     if (flags[key] !== undefined && !allowed[sub]!.includes(key)) {
       throw new CliError('invalid_arguments')
     }
@@ -242,14 +236,6 @@ export async function handleTokenCommand(
       )
       issued = rotated.token
       io.stdout.write(rotated.token + '\n')
-    } else if (flags.sub === 'permissions') {
-      next = setDiscardPermission(registry, flags.principal!, flags.discard!)
-      io.stderr.write(
-        formatMessage(cliMessages(io.language)['token.permissions'], {
-          principal: flags.principal!,
-          discard: String(flags.discard)
-        })
-      )
     } else if (flags.sub === 'revoke') {
       next = revokeCaller(registry, flags.principal!)
       io.stderr.write(formatMessage(cliMessages(io.language)['token.revoked'], { principal: flags.principal! }))

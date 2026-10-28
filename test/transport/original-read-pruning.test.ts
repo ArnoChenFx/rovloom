@@ -158,17 +158,7 @@ test(
       const live = await completed(f, device.target)
       const original = f.gateway.resolveOriginalRead(discarded.call_id)!
       const expiredOriginal = f.gateway.resolveOriginalRead(expired.call_id)!
-      const grant = f.principal.policy.grants[0]!
-      const actions = [...grant.actions]
-      grant.actions = ['dispatch', 'cancel']
       f.counts.releases.length = 0
-      assert.equal(f.gateway.resolveOriginalRead(discarded.call_id), undefined)
-      assert.deepEqual(f.counts.releases, [], '读取撤权不误删所有者原上下文')
-      assert.throws(
-        /** 已取得的 Wire 引用也必须按当前 grant 拒绝。 */ () => original.wire.checkResult(original.binding)
-      )
-      grant.actions = actions
-      assert.equal(f.gateway.resolveOriginalRead(discarded.call_id)!.wire, original.wire)
       f.store.discardResponse(f.principal.id, discarded.call_id)
       assert.equal(f.gateway.resolveOriginalRead(discarded.call_id), undefined)
       assert.deepEqual(f.counts.releases, [discarded.call_id])

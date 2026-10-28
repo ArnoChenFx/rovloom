@@ -408,7 +408,7 @@ test(
       }
     } as unknown as LocalOwnerLuvusInstance
     assert.throws(
-      /** 工厂在读取任何伪造来源字段前核实际交付句柄。 */ () => createLuvusOperationsProvider(owner, 'local1'),
+      /** 工厂在读取任何伪造来源字段前核实际交付句柄。 */ () => createLuvusOperationsProvider(owner),
       /local_owner_unavailable/
     )
     assert.equal(invoked, false)

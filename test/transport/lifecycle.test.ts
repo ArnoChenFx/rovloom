@@ -81,8 +81,6 @@ test(
           connection_epoch: epoch,
           recovery_generation: a.credential.recovery_generation,
           capability_revision: 'caps1',
-          caller_policy_revision: 'caller1',
-          local_policy_revision: 'local1',
           classification_revision: 'review1',
           contract: nativeIdentity
         }

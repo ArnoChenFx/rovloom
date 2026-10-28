@@ -10,17 +10,15 @@
 - 原有的调用、结果句柄和未确认的响应不会迁移到新连接，也不会自动重发。
 - 通用的 `raw-contract` 参数契约由已审核的方法子集限制，不等于完整的参数 schema。
 
-### Caller 与 raw 授权
+### MCP token 与设备范围
 
-配对生成的 Gateway raw 授权绑定 `caller_policy_revision` 和精确方法集合。
-使用同一已批准策略的 gateway 范围 token 可以调用这些方法；实际 raw grant 每次按
-真实 caller 签发，并绑定当前连接、契约、目标和本次调用的固定 deadline。
-撤权、方法范围和 caller/local 双端策略检查继续生效。手动配置的
-`raw_grant.principal_id` 仍只允许该主体；它与 `caller_policy_revision` 互斥。
+MCP 不再按方法名分配 token 权限：在已批准的目标与 `dispatch/read/cancel` 动作范围内，所有 provider 已暴露的方法一视同仁。旧方法列表只在运行时展开，不修改原目标和动作；例如仅 `read` 的策略不会获得 `dispatch`。`device_scope` 继续收窄设备范围；吊销、过期、设备撤销和 provider 启用状态继续生效。完整 Gateway token 缺少权威 `gateway_policy` 时失败关闭，不能借用本机策略；旧普通 token 保留自己的目标和动作边界。
 
-旧单码配对的完整标准授权在 Gateway 启动时迁移内存副本，无需重新配对、更换 token
-或修改 Connector。自定义主体、方法子集、会话、修订和 binding 不自动扩大范围。
-先升级 Gateway；新 Connector 的策略格式清单需要新版 Gateway 接纳。
+新配对使用全方法标志，不保存当时的 35/36 项方法快照，也不再生成持久化 `raw_grant`。旧配置中的方法列表与 raw grant 仅兼容读取，不再限制 MCP 方法；无需按新增方法迁移授权。注册表解析以及 token 创建、续期、修改范围等写操作保留原策略，不把运行时的展开结果写盘。
+
+远端 raw 授权由可信 Gateway 在通过身份、目标和动作检查后逐次提供，取代旧配对清单这道显式 gate。它不证明 Gateway 拥有远端 OS 进程的 Owner 身份；authority 先复核实际认证 epoch、来源、契约、已实现方法与参数，再生成只绑定本次实际 caller、方法、来源、连接和固定 deadline 的原生许可。目录和调用准入使用同一 provider 暴露面，静态分类表或原生广告不能额外开放接口。
+
+升级并重启 Gateway 与 Connector 后，原 token 和配对继续使用，不需要手改多份文件。provider 目录只暴露当前后端实际实现的契约；设备运行开关与原生参数校验仍决定方法/参数是否可用。新配对的全方法标志无法由 0.6.9 解释，回滚前须恢复升级前两端完整状态，见[运维指南](OPERATIONS.md#升级与回滚)。
 
 Gateway 在编码阶段拒绝请求时，尚未写入设备通道；调用账本记录
 `not_dispatched` 和 Gateway 的 `dispatch_refused` 审计（含固定错误码），释放该次调用的
@@ -71,9 +69,15 @@ Luvus 0.14.3 的数字 `pane` 是进程级递增分配的 ID，不是布局中�
 - 例如等待 35 秒时把 `deadline` 设为当前时间加 45–60 秒，`wait_ms:0` 取得 call_id 后查询同一调用；HTTP 短等结束不重提调用。它仍是一条阻塞 native RPC，会占执行槽，不是异步 job。
 - 原生先检查已有 recent 输出，旧标记可能立即命中。需要区分执行时使用每次不同的标记；匹配不证明标记来自本轮命令，更不证明 exit code。不会自动插入 shell wrapper。
 - 命中回包形如 `{"type":"wait","matched":true,"pane":"2"}`；未命中或 pane 关闭时可为 `{"type":"wait","matched":false}`。Rovloom 原样保留，`matched:false` 不是 Gateway 派发失败，也不代表命令已经停止。
-- 只读等待不需要打开终端输入开关，但双方 dispatch/read ACL、原生权限和 raw 授权仍须允许 `wait.output`。原生 schema 对此方法是 generic，`runtime_describe` 提供明确标记来源的 `parameter_help`，不伪造完整原生参数 schema。
+- 只读等待不需要打开终端输入开关，使用可见设备的有效 MCP token 即可调用，原生来源和参数仍逐次核验。原生 schema 对此方法是 generic，`runtime_describe` 提供明确标记来源的 `parameter_help`，不伪造完整原生参数 schema。
 
-部署需要 Gateway 与 Connector 都支持此方法；已有 35 方法授权保持原范围，升级不会自动加入 `wait.output`。所有者须在 Gateway 当前 caller/local 策略、该 provider 的 `raw_grant.methods` 与 Connector 当前 caller/local 方法授权中明确加入它。新配对包含该只读方法；旧清单的配对重入与 caller 授权迁移保留原方法集合，不强制重配，也不扩大自定义子集。
+升级并重启两端即可沿用原 token 调用 `wait.output`。没有额外的方法授权配置；新方法进入 provider 暴露面后自动对可见设备的有效 token 可用。
+
+### 先确认当前 provider 已暴露
+
+先对实际 target 运行 `runtime_discover`，再 describe 和调用。未列出表示当前 provider 未暴露该方法，可能是后端未实现、原生契约/能力未提供或运行设置不允许；不需要编辑 caller/local/raw 方法清单。`agent.prompt.parameter_help` 根据当前目录给出可用性提示，原生 generic 参数仍以 `generic_params_only` 和 `parameter_help` 展示，不合成专用原生 schema。
+
+`runtime_describe not_found` 是当前目录不存在该方法，不是整个原生安装的全局查询。`forbidden` 仍可表示 token 不可见的设备或原生权限拒绝，不再用于 token 方法白名单。
 
 原生语义依据：[0.14.3 wait.output 接口](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/ipc/api.rs)与[已有输出检查和等待器](https://github.com/RizRiyz/luvus/blob/54003ce9568acb2977e4bbdbb30a61f99faa0465/src/app/dispatch/agent_workflow.rs)。`pane.run` 的 stdout / exit code 派生执行能力继续在 [#292](https://github.com/ArnoChenFx/rovloom/issues/292) 跟踪，不包含在此等待接口中。
 
@@ -128,10 +132,19 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 
 例如 `agent.prompt` 的原生根注释明确说明：等待模式须先观察到新的 working/blocked 转换，再匹配 `until`；`agent.wait` 则只是当前状态匹配器。快速回复或缺少正向状态证据时，前者可能一直未匹配，即使 Agent 实际已答完。MCP 可直接读到原生注释和下面的审核提示。
 
-`runtime_describe` 对 `agent.wait`、`agent.prompt`、`pane.run`、`wait.output` 附带
+`runtime_describe` 对 `agent.start`、`agent.wait`、`agent.prompt`、`pane.run`、`wait.output` 附带
 `parameter_help`：必填/可选字段、依赖规则和示例，来源标记为
 `rovloom_reviewed_subset`。它是 Rovloom 已审核子集的调用指南，原来的
 `schema_status` 仍表示安装版原生 schema 的覆盖情况。`runtime_discover` 不附带这些示例。
+
+`agent.start` 必填 `name` 和 `kind`，两者均须匹配 `^[a-z][a-z0-9_-]{0,31}$`（小写 ASCII 字母开头，最长 32 字符）；格式错误会在登记前定位到 `/params/name` 或 `/params/kind`，规则为 `pattern`。`kind` 还须是原生已安装的 Agent，格式有效不证明该 Agent 可用。`pane` 是可选字段：提供时使用已有 pane，省略时由 Luvus 新建 pane；可用 `anchor` 指定分屏锚点，不能同时传 `pane` 和 `anchor`。启动回包中的 `pane` 是后续应使用的真实标识，`ready:true` 不代表一轮 prompt 已完成。
+
+```json
+{"method":"agent.start","params":{"name":"worker","kind":"pi"}}
+{"method":"agent.start","params":{"name":"worker","kind":"pi","pane":"2"}}
+```
+
+上面分别演示新建 pane 和使用已有 pane，应按意图选一个调用；Rovloom 不替调用方补 pane，也不会为定位参数错误启动 Agent。该方法的原生 `schema_status` 仍为 `generic_params_only`，审核提示不冒充专用原生参数 schema。
 
 两个 Agent 等待入口的参数不同：
 
@@ -159,7 +172,7 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 1. 从 `agent.get` / `pane.get` 确认选定 Agent、pane、`terminal_id` 和 session，并读取一次输出作为基线。
 2. 调用 `agent.prompt`，省略 `wait`、`until` 和 `timeout_s`，带上已观察的 `terminal_id` 与 `strict:true`。保留返回的提交证据和同一 `call_id`，不要因观察超时重发 prompt。
 3. 用短调用轮询 `agent.read` / `pane.status`，核对终端与 session 仍相同。输出或 `content_revision` 变化只证明活动；状态为 `idle` 且 `state_source:"no_positive_state_evidence"` 时按未知处理。读到与本轮请求相关的真实 Agent 回复后再向用户交付结果，不能用终端输入回显替代。
-4. 如果任务约定了可验证的输出标记，可调用上文的 `wait.output`，随后读取并核对内容。已有 recent 输出或本次 prompt 的输入回显都可能命中；不要把原样写在 prompt 中的标记当作回复完成证据。没有约定可验证标记时，继续有界轮询输出，不制造通用完成保证。
+4. 如果当前 `runtime_discover` 已列出 `wait.output`，且任务约定了可验证的输出标记，可调用该方法，随后读取并核对内容。未列出时继续读取 `agent.read` / `pane.status`，不要尝试调用。已有 recent 输出或本次 prompt 的输入回显都可能命中；不要把原样写在 prompt 中的标记当作回复完成证据。没有约定可验证标记时，继续有界轮询输出，不制造通用完成保证。
 
 无等待提交示例（使用实际观察到的选择器）：
 
@@ -195,6 +208,8 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 例如 `status:"idle", matched:false, evidence:"timeout", observed_state:null` 与 Agent 已经输出答案并不矛盾。该回包仍是正常收到的原生响应，Rovloom 调用可为 `responded`；它不同于 Gateway 派发失败或未获得回包。Rovloom 不凭当前 idle 改成 `matched:true`。原生 evidence 的改进跟踪在 [#301](https://github.com/ArnoChenFx/rovloom/issues/301)。
 
 v0.6.8 的部署验收还确认：即使 `until:["done","idle"]` 且原生已回报 `status:"done"`，没有观测到新的 working/blocked 时仍可能返回 `matched:false, evidence:"timeout", observed_state:null`。长阻塞等待的通道修复和两段式可用，不表示这个原生一段式行为已经修复；需要 Luvus 原生层调整等待语义及响应 schema，Rovloom 保留原文。
+
+v0.6.9 现场又报告 `until:["working"]`、`["done"]`、`["done","idle"]` 均等待 20 秒后返回 timeout/null/done。原生在提交时将当前状态记为等待基线；若已是 working，后续 working 采样不构成新的跃迁，直接变为 done 也不产生 working/blocked 跃迁。`observed_state` 不是当前状态镜像，因此 null 与当前 `status:done` 可以并存；不能仅凭 null 断定采样链路未连接。这一基线与跃迁条件需由 Luvus 原生改进，不是已修复的 Rovloom 功能。
 
 ## 验证
 

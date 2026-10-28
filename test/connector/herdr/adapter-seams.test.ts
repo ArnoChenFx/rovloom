@@ -47,40 +47,6 @@ test(
 )
 
 test(
-  'valid native evidence survives read revocation while content delivery remains forbidden',
-  /** 撤回 read grant 后保留原生证据校验，同时拒绝内容交付。 */ () => {
-    const state = prepared()
-    state.backend.context('principal1', 'connector_to_gateway').policies!.local.grants[0]!.actions = ['dispatch']
-    assert.doesNotThrow(
-      /** 验证已派发调用的合法回包不因读取撤权被丢弃。 */ () =>
-        state.adapter.validator.validateResponse(fixture().response, state.context)
-    )
-    assert.throws(
-      /** 在读取撤权后检查内容边界的独立拒绝。 */ () => state.adapter.checkResult(state.context),
-      /provider_scope_forbidden/
-    )
-  }
-)
-
-test(
-  'policy revision change preserves evidence and current read but rejects new dispatch',
-  /** 改变当前策略 revision，分别验证证据、当前读取及禁止重新派发。 */ () => {
-    const state = prepared()
-    state.backend.context('principal1', 'connector_to_gateway').policies!.local.revision = 'local2'
-    assert.doesNotThrow(
-      /** 使用原 permit 验证策略变化后的合法回包。 */ () =>
-        state.adapter.validator.validateResponse(fixture().response, state.context)
-    )
-    assert.doesNotThrow(/** 检查仍有当前 read grant 的内容交付边界。 */ () => state.adapter.checkResult(state.context))
-    assert.throws(
-      /** 用过期策略 revision 重新编码请求，检查派发拒绝。 */ () =>
-        state.adapter.encodeRequest(state.request, state.context),
-      /policy_revision_stale/
-    )
-  }
-)
-
-test(
   'background evidence needs no current reader while actual delivery does',
   /** 移除当前读者，核对后台证据仍有效而内容交付失败。 */ () => {
     const state = prepared()
@@ -243,8 +209,6 @@ function stored(prepare = true, requestValue = { method: 'ping', params: {} as J
   const options = {
     binding_revision: 1,
     contract_ref: state.binding.contract_ref,
-    caller_policy_revision: 'caller1',
-    local_policy_revision: 'local1',
     timeoutMs: 20
   }
   const call = store.createCall('principal1', target, state.record.native_request, options)
@@ -256,10 +220,6 @@ function stored(prepare = true, requestValue = { method: 'ping', params: {} as J
     connection_epoch: device.epoch,
     recovery_generation: store.generation(),
     negotiated: { major: 2, minor: 0, capabilities: ['rpc', 'late_evidence'] }
-  }
-  for (const side of [state.context.policies!.caller, state.context.policies!.local]) {
-    side.grants[0]!.target = target
-    side.grants[0]!.methods = [requestValue.method]
   }
   const local = { ...provider }
   const token = Object.freeze({ owned_synthetic_socket: true })
@@ -459,13 +419,6 @@ test(
   /** ping 授权不能扩展到元数据；原请求正文、当前派发权和当前读权分别检查。 */ () => {
     const state = stored(false, metadataRequest())
     try {
-      const policy = state.backend.context('principal1', 'gateway_to_connector').policies!
-      policy.local.grants[0]!.methods = ['ping']
-      assert.throws(
-        /** 仅拥有旧 ping grant 时禁止派发新方法。 */ () => state.adapter.encodeRequest(state.request, state.context),
-        /provider_scope_forbidden/
-      )
-      policy.local.grants[0]!.methods = ['workspace.report_metadata']
       assert.throws(
         /** 原 binding 不能改写 token 内容后重新编码。 */ () =>
           state.adapter.encodeRequest(
@@ -475,17 +428,12 @@ test(
         /attempt_request_mismatch/
       )
       state.adapter.encodeRequest(state.request, state.context)
-      policy.local.grants[0]!.actions = ['dispatch']
       assert.deepEqual(
         state.adapter.decodeResponse(
           Buffer.from(JSON.stringify(state.frame.payload.native_response) + '\n'),
           state.context
         ),
         state.frame.payload.native_response
-      )
-      assert.throws(
-        /** 合法响应证据不绕过当前读取授权。 */ () => state.adapter.checkResult(state.context),
-        /provider_scope_forbidden/
       )
     } finally {
       state.close()
@@ -969,16 +917,6 @@ test(
         ...state.frame,
         type: 'cancel' as const,
         payload: { attempt: state.identity, reason: 'caller_cancelled' as const }
-      }
-      assert.throws(
-        /** 缺 cancel grant 不能停止其它调用者的桥接等待。 */ () => wire.encode(cancel, 'gateway_to_connector'),
-        /provider_scope_forbidden/
-      )
-      for (const side of [
-        state.backend.context('principal1', 'gateway_to_connector').policies!.caller,
-        state.backend.context('principal1', 'gateway_to_connector').policies!.local
-      ]) {
-        side.grants[0]!.actions.push('cancel')
       }
       assert.equal(JSON.parse(wire.encode(cancel, 'gateway_to_connector')).type, 'cancel')
       assert.equal(state.adapter.stats().executions, 1)
