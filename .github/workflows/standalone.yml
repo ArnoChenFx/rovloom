@@ -66,7 +66,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          if [[ -f src/cli/main.ts && -f src/native-contract/compiler-worker.ts ]]; then
+          if [[ -f src/cli/main.ts && -f src/connector/luvus/contract/compiler-worker.ts ]]; then
             bun --no-env-file run release:build
             extension=''
             if [[ "$RUNNER_OS" == Windows ]]; then extension='.exe'; fi
@@ -128,7 +128,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -f src/native-contract/compiler-worker.ts ]]; then
+          if [[ -f src/connector/luvus/contract/compiler-worker.ts ]]; then
             bun --no-env-file scripts/release/native-smoke.mjs
             if [[ "$RUNNER_OS" == Windows ]]; then
               python scripts/release/verify-windows-icon.py dist/release/${{ matrix.target }}/probe/packaging-probe.exe

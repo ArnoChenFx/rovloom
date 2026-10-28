@@ -7,15 +7,15 @@ import { createServer } from 'node:net'
 import type { Server } from 'node:net'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { DISPATCH_CLAIMS_LOCK_FORMAT, DispatchClaims } from '../../src/connector/claims.js'
+import { DISPATCH_CLAIMS_LOCK_FORMAT, DispatchClaims } from '../../../src/connector/claims.js'
 import {
   LUVUS_OWNER_FORMAT,
   recoverDispatchClaimsLock,
   recoverLuvusOwnerLock
-} from '../../src/connector/luvus/host/native-crash-recovery.js'
-import { createNativeRecord } from '../../src/connector/luvus/host/native-record-files.js'
-import { currentProcessIdentity } from '../../src/storage/process-identity.js'
-import { privateHerdrTestRoot } from '../connector/herdr/private-root.js'
+} from '../../../src/connector/luvus/host/native-crash-recovery.js'
+import { createNativeRecord } from '../../../src/connector/luvus/host/native-record-files.js'
+import { currentProcessIdentity } from '../../../src/storage/process-identity.js'
+import { privateHerdrTestRoot } from '../herdr/private-root.js'
 
 // 崩溃恢复依赖进程身份证据：Linux（/proc）与 macOS（libproc）有，Windows 另有 e2e。
 const unixHost = process.platform === 'linux' || process.platform === 'darwin'

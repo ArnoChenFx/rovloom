@@ -5,15 +5,18 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
-import { DispatchClaims } from '../../src/connector/luvus/index.js'
-import type { LuvusLocalConfig } from '../../src/connector/luvus/index.js'
-import { FIXED_LUVUS_SHA256, FIXED_LUVUS_SCHEMA_SHA256 } from '../../src/connector/luvus/host/native-control.js'
-import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/connector/luvus/host/native-source.js'
-import { createNativeRecord } from '../../src/connector/luvus/host/native-record-files.js'
-import { ownedPathStamp } from '../../src/connector/luvus/host/native-process.js'
-import { createLuvusProductionSources } from '../../src/connector/luvus/host/production-luvus.js'
-import type { LuvusProductionOwnerConfig } from '../../src/connector/luvus/host/production-luvus.js'
-import { boundedJson, hash } from '../../src/wire/index.js'
+import { DispatchClaims } from '../../../src/connector/luvus/index.js'
+import type { LuvusLocalConfig } from '../../../src/connector/luvus/index.js'
+import { FIXED_LUVUS_SHA256, FIXED_LUVUS_SCHEMA_SHA256 } from '../../../src/connector/luvus/host/native-control.js'
+import {
+  MANAGED_LUVUS_CLASSIFICATION,
+  MANAGED_LUVUS_REVISION
+} from '../../../src/connector/luvus/host/native-source.js'
+import { createNativeRecord } from '../../../src/connector/luvus/host/native-record-files.js'
+import { ownedPathStamp } from '../../../src/connector/luvus/host/native-process.js'
+import { createLuvusProductionSources } from '../../../src/connector/luvus/host/production-luvus.js'
+import type { LuvusProductionOwnerConfig } from '../../../src/connector/luvus/host/production-luvus.js'
+import { boundedJson, hash } from '../../../src/wire/index.js'
 
 type MutableOwnerConfig = { -readonly [K in keyof LuvusProductionOwnerConfig]: LuvusProductionOwnerConfig[K] }
 
@@ -42,7 +45,7 @@ test(
           adapter_revision: MANAGED_LUVUS_REVISION,
           classification_revision: MANAGED_LUVUS_CLASSIFICATION,
           schema_bundle: readFileSync(
-            new URL('../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url),
+            new URL('../../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url),
             'utf8'
           )
         }
@@ -64,7 +67,7 @@ test(
 /** 建立真实受保护目录与合成 root 记录；假 binary 的真实摘要不符，必须在任何 child 启动前拒绝。 */
 function fixture(agentDirectory?: string) {
   const directory = mkdtempSync(
-    join(process.env.LUVUS_TEST_ROOT ?? fileURLToPath(new URL('../../', import.meta.url)), '.production-luvus-')
+    join(process.env.LUVUS_TEST_ROOT ?? fileURLToPath(new URL('../../../', import.meta.url)), '.production-luvus-')
   )
   const home = join(directory, 'home')
   const native = join(directory, 'native')

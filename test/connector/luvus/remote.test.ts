@@ -4,25 +4,28 @@ import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { checkDispatch, createNativeValidator } from '../../src/connector/luvus/contract/index.js'
-import type { DispatchAuthorization } from '../../src/connector/luvus/contract/index.js'
-import type { TrustedAttempt } from '../../src/wire/backend.js'
-import type { Connection } from '../../src/transport/index.js'
-import { boundedJson, contractRef, hash } from '../../src/wire/index.js'
-import type { AttemptBinding, ContractSource } from '../../src/wire/types.js'
+import { checkDispatch, createNativeValidator } from '../../../src/connector/luvus/contract/index.js'
+import type { DispatchAuthorization } from '../../../src/connector/luvus/contract/index.js'
+import type { TrustedAttempt } from '../../../src/wire/backend.js'
+import type { Connection } from '../../../src/transport/index.js'
+import { boundedJson, contractRef, hash } from '../../../src/wire/index.js'
+import type { AttemptBinding, ContractSource } from '../../../src/wire/types.js'
 import {
   checkedRemoteLuvusConfig,
   createPinnedRemoteLuvus,
   type LuvusProductionRemoteConfig
-} from '../../src/connector/luvus/host/remote-luvus.js'
-import { FIXED_LUVUS_SCHEMA_SHA256, FIXED_LUVUS_SHA256 } from '../../src/connector/luvus/host/native-control.js'
-import { publishSchema, schemaReference } from '../../src/connector/schema-store.js'
-import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/connector/luvus/host/native-source.js'
-import type { RuntimeProvider } from '../../src/runtime/types.js'
+} from '../../../src/connector/luvus/host/remote-luvus.js'
+import { FIXED_LUVUS_SCHEMA_SHA256, FIXED_LUVUS_SHA256 } from '../../../src/connector/luvus/host/native-control.js'
+import { publishSchema, schemaReference } from '../../../src/connector/schema-store.js'
+import {
+  MANAGED_LUVUS_CLASSIFICATION,
+  MANAGED_LUVUS_REVISION
+} from '../../../src/connector/luvus/host/native-source.js'
+import type { RuntimeProvider } from '../../../src/runtime/types.js'
 
-const schema = readFileSync(new URL('../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8')
+const schema = readFileSync(new URL('../../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8')
 const capabilitiesBytes = readFileSync(
-  new URL('../fixtures/luvus/0.14.3/linux/session-capabilities.json', import.meta.url),
+  new URL('../../fixtures/luvus/0.14.3/linux/session-capabilities.json', import.meta.url),
   'utf8'
 )
 const reference = 'remote_config'
@@ -197,7 +200,7 @@ test(
   'remote pin 支持内容寻址引用，旧内嵌 schema_bundle 仍按同一摘要编译',
   /** 布局统一不改变原始字节或契约身份：两种来源都必须产出同一编译身份。 */ async () => {
     const directory = mkdtempSync(
-      join(process.env.LUVUS_TEST_ROOT ?? fileURLToPath(new URL('../../', import.meta.url)), '.remote-luvus-schema-')
+      join(process.env.LUVUS_TEST_ROOT ?? fileURLToPath(new URL('../../../', import.meta.url)), '.remote-luvus-schema-')
     )
     try {
       mkdirSync(join(directory, 'managed'), { mode: 0o700 })

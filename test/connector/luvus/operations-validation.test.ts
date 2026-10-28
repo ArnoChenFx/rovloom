@@ -3,20 +3,23 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { checkDispatch, compileBundle, createNativeValidator } from '../../src/connector/luvus/contract/index.js'
-import type { NativeBinding, TrustedNativeContext } from '../../src/connector/luvus/contract/index.js'
-import type { NativeContractRecord, TrustedAttempt } from '../../src/wire/backend.js'
-import { boundedJson, contractRef } from '../../src/wire/index.js'
-import type { ContractSource } from '../../src/wire/types.js'
-import { FIXED_LUVUS_SCHEMA_SHA256, FIXED_LUVUS_SHA256 } from '../../src/connector/luvus/host/native-control.js'
-import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/connector/luvus/host/native-source.js'
+import { checkDispatch, compileBundle, createNativeValidator } from '../../../src/connector/luvus/contract/index.js'
+import type { NativeBinding, TrustedNativeContext } from '../../../src/connector/luvus/contract/index.js'
+import type { NativeContractRecord, TrustedAttempt } from '../../../src/wire/backend.js'
+import { boundedJson, contractRef } from '../../../src/wire/index.js'
+import type { ContractSource } from '../../../src/wire/types.js'
+import { FIXED_LUVUS_SCHEMA_SHA256, FIXED_LUVUS_SHA256 } from '../../../src/connector/luvus/host/native-control.js'
+import {
+  MANAGED_LUVUS_CLASSIFICATION,
+  MANAGED_LUVUS_REVISION
+} from '../../../src/connector/luvus/host/native-source.js'
 import {
   assertLuvusOperationsContract,
   createLuvusOperationsValidation
-} from '../../src/connector/luvus/operations-validation.js'
-import { LUVUS_OPERATION_METHODS } from '../../src/connector/luvus/operations.js'
+} from '../../../src/connector/luvus/operations-validation.js'
+import { LUVUS_OPERATION_METHODS } from '../../../src/connector/luvus/operations.js'
 
-const schema = readFileSync(new URL('../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url))
+const schema = readFileSync(new URL('../../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url))
 const result = await compileBundle(schema, {
   identity: {
     binary_sha256: FIXED_LUVUS_SHA256,
@@ -30,7 +33,7 @@ const compiled = result.value
 /** 每个场景复制原官方能力 envelope，session 与 generation 仅换为明确的合成测试值。 */
 function record(): NativeContractRecord {
   const capabilities = JSON.parse(
-    readFileSync(new URL('../fixtures/luvus/0.14.3/linux/session-capabilities.json', import.meta.url), 'utf8')
+    readFileSync(new URL('../../fixtures/luvus/0.14.3/linux/session-capabilities.json', import.meta.url), 'utf8')
   )
   capabilities.result.session = 'synthetic'
   capabilities.result.server_generation = 'generation1'

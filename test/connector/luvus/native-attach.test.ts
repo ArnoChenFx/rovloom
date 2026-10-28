@@ -5,16 +5,16 @@ import { createConnection, createServer, Socket } from 'node:net'
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { attachExistingLuvus } from '../../src/connector/luvus/host/native-attach.js'
-import { observeLinuxLuvusProcess } from '../../src/connector/luvus/host/native-process.js'
-import { FIXED_LUVUS_SHA256 } from '../../src/connector/luvus/host/native-control.js'
-import { LuvusAdapterError } from '../../src/connector/luvus/index.js'
-import type { LuvusLocalConfig } from '../../src/connector/luvus/index.js'
+import { attachExistingLuvus } from '../../../src/connector/luvus/host/native-attach.js'
+import { observeLinuxLuvusProcess } from '../../../src/connector/luvus/host/native-process.js'
+import { FIXED_LUVUS_SHA256 } from '../../../src/connector/luvus/host/native-control.js'
+import { LuvusAdapterError } from '../../../src/connector/luvus/index.js'
+import type { LuvusLocalConfig } from '../../../src/connector/luvus/index.js'
 
 /** 使用自有私有目录与不会通过官方哈希检查的标记文件，避免普通测试依赖真实 native 安装。 */
 function fixture() {
   const root = mkdtempSync(
-    join(process.env.LUVUS_TEST_ROOT ?? fileURLToPath(new URL('../../', import.meta.url)), '.native-attach-')
+    join(process.env.LUVUS_TEST_ROOT ?? fileURLToPath(new URL('../../../', import.meta.url)), '.native-attach-')
   )
   const home = join(root, 'home')
   for (const path of ['state', 'project', 'home', 'home/config', 'home/data', 'home/cache', 'home/runtime']) {

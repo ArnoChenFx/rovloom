@@ -6,25 +6,25 @@ import { createRequire } from 'node:module'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ownedPathStamp } from '../../src/connector/luvus/host/native-process.js'
+import { ownedPathStamp } from '../../../src/connector/luvus/host/native-process.js'
 import {
   OwnedProcessShutdownError,
   signalOwnedPidfd,
   stopOwnedProcess
-} from '../../src/connector/luvus/host/native-process.js'
+} from '../../../src/connector/luvus/host/native-process.js'
 import type {
   OwnedProcessSignal,
   OwnedProcessSignalAttempt,
   OwnedProcessStopPort
-} from '../../src/connector/luvus/host/native-process.js'
+} from '../../../src/connector/luvus/host/native-process.js'
 
 const limits = { grace_ms: 5, exit_ms: 20 }
 
 test(
   'owned path rejects relative and noncanonical inputs before traversing a parent chain',
   /** 独立自有 Bun 进程受父进程硬截止保护，回归时坏路径不能卡住主测试事件循环。 */ () => {
-    const module = new URL('../../src/connector/luvus/host/native-process.ts', import.meta.url).href
-    const errors = new URL('../../src/connector/luvus/types.ts', import.meta.url).href
+    const module = new URL('../../../src/connector/luvus/host/native-process.ts', import.meta.url).href
+    const errors = new URL('../../../src/connector/luvus/types.ts', import.meta.url).href
     const code = `
       import assert from 'node:assert/strict';
       import { ownedPathStamp } from ${JSON.stringify(module)};
@@ -60,7 +60,7 @@ test(
   'owned path completes a canonical protected parent chain with the same identity',
   /** 合法私有目录保留既有身份戳；规范校验不认领 native 实例或读取配置。 */ () => {
     const root = mkdtempSync(
-      join(process.env.LUVUS_TEST_ROOT ?? fileURLToPath(new URL('../../', import.meta.url)), '.owned-path-')
+      join(process.env.LUVUS_TEST_ROOT ?? fileURLToPath(new URL('../../../', import.meta.url)), '.owned-path-')
     )
     try {
       const first = ownedPathStamp(root, 'directory')

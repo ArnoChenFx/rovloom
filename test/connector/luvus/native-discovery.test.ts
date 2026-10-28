@@ -5,17 +5,17 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync 
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
-import { attachExistingLuvus } from '../../src/connector/luvus/host/native-attach.js'
-import { discoverLuvusInstallation, readLuvusVersion } from '../../src/connector/luvus/host/native-control.js'
-import { initializeManagedLuvusRoot } from '../../src/connector/luvus/host/native-root.js'
-import { observedLuvusContract, MANAGED_LUVUS_REVISION } from '../../src/connector/luvus/host/native-source.js'
-import { compileBundle, createNativeValidator } from '../../src/connector/luvus/contract/index.js'
-import type { LuvusLocalConfig } from '../../src/connector/luvus/types.js'
-import { unknownSchemaBundle } from '../connector/luvus/contract/unknown-schema-fixture.js'
-import { validateProviderSnapshot } from '../../src/wire/index.js'
-import { providerIsolationFixture } from '../transport/provider-isolation-helpers.js'
-import { until } from '../transport/helpers.js'
-import { G } from '../connector/luvus/contract/helpers.js'
+import { attachExistingLuvus } from '../../../src/connector/luvus/host/native-attach.js'
+import { discoverLuvusInstallation, readLuvusVersion } from '../../../src/connector/luvus/host/native-control.js'
+import { initializeManagedLuvusRoot } from '../../../src/connector/luvus/host/native-root.js'
+import { observedLuvusContract, MANAGED_LUVUS_REVISION } from '../../../src/connector/luvus/host/native-source.js'
+import { compileBundle, createNativeValidator } from '../../../src/connector/luvus/contract/index.js'
+import type { LuvusLocalConfig } from '../../../src/connector/luvus/types.js'
+import { unknownSchemaBundle } from './contract/unknown-schema-fixture.js'
+import { validateProviderSnapshot } from '../../../src/wire/index.js'
+import { providerIsolationFixture } from '../../transport/provider-isolation-helpers.js'
+import { until } from '../../transport/helpers.js'
+import { G } from './contract/helpers.js'
 
 /** 为被测安装生成原字节摘要，与任何内嵌发行版摘要无关。 */
 function hash(value: string | Uint8Array): string {
@@ -25,13 +25,13 @@ function hash(value: string | Uint8Array): string {
 /** 合成私有目录只含无害 CLI 脚本与测试 schema，清理由本测试负责。 */
 function fixture() {
   const root = mkdtempSync(
-    join(process.env.LUVUS_TEST_ROOT ?? fileURLToPath(new URL('../../', import.meta.url)), '.native-discovery-')
+    join(process.env.LUVUS_TEST_ROOT ?? fileURLToPath(new URL('../../../', import.meta.url)), '.native-discovery-')
   )
   for (const name of ['home', 'home/config', 'home/data', 'home/cache', 'home/runtime', 'state', 'cwd', 'control']) {
     mkdirSync(join(root, name), { mode: 0o700 })
   }
   const schema =
-    readFileSync(new URL('../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8') + '\n'
+    readFileSync(new URL('../../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8') + '\n'
   writeFileSync(join(root, 'schema.json'), schema, { mode: 0o600 })
   const binary = join(root, 'synthetic-luvus')
   const source = `#!/bin/sh
@@ -74,7 +74,7 @@ test(
         signal: new AbortController().signal
       })
       const frame = JSON.parse(
-        readFileSync(new URL('../fixtures/luvus/0.14.3/linux/session-capabilities.json', import.meta.url), 'utf8')
+        readFileSync(new URL('../../fixtures/luvus/0.14.3/linux/session-capabilities.json', import.meta.url), 'utf8')
       )
       frame.result.session = 'synthetic'
       frame.result.server_generation = G
@@ -170,7 +170,7 @@ test(
       assert.equal(discovered.config.binary_sha256, f.config.binary_sha256)
       assert.equal(discovered.config.allow_terminal_execution, false)
       const frame = JSON.parse(
-        readFileSync(new URL('../fixtures/luvus/0.14.3/linux/session-capabilities.json', import.meta.url), 'utf8')
+        readFileSync(new URL('../../fixtures/luvus/0.14.3/linux/session-capabilities.json', import.meta.url), 'utf8')
       )
       frame.result.session = 'synthetic'
       const observed = observedLuvusContract(

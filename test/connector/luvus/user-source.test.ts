@@ -4,9 +4,9 @@ import { createHash } from 'node:crypto'
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { luvusSessionRunning, userLuvusEnvironment } from '../../src/connector/luvus/host/luvus-user-source.js'
-import type { LuvusLocalConfig } from '../../src/connector/luvus/types.js'
-import { privateHerdrTestRoot } from '../connector/herdr/private-root.js'
+import { luvusSessionRunning, userLuvusEnvironment } from '../../../src/connector/luvus/host/luvus-user-source.js'
+import type { LuvusLocalConfig } from '../../../src/connector/luvus/types.js'
+import { privateHerdrTestRoot } from '../herdr/private-root.js'
 
 /** 用一个只回放固定 JSON 的脚本代替 luvus 二进制，检查我们如何解读会话列表。 */
 function fixture(sessions: unknown, exit = 0) {
