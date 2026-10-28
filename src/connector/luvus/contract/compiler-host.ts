@@ -1,3 +1,4 @@
+import { CompilerWorkerOwner, compilerDeadline, settleCompilerTask } from '../../compiler-worker.js'
 // 管理有界 Bun 编译任务并加载本进程私有任务的 standalone 产物；不接收 caller 代码或路径。
 import { randomUUID } from 'node:crypto'
 import type { ValidateFunction } from 'ajv'
@@ -174,15 +175,21 @@ function install(value: unknown, expected: Expected): CompiledContract {
 
 // 一个宿主服务最多一个在途任务；超时/取消/Worker 故障后永久退役该服务，不自动补建或恢复旧代次。
 export class SchemaCompiler {
-  #worker: CompilerPort | undefined
+  #host: CompilerWorkerOwner<CompilerPort>
   #pending: Pending | undefined
   #closed = false
 
   // 由受信模块固定 Worker 工厂；不在公共编译 API 接收代码或文件路径。
   constructor(
-    private readonly createWorker: () => CompilerPort,
+    createWorker: () => CompilerPort,
     private readonly timeoutMs = COMPILE_TIMEOUT_MS
-  ) {}
+  ) {
+    this.#host = new CompilerWorkerOwner(
+      createWorker,
+      (worker, value) => this.#receive(worker, value),
+      (reason) => this.#retire(reason)
+    )
+  }
 
   // 输入先复制并计量，计时覆盖 Worker 启动、生成、消息与主线程代码初始化；不承诺硬实时物理退出。
   compile(bytes: Uint8Array | string, options: CompileOptions, signal?: AbortSignal): Promise<Check<CompiledContract>> {
@@ -230,50 +237,24 @@ export class SchemaCompiler {
     return new Promise(
       /* 每个任务只结算一次，取消和迟到消息按原 Worker 实例隔离。 */ (resolve) => {
         const id = randomUUID()
-        const cancel = /* 取消后整个编译服务退役，旧回复不能登记任何宿主句柄。 */ () =>
-          this.#retire('compiler_cancelled')
-        const timer = setTimeout(
-          /* 期限到达请求终止，未完成生成物不进入 registry。 */ () => this.#retire('compiler_timeout'),
-          Math.max(0, until - performance.now())
-        )
+        const lease = compilerDeadline(until, signal, (reason) => this.#retire(reason))
         this.#pending = {
           id,
           resolve,
-          timer,
-          cancel,
-          signal,
+          ...lease,
           until,
           identity: prepared.value.identity,
           budget: prepared.value.budget,
           inputSha256: prepared.value.inputSha256,
           input: prepared.value.input
         }
-        signal?.addEventListener('abort', cancel, { once: true })
         try {
-          if (!this.#worker) {
-            const worker = this.createWorker()
-            this.#worker = worker
-            worker.onmessage = /* 只消费本服务当前任务的精确回复，退役实例的消息全部丢弃。 */ (event) =>
-              this.#receive(worker, event.data)
-            worker.onerror = /* 屏蔽异常原文并让本服务失败关闭。 */ (event) => {
-              event.preventDefault?.()
-              this.#retire('compiler_failed')
-            }
-            worker.addEventListener(
-              'close',
-              /* 不把 close 当作所有线程/内存已回收的证明。 */ () => {
-                if (this.#worker === worker && !this.#closed) {
-                  this.#retire('compiler_closed')
-                }
-              }
-            )
-          }
-          this.#worker.ref()
+          const worker = this.#host.open()
           if (signal?.aborted) {
-            cancel()
+            lease.cancel()
             return
           }
-          this.#worker.postMessage({
+          worker.postMessage({
             version: ARTIFACT_VERSION,
             job_id: id,
             bytes: prepared.value.input,
@@ -289,7 +270,7 @@ export class SchemaCompiler {
   // 任何异步成功都先核对身份，再在同步安装完成后一次性发布真实句柄。
   #receive(worker: CompilerPort, value: unknown): void {
     const pending = this.#pending
-    if (this.#closed || this.#worker !== worker || !pending) {
+    if (this.#closed || this.#host.current !== worker || !pending) {
       return
     }
     try {
@@ -352,28 +333,15 @@ export class SchemaCompiler {
       return
     }
     this.#pending = undefined
-    clearTimeout(pending.timer)
-    pending.signal?.removeEventListener('abort', pending.cancel)
-    try {
-      this.#worker?.unref()
-    } catch {
-      /* 清理失败不阻止当前任务结算。 */
-    }
+    settleCompilerTask(pending, this.#host.current)
     pending.resolve(result)
   }
 
   // 关闭是同步拒绝与代次撤销；terminate 仅为终止请求，不能充当硬堆或硬实时保证。
   #retire(reason: string): void {
     this.#closed = true
-    const worker = this.#worker
-    this.#worker = undefined
-    try {
-      worker?.terminate()
-    } catch {
-      /* 已撤销代次，终止请求失败也不再接纳回复。 */
-    } finally {
-      this.#settle(failure(reason))
-    }
+    this.#host.close()
+    this.#settle(failure(reason))
   }
 
   // 属于角色宿主的关闭入口；已接受的 standalone 契约不依赖编译 Worker 继续存活。

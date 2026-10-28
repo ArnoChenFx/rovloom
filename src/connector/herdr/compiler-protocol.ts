@@ -1,3 +1,4 @@
+import type { CompilerWorkerPort } from '../compiler-worker.js'
 /** Herdr 实际安装 schema 的私有编译协议、生成选项及预算，不携带原生执行许可。 */
 import type { Options } from 'ajv'
 import { HERDR_READONLY_REVIEW as review } from './review.js'
@@ -67,12 +68,6 @@ export type HerdrCompilerArtifact = {
 }
 export type HerdrCompileJob = { version: number; job_id: string; bytes: Uint8Array | string }
 export type HerdrCompileResult = { ok: true; value: HerdrCompilerArtifact } | { ok: false; reason: string }
-export type HerdrCompilerPort = {
-  onmessage: ((event: { data: unknown }) => void) | null
-  onerror: ((event: { preventDefault?(): void }) => void) | null
+export type HerdrCompilerPort = CompilerWorkerPort & {
   postMessage(message: HerdrCompileJob): void
-  terminate(): void
-  ref(): void
-  unref(): void
-  addEventListener(type: 'close', listener: () => void): void
 }

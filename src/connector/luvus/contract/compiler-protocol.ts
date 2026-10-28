@@ -1,3 +1,4 @@
+import type { CompilerWorkerPort } from '../../compiler-worker.js'
 // 定义宿主与私有编译 Worker 的准确协议、固定生成选项和有界产物，不承载执行许可。
 import type { Options } from 'ajv'
 import type { CompileOptions, ContractIdentity, Limits } from './types.js'
@@ -40,12 +41,6 @@ export type CompileJob = {
   options: CompileOptions
 }
 
-export type CompilerPort = {
-  onmessage: ((event: { data: unknown }) => void) | null
-  onerror: ((event: { message?: string; preventDefault?(): void }) => void) | null
+export type CompilerPort = CompilerWorkerPort & {
   postMessage(message: CompileJob): void
-  terminate(): void
-  ref(): void
-  unref(): void
-  addEventListener(type: 'close', listener: () => void): void
 }
