@@ -466,8 +466,11 @@ def main():
         status = 0
         if args.then:
             status = 1
+            # 验收脚本可以核对 Gateway 自己的持久化布局（两台机器部署时设备路径不可见）。
+            then_env = {**os.environ, 'MCP_CONFIG': out,
+                        'ROVLOOM_GATEWAY_STATE': os.path.join(home_g, '.local', 'share', 'rovloom', 'gateway')}
             for attempt in range(8 if args.service else 1):
-                status = subprocess.call(shlex.split(args.then), env={**os.environ, 'MCP_CONFIG': out})
+                status = subprocess.call(shlex.split(args.then), env=then_env)
                 if status == 0:
                     break
                 time.sleep(10.0)  # 服务 Connector 尚在连接：MCP 链路成功本身就是就绪证明

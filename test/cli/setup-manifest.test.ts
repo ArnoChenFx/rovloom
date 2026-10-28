@@ -295,3 +295,66 @@ test(
     }
   }
 )
+
+test(
+  'Luvus 配对把原始 schema 发布到 Gateway 自己的目录，不接受设备路径',
+  /* 两台机器部署时设备路径在 Gateway 侧不存在：引用必须由 Gateway 自己选择并落盘。 */ async () => {
+    const root = privateHerdrTestRoot('.setup-luvus-schema-')
+    const schema = readFileSync(new URL('../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8')
+    const reference = setupReference(plan.attempt_id)
+    const target = setupTarget('synthetic_machine', 'luvus')
+    const value = {
+      kind: 'luvus',
+      authentication: 'remote_connector',
+      target,
+      binding: {
+        machine_id: 'synthetic_machine',
+        provider_id: 'luvus',
+        kind: 'luvus',
+        config_ref: reference,
+        binding_revision: 1,
+        enabled: true
+      },
+      contract: {
+        binary_version: 'synthetic_future',
+        binary_sha256: 'f'.repeat(64),
+        schema_sha256: hash(schema),
+        adapter_revision: MANAGED_LUVUS_REVISION,
+        classification_revision: MANAGED_LUVUS_CLASSIFICATION,
+        schema_bundle: schema
+      }
+    }
+    try {
+      privateDirectory(join(root, 'managed'))
+      const reviewed = await reviewSetupManifest(
+        { installations: [{ reference, value }] },
+        plan,
+        'synthetic_machine',
+        root,
+        new AbortController().signal
+      )
+      const entry = reviewed.reviewed[0]!
+      // 发布后的引用由 Gateway 自己选，且落在它自己的 managed 目录内。
+      const published = (entry.value as { contract: { schema_ref?: string; schema_bundle?: string } }).contract
+      assert.equal(published.schema_bundle, undefined)
+      assert.equal(published.schema_ref, join(root, 'managed', `schema_${hash(schema)}.json`))
+      await publishSetupSchemas(reviewed.reviewed, new AbortController().signal)
+      assert.deepEqual(readFileSync(published.schema_ref!), Buffer.from(schema, 'utf8'))
+      // 设备提交自己的路径不被接受：Gateway 不接受设备选择本机文件位置。
+      const hostile = structuredClone(value) as unknown as { contract: Record<string, unknown> }
+      hostile.contract.schema_ref = '/arbitrary/device/path/schema.json'
+      await assert.rejects(
+        /* 设备路径既不参与发布，也不被当作已发布证据。 */ () =>
+          reviewSetupManifest(
+            { installations: [{ reference, value: hostile }] },
+            plan,
+            'synthetic_machine',
+            root,
+            new AbortController().signal
+          )
+      )
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+)

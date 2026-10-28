@@ -11,7 +11,6 @@ import { localLimits, verifyInstallation } from '../connector/luvus/local.js'
 import { effectiveBinDirectories } from '../connector/local/agent-path.js'
 import { runFixedProcess } from '../connector/luvus/io.js'
 import { DispatchClaims } from '../connector/claims.js'
-import { publishSchema, schemaReference } from '../connector/schema-store.js'
 import { boundedJson, fields, hash, id, object } from '../wire/index.js'
 
 import {
@@ -193,9 +192,6 @@ export async function prepareSetupNative(
     throw new CliError('configuration_required')
   }
   await verifyInstallation(discovered.config)
-  // 原始 schema 与 Herdr 使用同一内容寻址布局；旧记录里的内嵌 `schema_bundle` 仍可读取。
-  const schemaRef = schemaReference(config.state_dir, discovered.compiled.identity.schema_sha256)
-  publishSchema(schemaRef, schema.stdout)
   const remote: LuvusProductionRemoteConfig = {
     kind: 'luvus',
     authentication: 'remote_connector',
@@ -214,7 +210,9 @@ export async function prepareSetupNative(
       schema_sha256: discovered.compiled.identity.schema_sha256,
       adapter_revision: MANAGED_LUVUS_REVISION,
       classification_revision: MANAGED_LUVUS_CLASSIFICATION,
-      schema_ref: schemaRef
+      // 原始字节随清单交给 Gateway，由它在自己的状态目录按内容寻址落盘；Connector 不发布本地副本，
+      // 对端机器也读不到本机路径。
+      schema_bundle: schema.stdout.toString('utf8')
     }
   }
   boundedJson(remote, 1_048_576)

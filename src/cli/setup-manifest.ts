@@ -20,6 +20,8 @@ export type ReviewedSetupInstallation = Readonly<{
   label: string
   binary_sha256: string
   schema?: Readonly<{ path: string; bytes: Buffer }>
+  /** 落盘后由该 provider 重新加载已发布字节；公共发布层不解释 provider 语义。 */
+  verifyPublished?(): Promise<void>
 }>
 
 // 诊断标签须为有界单行文本，不能向所有者确认注入TTY控制序列。
@@ -96,16 +98,29 @@ export async function reviewSetupManifest(
       ) {
         throw new CliError('configuration_required')
       }
+      // 设备只交付原始 schema 字节；不接受设备指定 Gateway 自己的文件路径，
+      // 也不由设备发布本地副本（两台机器部署时那路径在 Gateway 侧不存在）。
+      if (remote.contract.schema_ref !== undefined || remote.contract.schema_bundle === undefined) {
+        throw new CliError('configuration_required')
+      }
+      const bytes = Buffer.from(remote.contract.schema_bundle, 'utf8')
+      if (bytes.length > 524_288) {
+        throw new CliError('configuration_required')
+      }
+      const path = schemaReference(directory, remote.contract.schema_sha256)
       const verified = await createPinnedRemoteLuvus(remote)
       verified.close()
+      const { schema_bundle: _inline, ...pin } = remote.contract
       reviewed.push({
         kind,
         reference,
         target,
         binding: remote.binding,
-        value: remote,
+        // 发布后的 pin 只留 Gateway 自己的内容寻址引用，不再内嵌原始文本。
+        value: { ...remote, contract: { ...pin, schema_ref: path } },
         label: label(remote.contract.binary_version),
-        binary_sha256: remote.contract.binary_sha256
+        binary_sha256: remote.contract.binary_sha256,
+        schema: { path, bytes }
       })
     } else {
       const remote = object(entry.value)
@@ -153,7 +168,12 @@ export async function reviewSetupManifest(
         value: { kind, config: parsed },
         label: label(parsed.expected_source.binary_version),
         binary_sha256: parsed.expected_source.binary_sha256,
-        schema: { path, bytes }
+        schema: { path, bytes },
+        /** 发布后按 Gateway 自己的路径重建资源，证明落盘字节与编译身份一致。 */
+        async verifyPublished() {
+          const verified = await createHerdrGatewayResources({ config: parsed, signal })
+          await verified.release()
+        }
       })
     }
   }
@@ -183,7 +203,15 @@ export async function publishSetupSchemas(
     } else if (!previous.equals(bytes)) {
       throw new CliError('configuration_required')
     }
-    const value = entry.value as { config: unknown }
+    const value = entry.value as { config?: unknown }
+    if (entry.verifyPublished) {
+      await entry.verifyPublished()
+      continue
+    }
+    // 只对带 config 的 Herdr 条目走原有资源重建；其余 provider 自报自己的验证。
+    if (value.config === undefined) {
+      continue
+    }
     const verified = await createHerdrGatewayResources({ config: value.config, signal })
     await verified.release()
   }
