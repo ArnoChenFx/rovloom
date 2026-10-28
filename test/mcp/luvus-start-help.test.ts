@@ -11,7 +11,7 @@ import { httpFixture } from './http-fixture.js'
 test('agent.start 名称诊断可定位、describe 说明可选 pane，纠正后同 key 只派发一次', async () => {
   const params = { name: 'worker', kind: 'pi' }
   const f = await runtimeFixture({}, undefined, { method: 'agent.start', params, validation: 'raw-contract' })
-  const service = new RuntimeGatewayService({ ...f.mcp, catalog: f.gateway.catalog })
+  const service = new RuntimeGatewayService({ ...f.mcp, catalog: f.catalog })
   const http = httpFixture(service, { authentication: { authenticate: () => f.caller } })
   const reader = new DatabaseSync(join(f.native.root, 'gateway/gateway.db'), { readOnly: true })
   const received: unknown[] = []

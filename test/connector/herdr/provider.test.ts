@@ -32,7 +32,7 @@ function config(root: string) {
     binding_revision: 1,
     config_ref: 'owned-herdr',
     expected_source: { ...source },
-    schema_path: join(root, 'schema.json')
+    schema_ref: join(root, 'schema.json')
   }
   return {
     ...shared,
@@ -105,7 +105,7 @@ test(
     for (const patch of [
       { version: 2 },
       { config_ref: '' },
-      { schema_path: 'relative/schema.json' },
+      { schema_ref: 'relative/schema.json' },
       { extra: true },
       { target: { machine_id: 'owned-machine', provider_id: 'herdr', profile: 'host' } },
       { connector: { ...clean.connector, local: { ...clean.connector.local, binding_revision: 2 } } },
@@ -114,6 +114,40 @@ test(
       assert.throws(
         /** 任何漂移都不能变成等价本机配置或来源 pin。 */ () => parseHerdrProviderRefConfig({ ...clean, ...patch })
       )
+    }
+  }
+)
+
+test(
+  '旧 schema_path 布局仍可读取并与新 schema_ref 走同一摘要核验',
+  /** 升级不要求重新配对：旧独立 schema 文件继续按声明摘要编译。 */ async () => {
+    const root = privateHerdrTestRoot('.herdr-provider-legacy-')
+    const input = config(root)
+    try {
+      const { schema_ref: reference, ...legacy } = input
+      // config() 只声明路径；这里创建同一官方 schema 文件，供两条来源路径实际读取。
+      writeFileSync(reference, raw, { mode: 0o600 })
+      // 旧记录只带 schema_path；解析后与新记录得到同一份受保护配置。
+      const parsed = parseHerdrProviderRefConfig({ ...legacy, schema_path: reference })
+      assert.equal(parsed.schema_ref, reference)
+      assert.deepEqual(parsed, parseHerdrProviderRefConfig(input))
+      // 同一文件、同一摘要下两条路径都编译成功。
+      for (const value of [input, { ...legacy, schema_path: reference }]) {
+        const resources = await createHerdrGatewayResources({ config: value })
+        try {
+          assert.equal(resources.providers[0]!.ready!(), true)
+        } finally {
+          await resources.release()
+        }
+      }
+      // 旧路径同样要过摘要核验，不能靠字段名绕过。
+      writeFileSync(reference, Buffer.concat([raw, Buffer.from('\n')]), { mode: 0o600 })
+      await assert.rejects(
+        createHerdrGatewayResources({ config: { ...legacy, schema_path: reference } }),
+        /herdr_schema_unreviewed/
+      )
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
   }
 )
@@ -130,7 +164,7 @@ test(
       chmodSync(file, 0o644)
       assert.deepEqual(readHerdrProviderRefConfig(file), parseHerdrProviderRefConfig(input))
       chmodSync(file, 0o600)
-      writeFileSync(input.schema_path, Buffer.concat([raw, Buffer.from(' ')]), { mode: 0o600 })
+      writeFileSync(input.schema_ref, Buffer.concat([raw, Buffer.from(' ')]), { mode: 0o600 })
       await assert.rejects(createHerdrGatewayResources({ config: input }), /herdr_schema_unreviewed/)
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -219,7 +253,7 @@ test(
     const device = connected(store)
     const input = config(root)
     input.target.machine_id = device.machine_id
-    writeFileSync(input.schema_path, raw, { mode: 0o600 })
+    writeFileSync(input.schema_ref, raw, { mode: 0o600 })
     let catalogTime = 100
     let resources: Awaited<ReturnType<typeof createHerdrGatewayResources>>
     try {
@@ -329,7 +363,7 @@ test(
       )
       const replacement = join(root, 'replacement.json')
       writeFileSync(replacement, raw, { mode: 0o600 })
-      renameSync(replacement, input.schema_path)
+      renameSync(replacement, input.schema_ref)
       assert.equal(resources.providers[0]!.ready(), true)
       assert.throws(
         /** 文件变化不复活已被网络代次隔离的旧token。 */ () =>

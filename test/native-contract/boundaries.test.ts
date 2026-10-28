@@ -2,8 +2,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { checkDispatch, checkResultBoundary, compileBundle } from '../../src/native-contract/index.js'
-import { checkResultRetention } from '../../src/native-contract/safety.js'
+import { checkDispatch, checkResultBoundary, compileBundle } from '../../src/connector/luvus/contract/index.js'
+import { checkResultRetention } from '../../src/connector/luvus/contract/safety.js'
 import {
   auth,
   bytes,

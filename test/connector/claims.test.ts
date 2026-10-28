@@ -1,16 +1,16 @@
 /** 用真实 SQLite 和私有文件覆盖持久发送账本；不连接 native，也不提供生产认证。 */
 import { createHash } from 'node:crypto'
-import { boundedJson } from '../../../src/wire/index.js'
+import { boundedJson } from '../../src/wire/index.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, lstatSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
-import { LuvusDispatchClaims } from '../../../src/connector/luvus/claims.js'
-import { ConnectorCapacityError } from '../../../src/connector/capacity.js'
-import { LuvusAdapterError } from '../../../src/connector/luvus/types.js'
-import type { AttemptBinding } from '../../../src/wire/types.js'
+import { DispatchClaims } from '../../src/connector/claims.js'
+import { ConnectorCapacityError } from '../../src/connector/capacity.js'
+import { ProviderAdapterError } from '../../src/connector/provider-error.js'
+import type { AttemptBinding } from '../../src/wire/types.js'
 
 /** 仅建立账本测试需要的合法绑定；不将这些合成身份当作原生来源。 */
 function binding(call = 'call1'): AttemptBinding {
@@ -47,8 +47,8 @@ function setup() {
     path,
     clock,
     options,
-    create: /* 仅首次显式创建测试账本。 */ () => new LuvusDispatchClaims({ ...options, mode: 'create' }),
-    open: /* 正常重启必须打开同一份持久账本。 */ () => new LuvusDispatchClaims({ ...options, mode: 'open' }),
+    create: /* 仅首次显式创建测试账本。 */ () => new DispatchClaims({ ...options, mode: 'create' }),
+    open: /* 正常重启必须打开同一份持久账本。 */ () => new DispatchClaims({ ...options, mode: 'open' }),
     close: /* 测试结束删除仅本用例拥有的私有文件。 */ () => rmSync(root, { recursive: true, force: true })
   }
 }
@@ -56,7 +56,7 @@ function setup() {
 /** 断言公开错误只有稳定码，不包含路径、绑定内容或底层 SQLite 信息。 */
 function failure(code: string) {
   return /* 验证稳定异常类型、码与消息。 */ (error: unknown) => {
-    assert(error instanceof LuvusAdapterError)
+    assert(error instanceof ProviderAdapterError)
     assert.equal(error.code, code)
     assert.equal(error.message, code)
     return true
@@ -111,7 +111,7 @@ test(
       claims.close()
       assert.throws(
         /* 错误配置引用不能把旧库当作新的实例账本。 */ () =>
-          new LuvusDispatchClaims({ ...f.options, ledger_id: 'other', mode: 'open' }),
+          new DispatchClaims({ ...f.options, ledger_id: 'other', mode: 'open' }),
         failure('claim_ledger_mismatch')
       )
       const reopened = f.open()
@@ -211,7 +211,7 @@ test(
           claims.claim(binding('call' + index.toString().padStart(124, '0')), 1000)
           accepted++
         } catch (error) {
-          assert(error instanceof LuvusAdapterError)
+          assert(error instanceof ProviderAdapterError)
           assert(['claim_capacity', 'claim_storage_unavailable'].includes(error.code))
           break
         }
@@ -309,7 +309,7 @@ test(
   /** 不读取文件、不把 TypeError/WireError 当作公开配置错误格式。 */ () => {
     for (const options of [undefined, {}, { ledger_id: 'bad.id' }, { ledger_id: 'valid', limits: null }]) {
       assert.throws(
-        /* 非法受保护配置也应稳定失败，不落入隐式默认配置。 */ () => new LuvusDispatchClaims(options as never),
+        /* 非法受保护配置也应稳定失败，不落入隐式默认配置。 */ () => new DispatchClaims(options as never),
         failure('claim_config_invalid')
       )
     }

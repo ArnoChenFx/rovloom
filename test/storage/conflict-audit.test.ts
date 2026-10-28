@@ -10,7 +10,7 @@ import { Store } from '../../src/store.js'
 import type { StoreOptions } from '../../src/store.js'
 import { nativeBackend } from './native-backend.js'
 import { management, responseFrame } from './helpers.js'
-import { commitLuvusResponse } from '../../src/integration/persistence.js'
+import { commitLuvusResponse } from '../../src/wire/persistence.js'
 
 /* 创建私有磁盘库和真实原生校验适配器，并开放只读连接检查事务结果。 */ function fixture(overrides: StoreOptions = {}) {
   const root = mkdtempSync(join(tmpdir(), 'rovloom-conflict-audit-'))

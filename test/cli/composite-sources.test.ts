@@ -5,7 +5,7 @@ import { routeProductionSources } from '../../src/cli/product-sources.js'
 import { ProductionSourcesStartupError } from '../../src/cli/composite-sources.js'
 import { ProviderUnavailableError } from '../../src/cli/provider-unavailable.js'
 import { configTemplate } from '../../src/cli/config.js'
-import { createManagementSessionAuthority } from '../../src/runtime/index.js'
+import { createManagementSessionAuthority } from '../../src/runtime/management-session.js'
 import type { ProductionCliSources, ProductionGatewayResources } from '../../src/cli/production.js'
 import type { RuntimeCliGateway } from '../../src/cli/runtime.js'
 import type { RuntimeProvider } from '../../src/runtime/types.js'
@@ -117,7 +117,10 @@ test(
       assert.equal(catalog.select(luvus.providers[0]!.target), undefined)
       const nativeCatalog = { resolve: /** 这里只记录绑定原目录端口，不返回假的native来源。 */ () => undefined }
       mixed.started!({ catalog: nativeCatalog } as unknown as RuntimeCliGateway)
-      assert.equal(catalog.select(luvus.providers[0]!.target), nativeCatalog)
+      // 原生 Luvus 目录经统一 provider 端口交付；公共门禁只消费该投影。
+      const native = catalog.select(luvus.providers[0]!.target)
+      assert.equal(native?.kind, 'provider')
+      assert.equal(native?.resolve(luvus.providers[0]!.target, { id: 'alice' }), undefined)
       const closing = mixed.release()
       assert.equal(mixed.release(), closing)
       assert.throws(/** 关闭开始后目录选择必须明确拒绝。 */ () => catalog.select(herdr.providers[0]!.target), {

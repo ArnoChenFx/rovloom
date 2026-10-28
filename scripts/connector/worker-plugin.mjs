@@ -3,8 +3,8 @@ import { fileURLToPath } from 'node:url'
 
 const entries = [
   {
-    path: '../../src/native-contract/compiler-worker.ts',
-    filter: /[/\\]native-contract[/\\]compiler-location\.ts$/,
+    path: '../../src/connector/luvus/contract/compiler-worker.ts',
+    filter: /[/\\]connector[/\\]luvus[/\\]contract[/\\]compiler-location\.ts$/,
     factory: 'createCompilerWorker'
   },
   {

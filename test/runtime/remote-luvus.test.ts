@@ -1,10 +1,12 @@
 // 用固定官方离线契约与合成身份验证 remote pin、epoch、快照和 raw 边界；本文件不构成 native 或双机证据。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { checkDispatch, createNativeValidator } from '../../src/native-contract/index.js'
-import type { DispatchAuthorization } from '../../src/native-contract/index.js'
-import type { TrustedAttempt } from '../../src/integration/luvus-wire.js'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { checkDispatch, createNativeValidator } from '../../src/connector/luvus/contract/index.js'
+import type { DispatchAuthorization } from '../../src/connector/luvus/contract/index.js'
+import type { TrustedAttempt } from '../../src/wire/backend.js'
 import type { Connection } from '../../src/transport/index.js'
 import { boundedJson, contractRef, hash } from '../../src/wire/index.js'
 import type { AttemptBinding, ContractSource } from '../../src/wire/types.js'
@@ -12,9 +14,10 @@ import {
   checkedRemoteLuvusConfig,
   createPinnedRemoteLuvus,
   type LuvusProductionRemoteConfig
-} from '../../src/runtime/remote-luvus.js'
-import { FIXED_LUVUS_SCHEMA_SHA256, FIXED_LUVUS_SHA256 } from '../../src/runtime/native-control.js'
-import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/runtime/native-source.js'
+} from '../../src/connector/luvus/host/remote-luvus.js'
+import { FIXED_LUVUS_SCHEMA_SHA256, FIXED_LUVUS_SHA256 } from '../../src/connector/luvus/host/native-control.js'
+import { publishSchema, schemaReference } from '../../src/connector/schema-store.js'
+import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/connector/luvus/host/native-source.js'
 import type { RuntimeProvider } from '../../src/runtime/types.js'
 
 const schema = readFileSync(new URL('../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8')
@@ -186,6 +189,48 @@ test(
     )
     for (const raw_grant of [null, { principal_id: '', methods: [''] }, { expires_at: null }]) {
       assert.equal(Object.hasOwn(checkedRemoteLuvusConfig(reference, { ...input(), raw_grant }), 'raw_grant'), false)
+    }
+  }
+)
+
+test(
+  'remote pin 支持内容寻址引用，旧内嵌 schema_bundle 仍按同一摘要编译',
+  /** 布局统一不改变原始字节或契约身份：两种来源都必须产出同一编译身份。 */ async () => {
+    const directory = mkdtempSync(
+      join(process.env.LUVUS_TEST_ROOT ?? fileURLToPath(new URL('../../', import.meta.url)), '.remote-luvus-schema-')
+    )
+    try {
+      mkdirSync(join(directory, 'managed'), { mode: 0o700 })
+      const referencePath = schemaReference(directory, FIXED_LUVUS_SCHEMA_SHA256)
+      publishSchema(referencePath, Buffer.from(schema, 'utf8'))
+
+      const { schema_bundle: _inline, ...pin } = input().contract
+      const byReference = await createPinnedRemoteLuvus(
+        checkedRemoteLuvusConfig(reference, { ...input(), contract: { ...pin, schema_ref: referencePath } })
+      )
+      const byBundle = await createPinnedRemoteLuvus(checkedRemoteLuvusConfig(reference, input()))
+      try {
+        // 两种来源都必须编译成功；ready() 仍取决于真实快照而非静态 pin。
+        assert.equal(byReference.provider.ready(), false)
+        assert.equal(byBundle.provider.ready(), false)
+        // 同一原始字节下，同一非法请求在登记前被同样拒绝。
+        const invalid = { method: 'pane.rename', params: { pane: '0' } }
+        assert.throws(() => byReference.provider.preflightRequest!(invalid), /native_request_invalid/)
+        assert.throws(() => byBundle.provider.preflightRequest!(invalid), /native_request_invalid/)
+        // 合法请求在两种来源下都不被预检拒绝（需要完整 envelope 字段）。
+        const valid = {
+          id: 'schema-layout',
+          method: 'workspace.list',
+          params: {}
+        }
+        byReference.provider.preflightRequest!(valid)
+        byBundle.provider.preflightRequest!(valid)
+      } finally {
+        byReference.close()
+        byBundle.close()
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
     }
   }
 )

@@ -6,9 +6,9 @@ import {
   checkResultBoundary,
   compileBundle,
   createNativeValidator
-} from '../../src/native-contract/index.js'
-import type { DispatchCandidate, DispatchPermit } from '../../src/native-contract/index.js'
-import { responseContexts } from '../../src/native-contract/internal.js'
+} from '../../src/connector/luvus/contract/index.js'
+import type { DispatchCandidate, DispatchPermit } from '../../src/connector/luvus/contract/index.js'
+import { responseContexts } from '../../src/connector/luvus/contract/internal.js'
 import {
   auth,
   bytes,

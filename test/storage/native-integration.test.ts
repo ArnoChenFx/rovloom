@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from '../../src/store.js'
-import { commitLuvusResponse } from '../../src/integration/persistence.js'
+import { commitLuvusResponse } from '../../src/wire/persistence.js'
 import { management, responseFrame } from './helpers.js'
 import { nativeBackend } from './native-backend.js'
 

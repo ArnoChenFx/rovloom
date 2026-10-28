@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import { StoreGatewayService, FacadeServiceError } from '../../src/mcp/index.js'
 import { catalogFixture } from './catalog-fixture.js'
 import { target, storeFixture } from './store-fixture.js'
-import { authorizedProviderCatalog } from '../../src/mcp/provider-catalog.js'
+import { authorizedCatalog } from '../../src/mcp/catalog.js'
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import { httpFixture } from './http-fixture.js'
 import { terminalExecutionCatalog } from '../../src/connector/terminal-execution.js'
@@ -171,7 +171,7 @@ test(
       })
     }
     const read = /** 每次都走真实中性目录授权和来源复验。 */ () =>
-      authorizedProviderCatalog({
+      authorizedCatalog({
         store: f.store,
         principal: f.current(),
         currentPrincipal: f.current,

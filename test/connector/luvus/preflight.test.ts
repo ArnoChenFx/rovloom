@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { NativeRequestPreflightError, luvusValidation } from '../../src/runtime/request-preflight.js'
+import { NativeRequestPreflightError, luvusValidation } from '../../../src/connector/luvus/preflight.js'
 
 test('Luvus 通用参数方法未指定验证模式时按方法选择 raw-contract', () => {
   const options: { validation?: 'strict' | 'raw-contract'; deadline: number } = { deadline: 1 }

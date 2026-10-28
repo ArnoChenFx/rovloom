@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import schema from '../fixtures/luvus/0.14.3/linux/schema-bundle.json' with { type: 'file' }
-import { compileBundle, createNativeValidator } from '../../src/native-contract/index.ts'
+import { compileBundle, createNativeValidator } from '../../src/connector/luvus/contract/index.ts'
 import { createHash } from 'node:crypto'
 import { unknownSchemaBundle } from '../native-contract/unknown-schema-fixture.ts'
 import herdrSchema from '../fixtures/herdr/0.9.5/schema.json' with { type: 'file' }

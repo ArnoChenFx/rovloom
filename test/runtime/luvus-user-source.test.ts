@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { luvusSessionRunning, userLuvusEnvironment } from '../../src/runtime/luvus-user-source.js'
+import { luvusSessionRunning, userLuvusEnvironment } from '../../src/connector/luvus/host/luvus-user-source.js'
 import type { LuvusLocalConfig } from '../../src/connector/luvus/types.js'
 import { privateHerdrTestRoot } from '../connector/herdr/private-root.js'
 

@@ -3,13 +3,17 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { Ajv2020 } from 'ajv/dist/2020.js'
-import { SchemaCompiler } from '../../src/native-contract/compiler-host.js'
-import { createCompilerWorker } from '../../src/native-contract/compiler-location.js'
-import { ARTIFACT_VERSION, CODE_LIMIT } from '../../src/native-contract/compiler-protocol.js'
-import type { CompilerArtifact, CompilerPort, CompileJob } from '../../src/native-contract/compiler-protocol.js'
-import { hash } from '../../src/native-contract/json.js'
-import { compileBundle, createNativeValidator } from '../../src/native-contract/index.js'
-import type { Check } from '../../src/native-contract/index.js'
+import { SchemaCompiler } from '../../src/connector/luvus/contract/compiler-host.js'
+import { createCompilerWorker } from '../../src/connector/luvus/contract/compiler-location.js'
+import { ARTIFACT_VERSION, CODE_LIMIT } from '../../src/connector/luvus/contract/compiler-protocol.js'
+import type {
+  CompilerArtifact,
+  CompilerPort,
+  CompileJob
+} from '../../src/connector/luvus/contract/compiler-protocol.js'
+import { hash } from '../../src/json/bounds.js'
+import { compileBundle, createNativeValidator } from '../../src/connector/luvus/contract/index.js'
+import type { Check } from '../../src/connector/luvus/contract/index.js'
 import { bytes, clone, identity, json, unwrap } from './helpers.js'
 
 // 固定内部测试端口保存当前任务；生产 API 不提供该工厂或任意产物安装入口。

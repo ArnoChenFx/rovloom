@@ -2,8 +2,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { checkDispatch, checkResultBoundary, compileBundle, parseNativeJson } from '../../src/native-contract/index.js'
-import { DEFAULT_LIMITS, snapshot } from '../../src/native-contract/json.js'
+import {
+  checkDispatch,
+  checkResultBoundary,
+  compileBundle,
+  parseNativeJson
+} from '../../src/connector/luvus/contract/index.js'
+import { DEFAULT_LIMITS, snapshot } from '../../src/connector/luvus/contract/json.js'
 import {
   auth,
   bytes,

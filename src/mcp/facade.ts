@@ -8,7 +8,7 @@ import {
   type CallToolResult
 } from '@modelcontextprotocol/sdk/types.js'
 import { canonical, digest } from '../contracts.js'
-import { publicLuvusParameterDiagnostic } from '../runtime/luvus-parameter-help.js'
+import { publicLuvusParameterDiagnostic } from '../connector/luvus/parameter-help.js'
 import { cliMessages, type CliLanguage } from '../cli/messages.js'
 import { validateHostProfile } from '../wire/index.js'
 import {

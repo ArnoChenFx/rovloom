@@ -2,7 +2,8 @@ import type { V2Target } from '../wire/types.js'
 // 为受信宿主组合实际Store Gateway；身份和本地政策必须显式注入，不从argv、配置或OS名称推导权限。
 import { join } from 'node:path'
 import { Store, type StoreOptions } from '../store.js'
-import { StoreGatewayService, type GatewayIdentitySource, type GatewayCatalogProvider } from '../mcp/index.js'
+import { StoreGatewayService, type GatewayIdentitySource } from '../mcp/index.js'
+import type { GatewayCatalog } from '../mcp/catalog.js'
 import type { HttpAuthenticationProvider } from '../mcp/http.js'
 import type { CliRuntime } from './run.js'
 
@@ -10,7 +11,7 @@ export type StoreCliHost = {
   authentication: HttpAuthenticationProvider
   identities: GatewayIdentitySource
   targets?(): readonly V2Target[]
-  catalog?: GatewayCatalogProvider
+  catalog?: GatewayCatalog
   storeOptions?: Omit<StoreOptions, 'management' | 'fault'>
 }
 

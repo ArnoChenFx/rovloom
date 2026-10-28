@@ -15,8 +15,7 @@ import {
   type ManagementTransportProjection
 } from './transport-observations.js'
 import type { GatewayTransportObservationSource, MachineObservationRequest } from '../transport/observation.js'
-import { authorizedLuvusCatalog, type GatewayCatalog } from './native-catalog.js'
-import { authorizedProviderCatalog } from './provider-catalog.js'
+import { authorizedCatalog, selectCatalogProvider, type GatewayCatalog } from './catalog.js'
 import {
   FacadeServiceError,
   type CallView,
@@ -419,24 +418,19 @@ export class StoreGatewayService implements GatewayService {
     if (binding.enabled && this.options.catalog) {
       for (const target of targets) {
         try {
-          const provider =
-            this.options.catalog.kind === 'mixed' ? this.options.catalog.select(target) : this.options.catalog
+          const provider = selectCatalogProvider(this.options.catalog, target)
           if (!provider) {
             continue
           }
-          const options = {
+          return authorizedCatalog({
             store: this.options.store,
             principal,
             currentPrincipal: () => this.principal(context),
             terminalExecutionState: this.options.terminalExecutionState,
             target,
-            expected_binding_revision: binding.binding_revision
-          }
-          const catalog =
-            provider.kind === 'provider'
-              ? authorizedProviderCatalog({ ...options, provider })
-              : authorizedLuvusCatalog({ ...options, provider })
-          return catalog.metadata
+            expected_binding_revision: binding.binding_revision,
+            provider
+          }).metadata
         } catch {
           // 缺失、过期或失效目录不妨碍查看 binding；返回前仍重新核对当前 read 授权。
         }
@@ -590,15 +584,11 @@ export class StoreGatewayService implements GatewayService {
         target: request.args.target,
         expected_binding_revision: request.args.expected_binding_revision
       }
-      const provider =
-        this.options.catalog.kind === 'mixed' ? this.options.catalog.select(request.args.target) : this.options.catalog
+      const provider = selectCatalogProvider(this.options.catalog, request.args.target)
       if (!provider) {
         throw new FacadeServiceError('backend_unavailable')
       }
-      const catalog =
-        provider.kind === 'provider'
-          ? authorizedProviderCatalog({ ...options, provider })
-          : authorizedLuvusCatalog({ ...options, provider })
+      const catalog = authorizedCatalog({ ...options, provider })
       if (request.name === 'runtime_describe') {
         return catalog.describe(request.args.method)
       }
@@ -613,7 +603,7 @@ export class StoreGatewayService implements GatewayService {
           args: queryArguments(request.args)
         },
         now,
-        'expires_at' in catalog ? catalog.expires_at : catalog.scope.expires_at
+        catalog.expires_at
       )
     }
     if (!['machines_list', 'machines_get', 'providers_list', 'providers_get'].includes(request.name)) {

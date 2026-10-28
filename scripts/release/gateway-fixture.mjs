@@ -1,5 +1,6 @@
 // 管理来源测试只生成自有短期身份记录、摘要和目录；不注册账号、不配对设备或调用原生程序。
 import { createHash } from 'node:crypto'
+import { publishSchema, schemaReference } from '../../src/connector/schema-store.ts'
 import { createServer } from 'node:net'
 import { once } from 'node:events'
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
@@ -40,7 +41,6 @@ export async function gatewaySmokeFixture() {
   }
   const state = join(root, 'gateway')
   const refs = dirname(runtimeReference(state, 'management'))
-  const legacyRuntime = typeof configSchema.configDocument !== 'function'
   ensurePrivateDirectory(state)
   ensurePrivateDirectory(refs)
   const ports = new Set()
@@ -115,51 +115,29 @@ export async function gatewaySmokeFixture() {
   }
   const save = /** 所有JSON仅为本例合成记录，不修复已有对象权限或接受用户文件。 */ (path, value) =>
     write(path, JSON.stringify(value))
-  save(configPath, legacyRuntime ? config : configSchema.configDocument(config))
+  save(configPath, configSchema.configDocument(config))
   save(callerPath, callers)
   save(sourcePath, source)
-  const runtimeManifest = {
-    schema_version: 1,
-    role: 'gateway',
-    authentication_ref: config.authentication_ref,
-    device_listener: { hostname: '127.0.0.1', port: devicePort, tls_ref: 'fixture_tls' },
-    provider_config_refs: [],
-    management_ref: 'management'
-  }
-  const configureProviders = /** 夹具沿实际单文件/程序管理接口装配；旧主线路径仅供合流前回归，不改变产品契约。 */ (
+  const configureProviders = /** 夹具沿实际程序管理接口装配；schema 原字节按内容寻址落盘，不再内嵌进条目。 */ (
     entries
   ) => {
-    if (legacyRuntime) {
-      for (const entry of entries) {
-        save(runtimeReference(state, entry.reference), entry.value)
-      }
-      save(join(state, 'runtime.json'), {
-        ...runtimeManifest,
-        provider_config_refs: entries.map(/** 仅索引本例明确提供的引用。 */ (entry) => entry.reference)
-      })
-    } else {
-      const providers = entries.map(
-        /** schema原字节嵌入程序管理条目，不交给用户配置。 */ (entry) => {
-          if (!entry.value.contract?.schema_bundle_ref) {
-            return entry
-          }
-          const { schema_bundle_ref: reference, ...pin } = entry.value.contract
-          return {
-            ...entry,
-            value: {
-              ...entry.value,
-              contract: { ...pin, schema_bundle: readFileSync(runtimeReference(state, reference), 'utf8') }
-            }
-          }
+    const providers = entries.map(
+      /** 把夹具准备的 schema 文件发布到内容寻址位置，并只保留引用。 */ (entry) => {
+        if (!entry.value.contract?.schema_bundle_ref) {
+          return entry
         }
-      )
-      save(runtimeReference(state, 'providers'), { schema_version: 1, role: 'gateway', providers })
-    }
+        const { schema_bundle_ref: reference, ...pin } = entry.value.contract
+        const bytes = readFileSync(runtimeReference(state, reference))
+        const target = schemaReference(state, createHash('sha256').update(bytes).digest('hex'))
+        publishSchema(target, bytes)
+        return { ...entry, value: { ...entry.value, contract: { ...pin, schema_ref: target } } }
+      }
+    )
+    save(runtimeReference(state, 'providers'), { schema_version: 1, role: 'gateway', providers })
   }
   configureProviders([])
   return {
     root,
-    legacyRuntime,
     configureProviders,
     state,
     refs,

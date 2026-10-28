@@ -1,4 +1,4 @@
-// revision 漂移时准入层必须回确定性拒绝帧且保持连接：真实 loopback Gateway + Connector 全链路。
+// 执行器确定未写出的拒绝必须保持连接并可收敛：真实 loopback Gateway + Connector 全链路。
 // 本文件同时覆盖生产准入后端（本机 attempt 锚点）与共享 Store 后端两种装配。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -28,7 +28,7 @@ test('生产准入后端忽略旧 revision 与方法动作清单，保持同一�
 })
 
 test(
-  '已接受的 attempt 不能被 policy_revision_stale 拒绝证明倒退为未派发',
+  '已接受的 attempt 不能被 dispatch 拒绝证明倒退为未派发',
   /** Store 纵深：准入拒绝只存在于首帧被接受前；执行器自身的未写出证明不受影响。 */
   () => {
     const store = new Store(':memory:', () => 1000, { management })
@@ -37,7 +37,7 @@ test(
       const created = store.createCall('alice', device.target, { method: 'ping' }, options({ timeoutMs: 1000 }))
       const binding = store.dispatch('alice', created.call_id, device.epoch)
       // dispatching 状态：准入拒绝（首帧尚未被接受）允许提交。
-      assert.equal(store.commitDispatchRefusal(binding, 'policy_revision_stale'), true)
+      assert.equal(store.commitDispatchRefusal(binding, 'terminal_execution_disabled'), true)
       // 重新构造一个走到 connector_accepted 的 attempt。
       const second = store.createCall('alice', device.target, { method: 'ping' }, options({ timeoutMs: 1000 }))
       const acceptedBinding = store.dispatch('alice', second.call_id, device.epoch)
@@ -51,8 +51,8 @@ test(
 )
 
 test(
-  'accepted 后执行器真实的 policy_revision_stale 未写出证明仍能收敛为 not_dispatched',
-  /** 执行器在写入前复核策略抛 not_dispatched：与 decode 重放帧不同，这是真实首帧拒绝。 */
+  'accepted 后执行器真实的 terminal_execution_disabled 未写出证明仍能收敛为 not_dispatched',
+  /** 执行器在写入前复核本机终端开关抛 not_dispatched：与 decode 重放帧不同，这是真实首帧拒绝。 */
   async () => {
     const f = fixture()
     let refused = ''
@@ -64,7 +64,7 @@ test(
       execute: (raw, active, binding) => {
         if (binding.call_id === refused) {
           // 模拟执行器写入前的策略复核拒绝：真实 not_dispatched 语义，非重放帧。
-          throw new LuvusAdapterError('policy_revision_stale', 'not_dispatched')
+          throw new LuvusAdapterError('terminal_execution_disabled', 'not_dispatched')
         }
         signal = active
         return new Promise((resolve) => {

@@ -4,7 +4,7 @@ MCP forwards `method` and `params`; parameters and behavior follow the native co
 
 ## Luvus
 
-Corresponds to Luvus 0.14.3. The authoritative method list is `src/runtime/luvus-operations.ts`; the Gateway only lets through methods in its static table.
+Corresponds to Luvus 0.14.3. The authoritative method list is `src/connector/luvus/operations.ts` (static table in `src/connector/luvus/methods.ts`); the Gateway only lets through methods in its static table.
 
 ### Native schema, annotations and reviewed help
 

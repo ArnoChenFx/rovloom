@@ -3,14 +3,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { LuvusAdapterError } from '../../src/connector/luvus/types.js'
-import { createLuvusOperationsProvider } from '../../src/runtime/luvus-operations-provider.js'
-import type { LocalOwnerLuvusInstance } from '../../src/runtime/native-source.js'
+import { createLuvusOperationsProvider } from '../../src/connector/luvus/operations-provider.js'
+import type { LocalOwnerLuvusInstance } from '../../src/connector/luvus/host/native-source.js'
 import {
   LUVUS_OPERATION_METHODS,
   luvusOperationDescriptor,
   luvusOperationValidation,
   validateLuvusOperationParams
-} from '../../src/runtime/luvus-operations.js'
+} from '../../src/connector/luvus/operations.js'
 
 const capabilities = JSON.parse(
   readFileSync(new URL('../fixtures/luvus/0.14.3/linux/session-capabilities.json', import.meta.url), 'utf8')

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
 const api = fileURLToPath(new URL('../../../src/connector/herdr/compiler-api.ts', import.meta.url))
-const plugin = fileURLToPath(new URL('../../../scripts/native-contract/worker-plugin.mjs', import.meta.url))
+const plugin = fileURLToPath(new URL('../../../scripts/connector/worker-plugin.mjs', import.meta.url))
 const raw = readFileSync(new URL('../../fixtures/herdr/0.9.5/schema.json', import.meta.url))
 
 for (const standalone of [false, true]) {

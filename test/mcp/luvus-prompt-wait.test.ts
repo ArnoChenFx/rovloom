@@ -9,7 +9,7 @@ import { httpFixture } from './http-fixture.js'
 test('prompt 等待超时保留原生证据，describe 提供两段式指导而非把 idle 兜底为完成', async () => {
   const params = { target: 'synthetic-agent', text: '13*7=?', strict: true, wait: true, until: ['idle'], timeout_s: 0 }
   const f = await runtimeFixture({}, undefined, { method: 'agent.prompt', params, validation: 'strict' })
-  const service = new RuntimeGatewayService({ ...f.mcp, catalog: f.gateway.catalog })
+  const service = new RuntimeGatewayService({ ...f.mcp, catalog: f.catalog })
   const http = httpFixture(service, { authentication: { authenticate: () => f.caller } })
   let observed: 'working' | null = null
   let status = 'idle'

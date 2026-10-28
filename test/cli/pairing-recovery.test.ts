@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
-import { openGatewayState } from '../../src/runtime/index.js'
+import { openGatewayState } from '../../src/runtime/state.js'
 import {
   configTemplate,
   configDocument,

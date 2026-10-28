@@ -1,7 +1,7 @@
 // 固定ref只解析到角色私有目录；受保护数据不能选择模块、shell或新的信任来源。
 import { join } from 'node:path'
 import { readPrivateBytes } from '../storage/files.js'
-import { parseNativeJson } from '../native-contract/json.js'
+import { parseJson } from '../json/bounds.js'
 import { CliError } from './config.js'
 
 // 引用只构造固定文件名，拒绝路径、URL及目录跳转。
@@ -31,7 +31,7 @@ export function readRuntimeFile(path: string, maximum: number): Buffer {
 export function readRuntimeJson(path: string, maximum = 16_384): unknown {
   const bytes = readRuntimeFile(path, maximum)
   try {
-    const parsed = parseNativeJson(bytes, { object_bytes: maximum, object_depth: 32, object_nodes: 100_000 })
+    const parsed = parseJson(bytes, { object_bytes: maximum, object_depth: 32, object_nodes: 100_000 })
     if (!parsed.ok) {
       throw new CliError('invalid_config')
     }

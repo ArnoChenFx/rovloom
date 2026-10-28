@@ -2,8 +2,8 @@
 
 本文说明 Luvus 与 Herdr 安装契约的编译、原生请求与响应的校验，以及宿主必须提供的可信来源。
 
-- `src/native-contract/index.ts`：异步契约编译，同步的原生校验与授权内核。准确签名见 `src/native-contract/types.ts`。
-- `src/integration/luvus-wire.ts`：`createLuvusWireAdapter(backend, limits?)` 把内核接入 [Wire v2](WIRE-PROTOCOL.md)。
+- `src/connector/luvus/contract/index.ts`：异步契约编译，同步的原生校验与授权内核。准确签名见 `src/connector/luvus/contract/types.ts`。
+- `src/wire/native.ts`：`createLuvusWireAdapter(backend, limits?)` 把内核接入 [Wire v2](WIRE-PROTOCOL.md)；中性后端接口在 `src/wire/backend.ts`。
 - `src/connector/luvus/`、`src/connector/herdr/`：Connector 上的本机 adapter。
 - 设计取舍见 [ADR 0004](../adr/0004-multi-runtime-provider.md)。
 
@@ -53,7 +53,7 @@ Rovloom 使用宿主实际安装的程序导出的 schema 原字节，按协议�
 
 ## 校验接口
 
-`NativeValidator` 的主要入口（见 `src/native-contract/types.ts`）：
+`NativeValidator` 的主要入口（见 `src/connector/luvus/contract/types.ts`）：
 
 | 入口 | 作用 |
 |---|---|
@@ -73,7 +73,7 @@ Gateway 可把 `checkRequestShape` 接入首次登记事务的同步预检。非
 
 `checkDispatch` 的门禁：
 
-- 方法必须在静态方法表（`src/native-contract/methods.ts`）中，并且目标 profile 为 session、传输为单请求 RPC。表外方法（包括流、token、Host 与 server 管理方法）返回 `method_not_listed`。
+- 方法必须在静态方法表（`src/connector/luvus/methods.ts`）中，并且目标 profile 为 session、传输为单请求 RPC。表外方法（包括流、token、Host 与 server 管理方法）返回 `method_not_listed`。
 - 安装契约广告的 `access / scope / idempotent` 提示必须与表项逐字段一致，否则返回 `method_contract_mismatch`。
 - 调用方与本机策略都必须授权该方法。
 - `strict` 模式拒绝参数覆盖不完整（`parameter_schema_incomplete`）和不可用（`schema_unavailable`）的方法。

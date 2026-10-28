@@ -1,6 +1,6 @@
 // 在 Connector 受保护路由与原 Wire 校验之间保存有界准入锚点，不打开 Gateway Store 或生成执行许可。
 import { ConnectorCapacityError } from '../connector/capacity.js'
-import type { NativeWireBackend, TrustedAttempt } from '../integration/luvus-wire.js'
+import type { NativeWireBackend, TrustedAttempt } from '../wire/backend.js'
 import type { Adapter, Connection } from '../transport/index.js'
 import type { AttemptBinding, Direction, V2Target, WireEnvelope } from '../wire/types.js'
 import {

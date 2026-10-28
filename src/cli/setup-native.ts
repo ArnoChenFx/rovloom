@@ -2,15 +2,16 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
-import { discoverLuvusInstallation } from '../runtime/native-control.js'
-import { initializeManagedLuvusRoot } from '../runtime/native-root.js'
-import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../runtime/native-source.js'
-import type { LuvusProductionOwnerConfig, LuvusProductionUserConfig } from '../runtime/production-luvus.js'
-import type { LuvusProductionRemoteConfig } from '../runtime/remote-luvus.js'
+import { discoverLuvusInstallation } from '../connector/luvus/host/native-control.js'
+import { initializeManagedLuvusRoot } from '../connector/luvus/host/native-root.js'
+import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../connector/luvus/host/native-source.js'
+import type { LuvusProductionOwnerConfig, LuvusProductionUserConfig } from '../connector/luvus/host/production-luvus.js'
+import type { LuvusProductionRemoteConfig } from '../connector/luvus/host/remote-luvus.js'
 import { localLimits, verifyInstallation } from '../connector/luvus/local.js'
 import { effectiveBinDirectories } from '../connector/local/agent-path.js'
 import { runFixedProcess } from '../connector/luvus/io.js'
-import { LuvusDispatchClaims } from '../connector/luvus/claims.js'
+import { DispatchClaims } from '../connector/claims.js'
+import { publishSchema, schemaReference } from '../connector/schema-store.js'
 import { boundedJson, fields, hash, id, object } from '../wire/index.js'
 
 import {
@@ -192,6 +193,9 @@ export async function prepareSetupNative(
     throw new CliError('configuration_required')
   }
   await verifyInstallation(discovered.config)
+  // 原始 schema 与 Herdr 使用同一内容寻址布局；旧记录里的内嵌 `schema_bundle` 仍可读取。
+  const schemaRef = schemaReference(config.state_dir, discovered.compiled.identity.schema_sha256)
+  publishSchema(schemaRef, schema.stdout)
   const remote: LuvusProductionRemoteConfig = {
     kind: 'luvus',
     authentication: 'remote_connector',
@@ -210,7 +214,7 @@ export async function prepareSetupNative(
       schema_sha256: discovered.compiled.identity.schema_sha256,
       adapter_revision: MANAGED_LUVUS_REVISION,
       classification_revision: MANAGED_LUVUS_CLASSIFICATION,
-      schema_bundle: schema.stdout.toString('utf8')
+      schema_ref: schemaRef
     }
   }
   boundedJson(remote, 1_048_576)
@@ -225,7 +229,7 @@ export async function prepareSetupNative(
   if (attach) {
     // 附着用户自己的 Luvus：没有 Connector 拥有的 root，只建 claim 账本；实例配置直接记入受保护的已准备记录。
     const ledgerId = hash(boundedJson([reference, 'user', target]))
-    new LuvusDispatchClaims({
+    new DispatchClaims({
       path: join(control, 'luvus-claims.db'),
       mode: 'create',
       ledger_id: ledgerId,
@@ -258,7 +262,7 @@ export async function prepareSetupNative(
   })
   try {
     const ledgerId = hash(boundedJson([reference, root.root_id, root.root_revision, root.config.target]))
-    const claims = new LuvusDispatchClaims({
+    const claims = new DispatchClaims({
       path: join(control, 'luvus-claims.db'),
       mode: 'create',
       ledger_id: ledgerId,

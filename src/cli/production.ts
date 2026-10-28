@@ -2,17 +2,15 @@
 import { privateDirectory } from './first-config.js'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { openGatewayState, createManagementSessionAuthority } from '../runtime/index.js'
+import { openGatewayState } from '../runtime/state.js'
+import { createManagementSessionAuthority } from '../runtime/management-session.js'
 import {
   createManagementSessionPersistence,
   MANAGEMENT_SESSIONS_MAX_BYTES
 } from '../runtime/management-session-store.js'
 import { composeConnectorSessions } from '../runtime/provider-sessions.js'
-import type {
-  GatewayRuntimeOptions,
-  ProviderGatewayRuntimeOptions,
-  ManagementSessionAuthority
-} from '../runtime/index.js'
+import type { GatewayRuntimeOptions, ProviderGatewayRuntimeOptions } from '../runtime/types.js'
+import type { ManagementSessionAuthority } from '../runtime/management-session.js'
 import type { VersionOffer } from '../wire/types.js'
 import type { GatewayIdentitySource } from '../mcp/management.js'
 import type { ManagementWriteHttpOptions } from '../admin/index.js'

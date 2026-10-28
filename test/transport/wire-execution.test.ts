@@ -1,8 +1,8 @@
 // 验证原始已校验 Wire 帧接入实际 Luvus RPC adapter，原请求状态、发送 claim、auth 与提交职责不混用。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createLuvusWireAdapter } from '../../src/integration/luvus-wire.js'
-import { persistentBackend } from '../../src/integration/persistence.js'
+import { createLuvusWireAdapter } from '../../src/wire/native.js'
+import { persistentBackend } from '../../src/wire/persistence.js'
 import type { WireConnectorOptions } from '../../src/transport/index.js'
 import { until } from './helpers.js'
 import { wireFixture } from './wire-execution-helpers.js'

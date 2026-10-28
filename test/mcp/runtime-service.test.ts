@@ -7,7 +7,7 @@ import type { ManagementPermission } from '../../src/mcp/management.js'
 import { storeFixture, target } from './store-fixture.js'
 import { projectionFixture } from './runtime-service-fixture.js'
 import { LuvusAdapterError } from '../../src/connector/luvus/types.js'
-import { NativeRequestPreflightError } from '../../src/runtime/request-preflight.js'
+import { NativeRequestPreflightError } from '../../src/connector/luvus/preflight.js'
 import { FacadeServiceError, NativeRequestNotDispatchedError } from '../../src/mcp/types.js'
 import { RuntimeGatewayService } from '../../src/mcp/runtime-service.js'
 

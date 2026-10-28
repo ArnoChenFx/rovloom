@@ -1,6 +1,6 @@
 # Luvus 窗口与 Agent 操作
 
-本文说明经 Rovloom 操作 Luvus 的 workspace、tab、pane 和 Agent 时的方法、选择器和状态语义。方法清单对应 Luvus 0.14.3，权威定义见 [luvus-operations.ts](../src/runtime/luvus-operations.ts)。Luvus 的接入方式（附着或隔离）见 [配置参考](CONFIGURATION-zh.md#luvus附着或隔离)。
+本文说明经 Rovloom 操作 Luvus 的 workspace、tab、pane 和 Agent 时的方法、选择器和状态语义。方法清单对应 Luvus 0.14.3，权威定义见 [operations.ts](../src/connector/luvus/operations.ts) 与 [methods.ts](../src/connector/luvus/methods.ts)。Luvus 的接入方式（附着或隔离）见 [配置参考](CONFIGURATION-zh.md#luvus附着或隔离)。
 
 ## 接入
 

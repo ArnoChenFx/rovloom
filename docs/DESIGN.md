@@ -47,14 +47,15 @@ MCP Client ──HTTP (Bearer)──▶ Gateway ◀──WS/WSS (设备凭据)�
 
 | 模块 | 职责 |
 |---|---|
-| `mcp/` | Streamable HTTP facade、工具定义与参数校验、只读与调用服务 |
+| `mcp/` | Streamable HTTP facade、工具定义与参数校验、只读与调用服务；`catalog.ts` 是两个 provider 共用的目录门禁（身份/设备范围、绑定、分页、元数据投影），方法清单与原生描述由各 provider 提供 |
 | `runtime/` | Gateway 与 Connector 宿主：组合 Store、Router、传输、provider 会话与结果读取 |
 | `store.ts`、`router.ts`、`storage/` | SQLite 账本（设备、provider、调用、结果、审计、备份）；Router 负责授权与准入 |
 | `transport/` | 设备通道：握手、认证、心跳、派发、取消 |
 | `wire/` | Gateway ↔ Connector 的单一 major JSON 信封 |
-| `native-contract/` | 安装版 schema 的完整编译与校验，静态方法表 |
-| `connector/` | Luvus（UHP）与 Herdr（JSON socket）的本机 adapter、终端开关 |
-| `integration/` | Wire 与原生校验的接线 |
+| `json/` | 与 provider 无关的有界 JSON 解析、冻结快照与结构比较 |
+| `connector/luvus/` | Luvus（UHP）的全部实现：方法表、参数规则、契约编译/校验、原生/Wire 适配、来源与宿主接线 |
+| `connector/` | 共享的发送账本、终端开关与两端 schema 落盘约定；Herdr（JSON socket）的本机 adapter |
+| `wire/native.ts`、`wire/backend.ts` | Luvus 契约内核与 Wire 的接缝，以及 provider 中性的原生后端接口 |
 | `admin/`、`webui/` | 独立 listener 的管理 API 与 Web UI |
 | `cli/`、`service/` | 单一可执行文件、角色配置、开机服务 |
 
@@ -72,7 +73,7 @@ Luvus 与 Herdr 各自保留原生协议，Rovloom 不把 Herdr 改写成 UHP。
 
 ### 4.2 方法表与授权
 
-每个 provider 内置一份静态方法表。Luvus 的表把方法分为 `read` 与 `write`，并带 scope（见 `src/native-contract/methods.ts`）。Herdr 的表登记 65 个方法（见 `src/connector/herdr/methods.ts`）。
+每个 provider 内置一份静态方法表。Luvus 的表把方法分为 `read` 与 `write`，并带 scope（见 `src/connector/luvus/methods.ts`）。Herdr 的表登记 65 个方法（见 `src/connector/herdr/methods.ts`）。
 
 - 表中没有的方法一律拒绝。`schema` 通过只代表参数合法，不代表允许调用。
 - 流类方法、token 与 Host/server 管理方法不在表中。

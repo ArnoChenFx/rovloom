@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { compileOfficialSchema } from './official-ipc.mjs'
-import { createNativeValidator } from '../../../src/native-contract/index.ts'
+import { createNativeValidator } from '../../../src/connector/luvus/contract/index.ts'
 
 test(
   'official IPC schema bootstrap awaits the real Worker factory and preserves a usable handle',

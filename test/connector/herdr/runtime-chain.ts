@@ -8,7 +8,7 @@ import { createConnector } from '../../../src/transport/index.js'
 import type { Adapter, Connection, ConnectorWireSession } from '../../../src/transport/index.js'
 import { assertBinding, boundedJson, contractRef, fail } from '../../../src/wire/index.js'
 import type { AttemptBinding, Direction, JsonObject, ProviderBinding } from '../../../src/wire/types.js'
-import { LuvusDispatchClaims } from '../../../src/connector/luvus/claims.js'
+import { DispatchClaims } from '../../../src/connector/claims.js'
 import { HerdrInstallation, createHerdrHostServices } from '../../../src/connector/herdr/installation.js'
 import { inspectHerdrPath } from '../../../src/connector/herdr/local.js'
 import { persistentHerdrBackend } from '../../../src/connector/herdr/persistence.js'
@@ -40,7 +40,7 @@ export function createHerdrRuntimeChain(root: string) {
   const gateways: Adapter[] = []
   const runtimes: ReturnType<typeof createHerdrRuntime>[] = []
   let installation: HerdrInstallation | undefined
-  let claims: LuvusDispatchClaims | undefined
+  let claims: DispatchClaims | undefined
   let client: ReturnType<typeof createConnector> | undefined
   let closed = false
 
@@ -259,7 +259,7 @@ export function createHerdrRuntimeChain(root: string) {
       }
       installed.assert()
       installation = installed
-      claims = new LuvusDispatchClaims({
+      claims = new DispatchClaims({
         path: claimPath,
         mode: 'create',
         ledger_id: 'owned-herdr-chain',

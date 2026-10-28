@@ -1,7 +1,7 @@
 /** 构建 Bun 模块与内置管理页静态资源，清除旧输出；不启动 Gateway/Connector 或注入测试数据。 */
 import { rmSync } from 'node:fs'
 import { toolchain } from './toolchain.mjs'
-import { compilerWorkerPlugin } from '../native-contract/worker-plugin.mjs'
+import { compilerWorkerPlugin } from '../connector/worker-plugin.mjs'
 import { buildWebui } from './webui.mjs'
 import { resolve } from 'node:path'
 import { loadManagementAssets } from '../../src/admin/assets.ts'
@@ -17,12 +17,16 @@ const result = await Bun.build({
     'src/store.ts',
     'src/router.ts',
     'src/protocol.ts',
-    'src/native-contract/index.ts',
+    'src/connector/luvus/contract/index.ts',
     'src/wire/index.ts',
-    'src/integration/luvus-wire.ts',
-    'src/integration/persistence.ts',
+    'src/wire/native.ts',
+    'src/wire/persistence.ts',
     'src/transport/index.ts',
-    'src/runtime/index.ts',
+    'src/runtime/state.ts',
+    'src/runtime/gateway.ts',
+    'src/runtime/connector-host.ts',
+    'src/runtime/connector-attempts.ts',
+    'src/runtime/results.ts',
     'src/connector/luvus/index.ts',
     'src/connector/herdr/readonly.ts',
     'src/connector/herdr/compiler-api.ts',

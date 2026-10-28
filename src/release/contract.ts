@@ -1,5 +1,5 @@
 // 为发布器与自更新共享无 I/O 的版本、平台、资产命名和清单校验；导入不读配置或磁盘。
-import { parseNativeJson } from '../native-contract/json.js'
+import { parseJson } from '../json/bounds.js'
 export const RELEASE_REPOSITORY = 'ArnoChenFx/rovloom'
 export const RELEASE_MANIFEST = 'release-manifest.json'
 export const RELEASE_MAX_BINARY_BYTES = 256 * 1024 * 1024
@@ -19,9 +19,9 @@ export type ReleaseManifest = Readonly<{
 }>
 export type ReleaseVersion = Readonly<{ core: readonly number[]; prerelease: readonly string[] }>
 
-// 复用既有有界 JSON 解析器，拒绝重复键、损坏 UTF-8、BOM、过深结构和不安全整数。
+// 复用与 provider 无关的有界 JSON 解析器，拒绝重复键、损坏 UTF-8、BOM、过深结构和不安全整数。
 export function parseReleaseJson(bytes: Uint8Array, limit: number): unknown {
-  const parsed = parseNativeJson(bytes, { object_bytes: limit, object_depth: 32, object_nodes: 50_000 })
+  const parsed = parseJson(bytes, { object_bytes: limit, object_depth: 32, object_nodes: 50_000 })
   if (!parsed.ok) {
     throw new Error('invalid_release_json')
   }

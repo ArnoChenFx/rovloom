@@ -36,13 +36,15 @@ export type {
 export { StoreGatewayService } from './store-service.js'
 export type { StoreGatewayOptions } from './store-service.js'
 export type * from './management.js'
+export { authorizedCatalog, selectCatalogProvider } from './catalog.js'
 export type {
-  GatewayCatalogProvider,
-  GatewayCatalogSource,
   GatewayCatalog,
   CompositeGatewayCatalogProvider,
   ProviderCatalogProvider,
-  ProviderCatalogSource
-} from './native-catalog.js'
+  ProviderCatalogSource,
+  AuthorizedCatalogOptions
+} from './catalog.js'
+export { luvusCatalogProvider } from '../connector/luvus/catalog-provider.js'
+export type { GatewayCatalogProvider, GatewayCatalogSource } from '../connector/luvus/catalog-provider.js'
 export { RuntimeGatewayService } from './runtime-service.js'
 export type { RuntimeGateway, RuntimeGatewayPort, RuntimeGatewayServiceOptions } from './runtime-service.js'

@@ -3,7 +3,7 @@
 // 非交互、无确认问答；已配对状态与码目标不一致时先重置本地配对状态（作为新设备重新配对）。
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseNativeJson } from '../native-contract/json.js'
+import { parseJson } from '../json/bounds.js'
 import { createFileCredentialSink } from '../transport/credentials.js'
 import type { DeviceCredential } from '../transport/identity.js'
 import { boundedJson, fields, id, object } from '../wire/index.js'
@@ -88,7 +88,7 @@ async function responseJson(response: Response): Promise<Record<string, unknown>
       }
       chunks.push(value.value)
     }
-    const parsed = parseNativeJson(Buffer.concat(chunks, bytes), { object_bytes: 262_144 })
+    const parsed = parseJson(Buffer.concat(chunks, bytes), { object_bytes: 262_144 })
     if (!parsed.ok) {
       throw new CliError('configuration_required')
     }

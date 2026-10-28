@@ -3,7 +3,7 @@ import type { V2Target } from '../wire/types.js'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { Router, type Principal } from '../router.js'
 import type { Store } from '../store.js'
-import type { TrustedAttempt } from '../integration/luvus-wire.js'
+import type { TrustedAttempt } from '../wire/backend.js'
 import {
   createConnector,
   createGateway,
@@ -16,7 +16,7 @@ import { StoreGatewayService, resolveGatewayPrincipal } from '../mcp/store-servi
 import { FacadeServiceError, type CallerIdentity, type GatewayService } from '../mcp/types.js'
 import type { HttpAuthenticationProvider } from '../mcp/http.js'
 import type { GatewayIdentitySource } from '../mcp/management.js'
-import type { GatewayCatalogProvider } from '../mcp/native-catalog.js'
+import type { GatewayCatalog } from '../mcp/catalog.js'
 import type { ConnectorConfig, GatewayConfig } from './config.js'
 import type { CliRuntime } from './run.js'
 
@@ -37,7 +37,7 @@ export type GatewayTransportResources = {
   identities: GatewayIdentitySource
   targets?(): readonly V2Target[]
   authentication: HttpAuthenticationProvider
-  catalog?: GatewayCatalogProvider
+  catalog?: GatewayCatalog
   transport: Omit<GatewayOptions, 'store' | 'router' | 'principal'>
   // 可选原生服务工厂复用同一Store/Router/transport；省略时仅开放既有Store查询与清理。
   service?(ports: GatewayTransportPorts): GatewayService

@@ -7,16 +7,17 @@ import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
 import { createLuvusCatalog } from '../../src/connector/luvus/index.js'
-import { createLuvusProductionSources } from '../../src/runtime/production-luvus.js'
-import type { LuvusProductionRemoteConfig } from '../../src/runtime/remote-luvus.js'
+import { createLuvusProductionSources } from '../../src/connector/luvus/host/production-luvus.js'
+import type { LuvusProductionRemoteConfig } from '../../src/connector/luvus/host/remote-luvus.js'
+import { luvusCatalogProvider } from '../../src/connector/luvus/catalog-provider.js'
 import { createGatewayRuntime } from '../../src/runtime/gateway.js'
 import { createHerdrGatewayResources } from '../../src/connector/herdr/provider.js'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
 import { createProviderConnectorRuntime } from '../../src/runtime/connector-host.js'
 import { composeConnectorSessions } from '../../src/runtime/provider-sessions.js'
 import { openGatewayState } from '../../src/runtime/state.js'
-import { FIXED_LUVUS_SHA256, FIXED_LUVUS_SCHEMA_SHA256 } from '../../src/runtime/native-control.js'
-import { MANAGED_LUVUS_REVISION, MANAGED_LUVUS_CLASSIFICATION } from '../../src/runtime/native-source.js'
+import { FIXED_LUVUS_SHA256, FIXED_LUVUS_SCHEMA_SHA256 } from '../../src/connector/luvus/host/native-control.js'
+import { MANAGED_LUVUS_REVISION, MANAGED_LUVUS_CLASSIFICATION } from '../../src/connector/luvus/host/native-source.js'
 import {
   boundedJson,
   contractRef,
@@ -34,8 +35,8 @@ import { RuntimeGatewayService } from '../../src/mcp/runtime-service.js'
 import { httpFixture } from '../mcp/http-fixture.js'
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import { SERVICE_ERROR_CODES, type ReplyData, type ServiceErrorCode } from '../../src/mcp/types.js'
-import { LUVUS_TABLE_METHODS } from '../../src/native-contract/methods.js'
-import { LUVUS_OPERATION_METHODS } from '../../src/runtime/luvus-operations.js'
+import { LUVUS_TABLE_METHODS } from '../../src/connector/luvus/methods.js'
+import { LUVUS_OPERATION_METHODS } from '../../src/connector/luvus/operations.js'
 
 /** Gateway 只建立自身状态目录；没有 binary、HOME、native root 或 socket 输入。 */
 async function fixture(
@@ -119,7 +120,7 @@ async function fixture(
           binding_revision: 1,
           config_ref: 'herdr_snapshot',
           expected_source: fixedHerdrSource(),
-          schema_path: schema
+          schema_ref: schema
         }
       })
       state.store.defineProvider(herdr.providers[0]!.binding)
@@ -300,6 +301,11 @@ async function fixture(
   }
   return {
     runtime,
+    /** 与 CLI 相同：把远端 Luvus 注册表包装成 provider 目录端口。 */
+    catalog: luvusCatalogProvider({
+      store: runtime.store,
+      provider: runtime.catalog
+    }),
     setScope: (scope?: string[]) => {
       deviceScope = scope
     },
@@ -979,7 +985,7 @@ for (const { isolated, disconnectBeforeRead } of [
         f.hold()
         service = new RuntimeGatewayService({
           runtime: f.runtime,
-          catalog: f.runtime.catalog,
+          catalog: f.catalog,
           identities: {
             principal: /** 沿用原 runtime 的当前 caller 来源。 */ (caller) =>
               caller.principal_id === 'remote_reader' ? { id: 'remote_reader' } : null,
@@ -1438,7 +1444,7 @@ test(
         catalog: {
           kind: 'mixed',
           select: /** 委托两种真实原生目录，不自造描述或参数 schema。 */ (target) =>
-            target.provider_id === hosted.binding.provider_id ? f.herdr!.catalog : f.runtime.catalog
+            target.provider_id === hosted.binding.provider_id ? f.herdr!.catalog : f.catalog
         }
       })
       http = httpFixture(service, {

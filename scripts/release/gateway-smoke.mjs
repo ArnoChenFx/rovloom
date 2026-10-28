@@ -1,18 +1,18 @@
 /** 复制真实单文件产物到隔离目录，验收Gateway/HTTP/MCP/管理面和两个schema工厂；不宣称Connector或跨机通过。 */
 import assert from 'node:assert/strict'
 import { CLI_ERROR_CODES } from '../../src/cli/config.ts'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFileSync, chmodSync, existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { waitHttpReady } from './readiness.mjs'
 import { DatabaseSync } from 'node:sqlite'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
-import { openGatewayState } from '../../src/runtime/index.ts'
-import { FIXED_LUVUS_SHA256, FIXED_LUVUS_SCHEMA_SHA256 } from '../../src/runtime/native-control.ts'
-import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/runtime/native-source.ts'
+import { openGatewayState } from '../../src/runtime/state.ts'
+import { FIXED_LUVUS_SHA256, FIXED_LUVUS_SCHEMA_SHA256 } from '../../src/connector/luvus/host/native-control.ts'
+import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/connector/luvus/host/native-source.ts'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.ts'
 import { loadManagementAssets } from '../../src/admin/assets.ts'
 import { createManagementHttpRead } from '../../src/webui/http-client.ts'
@@ -38,7 +38,6 @@ function seed(f) {
     authentication: 'remote_connector',
     binding,
     target: luvusTarget,
-    peer_policy_revision: f.callers.local_policy.revision,
     contract: {
       binary_version: '0.14.3',
       binary_sha256: FIXED_LUVUS_SHA256,
@@ -58,8 +57,7 @@ function seed(f) {
       binding_revision: 1,
       config_ref: 'fixture_herdr',
       expected_source: fixedHerdrSource(),
-      schema_path: schema,
-      peer_policy_revision: f.callers.local_policy.revision
+      schema_ref: schema
     }
   })
   f.save(join(f.refs, 'fixture_luvus.json'), luvus)
@@ -110,36 +108,6 @@ function seed(f) {
   } finally {
     db.close()
   }
-}
-
-/** 自签测试证书只存于本次私有目录；不修改系统信任、不操作用户证书。 */
-function certificate(refs) {
-  const cert = join(refs, 'fixture_tls.cert.pem')
-  const key = join(refs, 'fixture_tls.key.pem')
-  const result = spawnSync(
-    '/usr/bin/openssl',
-    [
-      'req',
-      '-x509',
-      '-newkey',
-      'rsa:2048',
-      '-nodes',
-      '-days',
-      '1',
-      '-subj',
-      '/CN=synthetic-release-smoke',
-      '-addext',
-      'subjectAltName=IP:127.0.0.1',
-      '-out',
-      cert,
-      '-keyout',
-      key
-    ],
-    { stdio: 'ignore', timeout: 10_000 }
-  )
-  assert.equal(result.status, 0, 'synthetic_certificate_failed')
-  chmodSync(cert, 0o600)
-  chmodSync(key, 0o600)
 }
 
 /** 子进程固定15秒期限与2MiB输出上限；失败及关闭均等待直接child的真实close。 */
@@ -286,9 +254,6 @@ export async function smokeGatewayProduct(
     if (process.platform === 'win32') {
       // 只释放已close的夹具statement包装，产品尚未启动，不参与其正常关闭判定。
       Bun.gc(true)
-    }
-    if (f.legacyRuntime) {
-      certificate(f.refs)
     }
     const cwd = join(f.root, 'empty-cwd')
     const home = join(f.root, 'empty-home')

@@ -2,14 +2,14 @@
 import { compileHerdrSchemas } from '../connector/herdr/compiler-api.js'
 import { parseHerdrProviderRefConfig, createHerdrGatewayResources } from '../connector/herdr/provider.js'
 import { createHerdrCodec } from '../connector/herdr/readonly.js'
-import { checkedRemoteLuvusConfig, createPinnedRemoteLuvus } from '../runtime/remote-luvus.js'
+import { checkedRemoteLuvusConfig, createPinnedRemoteLuvus } from '../connector/luvus/host/remote-luvus.js'
 import { boundedJson, fields, hash, object } from '../wire/index.js'
 import type { ProviderBinding, V2Target } from '../wire/types.js'
 import { CliError, type NativeProviderKind } from './config.js'
 import type { SetupPlanFacts } from './setup-targets.js'
 import { setupProviderKinds, setupReference, setupSessions, setupTarget } from './setup-targets.js'
-import { readRuntimeFile, runtimeReference } from './runtime-files.js'
-import { writeSetupFile } from './setup-files.js'
+import { readRuntimeFile } from './runtime-files.js'
+import { publishSchema, schemaReference } from '../connector/schema-store.js'
 
 export type ReviewedSetupInstallation = Readonly<{
   kind: NativeProviderKind
@@ -123,8 +123,9 @@ export async function reviewSetupManifest(
       ) {
         throw new CliError('configuration_required')
       }
-      const path = runtimeReference(directory, 'herdr-schema_' + plan.attempt_id)
-      const parsed = parseHerdrProviderRefConfig({ ...config, schema_path: path })
+      // Gateway 自己保存的原始字节走与 Luvus 相同的内容寻址布局，引用不再按配对批次命名。
+      const path = schemaReference(directory, object(config.expected_source).schema_sha256 as string)
+      const parsed = parseHerdrProviderRefConfig({ ...config, schema_ref: path })
       const bytes = Buffer.from(remote.schema_bundle, 'utf8')
       if (
         parsed.config_ref !== reference ||
@@ -178,7 +179,7 @@ export async function publishSetupSchemas(
       }
     }
     if (previous === undefined) {
-      writeSetupFile(path, bytes)
+      publishSchema(path, bytes)
     } else if (!previous.equals(bytes)) {
       throw new CliError('configuration_required')
     }

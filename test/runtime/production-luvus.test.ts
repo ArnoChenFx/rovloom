@@ -5,14 +5,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
-import { LuvusDispatchClaims } from '../../src/connector/luvus/index.js'
+import { DispatchClaims } from '../../src/connector/luvus/index.js'
 import type { LuvusLocalConfig } from '../../src/connector/luvus/index.js'
-import { FIXED_LUVUS_SHA256, FIXED_LUVUS_SCHEMA_SHA256 } from '../../src/runtime/native-control.js'
-import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/runtime/native-source.js'
-import { createNativeRecord } from '../../src/runtime/native-record-files.js'
-import { ownedPathStamp } from '../../src/runtime/native-process.js'
-import { createLuvusProductionSources } from '../../src/runtime/production-luvus.js'
-import type { LuvusProductionOwnerConfig } from '../../src/runtime/production-luvus.js'
+import { FIXED_LUVUS_SHA256, FIXED_LUVUS_SCHEMA_SHA256 } from '../../src/connector/luvus/host/native-control.js'
+import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/connector/luvus/host/native-source.js'
+import { createNativeRecord } from '../../src/connector/luvus/host/native-record-files.js'
+import { ownedPathStamp } from '../../src/connector/luvus/host/native-process.js'
+import { createLuvusProductionSources } from '../../src/connector/luvus/host/production-luvus.js'
+import type { LuvusProductionOwnerConfig } from '../../src/connector/luvus/host/production-luvus.js'
 import { boundedJson, hash } from '../../src/wire/index.js'
 
 type MutableOwnerConfig = { -readonly [K in keyof LuvusProductionOwnerConfig]: LuvusProductionOwnerConfig[K] }
@@ -104,7 +104,6 @@ function fixture(agentDirectory?: string) {
     root_revision: 1,
     config,
     config_digest: createHash('sha256').update(boundedJson(config)).digest('hex'),
-    custody_policy: { scopes: ['read'], methods: ['automation.list'], max_token_ttl_s: 60 },
     roots: directories.map(
       /** 只记录实际文件系统身份，不自造 PID、peer 或运行中来源。 */ (path) => [path, ownedPathStamp(path, 'directory')]
     ),
@@ -303,7 +302,7 @@ test(
         assert.equal(existsSync(join(f.state, name + '.lock')), false)
       }
       const ledgerId = hash(boundedJson(['config1', 'root1', 1, f.config.target]))
-      const claims = new LuvusDispatchClaims({
+      const claims = new DispatchClaims({
         path: join(f.state, 'luvus-claims.db'),
         mode: 'open',
         ledger_id: ledgerId,

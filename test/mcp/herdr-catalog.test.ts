@@ -5,9 +5,9 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHerdrGatewayResources } from '../../src/connector/herdr/provider.js'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
-import { authorizedProviderCatalog } from '../../src/mcp/provider-catalog.js'
+import { authorizedCatalog } from '../../src/mcp/catalog.js'
 import { FacadeServiceError, RuntimeGatewayService } from '../../src/mcp/index.js'
-import type { ProviderCatalogProvider } from '../../src/mcp/native-catalog.js'
+import type { ProviderCatalogProvider } from '../../src/mcp/catalog.js'
 import { privateHerdrTestRoot } from '../connector/herdr/private-root.js'
 import { target } from './store-fixture.js'
 import { projectionFixture } from './runtime-service-fixture.js'
@@ -39,7 +39,7 @@ test(
           binding_revision: 1,
           config_ref: 'safe_ref',
           expected_source: fixedHerdrSource(),
-          schema_path: schemaPath
+          schema_ref: schemaPath
         },
         now: /** 与MCP共用单调fixture时钟，实际resolver每次形成now+5000的新观察视图。 */ () => f.store.clock()
       })
@@ -67,7 +67,7 @@ test(
         expected_binding_revision: 1,
         provider
       }
-      const catalog = authorizedProviderCatalog(options)
+      const catalog = authorizedCatalog(options)
       assert.equal(catalog.describe(methods[0]!).method, methods[0])
       assert(resolutions >= 4)
       service = new RuntimeGatewayService({
@@ -154,7 +154,7 @@ test(
       ] as const) {
         let reads = 0
         const checked = /** 每次从真实resolver获取当前值，再只注入该反例的漂移。 */ () =>
-          authorizedProviderCatalog({
+          authorizedCatalog({
             ...options,
             provider: {
               kind: 'provider',

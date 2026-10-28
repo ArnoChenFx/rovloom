@@ -1,14 +1,14 @@
 // 用实际原生 schema 与既有审核校验器验证提示；错误诊断只投影固定字段，不带用户值。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { compiled } from '../native-contract/helpers.js'
-import { createLuvusRequestPreflight, NativeRequestPreflightError } from '../../src/runtime/request-preflight.js'
-import { validateLuvusOperationParams } from '../../src/runtime/luvus-operations.js'
+import { compiled } from '../../native-contract/helpers.js'
+import { createLuvusRequestPreflight, NativeRequestPreflightError } from '../../../src/connector/luvus/preflight.js'
+import { validateLuvusOperationParams } from '../../../src/connector/luvus/operations.js'
 import {
   luvusParameterHelp,
   publicLuvusParameterDiagnostic,
   type LuvusParameterDiagnostic
-} from '../../src/runtime/luvus-parameter-help.js'
+} from '../../../src/connector/luvus/parameter-help.js'
 
 test('描述示例同时通过原 schema 和 Rovloom 审核子集，独立副本不能改变以后返回的提示', () => {
   const preflight = createLuvusRequestPreflight(compiled)

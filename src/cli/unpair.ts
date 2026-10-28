@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { syncParentDirectory } from '../storage/files.js'
 import { ownedFile, recordedProcess } from '../storage/lock-recovery.js'
 import { ownerIsDead } from '../storage/process-identity.js'
-import { LUVUS_CLAIMS_LOCK_FORMAT } from '../connector/luvus/claims.js'
+import { DISPATCH_CLAIMS_LOCK_FORMAT } from '../connector/claims.js'
 import { boundedJson } from '../wire/index.js'
 import { CliError, configDocument, readConfig, type ConnectorConfig } from './config.js'
 import { privateDirectory } from './first-config.js'
@@ -62,7 +62,7 @@ function assertConnectorIdle(stateDir: string): void {
       if (bytes.length === 0 || bytes.length > 1024) {
         continue
       }
-      const recorded = recordedProcess(JSON.parse(bytes.toString('utf8')), LUVUS_CLAIMS_LOCK_FORMAT)
+      const recorded = recordedProcess(JSON.parse(bytes.toString('utf8')), DISPATCH_CLAIMS_LOCK_FORMAT)
       if (recorded && !ownerIsDead(recorded)) {
         throw new CliError('configuration_required')
       }

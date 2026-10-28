@@ -5,7 +5,7 @@ import { smokeStandalone } from './smoke.mjs'
 
 const output = await buildStandalone({
   entrypoint: 'test/release/native-probe.mjs',
-  workers: ['src/native-contract/compiler-worker.ts', 'src/connector/herdr/compiler-herdr-worker.ts'],
+  workers: ['src/connector/luvus/contract/compiler-worker.ts', 'src/connector/herdr/compiler-herdr-worker.ts'],
   probe: 'native-contract'
 })
 const [result] = await smokeStandalone(output.binary, [{ args: [], code: 0, stderr: /^$/u }])

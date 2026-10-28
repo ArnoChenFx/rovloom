@@ -4,7 +4,7 @@ import { after, before, describe, test } from 'node:test'
 import { canonical, digest } from '../../src/contracts.js'
 import { RuntimeGatewayService } from '../../src/mcp/runtime-service.js'
 import type { ReplyData, ServiceContext, ToolArguments } from '../../src/mcp/types.js'
-import { DEFAULT_LIMITS } from '../../src/native-contract/index.js'
+import { DEFAULT_LIMITS } from '../../src/connector/luvus/contract/index.js'
 import { LIMITS } from '../../src/wire/index.js'
 import { projectionFixture } from './runtime-service-fixture.js'
 

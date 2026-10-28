@@ -206,7 +206,7 @@ export async function createStack({ binary, herdrBinary, methods = ['ping'], con
     },
     /** Gateway已停止时经正式Store撤销设备；等同管理员离线撤销。 */
     async revokeOffline() {
-      const { openGatewayState } = await import('../src/runtime/index.ts')
+      const { openGatewayState } = await import('../src/runtime/state.ts')
       const state = openGatewayState({
         state_directory: f.gatewayState,
         store: { management: () => ({ actor: 'e2e_admin', confirmation_id: randomUUID() }) },

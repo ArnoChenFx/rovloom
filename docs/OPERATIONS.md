@@ -15,6 +15,22 @@
 
 > 加入更多设备：Gateway 保持运行，在管理页生成新配对码（或 `rovloom gateway --issue-code`），新机器执行显示的加入命令（见[快速开始](QUICK-START-zh.md)）。现有 MCP Bearer 自动覆盖新设备；不设 device_scope 的其他 token 同样可见新设备；selected 范围须由操作员显式更新。
 
+### 程序管理的持久文件
+
+`data.directory` 下由程序自己维护的文件（不要手改，整目录一起备份）：
+
+| 文件 | 角色 | 内容 |
+|---|---|---|
+| `managed/providers.json` | Gateway / Connector | 已批准 provider 条目与契约 pin |
+| `managed/schema_<sha256>.json` | Gateway / Connector | 配对时取得的原始 schema 字节，按内容寻址；Herdr 与 Luvus 共用同一布局 |
+| `managed/management.json`、`managed/mcp-callers.json`、`managed/management-sessions.json` | Gateway | 管理员、令牌注册表与登录绑定 |
+| `gateway.db`（及 `.lock`、`.degraded`） | Gateway | 唯一账本 |
+| `managed/{native-setup,herdr-setup,pairing,device,providers}.json` | Connector | 配对记录与原生准备记录 |
+| `control/luvus-claims.db`、`hr/control/claims.db`（及 `.lock`） | Connector | 每 provider 的唯一发送账本 |
+| `control/luvus-root.json`、`hr/…` 隔离根 | Connector | managed 原生根与运行记录 |
+
+schema 采用内容寻址：文件名即摘要，已有同摘要文件不会被不同字节覆盖。升级前的旧布局仍可读取——Herdr 的 `managed/herdr-schema_<配对批次>.json` 与 Luvus 内嵌在 `managed/providers.json` 的 `contract.schema_bundle` 都继续按同一摘要核验后编译，用户不需要重新配对或换 token。新配对写入引用形式，旧文件保留到所有者按退役批次清理。
+
 ### 升级与回滚
 
 Gateway 与 Connector 一同升级。升级前停止两端进程，离线备份两端完整 `data.directory` 与配置，保留私有文件权限；脱敏数据库快照不能代替包含配对及 token 的完整备份。

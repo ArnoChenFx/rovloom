@@ -13,7 +13,7 @@ test(
   async () => {
     const params = { pane: '3', match: 'fresh_汉字_.*', timeout_s: 0.25 }
     const f = await runtimeFixture({}, undefined, { method: 'wait.output', params, validation: 'raw-contract' })
-    const service = new RuntimeGatewayService({ ...f.mcp, catalog: f.gateway.catalog })
+    const service = new RuntimeGatewayService({ ...f.mcp, catalog: f.catalog })
     const http = httpFixture(service, { authentication: { authenticate: () => f.caller } })
     const received: unknown[] = []
     try {

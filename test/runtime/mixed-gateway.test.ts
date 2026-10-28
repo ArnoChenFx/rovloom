@@ -36,7 +36,7 @@ test(
               binding_revision: 1,
               config_ref: 'mixed_herdr',
               expected_source: fixedHerdrSource(),
-              schema_path: schema
+              schema_ref: schema
             }
           })
           context.state.store.defineProvider(herdr.providers[0]!.binding)
@@ -63,7 +63,7 @@ test(
           boundedJson(selected) === boundedJson(target)
             ? herdr.catalog
             : boundedJson(selected) === boundedJson(fixture.target)
-              ? fixture.gateway.catalog
+              ? fixture.catalog
               : undefined
       }
     })

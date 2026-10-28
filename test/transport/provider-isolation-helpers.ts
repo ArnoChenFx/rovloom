@@ -10,7 +10,7 @@ import { fixture } from './helpers.js'
 import { source } from '../wire/helpers.js'
 import { G } from '../native-contract/helpers.js'
 import { LuvusAdapterError } from '../../src/connector/luvus/types.js'
-import type { NativeContractRecord } from '../../src/integration/luvus-wire.js'
+import type { NativeContractRecord } from '../../src/wire/backend.js'
 
 /** 只冻结合成纯数据，不冻结任何产品 owner、schema handle 或原生许可。 */
 function freeze<T>(value: T): T {

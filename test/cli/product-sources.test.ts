@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { routeProductionSources, createProductSources } from '../../src/cli/product-sources.js'
 import type { ProductionCliSources, ProductionProviderReference } from '../../src/cli/production.js'
 import { configTemplate } from '../../src/cli/config.js'
-import { createManagementSessionAuthority } from '../../src/runtime/index.js'
+import { createManagementSessionAuthority } from '../../src/runtime/management-session.js'
 
 test(
   '静态kind路由保留真实工厂this/配置/authority，未知kind在打开任何工厂前拒绝',

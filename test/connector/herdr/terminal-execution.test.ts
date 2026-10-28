@@ -8,7 +8,7 @@ import { test } from 'node:test'
 import { HerdrInstallation } from '../../../src/connector/herdr/installation.js'
 import { inspectHerdrPath, pinHerdrConfig } from '../../../src/connector/herdr/local.js'
 import { createHerdrRuntime } from '../../../src/connector/herdr/runtime.js'
-import { LuvusDispatchClaims } from '../../../src/connector/luvus/claims.js'
+import { DispatchClaims } from '../../../src/connector/claims.js'
 import { backendFixture } from './helpers.js'
 import { privateHerdrTestRoot } from './private-root.js'
 
@@ -64,7 +64,7 @@ async function fixture(method: string, enabled?: boolean, installedEnabled = ena
     source: /** 复用当前 fixture 的完整 binding 与合成本机来源。 */ (binding: typeof state.binding) =>
       state.backend.nativeSource(binding)
   }) as HerdrInstallation
-  const claims = new LuvusDispatchClaims({
+  const claims = new DispatchClaims({
     path: join(root, 'claims', 'claims.sqlite'),
     mode: 'create',
     ledger_id: 'synthetic',

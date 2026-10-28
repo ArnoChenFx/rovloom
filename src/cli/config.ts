@@ -2,7 +2,7 @@
 import { posix, win32 } from 'node:path'
 import { canonical } from '../contracts.js'
 import { readPrivateBytes } from '../storage/files.js'
-import { parseNativeJson } from '../native-contract/json.js'
+import { parseJson } from '../json/bounds.js'
 import { binDirectories } from '../connector/local/agent-path.js'
 
 export type GatewayConfig = Readonly<{
@@ -351,7 +351,7 @@ export function readProtectedJson(path: string): unknown {
   let bytes: Buffer | undefined
   try {
     bytes = readPrivateBytes(path, 16_384)
-    const parsed = parseNativeJson(bytes, {
+    const parsed = parseJson(bytes, {
       object_bytes: 16_384,
       object_depth: 16,
       object_nodes: 4096

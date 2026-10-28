@@ -33,7 +33,7 @@ function schemaFixture() {
       binding_revision: 1,
       config_ref: 'owned-herdr',
       expected_source: source,
-      schema_path: schema
+      schema_ref: schema
     }
   }
 }
@@ -83,7 +83,7 @@ test(
     const f = schemaFixture()
     try {
       await assert.rejects(
-        createHerdrGatewayResources({ config: { ...f.config, schema_path: f.root } }),
+        createHerdrGatewayResources({ config: { ...f.config, schema_ref: f.root } }),
         /invalid_storage_file/
       )
       truncateSync(f.schema, 0)

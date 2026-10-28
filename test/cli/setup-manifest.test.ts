@@ -14,56 +14,16 @@ import { createProductionCliRuntime } from '../../src/cli/production.js'
 import { configTemplate, type ConnectorConfig } from '../../src/cli/config.js'
 import { saveCredential } from '../../src/transport/credentials.js'
 import { writeSetupJson } from '../../src/cli/setup-files.js'
-import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/runtime/native-source.js'
-
-// v0.6.6（953e4f1）已发布的配对授权顺序；独立固定，不能从当前方法表过滤生成。
-const publishedLuvusSetupMethods = [
-  'session.snapshot',
-  'workspace.list',
-  'workspace.get',
-  'tab.list',
-  'tab.get',
-  'pane.list',
-  'pane.get',
-  'pane.current',
-  'pane.status',
-  'pane.read',
-  'agent.list',
-  'agent.get',
-  'agent.explain',
-  'agent.read',
-  'agent.sessions',
-  'agent.wait',
-  'workspace.new',
-  'workspace.open',
-  'workspace.focus',
-  'workspace.rename',
-  'workspace.close',
-  'tab.new',
-  'tab.focus',
-  'tab.rename',
-  'tab.close',
-  'pane.split',
-  'pane.focus',
-  'pane.rename',
-  'pane.close',
-  'pane.run',
-  'agent.start',
-  'agent.prompt',
-  'agent.send',
-  'agent.keys',
-  'agent.resume'
-]
+import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/connector/luvus/host/native-source.js'
 
 const plan: SetupPlanFacts = {
   attempt_id: 'synthetic_attempt',
   actor: 'synthetic_operator'
 }
 
-test('Luvus 配对清单兼容旧主体授权与新策略授权，拒绝额外方法或错误授权范围', async () => {
+test('Luvus 配对清单只接受当前策略授权，不携带逐方法 raw 授权', async () => {
   const root = privateHerdrTestRoot('.setup-luvus-grant-')
-  const authorization = { principal_id: plan.actor }
-  const grant = { target: setupTarget('synthetic_machine', 'luvus'), methods: ['pane.list'] }
+  const grant = { target: setupTarget('synthetic_machine', 'luvus') }
   const schema = readFileSync(new URL('../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8')
   const reference = setupReference(plan.attempt_id)
   const value = {
@@ -88,19 +48,17 @@ test('Luvus 配对清单兼容旧主体授权与新策略授权，拒绝额外�
     }
   }
   try {
-    for (const methods of [grant.methods, publishedLuvusSetupMethods]) {
-      for (const subject of [{ principal_id: authorization.principal_id }, {}]) {
-        const remote = { ...value, raw_grant: { ...subject, methods } }
-        const reviewed = await reviewSetupManifest(
-          { installations: [{ reference, value: remote }] },
-          plan,
-          'synthetic_machine',
-          root,
-          new AbortController().signal
-        )
-        assert.equal((reviewed.reviewed[0]!.value as { raw_grant?: unknown }).raw_grant, undefined)
-        assert.deepEqual(reviewed.authorization, { principal_id: plan.actor })
-      }
+    // 旧记录里的逐方法 raw 授权字段会被丢弃，但不再参与任何授权判断。
+    for (const remote of [value, { ...value, raw_grant: { principal_id: plan.actor, methods: ['pane.list'] } }]) {
+      const reviewed = await reviewSetupManifest(
+        { installations: [{ reference, value: remote }] },
+        plan,
+        'synthetic_machine',
+        root,
+        new AbortController().signal
+      )
+      assert.equal((reviewed.reviewed[0]!.value as { raw_grant?: unknown }).raw_grant, undefined)
+      assert.deepEqual(reviewed.authorization, { principal_id: plan.actor })
     }
     const noGrant = await reviewSetupManifest(
       { installations: [{ reference, value }] },

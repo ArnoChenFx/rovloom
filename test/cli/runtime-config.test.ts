@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { configTemplate, readRuntimeConfig } from '../../src/cli/index.js'
 import { configDocument, parseConfig } from '../../src/cli/config.js'
-import { createLuvusProductionSources } from '../../src/runtime/production-luvus.js'
-import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/runtime/native-source.js'
+import { createLuvusProductionSources } from '../../src/connector/luvus/host/production-luvus.js'
+import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/connector/luvus/host/native-source.js'
 import { hash } from '../../src/wire/index.js'
 
 test(

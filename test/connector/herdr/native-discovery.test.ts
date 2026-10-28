@@ -99,7 +99,7 @@ test(
             binding_revision: 1,
             config_ref: 'synthetic-config',
             expected_source: source,
-            schema_path: '/synthetic/schema.json'
+            schema_ref: '/synthetic/schema.json'
           })
       )
       const catalog = describeHerdrContract({

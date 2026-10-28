@@ -1,8 +1,8 @@
 // 用真实 Store、Wire 与纯模拟执行验证按调用清理的线性成本、容量回收和当前读取门禁；不启动原生进程。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createLuvusWireAdapter } from '../../src/integration/luvus-wire.js'
-import { persistentBackend } from '../../src/integration/persistence.js'
+import { createLuvusWireAdapter } from '../../src/wire/native.js'
+import { persistentBackend } from '../../src/wire/persistence.js'
 import type { V2Target } from '../../src/wire/types.js'
 import { fixture, until } from './helpers.js'
 

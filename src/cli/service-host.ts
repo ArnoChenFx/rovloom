@@ -5,7 +5,7 @@ import { ServiceManager } from '../service/manager.js'
 import { ServiceError, type ServiceBackend, type ServiceRole, type ServiceSpec } from '../service/types.js'
 import { manifest, serviceControlId } from '../service/spec.js'
 import { requestStopPipe, windowsStopPipe } from '../service/windows-control.js'
-import { parseNativeJson } from '../native-contract/json.js'
+import { parseJson } from '../json/bounds.js'
 import { parseConfig } from './config.js'
 import { resolveRoleConfigPath } from './config-path.js'
 import type { CliServiceHost } from './run.js'
@@ -83,7 +83,7 @@ export async function verifyProductServiceRuntime(
       }
       length += count
     }
-    const parsed = parseNativeJson(bytes.subarray(0, length), {
+    const parsed = parseJson(bytes.subarray(0, length), {
       object_bytes: 16384,
       object_depth: 16,
       object_nodes: 4096

@@ -1,8 +1,8 @@
 // 用原编译契约与离线合成能力验证纯 shape 检查，拒绝身份和目录漂移且不登记认证或许可句柄。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { CapabilityView, NativeBinding } from '../../src/native-contract/index.js'
-import { candidates, responseContexts, views } from '../../src/native-contract/internal.js'
+import type { CapabilityView, NativeBinding } from '../../src/connector/luvus/contract/index.js'
+import { candidates, responseContexts, views } from '../../src/connector/luvus/contract/internal.js'
 import { G, json, rejects, source, unwrap, validator } from './helpers.js'
 
 /** 只观察本测试同步调用是否写入真实私有登记表，结束后恢复原方法。 */

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { createConnectorRuntime } from '../../src/runtime/connector.js'
 import type { ConnectorRuntimeOptions } from '../../src/runtime/types.js'
 import { join } from 'node:path'
-import { LuvusDispatchClaims } from '../../src/connector/luvus/index.js'
+import { DispatchClaims } from '../../src/connector/luvus/index.js'
 import { fixture as localFixture } from '../connector/luvus/helpers.js'
 import { fixture as transportFixture, until } from '../transport/helpers.js'
 
@@ -91,7 +91,7 @@ async function welcomeReentry(stage: ReentrantStage, failingClose = false): Prom
   const native = await localFixture()
   const gateway = transportFixture()
   const paired = gateway.pair('isolated_reentrant_connector')
-  const claims = new LuvusDispatchClaims({
+  const claims = new DispatchClaims({
     path: join(native.root, 'reentrant-claims.db'),
     mode: 'create',
     ledger_id: 'isolated_reentrant_claims',

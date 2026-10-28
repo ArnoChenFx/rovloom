@@ -118,7 +118,7 @@ try {
     assert.equal(await count(client, refs), second + 1)
     console.log(JSON.stringify({ ok: true, state: view.state, before: saved.before, after_unknown: second }))
   } else if (step === 'revoke') {
-    const { openGatewayState } = await import('../src/runtime/index.ts')
+    const { openGatewayState } = await import('../src/runtime/state.ts')
     const state = openGatewayState({
       state_directory: rest[0],
       store: { management: () => ({ actor: 'e2e_admin', confirmation_id: randomUUID() }) },

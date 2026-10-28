@@ -4,10 +4,10 @@ import { test } from 'node:test'
 import { Ajv2020 } from 'ajv/dist/2020.js'
 import type { AnySchema } from 'ajv'
 import { createLuvusCatalog } from '../../../src/connector/luvus/catalog.js'
-import { compileBundle, createNativeValidator } from '../../../src/native-contract/index.js'
-import { hash } from '../../../src/native-contract/json.js'
+import { compileBundle, createNativeValidator } from '../../../src/connector/luvus/contract/index.js'
+import { hash } from '../../../src/json/bounds.js'
 import { compiled, source, json, identity, unwrap, G } from '../../native-contract/helpers.js'
-import type { CompiledContract } from '../../../src/native-contract/index.js'
+import type { CompiledContract } from '../../../src/connector/luvus/contract/index.js'
 
 function catalog(contract: CompiledContract = compiled) {
   const trusted = { ...source(), binding: { ...source().binding, contract: contract.identity } }

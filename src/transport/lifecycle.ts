@@ -1,8 +1,8 @@
 // 将 Store 的设备凭据校验与连接 fence 组合为 Gateway 的认证宿主与 socket 门禁。
 import type { Store } from '../store.js'
-import { persistentBackend } from '../integration/persistence.js'
-import { createLuvusWireAdapter } from '../integration/luvus-wire.js'
-import type { NativeWireBackend } from '../integration/luvus-wire.js'
+import { persistentBackend } from '../wire/persistence.js'
+import { createLuvusWireAdapter } from '../wire/native.js'
+import type { NativeWireBackend } from '../wire/backend.js'
 import { fail, hash } from '../wire/index.js'
 import type { ConnectionIdentity } from '../wire/types.js'
 import type { IdentityHost } from './identity.js'

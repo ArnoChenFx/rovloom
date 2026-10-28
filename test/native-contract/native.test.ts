@@ -6,7 +6,7 @@ import {
   checkResultBoundary,
   LUVUS_TABLE_METHODS,
   parseNativeJson
-} from '../../src/native-contract/index.js'
+} from '../../src/connector/luvus/contract/index.js'
 import { auth, clone, json, raw, register, rejects, request, sourceFor, unwrap, validator, view } from './helpers.js'
 
 test(

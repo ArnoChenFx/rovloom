@@ -7,13 +7,13 @@ import { createServer } from 'node:net'
 import type { Server } from 'node:net'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { LUVUS_CLAIMS_LOCK_FORMAT, LuvusDispatchClaims } from '../../src/connector/luvus/claims.js'
+import { DISPATCH_CLAIMS_LOCK_FORMAT, DispatchClaims } from '../../src/connector/claims.js'
 import {
   LUVUS_OWNER_FORMAT,
-  recoverLuvusClaimsLock,
+  recoverDispatchClaimsLock,
   recoverLuvusOwnerLock
-} from '../../src/runtime/native-crash-recovery.js'
-import { createNativeRecord } from '../../src/runtime/native-record-files.js'
+} from '../../src/connector/luvus/host/native-crash-recovery.js'
+import { createNativeRecord } from '../../src/connector/luvus/host/native-record-files.js'
 import { currentProcessIdentity } from '../../src/storage/process-identity.js'
 import { privateHerdrTestRoot } from '../connector/herdr/private-root.js'
 
@@ -68,22 +68,22 @@ test('claim 账本锁：持有者已死则接管，空锁、旧格式、活进�
   const f = fixture()
   try {
     const dead = await deadProcess()
-    writeFileSync(f.claimsLock, JSON.stringify({ format: LUVUS_CLAIMS_LOCK_FORMAT, process: dead }), { mode: 0o600 })
-    assert.equal(recoverLuvusClaimsLock(f.claimsLock), true)
+    writeFileSync(f.claimsLock, JSON.stringify({ format: DISPATCH_CLAIMS_LOCK_FORMAT, process: dead }), { mode: 0o600 })
+    assert.equal(recoverDispatchClaimsLock(f.claimsLock), true)
     assert.equal(existsSync(f.claimsLock), false)
 
     const keep = async (content: string) => {
       writeFileSync(f.claimsLock, content, { mode: 0o600 })
-      assert.equal(recoverLuvusClaimsLock(f.claimsLock), false)
+      assert.equal(recoverDispatchClaimsLock(f.claimsLock), false)
       assert.equal(existsSync(f.claimsLock), true)
       rmSync(f.claimsLock)
     }
     await keep('')
     await keep('not json')
     await keep(JSON.stringify({ format: 'other', process: dead }))
-    await keep(JSON.stringify({ format: LUVUS_CLAIMS_LOCK_FORMAT, process: { pid: 0, start: '1' } }))
-    await keep(JSON.stringify({ format: LUVUS_CLAIMS_LOCK_FORMAT, process: currentProcessIdentity() }))
-    assert.equal(recoverLuvusClaimsLock(f.claimsLock), false)
+    await keep(JSON.stringify({ format: DISPATCH_CLAIMS_LOCK_FORMAT, process: { pid: 0, start: '1' } }))
+    await keep(JSON.stringify({ format: DISPATCH_CLAIMS_LOCK_FORMAT, process: currentProcessIdentity() }))
+    assert.equal(recoverDispatchClaimsLock(f.claimsLock), false)
   } finally {
     f.close()
   }
@@ -100,10 +100,10 @@ test('claim 账本实际写入持有者身份，进程内第二个实例仍被�
       limits: { entries: 16, bytes: 262_144 },
       now: Date.now
     }
-    const ledger = new LuvusDispatchClaims(options)
-    assert.throws(() => new LuvusDispatchClaims({ ...options, mode: 'open' }))
+    const ledger = new DispatchClaims(options)
+    assert.throws(() => new DispatchClaims({ ...options, mode: 'open' }))
     // 本进程仍活着：恢复必须拒绝。
-    assert.equal(recoverLuvusClaimsLock(path + '.lock'), false)
+    assert.equal(recoverDispatchClaimsLock(path + '.lock'), false)
     ledger.close()
     assert.equal(existsSync(path + '.lock'), false)
   } finally {

@@ -2,7 +2,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomUUID } from 'node:crypto'
 import { JSONRPCMessageSchema, InitializeRequestSchema, type JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
-import { parseNativeJson } from '../native-contract/json.js'
+import { parseJson } from '../json/bounds.js'
 import { createMcpFacade, type DiagnosticCode } from './facade.js'
 import { FacadeHttpTransport, type RequestReservation } from './http-transport.js'
 import { canonicalLoopbackHost } from './listen.js'
@@ -114,7 +114,7 @@ async function readMessage(request: Request, signal: AbortSignal): Promise<JSONR
       }
       chunks.push(part.value)
     }
-    const parsed = parseNativeJson(Buffer.concat(chunks, bytes))
+    const parsed = parseJson(Buffer.concat(chunks, bytes))
     if (!parsed.ok || Array.isArray(parsed.value)) {
       return denied(400)
     }

@@ -49,7 +49,10 @@ bun --no-env-file scripts/e2e/connector-disconnect.mjs
 
 ## 源码目录
 
-- `src/connector/{luvus,herdr}`：原生 adapter。`native-contract`、`wire`、`transport`、`storage`、`integration`、`mcp`、`webui`、`admin`、`service` 按职责划分；根目录的 Store、Router 与协议文件是公共入口。
+- `src/connector/luvus/`：Luvus 的全部实现——方法表（`methods.ts`）、参数规则（`operations.ts`、`operations-validation.ts`、`parameter-help.ts`）、契约编译与校验（`contract/`）、原生/Wire 适配（`adapter.ts`、`catalog.ts`）与宿主接线（`host/`、`operations-provider.ts`）。
+- `src/connector/herdr/`：Herdr 的全部实现（adapter、schema 编译、方法表、安装与来源）。
+- `src/connector/{claims,schema-store,terminal-execution}.ts`：两个 provider 实际共用的发送账本、原始 schema 落盘约定与终端开关。
+- `src/json/`：provider 中性的有界 JSON 工具。`src/wire/{native,backend}.ts` 是 Luvus 契约内核与 Wire 的接缝和中性原生后端接口；`wire`、`transport`、`storage`、`runtime`、`mcp`、`webui`、`admin`、`service` 按职责划分；根目录的 Store、Router 与协议文件是公共入口。
 - `scripts/{luvus,herdr}`：固定版本原生输入的采集、审计和验证工具。`scripts/bun`：构建与 smoke。`scripts/release`：发行。`scripts/webui`：管理页浏览器检查。`scripts/maintenance`：维护脚本。
 - `test/`：所有 Bun 回归，由 `bun run test` 执行。`test/fixtures/{luvus,herdr}` 按版本保存协议原文、来源与许可证，`test/fixtures/native-contract` 保存当前映射和矩阵。
 - 端到端验收见 [e2e/README](../e2e/README.md)，不属于单元测试门禁。

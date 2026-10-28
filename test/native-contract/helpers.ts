@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { compileBundle, createNativeValidator } from '../../src/native-contract/index.js'
+import { compileBundle, createNativeValidator } from '../../src/connector/luvus/contract/index.js'
 import type {
   CapabilityView,
   Check,
@@ -12,7 +12,7 @@ import type {
   CheckedRequest,
   RawRequestCandidate,
   TrustedNativeContext
-} from '../../src/native-contract/index.js'
+} from '../../src/connector/luvus/contract/index.js'
 
 // fixture 中只有 P0 自建内容；测试工厂的可信标志不代表生产认证实现。
 export const fixtureRoot = new URL('../fixtures/luvus/0.14.3/linux/', import.meta.url)

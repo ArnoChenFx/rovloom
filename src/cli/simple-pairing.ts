@@ -4,7 +4,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { ManagementRequest } from '../storage/model.js'
 import type { openGatewayState } from '../runtime/state.js'
-import { parseNativeJson } from '../native-contract/json.js'
+import { parseJson } from '../json/bounds.js'
 import { boundedJson, fields, id, object } from '../wire/index.js'
 import { GatewayError } from '../contracts.js'
 import type { GatewayConfig } from './config.js'
@@ -69,7 +69,7 @@ export async function requestJson(
       }
       chunks.push(result.value)
     }
-    const parsed = parseNativeJson(Buffer.concat(chunks, bytes), { object_bytes: maximum })
+    const parsed = parseJson(Buffer.concat(chunks, bytes), { object_bytes: maximum })
     if (!parsed.ok) {
       throw new Error('setup_request_invalid')
     }

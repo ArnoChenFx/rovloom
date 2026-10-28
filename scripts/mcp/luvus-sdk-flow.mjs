@@ -1,7 +1,7 @@
 // 正式SDK窗口/Agent流程与角色启动解耦；这里不生成native成功值、schema artifact或模型回复。
 import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
-import { luvusOperationValidation } from '../../src/runtime/luvus-operations.ts'
+import { luvusOperationValidation } from '../../src/connector/luvus/operations.ts'
 import { createNativeMcpInvoker } from '../../test/mcp/native-conversation.ts'
 
 // 每个独立用户动作沿用原30秒期限；总流程按已知动作数封顶，轮询与结果分页不能刷新原意图。

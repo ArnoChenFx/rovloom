@@ -9,15 +9,15 @@ import { dlopen, FFIType, ptr } from 'bun:ffi'
 import { DatabaseSync } from 'node:sqlite'
 import { Store } from '../../../src/store.ts'
 import { Router } from '../../../src/router.ts'
-import { persistentBackend, commitLuvusResponse } from '../../../src/integration/persistence.ts'
-import { createLuvusWireAdapter } from '../../../src/integration/luvus-wire.ts'
-import { compileBundle, createNativeValidator } from '../../../src/native-contract/index.ts'
+import { persistentBackend, commitLuvusResponse } from '../../../src/wire/persistence.ts'
+import { createLuvusWireAdapter } from '../../../src/wire/native.ts'
+import { compileBundle, createNativeValidator } from '../../../src/connector/luvus/contract/index.ts'
 import { assertBinding, boundedJson, contractRef } from '../../../src/wire/index.ts'
 import {
   LuvusRpcAdapter,
   LuvusAdapterError,
   createLuvusResultAccess,
-  LuvusDispatchClaims,
+  DispatchClaims,
   readLinuxLuvusPeer
 } from '../../../src/connector/luvus/index.ts'
 
@@ -419,7 +419,7 @@ export async function officialIpc(binaryPath) {
     wire = createLuvusWireAdapter(backend)
     responseWire = createLuvusWireAdapter(backend)
     const claimsPath = join(root, 'gateway/claims.sqlite')
-    claims = new LuvusDispatchClaims({
+    claims = new DispatchClaims({
       path: claimsPath,
       mode: 'create',
       ledger_id: 'owned-official-ipc',

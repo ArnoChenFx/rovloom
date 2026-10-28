@@ -1,7 +1,7 @@
 // 定义角色宿主的稳定装配边界；配置解析、HTTP/MCP 协议与管理写服务由各自入口维护。
 import type { NativeRequest } from '../contracts.js'
-import type { NativeWireBackend, NativeContractRecord } from '../integration/luvus-wire.js'
-import type { TrustedNativeContext } from '../native-contract/index.js'
+import type { NativeWireBackend, NativeContractRecord } from '../wire/backend.js'
+import type { TrustedNativeContext } from '../connector/luvus/contract/index.js'
 import type { GatewayIdentitySource, CallerIdentity } from '../mcp/management.js'
 import type { Principal } from '../router.js'
 import type { CallAdmissionOptions, Store } from '../store.js'
@@ -16,7 +16,7 @@ import type {
   WireConnectorOptions
 } from '../transport/index.js'
 import type { ProviderSnapshot, TerminalExecutionState } from '../wire/types.js'
-import type { LuvusLocalConfig, LuvusDispatchClaims, LuvusRpcHost, LuvusNativeAuth } from '../connector/luvus/index.js'
+import type { LuvusLocalConfig, DispatchClaims, LuvusRpcHost, LuvusNativeAuth } from '../connector/luvus/index.js'
 import type { AttemptBinding, JsonObject, ProviderBinding, V2Target } from '../wire/types.js'
 
 export type RuntimeProviderBinding = Readonly<{
@@ -56,6 +56,7 @@ export type RemoteLuvusRuntimeProvider = RuntimeProviderBinding &
       close(): void
     }>
   }>
+/** 本机 Luvus 目录端口：只交付 provider 自己的原生事实，公共门禁与分页由 MCP 层统一处理。 */
 export type RuntimeCatalogProvider = Readonly<{
   resolve(
     target: V2Target,
@@ -119,7 +120,7 @@ export type ConnectorRuntimeOptions = Readonly<{
     backend: NativeWireBackend
     // 当前宿主只接已验证 IPC；CLI proxy 需要另行交付可信归属，不能借 verifyPeer 放行。
     config: LuvusLocalConfig & { readonly transport: 'ipc' }
-    claims: LuvusDispatchClaims
+    claims: DispatchClaims
     verifyPeer: NonNullable<LuvusRpcHost['verifyPeer']>
     // 本机受保护配置的同步读取器；省略时使用本 epoch 固定的本地显式开关。
     terminalExecution?: LuvusRpcHost['terminalExecution']
@@ -145,4 +146,3 @@ export type ConnectorRuntimeOptions = Readonly<{
   // 停止重连和全部 epoch 资源之后释放长期 claims/custody；不能清除墓碑或自动撤销原生工作。
   release(): Promise<void>
 }>
-export type GatewayState = Readonly<{ store: Store; lifecycle: DeviceLifecycleWiring }>

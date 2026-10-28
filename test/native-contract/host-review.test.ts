@@ -1,7 +1,7 @@
 // 仅核对已发布的 host schema 与静态审核，不将尚未接线的 host 执行路由伪装成成功。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { checkDispatch, luvusMethod } from '../../src/native-contract/index.js'
+import { checkDispatch, luvusMethod } from '../../src/connector/luvus/contract/index.js'
 import { auth, rejects, request, unwrap, validator, view } from './helpers.js'
 
 test('host.info/capabilities 审核为只读幂等，仍需独立 host 传输，不能混入 session 或扩大管理方法', () => {
