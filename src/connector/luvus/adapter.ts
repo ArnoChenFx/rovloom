@@ -1,8 +1,8 @@
 import { ConnectorCapacityError } from '../capacity.js'
 /** 执行经过 Wire 与原生契约许可的单次本地 RPC，协调身份核验、完整帧预算及取消结果语义。 */
-import { compileBundle, createNativeValidator, DEFAULT_LIMITS, parseNativeJson } from '../../native-contract/index.js'
-import type { CompiledContract, Json } from '../../native-contract/index.js'
-import { createLuvusWireAdapter } from '../../integration/luvus-wire.js'
+import { compileBundle, createNativeValidator, DEFAULT_LIMITS, parseNativeJson } from './contract/index.js'
+import type { CompiledContract, Json } from './contract/index.js'
+import { createLuvusWireAdapter } from '../../wire/native.js'
 import { createHash } from 'node:crypto'
 import { assertBinding, boundedJson, WireError } from '../../wire/index.js'
 import type { AttemptBinding, AuthenticatedEnvelope, JsonObject } from '../../wire/types.js'

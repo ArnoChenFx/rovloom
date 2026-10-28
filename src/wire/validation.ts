@@ -1,7 +1,11 @@
 // 提供 Wire 错误、字段校验和有大小、深度、节点限制的 JSON 边界。
 import { createHash } from 'node:crypto'
 import { GatewayError } from '../contracts.js'
-import { ContractFault, DEFAULT_LIMITS as JSON_LIMITS, parse as parseNativeJson } from '../native-contract/json.js'
+import {
+  ContractFault,
+  DEFAULT_LIMITS as JSON_LIMITS,
+  parse as parseNativeJson
+} from '../connector/luvus/contract/json.js'
 import type { JsonObject } from './types.js'
 
 export const LIMITS = Object.freeze({

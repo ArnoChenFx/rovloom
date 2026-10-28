@@ -1,5 +1,5 @@
 /** Herdr 固定评审 RPC 的原生编解码与 Wire 接缝；其它能力继续逐项取得原生证据。 */
-import type { NativeWireBackend, TrustedAttempt } from '../../integration/luvus-wire.js'
+import type { NativeWireBackend, TrustedAttempt } from '../../wire/backend.js'
 import type { LedgerInvalidation } from '../../storage/model.js'
 import type { ResponseAnchor } from '../../wire/evidence.js'
 import {

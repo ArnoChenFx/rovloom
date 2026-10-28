@@ -1,6 +1,6 @@
 import { ConnectorCapacityError } from '../capacity.js'
 /** 将 Herdr 已评审 RPC 挂到既有 ConnectorWireSession，复用 Store/Wire 和持久唯一发送账本。 */
-import { LuvusDispatchClaims } from '../luvus/claims.js'
+import { DispatchClaims } from '../claims.js'
 import { LuvusAdapterError } from '../luvus/types.js'
 import { boundedJson, WireError } from '../../wire/index.js'
 import type { AttemptBinding, AuthenticatedEnvelope } from '../../wire/types.js'
@@ -17,10 +17,10 @@ import { assertTerminalExecutionAllowed } from '../terminal-execution.js'
 export function createHerdrRuntime(
   installation: HerdrInstallation,
   backend: HerdrReadonlyBackend,
-  claims: LuvusDispatchClaims,
+  claims: DispatchClaims,
   terminalExecution?: () => boolean
 ) {
-  if (!(installation instanceof HerdrInstallation) || !(claims instanceof LuvusDispatchClaims)) {
+  if (!(installation instanceof HerdrInstallation) || !(claims instanceof DispatchClaims)) {
     throw new HerdrLocalError('herdr_runtime_host_required')
   }
   installation.assert()

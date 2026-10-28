@@ -1,5 +1,5 @@
 /** Connector 本地容量诊断只包含固定资源类别和可回收时间，不携带请求或存储路径。 */
-import { LuvusAdapterError } from './luvus/types.js'
+import { ProviderAdapterError } from './provider-error.js'
 
 export type ConnectorCapacity = Readonly<{
   resource: 'claim_entries' | 'claim_bytes' | 'attempt_entries' | 'attempt_bytes'
@@ -7,7 +7,7 @@ export type ConnectorCapacity = Readonly<{
   reclaim_at: number | null
 }>
 
-export class ConnectorCapacityError extends LuvusAdapterError {
+export class ConnectorCapacityError extends ProviderAdapterError {
   readonly capacity: ConnectorCapacity
 
   /** 容量只在本地观测，不扩展 Wire 拒绝证明，也不允许重派同一个 attempt。 */
