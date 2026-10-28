@@ -1,4 +1,6 @@
+import { ProviderAdapterError } from '../connector/provider-error.js'
 // Gateway从配对设备的实际schema字节核对固定首次来源清单；不接受设备选择Gateway文件路径或重建可信句柄。
+import { HERDR_INPUT_LIMIT } from '../connector/herdr/compiler-protocol.js'
 import { compileHerdrSchemas } from '../connector/herdr/compiler-api.js'
 import { parseHerdrProviderRefConfig, createHerdrGatewayResources } from '../connector/herdr/provider.js'
 import { createHerdrCodec } from '../connector/herdr/readonly.js'
@@ -8,7 +10,6 @@ import type { ProviderBinding, V2Target } from '../wire/types.js'
 import { CliError, type NativeProviderKind } from './config.js'
 import type { SetupPlanFacts } from './setup-targets.js'
 import { setupProviderKinds, setupReference, setupSessions, setupTarget } from './setup-targets.js'
-import { readRuntimeFile } from './runtime-files.js'
 import { publishSchema, schemaReference } from '../connector/schema-store.js'
 
 export type ReviewedSetupInstallation = Readonly<{
@@ -21,7 +22,7 @@ export type ReviewedSetupInstallation = Readonly<{
   binary_sha256: string
   schema?: Readonly<{ path: string; bytes: Buffer }>
   /** 落盘后由该 provider 重新加载已发布字节；公共发布层不解释 provider 语义。 */
-  verifyPublished?(): Promise<void>
+  verifyPublished(): Promise<void>
 }>
 
 // 诊断标签须为有界单行文本，不能向所有者确认注入TTY控制序列。
@@ -104,23 +105,25 @@ export async function reviewSetupManifest(
         throw new CliError('configuration_required')
       }
       const bytes = Buffer.from(remote.contract.schema_bundle, 'utf8')
-      if (bytes.length > 524_288) {
-        throw new CliError('configuration_required')
-      }
       const path = schemaReference(directory, remote.contract.schema_sha256)
       const verified = await createPinnedRemoteLuvus(remote)
       verified.close()
       const { schema_bundle: _inline, ...pin } = remote.contract
+      const value = { ...remote, contract: { ...pin, schema_ref: path } }
       reviewed.push({
         kind,
         reference,
         target,
         binding: remote.binding,
         // 发布后的 pin 只留 Gateway 自己的内容寻址引用，不再内嵌原始文本。
-        value: { ...remote, contract: { ...pin, schema_ref: path } },
+        value,
         label: label(remote.contract.binary_version),
         binary_sha256: remote.contract.binary_sha256,
-        schema: { path, bytes }
+        schema: { path, bytes },
+        async verifyPublished() {
+          const loaded = await createPinnedRemoteLuvus(value)
+          loaded.close()
+        }
       })
     } else {
       const remote = object(entry.value)
@@ -134,7 +137,7 @@ export async function reviewSetupManifest(
       if (
         remote.kind !== 'herdr' ||
         typeof remote.schema_bundle !== 'string' ||
-        Buffer.byteLength(remote.schema_bundle) > 524_288
+        Buffer.byteLength(remote.schema_bundle) > HERDR_INPUT_LIMIT
       ) {
         throw new CliError('configuration_required')
       }
@@ -190,29 +193,17 @@ export async function publishSetupSchemas(
       continue
     }
     const { path, bytes } = entry.schema
-    let previous: Buffer | undefined
-    try {
-      previous = readRuntimeFile(path, 524_288)
-    } catch (error) {
-      if (!(error instanceof CliError && error.code === 'backend_unavailable')) {
-        throw error
-      }
-    }
-    if (previous === undefined) {
-      publishSchema(path, bytes)
-    } else if (!previous.equals(bytes)) {
+    if (signal.aborted) {
       throw new CliError('configuration_required')
     }
-    const value = entry.value as { config?: unknown }
-    if (entry.verifyPublished) {
-      await entry.verifyPublished()
-      continue
+    try {
+      publishSchema(path, bytes)
+    } catch (error) {
+      if (error instanceof ProviderAdapterError && error.code === 'schema_digest_conflict') {
+        throw new CliError('configuration_required')
+      }
+      throw error
     }
-    // 只对带 config 的 Herdr 条目走原有资源重建；其余 provider 自报自己的验证。
-    if (value.config === undefined) {
-      continue
-    }
-    const verified = await createHerdrGatewayResources({ config: value.config, signal })
-    await verified.release()
+    await entry.verifyPublished()
   }
 }

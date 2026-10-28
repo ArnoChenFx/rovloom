@@ -2,9 +2,9 @@
  * Herdr 与 Luvus 共用同一份原始 schema 落盘约定：内容寻址的单文件、摘要核验、原子发布。
  * 这里只处理字节和引用，不解析或重新序列化 schema，也不编译契约。
  */
-import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { privatePath, readPrivateBytes, syncParentDirectory } from '../storage/files.js'
+import { privatePath, publishPrivateBytes, readPrivateBytes } from '../storage/files.js'
 import { hash } from '../wire/index.js'
 import { ProviderAdapterError } from './provider-error.js'
 
@@ -34,29 +34,22 @@ export function publishSchema(path: string, bytes: Uint8Array): string {
     throw new ProviderAdapterError('schema_reference_mismatch')
   }
   privatePath(path)
-  // 目标目录必须已存在且属于本角色；发布本身不创建新目录层级。
-  if (existsSync(path)) {
-    const existing = readFileSync(path)
-    if (!Buffer.from(bytes).equals(existing)) {
-      throw new ProviderAdapterError('schema_digest_conflict')
-    }
-    return path
+  if (!bytes.length || bytes.byteLength > SCHEMA_BYTES_LIMIT) {
+    throw new ProviderAdapterError('schema_file_invalid')
   }
-  // 排他创建后同步文件与目录；中途失败保留已写文件，由调用方按同一摘要重试。
-  const temporary = path + '.publishing'
-  privatePath(temporary)
-  writeFileSync(temporary, bytes, { mode: 0o600, flag: 'w' })
-  try {
-    renameSync(temporary, path)
-  } catch (error) {
+  if (!existsSync(path)) {
     try {
-      unlinkSync(temporary)
-    } catch {
-      // 临时文件清理失败不掩盖原发布错误。
+      publishPrivateBytes(path, bytes)
+    } catch (error) {
+      // 并发发布只允许同一摘要、同一字节；其它 I/O 失败不被成功读回掩盖。
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw new ProviderAdapterError('schema_publish_failed')
+      }
     }
-    throw error instanceof ProviderAdapterError ? error : new ProviderAdapterError('schema_publish_failed')
   }
-  syncParentDirectory(path)
+  if (!Buffer.from(bytes).equals(readPrivateBytes(path, SCHEMA_BYTES_LIMIT))) {
+    throw new ProviderAdapterError('schema_digest_conflict')
+  }
   return path
 }
 

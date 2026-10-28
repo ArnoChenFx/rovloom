@@ -300,7 +300,9 @@ test(
   'Luvus 配对把原始 schema 发布到 Gateway 自己的目录，不接受设备路径',
   /* 两台机器部署时设备路径在 Gateway 侧不存在：引用必须由 Gateway 自己选择并落盘。 */ async () => {
     const root = privateHerdrTestRoot('.setup-luvus-schema-')
-    const schema = readFileSync(new URL('../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8')
+    const schema =
+      readFileSync(new URL('../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8') +
+      ' '.repeat(130_000)
     const reference = setupReference(plan.attempt_id)
     const target = setupTarget('synthetic_machine', 'luvus')
     const value = {
@@ -340,6 +342,9 @@ test(
       assert.equal(published.schema_ref, join(root, 'managed', `schema_${hash(schema)}.json`))
       await publishSetupSchemas(reviewed.reviewed, new AbortController().signal)
       assert.deepEqual(readFileSync(published.schema_ref!), Buffer.from(schema, 'utf8'))
+      // 合法空白超过旧 512 KiB 门槛；重复发布也必须从已发布引用重建成功。
+      assert(Buffer.byteLength(schema) > 524_288)
+      await publishSetupSchemas(reviewed.reviewed, new AbortController().signal)
       // 设备提交自己的路径不被接受：Gateway 不接受设备选择本机文件位置。
       const hostile = structuredClone(value) as unknown as { contract: Record<string, unknown> }
       hostile.contract.schema_ref = '/arbitrary/device/path/schema.json'
