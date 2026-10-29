@@ -2,11 +2,15 @@
 export { LuvusRpcAdapter } from './adapter.js'
 export type { RpcResult } from './adapter.js'
 export { createLuvusCatalog } from './catalog.js'
-export { createLuvusResultAccess } from './results.js'
-export { LuvusDispatchClaims } from './claims.js'
-export type { LuvusClaimLedgerOptions } from './claims.js'
+export { createProviderResultAccess as createLuvusResultAccess } from '../../runtime/results.js'
+export type {
+  ProviderResultAccessOptions as LuvusResultAccessOptions,
+  ProviderResultMetadata as LuvusResultMetadata,
+  ProviderResultPage as LuvusResultPage
+} from '../../runtime/results.js'
+export { DispatchClaims } from '../claims.js'
+export type { DispatchClaimLedgerOptions } from '../claims.js'
 export { readLinuxLuvusPeer } from './linux-peer.js'
 export { readLuvusPeer, readMacosLuvusPeer, readWindowsLuvusPeer } from './peer.js'
-export type { LuvusResultAccessOptions, LuvusResultMetadata, LuvusResultPage } from './results.js'
 export { LuvusAdapterError } from './types.js'
 export type * from './types.js'

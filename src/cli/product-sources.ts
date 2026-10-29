@@ -1,5 +1,5 @@
 // 唯一入口静态链接真实provider工厂；配置只选kind，不加载任意模块、脚本或另一套角色。
-import { createLuvusProductionSources } from '../runtime/index.js'
+import { createLuvusProductionSources } from '../connector/luvus/host/production-luvus.js'
 import { createHerdrProductionSources } from './production-herdr.js'
 import { prepareMixedGateway, prepareMixedConnector, type ProductionSourceGroup } from './composite-sources.js'
 import { CliError } from './config.js'

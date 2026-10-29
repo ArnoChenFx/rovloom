@@ -1,10 +1,13 @@
 // 普通跨平台文件读写：检查路径、文件类型及字节预算，保留排他创建和落盘，不附加所有权/权限门禁。
+import { randomUUID } from 'node:crypto'
 import {
   closeSync,
   constants,
   fstatSync,
+  existsSync,
   fsyncSync,
   lstatSync,
+  linkSync,
   mkdirSync,
   openSync,
   readSync,
@@ -12,6 +15,7 @@ import {
   readlinkSync,
   realpathSync,
   statSync,
+  unlinkSync,
   writeFileSync
 } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
@@ -62,7 +66,7 @@ export function databasePath(path: string): string {
   throw new GatewayError('database_symlink_loop')
 }
 // 排他创建并写完、同步同一文件；默认权限只用于新文件，不修改任何已有对象。
-export function createPrivate(path: string, content = ''): void {
+export function createPrivate(path: string, content: string | Uint8Array = ''): void {
   privatePath(path)
   const fd = openSync(path, 'wx', 0o600)
   try {
@@ -70,6 +74,21 @@ export function createPrivate(path: string, content = ''): void {
     fsyncSync(fd)
   } finally {
     closeSync(fd)
+  }
+}
+/** 完整同步临时内容后排他发布；已有目标交由调用方核对，不覆盖其它发布者。 */
+export function publishPrivateBytes(path: string, bytes: Uint8Array): void {
+  privatePath(path)
+  const temporary = join(dirname(path), '.rovloom-publish-' + randomUUID() + '.tmp')
+  try {
+    createPrivate(temporary, bytes)
+    linkSync(temporary, path)
+    syncParentDirectory(path)
+  } finally {
+    if (existsSync(temporary)) {
+      unlinkSync(temporary)
+      syncParentDirectory(temporary)
+    }
   }
 }
 // 同步父目录项，使创建、rename 与删除进入持久边界；Windows 不允许对目录句柄 fsync，NTFS 对元数据自带日志，故不做。

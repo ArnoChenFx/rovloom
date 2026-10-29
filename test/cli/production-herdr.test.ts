@@ -18,7 +18,7 @@ import { CliError, configTemplate } from '../../src/cli/config.js'
 import { createProductionCliRuntime } from '../../src/cli/production.js'
 import { routeProductionSources } from '../../src/cli/product-sources.js'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
-import { createManagementSessionAuthority } from '../../src/runtime/index.js'
+import { createManagementSessionAuthority } from '../../src/runtime/management-session.js'
 import { privateHerdrTestRoot } from '../connector/herdr/private-root.js'
 
 /** 真实私有路径和完整 pin 仅用于拒绝反例；假 binary 摘要不符，执行标记必须永远不存在。 */
@@ -48,7 +48,7 @@ function fixture() {
       binding_revision: 1,
       config_ref: 'herdr_fixture',
       expected_source: fixedHerdrSource(),
-      schema_path: schema,
+      schema_ref: schema,
       connector: {
         local: {
           target,

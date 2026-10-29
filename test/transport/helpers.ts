@@ -5,14 +5,14 @@ import { randomUUID } from 'node:crypto'
 import { Store } from '../../src/store.js'
 import type { StoreOptions } from '../../src/store.js'
 import { Router } from '../../src/router.js'
-import { persistentBackend } from '../../src/integration/persistence.js'
-import { createLuvusWireAdapter } from '../../src/integration/luvus-wire.js'
+import { persistentBackend } from '../../src/connector/luvus/persistence.js'
+import { createLuvusWireAdapter } from '../../src/connector/luvus/wire.js'
 import { createConnector, createGateway } from '../../src/transport/index.js'
 import type { Connection, DeviceCredential, Session, SocketChannel } from '../../src/transport/index.js'
 import type { NativeConnectorOptions } from '../../src/transport/connector.js'
 import type { GatewayOptions } from '../../src/transport/gateway.js'
-import type { NativeBinding } from '../../src/native-contract/index.js'
-import type { CompiledContract } from '../../src/native-contract/index.js'
+import type { NativeBinding } from '../../src/connector/luvus/contract/index.js'
+import type { CompiledContract } from '../../src/connector/luvus/contract/index.js'
 import {
   ConnectorAttemptBook,
   CONNECTOR_MAX_DEADLINE_MS,
@@ -21,7 +21,7 @@ import {
 } from '../../src/runtime/connector-attempts.js'
 import type { ContractSource, ProviderBinding, V2Target, VersionOffer } from '../../src/wire/types.js'
 import { contractRef } from '../../src/wire/index.js'
-import { compiled, G, identity, json } from '../native-contract/helpers.js'
+import { compiled, G, identity, json } from '../connector/luvus/contract/helpers.js'
 import { source } from '../wire/helpers.js'
 import { management } from '../storage/helpers.js'
 

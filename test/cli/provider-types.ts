@@ -1,5 +1,5 @@
 // 在正式类型检查中固定Gateway中性providers/session分支，避免Herdr被迫补造Luvus字段。
-import type { ProviderGatewayRuntimeOptions } from '../../src/runtime/index.js'
+import type { ProviderGatewayRuntimeOptions } from '../../src/runtime/types.js'
 import type { ProductionGatewayResources, RuntimeCliGatewayResources } from '../../src/cli/index.js'
 
 // 仅用于编译检查，不启动角色、构造来源或创建测试成功后端。

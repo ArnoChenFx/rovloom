@@ -5,7 +5,7 @@ import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { canonical, digest, GatewayError, validateRequest } from './contracts.js'
 import type { NativeRequest } from './contracts.js'
-import { NativeRequestPreflightError } from './runtime/request-preflight.js'
+import { NativeRequestPreflightError } from './connector/preflight.js'
 import {
   assertBinding,
   boundedJson,
@@ -26,7 +26,7 @@ import type {
   ProviderBinding,
   V2Target
 } from './wire/types.js'
-import type { TrustedAttempt } from './integration/luvus-wire.js'
+import type { TrustedAttempt } from './wire/backend.js'
 import { DEFAULT_RETENTION, retention } from './storage/config.js'
 import type { Retention } from './storage/config.js'
 import { exportSnapshot } from './storage/backup.js'
@@ -1287,7 +1287,7 @@ export class Store {
   }
   /** 仅由已认证 Wire 拒绝路径调用；原子提交确定未写出，未知或既有终态绝不倒退。 */
   commitDispatchRefusal(binding: AttemptBinding, code: DispatchRefusalCode): boolean {
-    if (code !== 'terminal_execution_disabled' && code !== 'policy_revision_stale') {
+    if (code !== 'terminal_execution_disabled') {
       throw new GatewayError('invalid_dispatch_refusal')
     }
     return this.dispatchRefused(binding, code, 'connector', ['dispatching', 'connector_accepted'])

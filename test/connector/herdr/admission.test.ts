@@ -149,7 +149,7 @@ async function admissionFixture(methods: readonly string[], approved = source) {
       binding_revision: 1,
       config_ref: 'owned-herdr-admission',
       expected_source: approved,
-      schema_path: schemaPath
+      schema_ref: schemaPath
     }
   })
   base.store.defineProvider(resources.providers[0]!.binding)

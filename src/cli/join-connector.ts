@@ -1,9 +1,10 @@
+import { migrateConnectorControls, providerSetupPath } from './provider-control.js'
 // 单码直连配对的 Connector 侧：`rovloom connector --join ws://host:port#machine.attempt.secret`。
 // 一条命令完成：写 Gateway 地址 → 本地推导固定授权 → 准备实测原生清单 → POST /pairing 换取设备凭据 → 落盘并直接进入运行。
 // 非交互、无确认问答；已配对状态与码目标不一致时先重置本地配对状态（作为新设备重新配对）。
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseNativeJson } from '../native-contract/json.js'
+import { parseJson } from '../json/bounds.js'
 import { createFileCredentialSink } from '../transport/credentials.js'
 import type { DeviceCredential } from '../transport/identity.js'
 import { boundedJson, fields, id, object } from '../wire/index.js'
@@ -88,7 +89,7 @@ async function responseJson(response: Response): Promise<Record<string, unknown>
       }
       chunks.push(value.value)
     }
-    const parsed = parseNativeJson(Buffer.concat(chunks, bytes), { object_bytes: 262_144 })
+    const parsed = parseJson(Buffer.concat(chunks, bytes), { object_bytes: 262_144 })
     if (!parsed.ok) {
       throw new CliError('configuration_required')
     }
@@ -123,6 +124,7 @@ export async function joinConnector(
 ): Promise<ConnectorConfig> {
   const code = parseJoinValue(value)
   const console = silentConsole(io)
+  migrateConnectorControls(config.state_dir)
   const providers = readRuntimeConfig(config).providers
   const hasCredential = existsSync(runtimeReference(config.state_dir, 'device'))
   if (hasPairingState(config.state_dir)) {
@@ -140,15 +142,16 @@ export async function joinConnector(
     }
     // 换码即换设备身份（吊销恢复），换地址即换 Gateway：码本身就是意图证明，旧状态整体退役后重新配对。
     // managed 模式的原生根必须回到空白才能重新初始化，因此退役目录而不是只删文件。
-    const prepared = ['native-setup', 'herdr-setup']
-      .map((reference) => readSetupJson(runtimeReference(config.state_dir, reference), 1_048_576))
+    const prepared = ['luvus', 'herdr'] as const
+    const records = prepared
+      .map((kind) => readSetupJson(providerSetupPath(config.state_dir, kind), 1_048_576))
       .filter((entry) => entry !== undefined)
     const resume =
       !hasCredential &&
       providers.length === 0 &&
       config.gateway_url === code.url &&
-      prepared.length > 0 &&
-      prepared.every((entry) => {
+      records.length > 0 &&
+      records.every((entry) => {
         const row = object(entry)
         return row.phase === 'prepared' && row.machine_id === code.machine && row.attempt_id === code.attempt
       })

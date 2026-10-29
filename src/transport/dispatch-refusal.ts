@@ -14,7 +14,7 @@ export function dispatchRefusal(error: unknown, kind: ProviderKind): DispatchRef
     ((kind === 'herdr' && error instanceof HerdrLocalError) ||
       (kind === 'luvus' && error instanceof LuvusAdapterError)) &&
     error.outcome === 'not_dispatched' &&
-    (error.code === 'terminal_execution_disabled' || error.code === 'policy_revision_stale')
+    error.code === 'terminal_execution_disabled'
   ) {
     return error.code
   }

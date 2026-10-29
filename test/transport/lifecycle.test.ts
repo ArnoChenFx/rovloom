@@ -1,3 +1,4 @@
+import { guardLuvusSource } from '../../src/connector/luvus/persistence.js'
 // 验证 Store 设备凭据接线：nativeSource 逐轴复验所属 socket，注册表原子封锁同设备全部 socket。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -7,8 +8,8 @@ import type { Connection, Session } from '../../src/transport/index.js'
 import { OFFER } from '../../src/transport/common.js'
 import { negotiate } from '../../src/wire/index.js'
 import { fixture } from './helpers.js'
-import type { TrustedNativeContext } from '../../src/native-contract/index.js'
-import { G, identity as nativeIdentity } from '../native-contract/helpers.js'
+import type { TrustedNativeContext } from '../../src/connector/luvus/contract/index.js'
+import { G, identity as nativeIdentity } from '../connector/luvus/contract/helpers.js'
 
 /** 建立真实 Store 与生命周期接线；配对设备的凭据取自 Store 的一次性兑换结果。 */
 function wiringFixture() {
@@ -94,7 +95,8 @@ test(
         { ...source, binding: { ...source.binding, connection_epoch: 'wrong_epoch' } }
       ]
       for (const variant of variants) {
-        const resolve = f.lifecycle.nativeSource(
+        const resolve = guardLuvusSource(
+          f.lifecycle,
           channel,
           /** 返回只改变一个身份轴的 mock 来源，验证接线逐轴核对。 */
           () => variant
@@ -105,7 +107,8 @@ test(
           /native_identity_mismatch/
         )
       }
-      const resolve = f.lifecycle.nativeSource(
+      const resolve = guardLuvusSource(
+        f.lifecycle,
         channel,
         /** 模拟受信解析器中途同步关闭 socket，返回值不能绕过第二次门禁。 */
         () => {

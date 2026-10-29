@@ -4,11 +4,9 @@ import { chmodSync, constants, copyFileSync, mkdirSync, readdirSync, writeFileSy
 import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
-import {
-  openGatewayState,
-  createProviderGatewayRuntime,
-  createProviderConnectorRuntime
-} from '../../../src/runtime/index.js'
+import { openGatewayState } from '../../../src/runtime/state.js'
+import { createProviderGatewayRuntime } from '../../../src/runtime/gateway.js'
+import { createProviderConnectorRuntime } from '../../../src/runtime/connector-host.js'
 import type { Connection } from '../../../src/transport/index.js'
 import { HerdrInstallation } from '../../../src/connector/herdr/installation.js'
 import { launchHerdrProcess, herdrEndpoint, inspectHerdrPath } from '../../../src/connector/herdr/local.js'
@@ -264,7 +262,7 @@ export async function createHerdrWorkflowHost(options: HerdrWorkflowHostOptions)
       binding_revision,
       config_ref,
       expected_source: source,
-      schema_path: schemaPath,
+      schema_ref: schemaPath,
       connector: {
         local: config,
         principal_id: callerId,

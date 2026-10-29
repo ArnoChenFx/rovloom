@@ -1,6 +1,6 @@
 # Wire v2：Gateway 与 Connector 的消息协议
 
-Wire 当前版本为 major **2** / minor **2**。每条 WebSocket 消息是一个 UTF-8 JSON 信封。编解码在 `src/wire/`，Luvus 原生校验经 `src/integration/luvus-wire.ts` 接入，见 [原生契约](NATIVE-CONTRACT.md)。认证、存储和传输由宿主提供可信实现，见 [通道](../TRANSPORT.md)。总览见 [协议总览](../PROTOCOL.md)。
+Wire 当前版本为 major **2** / minor **2**。每条 WebSocket 消息是一个 UTF-8 JSON 信封。编解码在 `src/wire/`，Luvus 原生校验经 `src/connector/luvus/wire.ts` 接入（Luvus 后端接口在 `src/connector/luvus/backend.ts`，公共 attempt 账本事实在 `src/wire/backend.ts`），见 [原生契约](NATIVE-CONTRACT.md)。认证、存储和传输由宿主提供可信实现，见 [通道](../TRANSPORT.md)。总览见 [协议总览](../PROTOCOL.md)。
 
 Luvus / Herdr 的原生协议、UHP 标识和 fixture 保持原样，Wire 不改写它们。
 
@@ -222,8 +222,8 @@ Connector 不依赖 Gateway 额外交付的 TTL 或上下文。受保护配置�
 
 `dispatch_refused` 只在双方协商 `dispatch_refusal` 后由 Connector 发送，须经当前认证连接和独立登记的完整 attempt 校验。旧版准入层的 revision 拒绝仅为兼容输入，Connector 编码拒绝帧只绑定当前认证连接与 attempt 结构，锚点、策略与 revision 的全量复核由 Gateway 接收端在其自身账本完成；执行器拒绝仍经原 adapter 完整校验。
 
-- `code` 目前允许 `terminal_execution_disabled` 与 `policy_revision_stale`，不承载原生响应、异常正文或任意字符串。
-- 新版仅由本机 adapter 的终端最终开关拒绝生成 `not_dispatched` 证明；不再生成 policy_revision_stale。旧版拒绝帧保留解码兼容。`accepted` 之后仍可确证未写出。普通异常、原生 error、超时和 `outcome_unknown` 都不能生成此证明。
+- `code` 只允许 `terminal_execution_disabled`，不承载原生响应、异常正文或任意字符串。
+- 拒绝证明仅由本机 adapter 的终端最终开关生成 `not_dispatched`；`accepted` 之后仍可确证未写出。普通异常、原生 error、超时和 `outcome_unknown` 都不能生成此证明。
 - Gateway 先在账本事务中核对原 tuple、当前 provider 与 epoch、固定 deadline，提交拒绝和必要审计，之后才清理该 call 的在途与读取上下文。
 - 只有尚未到期的 `dispatching` / `connector_accepted` 可变为 `not_dispatched`（执行器可能在 accepted 后、原生写入前才复核终端开关并报告真实未写出）。重放帧的防御在 Connector 的 running/seen 守卫：已进入执行的 attempt 重发不生成拒绝证明。已 unknown、已响应或已拒绝的状态保持不变，不续期，不重派。合法的拒绝不关闭连接，不取消其它在途调用。
 - 未协商、认证或锚点错误、存储提交失败都保守拒绝，不发布虚假终态。

@@ -1,5 +1,6 @@
 /** Herdr 固定评审 RPC 的原生编解码与 Wire 接缝；其它能力继续逐项取得原生证据。 */
-import type { NativeWireBackend, TrustedAttempt } from '../../integration/luvus-wire.js'
+import type { TrustedAttempt } from '../../wire/backend.js'
+import type { AttemptBackend } from '../../wire/backend.js'
 import type { LedgerInvalidation } from '../../storage/model.js'
 import type { ResponseAnchor } from '../../wire/evidence.js'
 import {
@@ -58,7 +59,7 @@ export type HerdrNativeSource = HerdrSource
 
 /** 复用 Store attempt 与当前认证；宿主负责本地实例来源、契约编译及完整上下文。 */
 export interface HerdrReadonlyBackend extends Pick<
-  NativeWireBackend,
+  AttemptBackend,
   'attempt' | 'now' | 'currentPrincipal' | 'contentStatus'
 > {
   /** 每次重新读取认证和双端精确 grants；resolveProvider 须先核对 registry 与本机配置同值。 */

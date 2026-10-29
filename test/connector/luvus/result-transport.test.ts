@@ -27,7 +27,7 @@ async function completed() {
     const call = f.f.call(device.target)
     const binding = f.f.gateway.dispatch(call.call_id)
     await until(
-      /** responded 必须由 Gateway 的真实 commitLuvusResponse 事务发布，原生完成本身不算。 */
+      /** responded 必须由 Gateway 的真实 commitNativeResponse 事务发布，原生完成本身不算。 */
       () => f.f.store.call(f.f.principal.id, call.call_id).state === 'responded'
     )
     const ports = {

@@ -29,5 +29,5 @@ export type {
 } from './custody.js'
 export { ChannelRegistry } from './channel-host.js'
 export type { ChannelHost, SocketChannel } from './channel-host.js'
-export { createDeviceLifecycle, createDeviceLifecycleAdapter } from './lifecycle.js'
+export { createDeviceLifecycle } from './lifecycle.js'
 export type { DeviceLifecycleWiring } from './lifecycle.js'

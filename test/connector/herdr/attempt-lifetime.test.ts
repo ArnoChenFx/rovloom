@@ -5,7 +5,7 @@ import { once } from 'node:events'
 import { chmodSync, copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { LuvusDispatchClaims } from '../../../src/connector/luvus/claims.js'
+import { DispatchClaims } from '../../../src/connector/claims.js'
 import { ConnectorCapacityError } from '../../../src/connector/capacity.js'
 import { observeHerdrServer } from '../../../src/connector/herdr/attach.js'
 import { HerdrInstallation } from '../../../src/connector/herdr/installation.js'
@@ -57,7 +57,7 @@ test(
       stdio: ['ignore', 'pipe', 'ignore']
     })
     let installation: HerdrInstallation | undefined
-    let claims: LuvusDispatchClaims | undefined
+    let claims: DispatchClaims | undefined
     let runtime: ReturnType<typeof createHerdrRuntime> | undefined
     let now = 100
     let refusedClaims = 0
@@ -83,7 +83,7 @@ test(
         content_expires_at: state.binding.registration.deadline,
         dedup_expires_at: state.binding.registration.deadline
       })
-      claims = new LuvusDispatchClaims({
+      claims = new DispatchClaims({
         path: join(root, 'claims.sqlite'),
         mode: 'create',
         ledger_id: 'synthetic_herdr_history',

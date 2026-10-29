@@ -6,21 +6,22 @@ import { fixture as localFixture } from '../connector/luvus/helpers.js'
 import { management } from '../storage/helpers.js'
 import { until } from '../transport/helpers.js'
 import { openGatewayState } from '../../src/runtime/state.js'
-import { createGatewayRuntime } from '../../src/runtime/gateway.js'
-import { createConnectorRuntime } from '../../src/runtime/connector.js'
+import { createGatewayRuntime } from '../../src/connector/luvus/host/gateway-runtime.js'
+import { luvusCatalogProvider } from '../../src/connector/luvus/catalog-provider.js'
+import { createConnectorRuntime } from '../../src/connector/luvus/host/connector-runtime.js'
 import {
   ConnectorAttemptBook,
   CONNECTOR_MAX_DEADLINE_MS,
   createConnectorAdmissionBackend
 } from '../../src/runtime/connector-attempts.js'
-import type { LuvusConnectorAdmissionSource } from '../../src/runtime/connector-attempts.js'
-import { LuvusDispatchClaims, readLinuxLuvusPeer } from '../../src/connector/luvus/index.js'
+import type { LuvusConnectorAdmissionSource } from '../../src/connector/luvus/backend.js'
+import { DispatchClaims, readLinuxLuvusPeer } from '../../src/connector/luvus/index.js'
 import { contractRef, assertBinding, fail } from '../../src/wire/index.js'
 import type { AttemptBinding } from '../../src/wire/types.js'
-import type { NativeBinding, TrustedNativeContext } from '../../src/native-contract/index.js'
+import type { NativeBinding, TrustedNativeContext } from '../../src/connector/luvus/contract/index.js'
 import type { GatewayIdentitySource } from '../../src/mcp/management.js'
 import type { GatewayHostedProviders } from '../../src/runtime/types.js'
-import type { GatewayRuntimeOptions } from '../../src/runtime/types.js'
+import type { GatewayRuntimeOptions } from '../../src/connector/luvus/host/runtime-types.js'
 
 /** Gateway 和 Connector 独立请求锚点仅经真实认证通道关联；native 来源仍为标明的测试 fixture。 */
 export async function runtimeFixture(
@@ -141,7 +142,7 @@ export async function runtimeFixture(
   })
   const active = gateway
   const claimsPath = join(native.root, 'claims.db')
-  const claims = new LuvusDispatchClaims({
+  const claims = new DispatchClaims({
     path: claimsPath,
     mode: 'create',
     ledger_id: 'isolated_runtime_claims',
@@ -219,6 +220,11 @@ export async function runtimeFixture(
   })
   return {
     gateway: active,
+    /** 与 CLI 相同：把本机 Luvus 目录包装成 provider 目录端口。 */
+    catalog: luvusCatalogProvider({
+      store: active.store,
+      provider: active.catalog
+    }),
     mcp: { runtime: active, identities },
     connector,
     state,

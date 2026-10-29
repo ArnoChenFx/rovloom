@@ -1,7 +1,7 @@
 /** 唯一 CLI 的 Herdr 生产来源：Gateway 委托原工厂，Connector 只持有本次显式启动的真实 child。 */
 import { ChildProcess } from 'node:child_process'
-import { lstatSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, lstatSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { setTimeout as pause } from 'node:timers/promises'
 import { HerdrInstallation } from '../connector/herdr/installation.js'
 import {
@@ -13,7 +13,7 @@ import {
 } from '../connector/herdr/local.js'
 import { createHerdrConnectorResources, parseHerdrProviderRefConfig } from '../connector/herdr/provider.js'
 import type { HerdrProviderRefConfig } from '../connector/herdr/provider.js'
-import { createNativeRecord, nativeRecordStamp, removeNativeRecord } from '../runtime/native-record-files.js'
+import { createNativeRecord, nativeRecordStamp, removeNativeRecord } from '../connector/native-record-files.js'
 import { boundedJson, fields, hash, object, parseJson } from '../wire/index.js'
 import type { Connection } from '../transport/index.js'
 import { CliError } from './config.js'
@@ -21,7 +21,7 @@ import type { ProductionCliSources, ProductionProviderReference } from './produc
 import { startAttachedHerdr } from './herdr-attached.js'
 import { createHerdrProductSources } from './herdr-sources.js'
 import { HERDR_OWNER_FORMAT, currentProcessIdentity, recoverHerdrCrashResidue } from './herdr-crash-recovery.js'
-import { recoverLuvusClaimsLock } from '../runtime/native-crash-recovery.js'
+import { recoverDispatchClaimsLock } from '../connector/crash-recovery.js'
 import { readRuntimeFile } from './runtime-files.js'
 import { ProviderUnavailableError } from './provider-unavailable.js'
 import { pinTerminalExecution } from '../connector/terminal-execution.js'
@@ -247,7 +247,7 @@ export function createHerdrProductionSources(): ProductionCliSources {
       const config = selected.config
       const local = config.connector.local
       // 坏 schema/binary 在任何启动和 owner 记录创建前拒绝；原工厂仍会在最终边界重新核对。
-      const bytes = readRuntimeFile(config.schema_path, 16_777_216)
+      const bytes = readRuntimeFile(config.schema_ref, 16_777_216)
       try {
         if (hash(bytes) !== config.expected_source.schema_sha256) {
           throw new HerdrLocalError('herdr_schema_unreviewed')
@@ -259,12 +259,16 @@ export function createHerdrProductionSources(): ProductionCliSources {
       if (selected.native.mode === 'attach') {
         // 附着模式：用户自己的会话，不创建 owner 记录、不拥有进程，也不做 managed 的端点清理；
         // 但 claim 账本锁是 Connector 自己的，持有者已死才接管（账本墓碑原样保留）。
-        if (recoverLuvusClaimsLock(config.connector.claims.path + '.lock')) {
+        if (recoverDispatchClaimsLock(config.connector.claims.path + '.lock')) {
           process.stderr.write('claims_lock_recovered\n')
         }
         return startAttachedHerdr(selected, terminalExecution ? { terminalExecution } : {})
       }
-      const ownerPath = join(local.config_home, `.rovloom-herdr-${local.target.session}.owner.json`)
+      const legacyOwner = join(local.config_home, `.rovloom-herdr-${local.target.session}.owner.json`)
+      // 手工旧布局仅兼容读取，不移动用户 XDG 中的附着/原生数据。
+      const ownerPath = existsSync(legacyOwner)
+        ? legacyOwner
+        : join(dirname(config.connector.claims.path), 'owner.json')
       // 上一个 Connector 若崩溃，只有证明其已死且端点无人监听才清理；否则下面仍按原样拒绝。
       if (
         await recoverHerdrCrashResidue({

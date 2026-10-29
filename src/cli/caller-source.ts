@@ -5,7 +5,7 @@ import type { HttpAuthenticationProvider } from '../mcp/http.js'
 import type { Principal } from '../router.js'
 import { CliError } from './config.js'
 import { readRuntimeFile } from './runtime-files.js'
-import { parseNativeJson } from '../native-contract/json.js'
+import { parseJson } from '../json/bounds.js'
 import { parseRegistry, REGISTRY_MAX_BYTES } from './token-registry.js'
 import type { CallerEntry, CallerRegistry } from './token-registry.js'
 
@@ -36,7 +36,7 @@ export function openCallerSource(
         return cached.registry
       }
       cached = undefined
-      const parsed = parseNativeJson(bytes, {
+      const parsed = parseJson(bytes, {
         object_bytes: REGISTRY_MAX_BYTES,
         object_depth: 32,
         object_nodes: 100_000

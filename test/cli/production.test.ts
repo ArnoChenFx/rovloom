@@ -35,12 +35,12 @@ import { createDeviceManagementFlow } from '../../src/webui/write-flow.js'
 import { createManagementHttpRead } from '../../src/webui/http-client.js'
 import { openCallerSource } from '../../src/cli/caller-source.js'
 import { readRuntimeJson, runtimeReference } from '../../src/cli/runtime-files.js'
-import { openGatewayState } from '../../src/runtime/index.js'
-import { FIXED_LUVUS_SCHEMA_SHA256, FIXED_LUVUS_SHA256 } from '../../src/runtime/native-control.js'
-import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/runtime/native-source.js'
+import { openGatewayState } from '../../src/runtime/state.js'
+import { FIXED_LUVUS_SCHEMA_SHA256, FIXED_LUVUS_SHA256 } from '../../src/connector/luvus/host/native-control.js'
+import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/connector/luvus/host/native-source.js'
 import { DatabaseSync } from 'node:sqlite'
 import { startHttpFacade } from '../../src/mcp/http.js'
-import type { ProviderCatalogSource } from '../../src/mcp/native-catalog.js'
+import type { ProviderCatalogSource } from '../../src/mcp/catalog.js'
 import type { ProviderBinding, V2Target } from '../../src/wire/types.js'
 
 const syntheticToken = 'SYNTHETIC_MCP_TOKEN_'.padEnd(48, 'x')
@@ -179,7 +179,7 @@ test(
           binding_revision: 1,
           config_ref: 'fixture_herdr',
           expected_source: fixedHerdrSource(),
-          schema_path: herdrSchema
+          schema_ref: herdrSchema
         }
       }
       f.providers({ fixture_remote: reference, fixture_herdr: herdrReference })

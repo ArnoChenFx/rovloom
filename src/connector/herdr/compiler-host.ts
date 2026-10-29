@@ -1,3 +1,4 @@
+import { CompilerWorkerOwner, compilerDeadline, settleCompilerTask } from '../compiler-worker.js'
 /** 管理 Herdr 有界异步编译任务，只接纳固定私有 Worker 的同任务 standalone 产物。 */
 import { createHash, randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
@@ -160,12 +161,18 @@ export function isCompiledHerdrSchemas(value: HerdrSchemas): boolean {
 
 /** 一个服务最多单在途任务，无排队；取消、超时或协议故障后永久退役，不补建 Worker。 */
 export class HerdrSchemaCompiler {
-  #worker?: HerdrCompilerPort
+  #host: CompilerWorkerOwner<HerdrCompilerPort>
   #pending?: Pending
   #closed = false
 
   /** 固定定位模块注入生产工厂；内部故障测试可单独控制自有端口。 */
-  constructor(private readonly createWorker: () => HerdrCompilerPort) {}
+  constructor(createWorker: () => HerdrCompilerPort) {
+    this.#host = new CompilerWorkerOwner(
+      createWorker,
+      (worker, value) => this.#receive(worker, value),
+      (reason) => this.#retire(reason)
+    )
+  }
 
   /** 整体期限覆盖输入复制、Worker 启动、编译、回复及宿主代码初始化。 */
   compile(bytes: Uint8Array | string, signal?: AbortSignal): Promise<HerdrSchemas> {
@@ -205,37 +212,15 @@ export class HerdrSchemaCompiler {
     }
     return new Promise(
       /** 安装前没有可观察 schema 对象，每个任务最多结算一次。 */ (resolve, reject) => {
-        const cancel = /** 取消撤销整个服务代次，迟到消息不能登记品牌。 */ () => this.#retire('compiler_cancelled')
-        const timer = setTimeout(
-          /** 期限只能证明接纳已撤销；terminate 不等于硬堆或物理退出保证。 */ () => this.#retire('compiler_timeout'),
-          Math.max(0, until - performance.now())
-        )
-        this.#pending = { id: randomUUID(), until, inputSha256, inputIdentity, resolve, reject, timer, signal, cancel }
-        signal?.addEventListener('abort', cancel, { once: true })
+        const lease = compilerDeadline(until, signal, (reason) => this.#retire(reason))
+        this.#pending = { id: randomUUID(), until, inputSha256, inputIdentity, resolve, reject, ...lease }
         try {
-          if (!this.#worker) {
-            const worker = this.createWorker()
-            this.#worker = worker
-            worker.onmessage = /** 只接纳当前实例和当前任务的精确回复。 */ (event) => this.#receive(worker, event.data)
-            worker.onerror = /** 屏蔽底层诊断后永久失败关闭。 */ (event) => {
-              event.preventDefault?.()
-              this.#retire('compiler_failed')
-            }
-            worker.addEventListener(
-              'close',
-              /** 不把 close 事件视为物理资源回收证明。 */ () => {
-                if (this.#worker === worker && !this.#closed) {
-                  this.#retire('compiler_closed')
-                }
-              }
-            )
-          }
-          this.#worker.ref()
+          const worker = this.#host.open()
           if (signal?.aborted) {
-            cancel()
+            lease.cancel()
             return
           }
-          this.#worker.postMessage({ version: HERDR_COMPILER_VERSION, job_id: this.#pending.id, bytes: input })
+          worker.postMessage({ version: HERDR_COMPILER_VERSION, job_id: this.#pending.id, bytes: input })
         } catch {
           this.#retire('compiler_start_failed')
         }
@@ -246,7 +231,7 @@ export class HerdrSchemaCompiler {
   /** 版本、任务与期限通过后才核对产物，并同步登记本进程品牌。 */
   #receive(worker: HerdrCompilerPort, value: unknown): void {
     const pending = this.#pending
-    if (this.#closed || this.#worker !== worker || !pending) {
+    if (this.#closed || this.#host.current !== worker || !pending) {
       return
     }
     try {
@@ -308,13 +293,7 @@ export class HerdrSchemaCompiler {
       return
     }
     this.#pending = undefined
-    clearTimeout(pending.timer)
-    pending.signal?.removeEventListener('abort', pending.cancel)
-    try {
-      this.#worker?.unref()
-    } catch {
-      /* 清理异常不能恢复已结算任务或暴露底层文本。 */
-    }
+    settleCompilerTask(pending, this.#host.current)
     if (schemas && !error) {
       pending.resolve(schemas)
     } else {
@@ -325,15 +304,8 @@ export class HerdrSchemaCompiler {
   /** 撤销服务代次并请求终止线程；不声称硬实时退出或硬 heap 隔离。 */
   #retire(reason: string): void {
     this.#closed = true
-    const worker = this.#worker
-    this.#worker = undefined
-    try {
-      worker?.terminate()
-    } catch {
-      /* 终止请求失败也不接纳任何旧回复。 */
-    } finally {
-      this.#settle(undefined, fault(reason))
-    }
+    this.#host.close()
+    this.#settle(undefined, fault(reason))
   }
 
   /** 宿主正常退出时关闭自有编译资源；已接纳 schema 根仍可同步使用。 */

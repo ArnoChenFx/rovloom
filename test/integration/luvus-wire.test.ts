@@ -1,12 +1,13 @@
 // 用真实原生校验器验证 Wire 的授权、流状态、证据、回滚及预算边界；宿主和消息均为合成，不连接原生进程。
 import { afterEach, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createLuvusWireAdapter } from '../../src/integration/luvus-wire.js'
-import type { NativeWireBackend, TrustedAttempt } from '../../src/integration/luvus-wire.js'
+import { createLuvusWireAdapter } from '../../src/connector/luvus/wire.js'
+import type { NativeWireBackend } from '../../src/connector/luvus/backend.js'
+import type { TrustedAttempt } from '../../src/wire/backend.js'
 import { contractRef, LIMITS } from '../../src/wire/index.js'
 import type { AttemptBinding, AuthenticatedEnvelope, ContractSource, Payloads } from '../../src/wire/types.js'
-import type { NativeBinding } from '../../src/native-contract/index.js'
-import { clone, compiled, G, identity, json, request, T, view } from '../native-contract/helpers.js'
+import type { NativeBinding } from '../../src/connector/luvus/contract/index.js'
+import { clone, compiled, G, identity, json, request, T, view } from '../connector/luvus/contract/helpers.js'
 
 const adapters = new Set<ReturnType<typeof createLuvusWireAdapter>>()
 

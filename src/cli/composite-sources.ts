@@ -1,14 +1,17 @@
 // 唯一CLI只组合原owner资源；协议路由、执行许可及会话隔离均交给现有runtime。
-import { createLuvusConnectorSessions, composeConnectorSessions } from '../runtime/index.js'
-import type { GatewayHostedProviders, ProviderSessionGroup } from '../runtime/index.js'
+import { createLuvusConnectorSessions } from '../connector/luvus/host/connector-runtime.js'
+import { composeConnectorSessions } from '../runtime/provider-sessions.js'
+import type { GatewayHostedProviders } from '../runtime/types.js'
+import type { ProviderSessionGroup } from '../runtime/provider-sessions.js'
 import { closeSession } from '../transport/common.js'
 import type { ConnectorWireSession } from '../transport/index.js'
 import { boundedJson } from '../wire/index.js'
-import type { GatewayCatalogProvider, ProviderCatalogProvider } from '../mcp/native-catalog.js'
+import type { ProviderCatalogProvider } from '../mcp/catalog.js'
+import { luvusCatalogProvider } from '../connector/luvus/catalog-provider.js'
 import type { GatewayConfig, ConnectorConfig } from './config.js'
 import { CliError } from './config.js'
 import { ProviderUnavailableError } from './provider-unavailable.js'
-import type { ManagementSessionAuthority } from '../runtime/index.js'
+import type { ManagementSessionAuthority } from '../runtime/management-session.js'
 import type { RuntimeCliGateway } from './runtime.js'
 import type {
   ProductionCliSources,
@@ -115,7 +118,7 @@ export async function prepareMixedGateway(
         session: resource.session.bind(resource)
       })
     )
-    const routes = new Map<string, GatewayCatalogProvider | ProviderCatalogProvider | 'native'>()
+    const routes = new Map<string, ProviderCatalogProvider | 'native'>()
     const names = new Set<string>()
     for (const resource of prepared) {
       for (const provider of resource.providers) {
@@ -148,10 +151,22 @@ export async function prepareMixedGateway(
       management: management[0]?.management,
       catalog: {
         kind: 'mixed',
-        select: /** 精确目标只选一个原目录；Luvus读取唯一已建立runtime的实际epoch目录。 */ (target) => {
+        select: /** 精确目标只选一个原目录；Luvus 用自己的目录端口包装唯一已建立 runtime 的实际 epoch 目录。 */ (
+          target
+        ) => {
           owner.assertOpen()
           const route = routes.get(boundedJson(target))
-          return route === 'native' ? runtime?.catalog : route
+          if (route === 'native') {
+            const active = runtime
+            if (!active?.catalog) {
+              return undefined
+            }
+            return luvusCatalogProvider({
+              store: active.store,
+              provider: active.catalog
+            })
+          }
+          return route
         }
       },
       started: /** 唯一宿主建立后绑定原目录，不从describe或CLI配置重建原生能力。 */ (active) => {

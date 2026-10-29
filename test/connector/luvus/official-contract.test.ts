@@ -1,8 +1,8 @@
 /** 固定官方 fixture 的真实验收参数与 strict 缺口，防止以原生 scope 代替 schema 派发许可。 */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { checkDispatch } from '../../../src/native-contract/index.js'
-import { auth, request, validator, view } from '../../native-contract/helpers.js'
+import { checkDispatch } from '../../../src/connector/luvus/contract/index.js'
+import { auth, request, validator, view } from './contract/helpers.js'
 
 test(
   '官方大结果验收的有界 task.add/update 参数具有完整 strict 分支',

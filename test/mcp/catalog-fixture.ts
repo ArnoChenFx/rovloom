@@ -1,8 +1,10 @@
+import type { GatewayCatalogSource } from '../../src/connector/luvus/catalog-provider.js'
 // 为真实目录/Store接线建立人工在线状态与合成来源；不建立设备或原生会话，不替代生产证明。
-import { StoreGatewayService, type GatewayCatalogSource } from '../../src/mcp/index.js'
+import { StoreGatewayService } from '../../src/mcp/index.js'
 import { contractRef, type ContractSource } from '../../src/wire/index.js'
-import { compiled, json, source as nativeSource, G } from '../native-contract/helpers.js'
+import { compiled, json, source as nativeSource, G } from '../connector/luvus/contract/helpers.js'
 import { storeFixture, target, syntheticCredential } from './store-fixture.js'
+import { luvusCatalogProvider } from '../../src/connector/luvus/catalog-provider.js'
 
 import { catalogMethods } from './fixture-values.js'
 
@@ -61,12 +63,16 @@ export function catalogFixture() {
     expires_at: f.store.clock() + 30_000
   }
   let resolutions = 0
-  const catalog = {
-    resolve: /* 合成能力已显式绑定本例epoch/target；此回调不是生产原生身份提供者。 */ () => {
-      resolutions++
-      return source
+  // 与 CLI 相同：本机 Luvus 目录经 provider 目录端口交付，公共门禁在 MCP 层。
+  const catalog = luvusCatalogProvider({
+    store: f.store,
+    provider: {
+      resolve: /* 合成能力已显式绑定本例epoch/target；此回调不是生产原生身份提供者。 */ () => {
+        resolutions++
+        return source
+      }
     }
-  }
+  })
   const service = new StoreGatewayService({
     targets: f.targets,
     store: f.store,

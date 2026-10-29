@@ -1,21 +1,17 @@
 // 唯一CLI组合实际角色工厂；受保护身份、策略、凭据和native来源由宿主解析，不从argv补造。
-import {
-  createGatewayRuntime,
-  createProviderGatewayRuntime,
-  createConnectorRuntime,
-  createProviderConnectorRuntime
-} from '../runtime/index.js'
-import type {
-  GatewayRuntimeOptions,
-  ProviderGatewayRuntimeOptions,
-  ConnectorRuntimeOptions,
-  ConnectorHostOptions,
-  ManagementSessionAuthority
-} from '../runtime/index.js'
+import { createProviderGatewayRuntime } from '../runtime/gateway.js'
+import { createGatewayRuntime } from '../connector/luvus/host/gateway-runtime.js'
+import { createConnectorRuntime } from '../connector/luvus/host/connector-runtime.js'
+import { createProviderConnectorRuntime } from '../runtime/connector-host.js'
+import type { ProviderGatewayRuntimeOptions } from '../runtime/types.js'
+import type { GatewayRuntimeOptions, ConnectorRuntimeOptions } from '../connector/luvus/host/runtime-types.js'
+import type { ConnectorHostOptions } from '../runtime/connector-host.js'
+import type { ManagementSessionAuthority } from '../runtime/management-session.js'
 import { scopeManagementService } from './management-scope.js'
 import { RuntimeGatewayService } from '../mcp/runtime-service.js'
 import type { ProviderSessionGroup } from '../runtime/provider-sessions.js'
-import type { GatewayCatalog } from '../mcp/native-catalog.js'
+import type { GatewayCatalog } from '../mcp/catalog.js'
+import { luvusCatalogProvider } from '../connector/luvus/catalog-provider.js'
 import type { HttpAuthenticationProvider } from '../mcp/http.js'
 import {
   StoreManagementWriteService,
@@ -111,7 +107,15 @@ export function createRuntimeCliRuntime(host: RuntimeCliHost): CliRuntime {
         service = new RuntimeGatewayService({
           runtime: gateway,
           identities: resource.options.identities,
-          catalog: resource.catalog ?? gateway.catalog,
+          catalog:
+            resource.catalog ??
+            /** 原生 Luvus 目录走同一 provider 端口，公共分页与门禁在 MCP 层统一处理。 */
+            (gateway.catalog
+              ? luvusCatalogProvider({
+                  store: gateway.store,
+                  provider: gateway.catalog
+                })
+              : undefined),
           // 管理页的连接、认证与 provider 就绪来自同一个实际传输的只读观测。
           transportObservations: gateway.transport.observations,
           managementCapabilities: managementOptions

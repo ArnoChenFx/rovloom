@@ -2,8 +2,8 @@
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs'
 import { dirname, isAbsolute, normalize } from 'node:path'
 import { GatewayError } from '../../contracts.js'
-import { NativeRequestPreflightError } from '../../runtime/request-preflight.js'
-import { privateFile, readPrivateBytes } from '../../storage/files.js'
+import { NativeRequestPreflightError } from '../preflight.js'
+import { privateFile } from '../../storage/files.js'
 import {
   ConnectorAttemptBook,
   CONNECTOR_MAX_DEADLINE_MS,
@@ -14,7 +14,9 @@ import type { GatewayProviderServices, RuntimeProviderBinding } from '../../runt
 import type { Principal } from '../../router.js'
 import type { LedgerInvalidation } from '../../storage/model.js'
 import type { Connection, ConnectorWireSession, Session, SocketChannel } from '../../transport/index.js'
-import { LuvusDispatchClaims } from '../luvus/claims.js'
+import { DispatchClaims } from '../claims.js'
+import { ProviderAdapterError } from '../provider-error.js'
+import { readSchema } from '../schema-store.js'
 import {
   boundedJson,
   contractRef,
@@ -57,7 +59,8 @@ export type HerdrProviderRefConfig = Readonly<{
   binding_revision: number
   config_ref: string
   expected_source: ContractSource
-  schema_path: string
+  /** 原始安装 schema 的内容寻址引用；同一摘要永远对应同一路径。 */
+  schema_ref: string
   connector?: Readonly<{
     local: HerdrLocalConfig
     principal_id: string
@@ -134,8 +137,8 @@ export function parseHerdrProviderRefConfig(input: unknown): HerdrProviderRefCon
   const value = object(parseJson(boundedJson(input, 65_536)))
   fields(
     value,
-    ['version', 'target', 'binding_revision', 'config_ref', 'expected_source', 'schema_path'],
-    ['connector', 'peer_policy_revision']
+    ['version', 'target', 'binding_revision', 'config_ref', 'expected_source'],
+    ['schema_ref', 'schema_path', 'connector', 'peer_policy_revision']
   )
   if (value.version !== 1) {
     fail('herdr_provider_config_invalid')
@@ -157,7 +160,8 @@ export function parseHerdrProviderRefConfig(input: unknown): HerdrProviderRefCon
     binding_revision: value.binding_revision,
     config_ref: value.config_ref,
     expected_source: Object.freeze({ ...value.expected_source }),
-    schema_path: path(value.schema_path)
+    // 新配置使用内容寻址引用；旧 `schema_path` 仍可读取并参与同一摘要核验。
+    schema_ref: path(value.schema_ref ?? value.schema_path)
   }
   if (value.connector === undefined) {
     return Object.freeze(shared)
@@ -218,7 +222,7 @@ function fileOperation<T>(operation: () => T): T {
   try {
     return operation()
   } catch (error) {
-    if (error instanceof GatewayError || error instanceof HerdrLocalError) {
+    if (error instanceof GatewayError || error instanceof HerdrLocalError || error instanceof ProviderAdapterError) {
       throw error
     }
     fail('herdr_provider_file_unavailable')
@@ -306,7 +310,13 @@ export async function createHerdrGatewayResources(
   const config = parseHerdrProviderRefConfig(input.config)
   // Gateway加载普通文件的有界字节快照；运行中的编译契约不依赖文件所有者、权限或inode。
   const bytes = fileOperation(
-    /** 路径已由角色配置解析器核对。 */ () => readPrivateBytes(config.schema_path, 16_777_216)
+    /** 路径与摘要已由角色配置解析器核对。 */ () =>
+      readSchema(
+        config.schema_ref,
+        config.expected_source.schema_sha256,
+        'herdr_schema_unreviewed',
+        'herdr_provider_file_invalid'
+      )
   )
   if (!bytes.length) {
     fail('herdr_provider_file_invalid')
@@ -566,7 +576,7 @@ export async function createHerdrConnectorResources(
   ) {
     fail('provider_binding_mismatch')
   }
-  const document = protectedFile(config.schema_path, 16_777_216)
+  const document = protectedFile(config.schema_ref, 16_777_216)
   if (hash(document.bytes) !== config.expected_source.schema_sha256) {
     fail('herdr_schema_unreviewed')
   }
@@ -574,7 +584,7 @@ export async function createHerdrConnectorResources(
   const binding = provider(config)
   const routes = [{ target: config.target, principal_id: connector.principal_id }]
   const sessions = new Set<ConnectorWireSession>()
-  let claims: LuvusDispatchClaims | undefined
+  let claims: DispatchClaims | undefined
   let closed = false
   let releasing: Promise<void> | undefined
   /** policies 每次来自受保护宿主当前值，配置中的 principal 只是路由归属，不发行身份。 */
@@ -626,7 +636,7 @@ export async function createHerdrConnectorResources(
   }
   try {
     const book = new ConnectorAttemptBook({ maximum_deadline_ms: CONNECTOR_MAX_DEADLINE_MS, now: input.now })
-    claims = new LuvusDispatchClaims({ ...connector.claims, now: input.now })
+    claims = new DispatchClaims({ ...connector.claims, now: input.now })
     const sendClaims = claims
     return Object.freeze({
       kind: 'provider',

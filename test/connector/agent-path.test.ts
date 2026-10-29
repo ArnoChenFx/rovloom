@@ -12,10 +12,10 @@ import {
 } from '../../src/connector/local/agent-path.js'
 import { childEnvironment, pinConfig } from '../../src/connector/luvus/local.js'
 import { herdrEnvironment, pinHerdrConfig } from '../../src/connector/herdr/local.js'
-import { OwnedNativeProcess } from '../../src/runtime/native-process.js'
+import { OwnedNativeProcess } from '../../src/connector/luvus/host/native-process.js'
 import { LuvusRpcAdapter } from '../../src/connector/luvus/adapter.js'
 import { fixture } from './luvus/helpers.js'
-import { G, validator, view, rejects } from '../native-contract/helpers.js'
+import { G, validator, view, rejects } from './luvus/contract/helpers.js'
 
 test(
   'Agent directories keep default PATH and use platform-specific absolute path rules',

@@ -66,14 +66,14 @@ export async function createDualRoleFixture({
     { inspectHerdrPath },
     { fixedHerdrSource },
     { contractRef },
-    { LuvusDispatchClaims }
+    { DispatchClaims }
   ] = await Promise.all([
-    load('src/runtime/index.ts'),
+    load('src/runtime/state.ts'),
     load('src/transport/index.ts'),
     load('src/connector/herdr/local.ts'),
     load('src/connector/herdr/review.ts'),
     load('src/wire/index.ts'),
-    load('src/connector/luvus/claims.ts')
+    load('src/connector/claims.ts')
   ])
   const root = mkdtempSync(join(parent, '.dual-role-'))
   const directory = /** 每个隔离根独占创建，绝不修改既有目录权限。 */ (name) => {
@@ -230,10 +230,10 @@ export async function createDualRoleFixture({
       binding_revision: 1,
       config_ref: 'synthetic_herdr',
       expected_source: source,
-      schema_path: schemaPath,
+      schema_ref: schemaPath,
       peer_policy_revision: localPolicy.revision
     }
-    const ownerPath = join(native.config_home, '.rovloom-herdr-smoke.owner.json')
+    const ownerPath = join(ledger, 'owner.json')
     const endpoint = join(native.config_home, 'herdr', 'sessions', 'smoke', 'herdr.sock')
     assert(Buffer.byteLength(endpoint) < 108, 'dual_role_native_socket_path_too_long')
     assert.equal(existsSync(endpoint), false)
@@ -255,7 +255,7 @@ export async function createDualRoleFixture({
     const limits = { entries: 128, bytes: 1_048_576 }
     // 与真实 setup 一致：账本在安装期创建一次，之后的每次启动（含 Connector 内部重建资源）都以 open 模式打开。
     const claimsRef = { path: join(ledger, 'claims.sqlite'), mode: 'open', ledger_id: 'synthetic_claims', limits }
-    new LuvusDispatchClaims({ ...claimsRef, mode: 'create', now: Date.now }).close()
+    new DispatchClaims({ ...claimsRef, mode: 'create', now: Date.now }).close()
     const connectorValue = {
       kind: 'herdr',
       native: { mode: attach ? 'attach' : 'managed' },

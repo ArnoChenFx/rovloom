@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Call, Store } from '../store.js'
 import type { Router, Principal } from '../router.js'
-import { commitNativeResponse } from '../integration/persistence.js'
+import { commitNativeResponse } from '../wire/persistence.js'
 import {
   boundedJson,
   hash,

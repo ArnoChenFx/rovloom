@@ -2,11 +2,12 @@
 import type { Store } from '../../src/store.js'
 import type { CallOptions } from '../../src/store.js'
 import { contractRef } from '../../src/wire/index.js'
-import { createLuvusWireAdapter } from '../../src/integration/luvus-wire.js'
-import { commitLuvusResponse, persistentBackend } from '../../src/integration/persistence.js'
-import type { NativeBinding } from '../../src/native-contract/index.js'
+import { createLuvusWireAdapter } from '../../src/connector/luvus/wire.js'
+import { persistentBackend } from '../../src/connector/luvus/persistence.js'
+import { commitNativeResponse } from '../../src/wire/persistence.js'
+import type { NativeBinding } from '../../src/connector/luvus/contract/index.js'
 import type { AttemptBinding, AuthenticatedContext } from '../../src/wire/types.js'
-import { compiled, G, identity, json } from '../native-contract/helpers.js'
+import { compiled, G, identity, json } from '../connector/luvus/contract/helpers.js'
 import { source } from '../wire/helpers.js'
 import { connected, options, responseFrame } from './helpers.js'
 
@@ -126,7 +127,7 @@ export function nativeBackend(
     },
     // 构造绑定原 attempt 的响应，并经真实适配器与 Store 同事务提交证据。
     respond(binding: AttemptBinding, result: Record<string, unknown> = { id: 'task-created' }) {
-      return commitLuvusResponse(store, adapter, responseFrame(binding, { result }))
+      return commitNativeResponse(store, adapter, responseFrame(binding, { result }))
     }
   }
 }

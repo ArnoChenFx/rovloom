@@ -19,7 +19,10 @@ import {
 /** 产品接线必须交付专属验收程序，不能以预览开关、测试入口或临时生成脚本跳过验收。 */
 export function productSmokePath(specification = product, directory = root) {
   assert.equal(specification.entrypoint, 'src/cli/main.ts')
-  assert(specification.workers.includes('src/native-contract/compiler-worker.ts'), 'Real schema Worker is required')
+  assert(
+    specification.workers.includes('src/connector/luvus/contract/compiler-worker.ts'),
+    'Real schema Worker is required'
+  )
   assert.equal(
     typeof specification.releaseSmoke,
     'string',

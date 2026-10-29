@@ -10,7 +10,7 @@ import { Store } from '../../src/store.js'
 import type { StoreOptions } from '../../src/store.js'
 import { nativeBackend } from './native-backend.js'
 import { management, responseFrame } from './helpers.js'
-import { commitLuvusResponse } from '../../src/integration/persistence.js'
+import { commitNativeResponse } from '../../src/wire/persistence.js'
 
 /* 创建私有磁盘库和真实原生校验适配器，并开放只读连接检查事务结果。 */ function fixture(overrides: StoreOptions = {}) {
   const root = mkdtempSync(join(tmpdir(), 'rovloom-conflict-audit-'))
@@ -85,7 +85,7 @@ test(
       f.native.state.sourceVerified = true
       assert.throws(
         /* 提交原生请求标识不匹配的响应帧，检查其在冲突分类前被拒绝。 */ () =>
-          commitLuvusResponse(
+          commitNativeResponse(
             f.store,
             f.native.adapter,
             responseFrame(binding, { id: 'wrong-native-id', result: { id: 'different' } })

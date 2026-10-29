@@ -1,10 +1,10 @@
 // 检查 Connector 角色工厂的异步启动清理、长期关闭及释放失败语义，不创建真实设备身份。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createConnectorRuntime } from '../../src/runtime/connector.js'
-import type { ConnectorRuntimeOptions } from '../../src/runtime/types.js'
+import { createConnectorRuntime } from '../../src/connector/luvus/host/connector-runtime.js'
+import type { ConnectorRuntimeOptions } from '../../src/connector/luvus/host/runtime-types.js'
 import { join } from 'node:path'
-import { LuvusDispatchClaims } from '../../src/connector/luvus/index.js'
+import { DispatchClaims } from '../../src/connector/luvus/index.js'
 import { fixture as localFixture } from '../connector/luvus/helpers.js'
 import { fixture as transportFixture, until } from '../transport/helpers.js'
 
@@ -91,7 +91,7 @@ async function welcomeReentry(stage: ReentrantStage, failingClose = false): Prom
   const native = await localFixture()
   const gateway = transportFixture()
   const paired = gateway.pair('isolated_reentrant_connector')
-  const claims = new LuvusDispatchClaims({
+  const claims = new DispatchClaims({
     path: join(native.root, 'reentrant-claims.db'),
     mode: 'create',
     ledger_id: 'isolated_reentrant_claims',

@@ -1,7 +1,7 @@
 /** 定义本地适配配置、传输身份证据、宿主可信接口和不携带敏感内容的失败语义。 */
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { Socket } from 'node:net'
-import type { NativeWireBackend } from '../../integration/luvus-wire.js'
+import type { NativeWireBackend } from './backend.js'
 import type { AttemptBinding, V2Target } from '../../wire/types.js'
 
 export type LuvusLocalConfig = Readonly<{
@@ -67,16 +67,9 @@ export interface LuvusRpcHost {
     binding: AttemptBinding
   ): Promise<void>
 }
-export type LocalFailureOutcome = 'not_dispatched' | 'outcome_unknown'
-
-export class LuvusAdapterError extends Error {
-  /** 创建只包含安全错误码和本地结果语义的异常，不携带原始请求或底层输出。 */
-  constructor(
-    readonly code: string,
-    readonly outcome: LocalFailureOutcome = 'not_dispatched'
-  ) {
-    // 不把路径、token、参数、stdout/stderr 或底层异常拼入普通错误。
-    super(code)
-    this.name = 'LuvusAdapterError'
-  }
-}
+/**
+ * Luvus 与 Herdr 共用同一错误类型：两者都只表达固定错误码与未派发/未知结果语义。
+ * 这里保留 Luvus 名称，供既有 Luvus 端口继续按名字引用同一个类身份。
+ */
+export { ProviderAdapterError as LuvusAdapterError } from '../provider-error.js'
+export type { LocalFailureOutcome } from '../provider-error.js'

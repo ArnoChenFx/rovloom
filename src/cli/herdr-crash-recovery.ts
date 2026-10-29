@@ -1,7 +1,7 @@
 /** Connector 崩溃（kill -9 / 掉电）后的遗留清理：只有证明旧 owner 已死且端点无人监听才动手，其余一律保持 fail-closed。 */
 import { lstatSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
-import { nativeRecordStamp, readNativeRecord, removeNativeRecord } from '../runtime/native-record-files.js'
+import { nativeRecordStamp, readNativeRecord, removeNativeRecord } from '../connector/native-record-files.js'
 import { listening, ownerIsDead } from '../storage/process-identity.js'
 import type { ProcessIdentity } from '../storage/process-identity.js'
 

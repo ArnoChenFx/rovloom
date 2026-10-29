@@ -85,7 +85,7 @@ export type RequestPayload = {
   native_request: JsonObject
   validation: ValidationMode
 }
-export type DispatchRefusalCode = 'terminal_execution_disabled' | 'policy_revision_stale'
+export type DispatchRefusalCode = 'terminal_execution_disabled'
 export type TerminalExecutionState = Readonly<{ binding: ProviderBinding; enabled: boolean }>
 /** 设备最近一次上报的平台；distribution 只在 Linux 且 os-release 可读时出现。 */
 export type DevicePlatformPayload = Readonly<{

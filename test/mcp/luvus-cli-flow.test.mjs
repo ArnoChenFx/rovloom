@@ -7,7 +7,7 @@ import {
   LUVUS_OPERATION_METHODS,
   luvusOperationValidation,
   validateLuvusOperationParams
-} from '../../src/runtime/luvus-operations.ts'
+} from '../../src/connector/luvus/operations.ts'
 import { LUVUS_FLOW_INTENT_MS, verifyLuvusMcpOperations } from '../../scripts/mcp/luvus-sdk-flow.mjs'
 import { FacadeServiceError } from '../../src/mcp/types.ts'
 import { createNativeMcpInvoker } from './native-conversation.ts'

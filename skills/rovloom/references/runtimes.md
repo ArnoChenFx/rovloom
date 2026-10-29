@@ -4,7 +4,7 @@ MCP forwards `method` and `params`; parameters and behavior follow the native co
 
 ## Luvus
 
-Corresponds to Luvus 0.14.3. The authoritative method list is `src/runtime/luvus-operations.ts`; the Gateway only lets through methods in its static table.
+Corresponds to Luvus 0.14.3. The authoritative method list is `src/connector/luvus/operations.ts` (static table in `src/connector/luvus/methods.ts`); the Gateway only lets through methods in its static table.
 
 ### Native schema, annotations and reviewed help
 
@@ -182,3 +182,10 @@ MCP, the management UI and management APIs support arbitrary proxy domains and p
 ## Gateway database upgrades
 
 A v9 Gateway database upgrades to v10 during startup after writing a full rollback copy in the existing sibling backup directory. The copy uses the existing backup count and byte budgets; a full backup quota prevents migration and keeps the v9 database unchanged. Snapshot I/O or transaction-start failures clean up the unregistered copy so startup can be retried after the cause is resolved. Existing records and credentials are retained; older Connectors can still connect, while platform metadata requires a Connector that reports it.
+
+
+## Maintainer storage and lifecycle paths
+
+Luvus schema/validation and Wire implementation live under `src/connector/luvus/`, including `contract/`, `wire.ts`, and `host/{gateway-runtime,connector-runtime}.ts`. Herdr keeps its native schema and provider implementation under `src/connector/herdr/`. Both compilers share Worker lifetime/deadline mechanics in `src/connector/compiler-worker.ts`.
+
+Back up both roles' entire private state directories while stopped, including `managed/providers.json`, raw `managed/schema_<sha256>.json`, device/token records, Connector `control/{luvus,herdr}/` and retained `retired/` batches. Control directories contain each provider's `setup.json`, `claims.db` and runtime/root records. Legacy control paths migrate before startup; a `managed/control-migration.json` journal resumes interrupted migration without recreating claims or pairing identity. Existing Herdr schema_path and inline Luvus schema remain readable; do not reserialize raw schema or delete it as a cleanup step. Connector retirement includes its schemas and manifest; keep recovery journals and follow `docs/OPERATIONS.md` before deleting any batch or Gateway schema. User native HOME/XDG and attached instances stay in their original locations.

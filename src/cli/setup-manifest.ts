@@ -1,15 +1,16 @@
+import { ProviderAdapterError } from '../connector/provider-error.js'
 // Gateway从配对设备的实际schema字节核对固定首次来源清单；不接受设备选择Gateway文件路径或重建可信句柄。
+import { HERDR_INPUT_LIMIT } from '../connector/herdr/compiler-protocol.js'
 import { compileHerdrSchemas } from '../connector/herdr/compiler-api.js'
 import { parseHerdrProviderRefConfig, createHerdrGatewayResources } from '../connector/herdr/provider.js'
 import { createHerdrCodec } from '../connector/herdr/readonly.js'
-import { checkedRemoteLuvusConfig, createPinnedRemoteLuvus } from '../runtime/remote-luvus.js'
+import { checkedRemoteLuvusConfig, createPinnedRemoteLuvus } from '../connector/luvus/host/remote-luvus.js'
 import { boundedJson, fields, hash, object } from '../wire/index.js'
 import type { ProviderBinding, V2Target } from '../wire/types.js'
 import { CliError, type NativeProviderKind } from './config.js'
 import type { SetupPlanFacts } from './setup-targets.js'
 import { setupProviderKinds, setupReference, setupSessions, setupTarget } from './setup-targets.js'
-import { readRuntimeFile, runtimeReference } from './runtime-files.js'
-import { writeSetupFile } from './setup-files.js'
+import { publishSchema, schemaReference } from '../connector/schema-store.js'
 
 export type ReviewedSetupInstallation = Readonly<{
   kind: NativeProviderKind
@@ -20,6 +21,8 @@ export type ReviewedSetupInstallation = Readonly<{
   label: string
   binary_sha256: string
   schema?: Readonly<{ path: string; bytes: Buffer }>
+  /** 落盘后由该 provider 重新加载已发布字节；公共发布层不解释 provider 语义。 */
+  verifyPublished(): Promise<void>
 }>
 
 // 诊断标签须为有界单行文本，不能向所有者确认注入TTY控制序列。
@@ -96,16 +99,31 @@ export async function reviewSetupManifest(
       ) {
         throw new CliError('configuration_required')
       }
+      // 设备只交付原始 schema 字节；不接受设备指定 Gateway 自己的文件路径，
+      // 也不由设备发布本地副本（两台机器部署时那路径在 Gateway 侧不存在）。
+      if (remote.contract.schema_ref !== undefined || remote.contract.schema_bundle === undefined) {
+        throw new CliError('configuration_required')
+      }
+      const bytes = Buffer.from(remote.contract.schema_bundle, 'utf8')
+      const path = schemaReference(directory, remote.contract.schema_sha256)
       const verified = await createPinnedRemoteLuvus(remote)
       verified.close()
+      const { schema_bundle: _inline, ...pin } = remote.contract
+      const value = { ...remote, contract: { ...pin, schema_ref: path } }
       reviewed.push({
         kind,
         reference,
         target,
         binding: remote.binding,
-        value: remote,
+        // 发布后的 pin 只留 Gateway 自己的内容寻址引用，不再内嵌原始文本。
+        value,
         label: label(remote.contract.binary_version),
-        binary_sha256: remote.contract.binary_sha256
+        binary_sha256: remote.contract.binary_sha256,
+        schema: { path, bytes },
+        async verifyPublished() {
+          const loaded = await createPinnedRemoteLuvus(value)
+          loaded.close()
+        }
       })
     } else {
       const remote = object(entry.value)
@@ -119,12 +137,13 @@ export async function reviewSetupManifest(
       if (
         remote.kind !== 'herdr' ||
         typeof remote.schema_bundle !== 'string' ||
-        Buffer.byteLength(remote.schema_bundle) > 524_288
+        Buffer.byteLength(remote.schema_bundle) > HERDR_INPUT_LIMIT
       ) {
         throw new CliError('configuration_required')
       }
-      const path = runtimeReference(directory, 'herdr-schema_' + plan.attempt_id)
-      const parsed = parseHerdrProviderRefConfig({ ...config, schema_path: path })
+      // Gateway 自己保存的原始字节走与 Luvus 相同的内容寻址布局，引用不再按配对批次命名。
+      const path = schemaReference(directory, object(config.expected_source).schema_sha256 as string)
+      const parsed = parseHerdrProviderRefConfig({ ...config, schema_ref: path })
       const bytes = Buffer.from(remote.schema_bundle, 'utf8')
       if (
         parsed.config_ref !== reference ||
@@ -152,7 +171,12 @@ export async function reviewSetupManifest(
         value: { kind, config: parsed },
         label: label(parsed.expected_source.binary_version),
         binary_sha256: parsed.expected_source.binary_sha256,
-        schema: { path, bytes }
+        schema: { path, bytes },
+        /** 发布后按 Gateway 自己的路径重建资源，证明落盘字节与编译身份一致。 */
+        async verifyPublished() {
+          const verified = await createHerdrGatewayResources({ config: parsed, signal })
+          await verified.release()
+        }
       })
     }
   }
@@ -169,21 +193,17 @@ export async function publishSetupSchemas(
       continue
     }
     const { path, bytes } = entry.schema
-    let previous: Buffer | undefined
-    try {
-      previous = readRuntimeFile(path, 524_288)
-    } catch (error) {
-      if (!(error instanceof CliError && error.code === 'backend_unavailable')) {
-        throw error
-      }
-    }
-    if (previous === undefined) {
-      writeSetupFile(path, bytes)
-    } else if (!previous.equals(bytes)) {
+    if (signal.aborted) {
       throw new CliError('configuration_required')
     }
-    const value = entry.value as { config: unknown }
-    const verified = await createHerdrGatewayResources({ config: value.config, signal })
-    await verified.release()
+    try {
+      publishSchema(path, bytes)
+    } catch (error) {
+      if (error instanceof ProviderAdapterError && error.code === 'schema_digest_conflict') {
+        throw new CliError('configuration_required')
+      }
+      throw error
+    }
+    await entry.verifyPublished()
   }
 }

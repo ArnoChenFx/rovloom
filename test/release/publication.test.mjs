@@ -192,7 +192,7 @@ test(
   /** 无产品接线时必须阻断。 */ () => {
     const specification = {
       entrypoint: 'src/cli/main.ts',
-      workers: ['src/native-contract/compiler-worker.ts', 'src/connector/herdr/compiler-herdr-worker.ts'],
+      workers: ['src/connector/luvus/contract/compiler-worker.ts', 'src/connector/herdr/compiler-herdr-worker.ts'],
       releaseSmoke: null
     }
     assert.throws(/** 当前未接线产品不能发行。 */ () => productSmokePath(specification), /preview cannot release/u)
@@ -204,7 +204,7 @@ test(
       /** 只带Luvus工厂不能交付真实Herdr双角色验收。 */ () =>
         productSmokePath({
           ...specification,
-          workers: ['src/native-contract/compiler-worker.ts'],
+          workers: ['src/connector/luvus/contract/compiler-worker.ts'],
           releaseSmoke: 'scripts/release/product-smoke.mjs'
         }),
       /Real Herdr schema Worker is required/u

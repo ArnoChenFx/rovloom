@@ -1,7 +1,7 @@
 // 正式PR69 adapter及PR71 authority验证管理作用域；业务handler只是明确的计数stub，不执行真实管理动作。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createManagementSessionAuthority } from '../../src/runtime/index.js'
+import { createManagementSessionAuthority } from '../../src/runtime/management-session.js'
 import { createManagementHandler, createManagementSessionAdapter } from '../../src/admin/index.js'
 import type { GatewayManagementService, ManagementReply } from '../../src/mcp/management.js'
 import { scopeManagementService } from '../../src/cli/management-scope.js'

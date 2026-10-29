@@ -1,18 +1,18 @@
+import { migrateConnectorControls, providerControl, providerSetupPath } from './provider-control.js'
 // 唯一产品入口按固定role/ref加载真实资源；JSON不能重建opaque native来源或执行任意模块。
 import { privateDirectory } from './first-config.js'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { openGatewayState, createManagementSessionAuthority } from '../runtime/index.js'
+import { openGatewayState } from '../runtime/state.js'
+import { createManagementSessionAuthority } from '../runtime/management-session.js'
 import {
   createManagementSessionPersistence,
   MANAGEMENT_SESSIONS_MAX_BYTES
 } from '../runtime/management-session-store.js'
 import { composeConnectorSessions } from '../runtime/provider-sessions.js'
-import type {
-  GatewayRuntimeOptions,
-  ProviderGatewayRuntimeOptions,
-  ManagementSessionAuthority
-} from '../runtime/index.js'
+import type { ProviderGatewayRuntimeOptions } from '../runtime/types.js'
+import type { GatewayRuntimeOptions } from '../connector/luvus/host/runtime-types.js'
+import type { ManagementSessionAuthority } from '../runtime/management-session.js'
 import type { VersionOffer } from '../wire/types.js'
 import type { GatewayIdentitySource } from '../mcp/management.js'
 import type { ManagementWriteHttpOptions } from '../admin/index.js'
@@ -204,6 +204,7 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
       privateDirectory(join(config.state_dir, 'managed'))
       // 会话绑定与管理员记录分开放置：前者只含摘要，后者含凭据摘要与租期。
       const sessionStorePath = runtimeReference(config.state_dir, 'management-sessions')
+      migrateConnectorControls(config.state_dir)
       const settings = readRuntimeConfig(config)
       if (settings.provider_config_refs.length && !sources.gateway) {
         throw new CliError('backend_unavailable', 3)
@@ -433,6 +434,7 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
     connector: /* 只把程序保管的设备凭据接到真实session所有者；缺provider实现绝不创建心跳stub。 */ async (config) => {
       privateDirectory(config.state_dir)
       privateDirectory(join(config.state_dir, 'managed'))
+      migrateConnectorControls(config.state_dir)
       const settings = readRuntimeConfig(config)
       if (!sources.connector) {
         throw new CliError('backend_unavailable', 3)
@@ -453,8 +455,8 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
       }
       // 先验证静态认证输入，缺失或非法时不得启动provider所属的native child。
       credential()
-      const control = join(config.state_dir, 'control')
-      const managedRoot = join(control, 'luvus-root.json')
+      const control = providerControl(config.state_dir, 'luvus')
+      const managedRoot = join(control, 'root.json')
       const isolated = settings.providers.some(
         /* 只对首次引导的固定控制记录选择独立账本目录，native仍由既有root工厂逐项复验。 */ (entry) =>
           !!entry.value &&
@@ -494,12 +496,7 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
           throw new CliError('configuration_required')
         }
         for (const kind of kinds) {
-          const prepared = object(
-            readRuntimeJson(
-              runtimeReference(config.state_dir, kind === 'luvus' ? 'native-setup' : 'herdr-setup'),
-              1_048_576
-            )
-          )
+          const prepared = object(readRuntimeJson(providerSetupPath(config.state_dir, kind), 1_048_576))
           fields(prepared, [
             'schema_version',
             'attempt_id',

@@ -7,15 +7,15 @@ import type {
   ProviderGatewayRuntimeOptions,
   RuntimeCallInput
 } from '../../src/runtime/types.js'
-import { persistentBackend } from '../../src/integration/persistence.js'
-import { createLuvusWireAdapter } from '../../src/integration/luvus-wire.js'
+import { persistentBackend } from '../../src/connector/luvus/persistence.js'
+import { createLuvusWireAdapter } from '../../src/connector/luvus/wire.js'
 import type { Adapter, Session } from '../../src/transport/index.js'
 import type { ProviderBinding } from '../../src/wire/types.js'
 import { contractRef, LIMITS } from '../../src/wire/index.js'
-import { DEFAULT_LIMITS } from '../../src/native-contract/index.js'
+import { DEFAULT_LIMITS } from '../../src/connector/luvus/contract/index.js'
 import { fixture as transportFixture, until } from '../transport/helpers.js'
 import { source as contractSource } from '../wire/helpers.js'
-import { G } from '../native-contract/helpers.js'
+import { G } from '../connector/luvus/contract/helpers.js'
 
 type Gateway = Awaited<ReturnType<typeof createProviderGatewayRuntime>>
 type Stage = 'none' | 'session' | 'adapter' | 'readiness' | 'provider'

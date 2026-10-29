@@ -1,14 +1,11 @@
+import type { GatewayCatalogSource } from '../../src/connector/luvus/catalog-provider.js'
 // 验证实际Luvus目录按当前ACL/来源/epoch分页及即时撤权；不声称原生执行。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import {
-  FacadeServiceError,
-  StoreGatewayService,
-  type ServiceContext,
-  type GatewayCatalogSource
-} from '../../src/mcp/index.js'
+import { FacadeServiceError, StoreGatewayService, type ServiceContext } from '../../src/mcp/index.js'
 import { target } from './store-fixture.js'
 import { catalogFixture, catalogMethods } from './catalog-fixture.js'
+import { luvusCatalogProvider } from '../../src/connector/luvus/catalog-provider.js'
 import { contractRef } from '../../src/wire/index.js'
 
 test('prompt 帮助只推荐当前完整目标可见的输出等待，后端暴露面变化即时生效', async () => {
@@ -152,10 +149,13 @@ test(
           targets: f.targets,
           store: f.store,
           identities: f.identities,
-          catalog: {
-            resolve: /* 首次返回有效来源，随后模拟未更新revision的外部registry变化。 */ () =>
-              ++reads === 1 ? good : changed
-          }
+          catalog: luvusCatalogProvider({
+            store: f.store,
+            provider: {
+              resolve: /* 首次返回有效来源，随后模拟未更新revision的外部registry变化。 */ () =>
+                ++reads === 1 ? good : changed
+            }
+          })
         })
         await assert.rejects(
           service.execute('runtime_discover', { target, expected_binding_revision: 1 }, context()),
@@ -257,22 +257,25 @@ test(
           targets: f.targets,
           store: f.store,
           identities: f.identities,
-          catalog: {
-            resolve: /* 在最后一次读取中改变宿主事实，不能由返回的旧source掩盖撤销。 */ () => {
-              if (++reads === lastRead) {
-                if (change === 'principal') {
-                  f.setCaller(null)
+          catalog: luvusCatalogProvider({
+            store: f.store,
+            provider: {
+              resolve: /* 在最后一次读取中改变宿主事实，不能由返回的旧source掩盖撤销。 */ () => {
+                if (++reads === lastRead) {
+                  if (change === 'principal') {
+                    f.setCaller(null)
+                  }
+                  if (change === 'local') {
+                    f.setCaller({ id: 'alice', device_scope: { mode: 'selected', machine_ids: [] } })
+                  }
+                  if (change === 'expiry') {
+                    f.advance(30_001)
+                  }
                 }
-                if (change === 'local') {
-                  f.setCaller({ id: 'alice', device_scope: { mode: 'selected', machine_ids: [] } })
-                }
-                if (change === 'expiry') {
-                  f.advance(30_001)
-                }
+                return good
               }
-              return good
             }
-          }
+          })
         })
         try {
           await assert.rejects(

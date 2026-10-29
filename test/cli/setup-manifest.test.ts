@@ -14,56 +14,16 @@ import { createProductionCliRuntime } from '../../src/cli/production.js'
 import { configTemplate, type ConnectorConfig } from '../../src/cli/config.js'
 import { saveCredential } from '../../src/transport/credentials.js'
 import { writeSetupJson } from '../../src/cli/setup-files.js'
-import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/runtime/native-source.js'
-
-// v0.6.6（953e4f1）已发布的配对授权顺序；独立固定，不能从当前方法表过滤生成。
-const publishedLuvusSetupMethods = [
-  'session.snapshot',
-  'workspace.list',
-  'workspace.get',
-  'tab.list',
-  'tab.get',
-  'pane.list',
-  'pane.get',
-  'pane.current',
-  'pane.status',
-  'pane.read',
-  'agent.list',
-  'agent.get',
-  'agent.explain',
-  'agent.read',
-  'agent.sessions',
-  'agent.wait',
-  'workspace.new',
-  'workspace.open',
-  'workspace.focus',
-  'workspace.rename',
-  'workspace.close',
-  'tab.new',
-  'tab.focus',
-  'tab.rename',
-  'tab.close',
-  'pane.split',
-  'pane.focus',
-  'pane.rename',
-  'pane.close',
-  'pane.run',
-  'agent.start',
-  'agent.prompt',
-  'agent.send',
-  'agent.keys',
-  'agent.resume'
-]
+import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/connector/luvus/host/native-source.js'
 
 const plan: SetupPlanFacts = {
   attempt_id: 'synthetic_attempt',
   actor: 'synthetic_operator'
 }
 
-test('Luvus 配对清单兼容旧主体授权与新策略授权，拒绝额外方法或错误授权范围', async () => {
+test('Luvus 配对清单只接受当前策略授权，不携带逐方法 raw 授权', async () => {
   const root = privateHerdrTestRoot('.setup-luvus-grant-')
-  const authorization = { principal_id: plan.actor }
-  const grant = { target: setupTarget('synthetic_machine', 'luvus'), methods: ['pane.list'] }
+  const grant = { target: setupTarget('synthetic_machine', 'luvus') }
   const schema = readFileSync(new URL('../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8')
   const reference = setupReference(plan.attempt_id)
   const value = {
@@ -88,19 +48,17 @@ test('Luvus 配对清单兼容旧主体授权与新策略授权，拒绝额外�
     }
   }
   try {
-    for (const methods of [grant.methods, publishedLuvusSetupMethods]) {
-      for (const subject of [{ principal_id: authorization.principal_id }, {}]) {
-        const remote = { ...value, raw_grant: { ...subject, methods } }
-        const reviewed = await reviewSetupManifest(
-          { installations: [{ reference, value: remote }] },
-          plan,
-          'synthetic_machine',
-          root,
-          new AbortController().signal
-        )
-        assert.equal((reviewed.reviewed[0]!.value as { raw_grant?: unknown }).raw_grant, undefined)
-        assert.deepEqual(reviewed.authorization, { principal_id: plan.actor })
-      }
+    // 旧记录里的逐方法 raw 授权字段会被丢弃，但不再参与任何授权判断。
+    for (const remote of [value, { ...value, raw_grant: { principal_id: plan.actor, methods: ['pane.list'] } }]) {
+      const reviewed = await reviewSetupManifest(
+        { installations: [{ reference, value: remote }] },
+        plan,
+        'synthetic_machine',
+        root,
+        new AbortController().signal
+      )
+      assert.equal((reviewed.reviewed[0]!.value as { raw_grant?: unknown }).raw_grant, undefined)
+      assert.deepEqual(reviewed.authorization, { principal_id: plan.actor })
     }
     const noGrant = await reviewSetupManifest(
       { installations: [{ reference, value }] },
@@ -334,6 +292,74 @@ test(
       } finally {
         rmSync(root, { recursive: true, force: true })
       }
+    }
+  }
+)
+
+test(
+  'Luvus 配对把原始 schema 发布到 Gateway 自己的目录，不接受设备路径',
+  /* 两台机器部署时设备路径在 Gateway 侧不存在：引用必须由 Gateway 自己选择并落盘。 */ async () => {
+    const root = privateHerdrTestRoot('.setup-luvus-schema-')
+    const schema =
+      readFileSync(new URL('../fixtures/luvus/0.14.3/linux/schema-bundle.json', import.meta.url), 'utf8') +
+      ' '.repeat(130_000)
+    const reference = setupReference(plan.attempt_id)
+    const target = setupTarget('synthetic_machine', 'luvus')
+    const value = {
+      kind: 'luvus',
+      authentication: 'remote_connector',
+      target,
+      binding: {
+        machine_id: 'synthetic_machine',
+        provider_id: 'luvus',
+        kind: 'luvus',
+        config_ref: reference,
+        binding_revision: 1,
+        enabled: true
+      },
+      contract: {
+        binary_version: 'synthetic_future',
+        binary_sha256: 'f'.repeat(64),
+        schema_sha256: hash(schema),
+        adapter_revision: MANAGED_LUVUS_REVISION,
+        classification_revision: MANAGED_LUVUS_CLASSIFICATION,
+        schema_bundle: schema
+      }
+    }
+    try {
+      privateDirectory(join(root, 'managed'))
+      const reviewed = await reviewSetupManifest(
+        { installations: [{ reference, value }] },
+        plan,
+        'synthetic_machine',
+        root,
+        new AbortController().signal
+      )
+      const entry = reviewed.reviewed[0]!
+      // 发布后的引用由 Gateway 自己选，且落在它自己的 managed 目录内。
+      const published = (entry.value as { contract: { schema_ref?: string; schema_bundle?: string } }).contract
+      assert.equal(published.schema_bundle, undefined)
+      assert.equal(published.schema_ref, join(root, 'managed', `schema_${hash(schema)}.json`))
+      await publishSetupSchemas(reviewed.reviewed, new AbortController().signal)
+      assert.deepEqual(readFileSync(published.schema_ref!), Buffer.from(schema, 'utf8'))
+      // 合法空白超过旧 512 KiB 门槛；重复发布也必须从已发布引用重建成功。
+      assert(Buffer.byteLength(schema) > 524_288)
+      await publishSetupSchemas(reviewed.reviewed, new AbortController().signal)
+      // 设备提交自己的路径不被接受：Gateway 不接受设备选择本机文件位置。
+      const hostile = structuredClone(value) as unknown as { contract: Record<string, unknown> }
+      hostile.contract.schema_ref = '/arbitrary/device/path/schema.json'
+      await assert.rejects(
+        /* 设备路径既不参与发布，也不被当作已发布证据。 */ () =>
+          reviewSetupManifest(
+            { installations: [{ reference, value: hostile }] },
+            plan,
+            'synthetic_machine',
+            root,
+            new AbortController().signal
+          )
+      )
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
   }
 )

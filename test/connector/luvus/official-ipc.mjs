@@ -9,15 +9,16 @@ import { dlopen, FFIType, ptr } from 'bun:ffi'
 import { DatabaseSync } from 'node:sqlite'
 import { Store } from '../../../src/store.ts'
 import { Router } from '../../../src/router.ts'
-import { persistentBackend, commitLuvusResponse } from '../../../src/integration/persistence.ts'
-import { createLuvusWireAdapter } from '../../../src/integration/luvus-wire.ts'
-import { compileBundle, createNativeValidator } from '../../../src/native-contract/index.ts'
+import { persistentBackend } from '../../../src/connector/luvus/persistence.ts'
+import { commitNativeResponse } from '../../../src/wire/persistence.ts'
+import { createLuvusWireAdapter } from '../../../src/connector/luvus/wire.ts'
+import { compileBundle, createNativeValidator } from '../../../src/connector/luvus/contract/index.ts'
 import { assertBinding, boundedJson, contractRef } from '../../../src/wire/index.ts'
 import {
   LuvusRpcAdapter,
   LuvusAdapterError,
   createLuvusResultAccess,
-  LuvusDispatchClaims,
+  DispatchClaims,
   readLinuxLuvusPeer
 } from '../../../src/connector/luvus/index.ts'
 
@@ -419,7 +420,7 @@ export async function officialIpc(binaryPath) {
     wire = createLuvusWireAdapter(backend)
     responseWire = createLuvusWireAdapter(backend)
     const claimsPath = join(root, 'gateway/claims.sqlite')
-    claims = new LuvusDispatchClaims({
+    claims = new DispatchClaims({
       path: claimsPath,
       mode: 'create',
       ledger_id: 'owned-official-ipc',
@@ -559,7 +560,7 @@ export async function officialIpc(binaryPath) {
         payload: { attempt: p.attempt, native_response: result.native_response }
       }
       const envelope = wire.decode(responseWire.encode(response, 'connector_to_gateway'), 'connector_to_gateway')
-      const committed = commitLuvusResponse(store, wire, envelope)
+      const committed = commitNativeResponse(store, wire, envelope)
       assert.equal(committed.state, 'responded')
       assert.deepEqual(JSON.parse(committed.response), result.native_response)
       last = { ...p, response: result.native_response }

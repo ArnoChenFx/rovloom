@@ -56,7 +56,20 @@ try {
     await read(previous.result)
   }
   const route = { target, expected_binding_revision: 1 }
+  // 安装身份（schema/二进制摘要）必须原样保留；contract_ref 含 runtime_generation，
+  // managed 实例在升级时重启、attach 复用原会话，因此只有前者可跨升级断言。
+  const provider = await tool('providers_get', { machine_id: target.machine_id, provider_id: target.provider_id })
+  const installation = { schema_sha256: provider.schema_sha256, native_version: provider.native_version }
   const description = await tool('runtime_describe', { ...route, method: 'pane.list' })
+  if (phase === 'after') {
+    const previous = JSON.parse(readFileSync(process.env.UPGRADE_EVIDENCE, 'utf8'))
+    assert.deepEqual(
+      installation,
+      previous.installation,
+      'same installation schema/binary identity must survive upgrade'
+    )
+    assert.match(description.contract_ref, /^[a-f0-9]{64}$/u)
+  }
   let call = await tool('runtime_call', {
     ...route,
     contract_ref: description.contract_ref,
@@ -72,7 +85,13 @@ try {
   if (phase === 'before') {
     writeFileSync(
       process.env.UPGRADE_EVIDENCE,
-      JSON.stringify({ target, call_id: call.call_id, result: call.result }),
+      JSON.stringify({
+        target,
+        contract_ref: description.contract_ref,
+        installation,
+        call_id: call.call_id,
+        result: call.result
+      }),
       { mode: 0o600 }
     )
   }

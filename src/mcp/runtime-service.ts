@@ -2,9 +2,9 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { GatewayError } from '../contracts.js'
 import { WireError } from '../wire/index.js'
-import { LuvusAdapterError } from '../connector/luvus/index.js'
-import { NativeRequestPreflightError } from '../runtime/request-preflight.js'
-import type { createGatewayRuntime, createProviderGatewayRuntime } from '../runtime/index.js'
+import { ProviderAdapterError } from '../connector/provider-error.js'
+import { NativeRequestPreflightError } from '../connector/preflight.js'
+import type { createProviderGatewayRuntime } from '../runtime/gateway.js'
 import type { Store } from '../store.js'
 import { StoreGatewayService, type StoreGatewayOptions } from './store-service.js'
 import { isToolName, parseToolArguments } from './schema.js'
@@ -23,9 +23,7 @@ import {
   type ToolName
 } from './types.js'
 
-export type RuntimeGateway =
-  | Awaited<ReturnType<typeof createGatewayRuntime>>
-  | Awaited<ReturnType<typeof createProviderGatewayRuntime>>
+export type RuntimeGateway = Awaited<ReturnType<typeof createProviderGatewayRuntime>>
 export type RuntimeGatewayPort = Pick<
   RuntimeGateway,
   'router' | 'principal' | 'runAuthenticated' | 'admit' | 'get' | 'cancel' | 'results' | 'targets'
@@ -58,7 +56,7 @@ function publicError(error: unknown): FacadeServiceError {
   if (error instanceof FacadeServiceError && SERVICE_ERROR_CODES.includes(error.code)) {
     return error
   }
-  if (error instanceof GatewayError || error instanceof WireError || error instanceof LuvusAdapterError) {
+  if (error instanceof GatewayError || error instanceof WireError || error instanceof ProviderAdapterError) {
     if (SERVICE_ERROR_CODES.includes(error.code as ServiceErrorCode)) {
       return new FacadeServiceError(error.code as ServiceErrorCode)
     }

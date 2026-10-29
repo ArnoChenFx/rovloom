@@ -1,9 +1,9 @@
 /** 从安装契约和受信任在线能力构造有期限的方法目录，约束来源绑定与分页游标。 */
-import { createNativeValidator } from '../../native-contract/index.js'
-import type { CompiledContract, TrustedNativeContext } from '../../native-contract/index.js'
+import { createNativeValidator } from './contract/index.js'
+import type { CompiledContract, TrustedNativeContext } from './contract/index.js'
 import { boundedJson, hash } from '../../wire/index.js'
 import { LuvusAdapterError } from './types.js'
-import { describeLuvusSchema } from '../../native-contract/description.js'
+import { describeLuvusSchema } from './contract/description.js'
 
 // 安装 schema 与在线能力是独立输入；不把 CLI session list 当成 capabilities。
 // 宿主负责经认证获得 capabilities、发布 contract registry，并维护当前完整 binding。

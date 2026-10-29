@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createHerdrGatewayResources } from '../../../src/connector/herdr/provider.js'
 import { fixedHerdrSource } from '../../../src/connector/herdr/review.js'
-import { NativeRequestPreflightError } from '../../../src/runtime/request-preflight.js'
+import { NativeRequestPreflightError } from '../../../src/connector/preflight.js'
 import { WireError } from '../../../src/wire/index.js'
 import { Store } from '../../../src/store.js'
 import { connected, management, options } from '../../storage/helpers.js'
@@ -29,7 +29,7 @@ async function herdrFixture() {
       binding_revision: 1,
       config_ref: 'safe_ref',
       expected_source: fixedHerdrSource(),
-      schema_path: schemaPath
+      schema_ref: schemaPath
     },
     now: () => 1_000_000
   })

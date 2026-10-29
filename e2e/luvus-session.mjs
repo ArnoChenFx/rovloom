@@ -102,6 +102,29 @@ try {
   const snapshot = await invoke(entry('session.snapshot').contract_ref, { method: 'session.snapshot', params: {} })
   assert.equal(snapshot.state, 'responded', JSON.stringify(snapshot))
   const evidence = { machines: machines.items.length, methods: methods.length, workspaces_before: before.n }
+  // 两台机器部署时设备本机路径在 Gateway 侧不存在：已发布的 pin 必须引用 Gateway 自己的
+  // 内容寻址副本，且该副本的摘要与在线契约摘要一致。
+  const gatewayState = process.env.ROVLOOM_GATEWAY_STATE
+  if (gatewayState) {
+    const providers = JSON.parse(readFileSync(`${gatewayState}/managed/providers.json`, 'utf8'))
+    const contract = providers.providers[0].value.contract
+    if (process.env.ROVLOOM_EXPECT_LEGACY_SCHEMA === '1') {
+      assert.equal(typeof contract.schema_bundle, 'string', 'legacy pin keeps the original inline schema')
+      assert.equal(contract.schema_ref, undefined)
+      assert.equal(createHash('sha256').update(contract.schema_bundle).digest('hex'), contract.schema_sha256)
+      evidence.gateway_schema_ref = 'legacy-inline'
+    } else {
+      assert.equal(contract.schema_bundle, undefined, 'published pin must not inline the schema')
+      assert.equal(
+        contract.schema_ref,
+        `${gatewayState}/managed/schema_${contract.schema_sha256}.json`,
+        `published pin must reference the Gateway copy, got ${contract.schema_ref}`
+      )
+      const published = readFileSync(contract.schema_ref)
+      assert.equal(createHash('sha256').update(published).digest('hex'), contract.schema_sha256)
+      evidence.gateway_schema_ref = 'own-copy'
+    }
+  }
   if (process.env.LUVUS_WRITE) {
     const created = await invoke(entry('workspace.new').contract_ref, {
       method: 'workspace.new',

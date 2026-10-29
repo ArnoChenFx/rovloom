@@ -1,16 +1,17 @@
+import { migrateConnectorControls, providerControl, providerSetupPath } from './provider-control.js'
 // 从实际安装发现Luvus并初始化既有受保护root/持久账本；不启动Agent、调用模型或根据固定发行版猜pin。
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
-import { discoverLuvusInstallation } from '../runtime/native-control.js'
-import { initializeManagedLuvusRoot } from '../runtime/native-root.js'
-import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../runtime/native-source.js'
-import type { LuvusProductionOwnerConfig, LuvusProductionUserConfig } from '../runtime/production-luvus.js'
-import type { LuvusProductionRemoteConfig } from '../runtime/remote-luvus.js'
+import { discoverLuvusInstallation } from '../connector/luvus/host/native-control.js'
+import { initializeManagedLuvusRoot } from '../connector/luvus/host/native-root.js'
+import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../connector/luvus/host/native-source.js'
+import type { LuvusProductionOwnerConfig, LuvusProductionUserConfig } from '../connector/luvus/host/production-luvus.js'
+import type { LuvusProductionRemoteConfig } from '../connector/luvus/host/remote-luvus.js'
 import { localLimits, verifyInstallation } from '../connector/luvus/local.js'
 import { effectiveBinDirectories } from '../connector/local/agent-path.js'
 import { runFixedProcess } from '../connector/luvus/io.js'
-import { LuvusDispatchClaims } from '../connector/luvus/claims.js'
+import { DispatchClaims } from '../connector/claims.js'
 import { boundedJson, fields, hash, id, object } from '../wire/index.js'
 
 import {
@@ -23,7 +24,6 @@ import {
 } from './config.js'
 import { privateDirectory } from './first-config.js'
 import { readSetupJson, writeSetupJson } from './setup-files.js'
-import { runtimeReference } from './runtime-files.js'
 import { setupReference, setupSessionsFor, setupTarget } from './setup-targets.js'
 import type { SetupConsole } from './setup-console.js'
 import { cliMessages, formatMessage } from './messages.js'
@@ -120,7 +120,8 @@ export async function prepareSetupNative(
   id(attempt)
   id(machine)
   id(authorization.principal_id)
-  const path = runtimeReference(config.state_dir, 'native-setup')
+  migrateConnectorControls(config.state_dir)
+  const path = providerSetupPath(config.state_dir, 'luvus')
   const existing = readSetupJson(path, 1_048_576)
   if (existing !== undefined) {
     return prepared(existing, attempt, machine, config)
@@ -147,7 +148,8 @@ export async function prepareSetupNative(
     )
     throw new CliError('configuration_required')
   }
-  const control = join(config.state_dir, 'control')
+  const control = providerControl(config.state_dir, 'luvus')
+  privateDirectory(join(config.state_dir, 'control'))
   // 附着：状态根是用户自己的 LUVUS_HOME；managed：Connector 私有的隔离目录。
   const stateRoot = attach ? userLuvusHome(config) : join(config.state_dir, 'n')
   const home = join(config.state_dir, 'h')
@@ -210,6 +212,8 @@ export async function prepareSetupNative(
       schema_sha256: discovered.compiled.identity.schema_sha256,
       adapter_revision: MANAGED_LUVUS_REVISION,
       classification_revision: MANAGED_LUVUS_CLASSIFICATION,
+      // 原始字节随清单交给 Gateway，由它在自己的状态目录按内容寻址落盘；Connector 不发布本地副本，
+      // 对端机器也读不到本机路径。
       schema_bundle: schema.stdout.toString('utf8')
     }
   }
@@ -225,8 +229,8 @@ export async function prepareSetupNative(
   if (attach) {
     // 附着用户自己的 Luvus：没有 Connector 拥有的 root，只建 claim 账本；实例配置直接记入受保护的已准备记录。
     const ledgerId = hash(boundedJson([reference, 'user', target]))
-    new LuvusDispatchClaims({
-      path: join(control, 'luvus-claims.db'),
+    new DispatchClaims({
+      path: join(control, 'claims.db'),
       mode: 'create',
       ledger_id: ledgerId,
       limits: { entries: 1024, bytes: 4_194_304 },
@@ -251,15 +255,15 @@ export async function prepareSetupNative(
     writeSetupJson(path, result, true, 1_048_576)
     return result
   }
-  const rootRecord = join(control, 'luvus-root.json')
+  const rootRecord = join(control, 'root.json')
   const root = await initializeManagedLuvusRoot({
     record_path: rootRecord,
     config: discovered.config
   })
   try {
     const ledgerId = hash(boundedJson([reference, root.root_id, root.root_revision, root.config.target]))
-    const claims = new LuvusDispatchClaims({
-      path: join(control, 'luvus-claims.db'),
+    const claims = new DispatchClaims({
+      path: join(control, 'claims.db'),
       mode: 'create',
       ledger_id: ledgerId,
       limits: { entries: 1024, bytes: 4_194_304 },

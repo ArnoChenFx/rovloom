@@ -1,7 +1,7 @@
 // 管理HTTP沿用原handler的认证、CSRF和预算；只在实际service委托处进入PR71管理作用域。
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { ManagementListenerHandler } from '../admin/index.js'
-import type { ManagementSessionAuthority } from '../runtime/index.js'
+import type { ManagementSessionAuthority } from '../runtime/management-session.js'
 import type {
   AdminContext,
   GatewayManagementService,

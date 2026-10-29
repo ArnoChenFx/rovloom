@@ -13,7 +13,7 @@ import { parseRpcFrame, requestFrame } from '../../../src/connector/luvus/adapte
 import { inspectEndpoint, recheckEndpoint } from '../../../src/connector/luvus/local.js'
 import { localLimits } from '../../../src/connector/luvus/local.js'
 import { runFixedProcess } from '../../../src/connector/luvus/io.js'
-import { bytes, clone, json } from '../../native-contract/helpers.js'
+import { bytes, clone, json } from './contract/helpers.js'
 import { fixture } from './helpers.js'
 
 /** 构造拒绝断言，检查安全错误码以及可选的派发结果语义。 */
@@ -639,7 +639,7 @@ test(
       [
         '--no-env-file',
         '-e',
-        `const {compilerWorkerPlugin} = await import(${JSON.stringify(new URL('../../../scripts/native-contract/worker-plugin.mjs', import.meta.url).href)});
+        `const {compilerWorkerPlugin} = await import(${JSON.stringify(new URL('../../../scripts/connector/worker-plugin.mjs', import.meta.url).href)});
         const built = await Bun.build({entrypoints: [${JSON.stringify(fileURLToPath(new URL('../../../src/connector/luvus/index.ts', import.meta.url)))}], target:'bun', format:'esm', outdir:${JSON.stringify(outdir)}, plugins:[await compilerWorkerPlugin()]});
         if(!built.success) throw new AggregateError(built.logs, 'artifact build failed')`
       ],

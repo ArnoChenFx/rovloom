@@ -5,6 +5,7 @@ import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js'
 import { StoreGatewayService } from '../../src/mcp/store-service.js'
 import { contractRef } from '../../src/wire/index.js'
 import { catalogFixture } from './catalog-fixture.js'
+import { luvusCatalogProvider } from '../../src/connector/luvus/catalog-provider.js'
 import { httpFixture } from './http-fixture.js'
 import { target } from './store-fixture.js'
 
@@ -86,12 +87,15 @@ test('元数据 resolver 同步撤销 caller 时仍拒绝整条读取，不以 u
     targets: f.targets,
     store: f.store,
     identities: f.identities,
-    catalog: {
-      resolve: () => {
-        f.setCaller(null)
-        return source
+    catalog: luvusCatalogProvider({
+      store: f.store,
+      provider: {
+        resolve: () => {
+          f.setCaller(null)
+          return source
+        }
       }
-    }
+    })
   })
   try {
     await assert.rejects(

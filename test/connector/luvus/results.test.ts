@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Store } from '../../../src/store.js'
 import type { Principal } from '../../../src/router.js'
-import { commitLuvusResponse } from '../../../src/integration/persistence.js'
+import { commitNativeResponse } from '../../../src/wire/persistence.js'
 import { createLuvusResultAccess } from '../../../src/connector/luvus/index.js'
 import { management, responseFrame } from '../../storage/helpers.js'
 import { nativeBackend } from '../../storage/native-backend.js'
@@ -29,7 +29,7 @@ function fixture() {
   const frame = responseFrame(binding, {
     error: { code: 'synthetic', message: 'preserved', data: { revision: 7, text: '你好🌍'.repeat(8000) } }
   })
-  commitLuvusResponse(store, native.adapter, frame)
+  commitNativeResponse(store, native.adapter, frame)
   const principal: Principal = {
     id: 'synthetic'
   }
