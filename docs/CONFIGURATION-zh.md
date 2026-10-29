@@ -105,7 +105,7 @@ provider JSON 或凭据文件。
 如有需要，请在配对前选择更短的目录。
 
 没有 caller 状态的 Gateway 处于**待配对**状态：MCP 返回 401，管理页在创建管理员之前
-只显示空壳。首次原生批准为已审核的 Target 创建一个本机 caller，Bearer 仅显示在
+只显示空壳。首次配对为已审核的 Target 创建一个本机 caller，Bearer 仅显示在
 已核验的本地终端，并由 Rovloom 私密保留；请复制到 MCP 客户端的秘密存储。
 默认有效期 30 天，用 `rovloom token` 管理。设备凭据、MCP Bearer 与管理员密码互不替代，
 MCP Bearer 不能登录管理页。经 Gateway 终端完成首次配对时，终端会创建管理员 `admin`，
@@ -283,7 +283,7 @@ runtime（`luvus`/`herdr`）和 Agent（如 OpenCode）可以装在机器上任�
 
 `PATH` 里只有部分条目可用：规范绝对路径、真实存在的目录（不是符号链接、文件或缺失路径），
 属于 root 或 Connector 用户，且组/其它用户不可写；其余条目静默跳过。最多保留 16 个目录，
-显式目录在前。若服务管理器给 Connector 的 `PATH` 很精简，请在**批准原生初始化前**于唯一
+显式目录在前。若服务管理器给 Connector 的 `PATH` 很精简，请在**执行 `connector --join` 之前**于唯一
 Connector 用户文件里显式列出目录：
 
 ```json

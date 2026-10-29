@@ -123,7 +123,9 @@ async function inspect(path: string, kind: 'directory' | 'binary' | 'socket') {
         throw new LuvusAdapterError('local_path_untrusted')
       }
     }
-    stamps.push([component, info.dev, info.ino, last ? info.ctimeNs : '', info.uid, info.mode].join(':'))
+    stamps.push(
+      [component, info.dev, info.ino, last ? info.ctimeNs : '', last ? info.size : '', info.uid, info.mode].join(':')
+    )
   }
   return stamps.join('\n')
 }
