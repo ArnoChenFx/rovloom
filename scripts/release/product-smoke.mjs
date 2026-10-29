@@ -30,7 +30,10 @@ export async function smokeProduct(binary, version, options = {}) {
   // musl 产物缺少 pidfd_open/pidfd_send_signal，Luvus managed 原生进程管理按 fail-closed 不可用，
   // 因此 musl 目标只验收 Gateway 切片，绝不把双角色结果声明为通过。
   const { connector: _partialConnector, ...gatewayAcceptance } = gateway
-  const nativeOwner = process.platform === 'linux' && process.arch === 'x64' && runtimeLibc() === 'glibc'
+  // 判据是产物自身的 libc，不是宿主：musl 产物即使跑在 glibc 宿主上也拿不到 pidfd。
+  const productLibc = options.libc ?? runtimeLibc()
+  const nativeOwner =
+    process.platform === 'linux' && process.arch === 'x64' && productLibc === 'glibc' && runtime.kind === 'native'
   let dualRole
   if (nativeOwner) {
     dualRole = await smokeDualRoleProduct(binary, options)

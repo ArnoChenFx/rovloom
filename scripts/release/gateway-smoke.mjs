@@ -423,5 +423,17 @@ export async function smokeGatewayProduct(
 if (import.meta.main) {
   const [binary, version] = process.argv.slice(2)
   assert.equal(process.argv.length, 4, 'Usage: bun scripts/release/gateway-smoke.mjs /built/product-binary version')
-  console.log(JSON.stringify(await smokeGatewayProduct(resolve(binary), version)))
+  const { smokeRuntime } = await import('./runtime.mjs')
+  const runtime = smokeRuntime()
+  console.log(
+    JSON.stringify(
+      await smokeGatewayProduct(
+        resolve(binary),
+        version,
+        undefined,
+        undefined,
+        runtime.kind === 'alpine' ? runtime : undefined
+      )
+    )
+  )
 }

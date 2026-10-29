@@ -11,7 +11,9 @@ Rovloom 有两个角色：
 
 ## 1. 安装
 
-**Linux / macOS**（x64 或 arm64；Linux 需要 glibc）。无需 Bun、Node 或 root 权限：
+**Linux / macOS**（x64 或 arm64）。Linux 支持 glibc 与 musl，安装器会自动选择对应资产。
+musl 版另需 C++ 运行时（Alpine 上 `apk add libstdc++`），且不能用 Luvus managed 原生进程管理，
+详见[分发说明](DISTRIBUTION.md)。无需 Bun、Node 或 root 权限：
 
 ```sh
 curl --fail --silent --show-error --location https://raw.githubusercontent.com/ArnoChenFx/rovloom/main/scripts/install.sh | sh

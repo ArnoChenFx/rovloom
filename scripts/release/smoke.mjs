@@ -40,12 +40,13 @@ export async function smokeStandalone(binary, checks = cliChecks, runtime = unde
       ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR } : {})
     }
     for (const check of checks) {
-      const result = await runSmokeChild(executable, check.args, {
-        cwd,
-        env,
-        input: check.input ?? '',
-        ...(runtime ? { runtime } : {})
-      })
+      // runtime 是第四个启动选项，不属于子进程环境。
+      const result = await runSmokeChild(
+        executable,
+        check.args,
+        { cwd, env, input: check.input ?? '' },
+        runtime ? { runtime } : {}
+      )
       assert.equal(result.signal, null)
       assert.equal(result.status, check.code, `Unexpected exit for ${JSON.stringify(check.args)}: ${result.stderr}`)
       if (check.stdout) {

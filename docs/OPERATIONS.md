@@ -59,7 +59,7 @@ Gateway 与 Connector 一同升级。升级前停止两端进程，离线备份�
 运维时单独监控该目录容量；确认旧工作数据与恢复资料已备份且不再需要后，由所有者
 按退役批次清理。清理退役目录不会撤销 Gateway 侧旧设备，应在设备管理里单独撤销。
 
-- 安装：`install.sh` / `install.ps1` 只安装单文件二进制并核对 `SHA256SUMS`，不建配置、不起服务（[快速开始](QUICK-START-zh.md)）。Docker 只用于 Linux Gateway（[Docker 部署](DOCKER-zh.md)）。
+- 安装：`install.sh` / `install.ps1` 只安装单文件二进制并核对 `SHA256SUMS`，不建配置、不起服务（[快速开始](QUICK-START-zh.md)）。Linux 的 glibc 与 musl 资产由安装器按 `getconf` 自动选择；musl 主机需自行安装 libstdc++（Alpine：`apk add libstdc++`），且 musl 下 Luvus managed 原生进程管理不可用（`owned_pidfd_unavailable`），Gateway、Herdr 与 Luvus attach 正常。Docker 只用于 Linux Gateway（[Docker 部署](DOCKER-zh.md)）。
 - 升级：先正常停 Connector 再停 Gateway，替换二进制（重新运行安装脚本，或 `docker compose pull && docker compose up -d`），再按原样启动。配置与数据沿用。脚本只安装官方 latest 稳定版；预发布版本从 Release 页面手动下载。
 - **反向代理配置变更：升级前删除 Gateway 配置中的 `mcp.public_url`。保留该字段会导致 `config check` 和 Gateway 启动报 `invalid_config`，不会继续兼容或忽略旧值。** AI 客户端仍直接填写代理的 HTTPS `/mcp` 地址。
 - 没有自更新。启动时 v9 库会自动升级到 v10：先在真实状态目录同级的 `<state>.backups` 里写一份整库迁移前副本（按原备份期限与两份上限过期），再在单个事务内加列并推进版本，失败整体回滚并保持 v9。高于当前版本的库仍拒绝启动（`unsupported_database_version`）并保持库文件字节不变；比 v9 更旧的库（v1-v8）不在迁移范围内，同样拒绝。详见[存储与数据保留](STORAGE.md#数据库与文件)。

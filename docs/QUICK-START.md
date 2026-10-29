@@ -12,7 +12,10 @@ Connector runs on Linux x64, macOS (x64, arm64) and Windows x64. On macOS and Wi
 
 ## 1. Install
 
-**Linux / macOS** (x64 or arm64; Linux needs glibc). No Bun, Node or root access required:
+**Linux / macOS** (x64 or arm64). Linux needs glibc **or** musl — the installer picks the
+matching asset. The musl build also needs the C++ runtime (`apk add libstdc++` on Alpine) and
+cannot run Luvus managed native processes; see [Distribution](DISTRIBUTION.md).
+No Bun, Node or root access required:
 
 ```sh
 curl --fail --silent --show-error --location https://raw.githubusercontent.com/ArnoChenFx/rovloom/main/scripts/install.sh | sh
