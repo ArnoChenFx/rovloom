@@ -47,6 +47,7 @@ import { createHerdrWireAdapter } from './wire.js'
 import { isReviewedHerdrSource } from './review.js'
 import { createHerdrGatewaySourceOwner } from './source.js'
 import { describeHerdrContract } from './discovery.js'
+import { herdrParameterDiagnostic } from './parameter-help.js'
 
 export type HerdrLedgerRef = Readonly<{
   path: string
@@ -440,10 +441,10 @@ export async function createHerdrGatewayResources(
             try {
               codec.encode(candidate)
             } catch (error) {
-              // 预检拒绝发生在登记前，是确定未派发的客户端参数错误；与 Luvus 预检同一投影，
-              // 不把原生 schema 细节进 MCP 诊断（不含参数、路径或字段指针）。
+              // 预检拒绝发生在登记前，是确定未派发的客户端参数错误；诊断只含安装 schema 派生的固定路径与规则，
+              // 与 describe 同源，不含请求值、字段名或原生错误文本。
               if (error instanceof WireError && error.code === 'herdr_native_request_invalid') {
-                throw new NativeRequestPreflightError()
+                throw new NativeRequestPreflightError(herdrParameterDiagnostic(schemaDocument, candidate))
               }
               throw error
             }

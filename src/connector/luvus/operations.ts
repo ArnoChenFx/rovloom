@@ -2,7 +2,7 @@
 import type { NativeMethodContract } from './contract/index.js'
 import { LUVUS_OPERATION_READ, LUVUS_OPERATION_WRITE, luvusMethod } from './methods.js'
 import { LuvusAdapterError } from './types.js'
-import { WAIT_OUTPUT_MATCH_BYTES } from './reviewed-params.js'
+import { WAIT_OUTPUT_MATCH_BYTES, luvusReviewedValidator } from './reviewed-params.js'
 import { boundedJson, fields, object } from '../../wire/index.js'
 
 export type LuvusOperationDescriptor = Readonly<{
@@ -150,6 +150,10 @@ export function validateLuvusOperationParams(method: string, input: unknown): vo
   }
   try {
     const params = object(JSON.parse(boundedJson(input)))
+    // 已审核 schema 先做字段级检查（必填、类型、枚举、范围、未知字段），与拒绝诊断同源；下面的跨字段规则保持不变。
+    if (luvusReviewedValidator(method)?.(params) === false) {
+      invalid()
+    }
     if (
       ['session.snapshot', 'workspace.list', 'tab.list', 'pane.current', 'agent.list', 'agent.sessions'].includes(
         method

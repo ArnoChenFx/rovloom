@@ -129,3 +129,73 @@ test(
     }
   }
 )
+
+test(
+  'Herdr 参数拒绝带出安装 schema 派生的字段诊断，诊断不回显请求值，纠正后通过预检',
+  /** 缺必填、枚举外取值与类型错误的 issues 同源于 describe 的 params_schema；纠正后的同一方法通过。 */
+  async () => {
+    const f = await herdrFixture()
+    try {
+      const hosted = f.resource.providers[0]!
+      const preflight = (request: Parameters<typeof checkProviderRequest>[1]) =>
+        checkProviderRequest(hosted, request, contractRef(fixedHerdrSource()))
+      const rejected = [
+        {
+          request: { method: 'pane.read', params: { pane: 'wC:p1', lines: 8000 } },
+          issues: [
+            { path: '/params/pane_id', rule: 'required' },
+            { path: '/params/source', rule: 'required' }
+          ]
+        },
+        {
+          request: { method: 'workspace.close', params: { workspace: 'wB' } },
+          issues: [{ path: '/params/workspace_id', rule: 'required' }]
+        },
+        {
+          request: { method: 'workspace.get', params: { workspace_id: 123 } },
+          issues: [{ path: '/params/workspace_id', rule: 'invalid_value' }]
+        },
+        {
+          request: { method: 'pane.read', params: { pane_id: 'wC:p1', source: 'nowhere' } },
+          issues: [{ path: '/params/source', rule: 'one_of' }]
+        },
+        {
+          request: { method: 'pane.read', params: { pane_id: 'wC:p1', source: 'recent', lines: -1 } },
+          issues: [{ path: '/params/lines', rule: 'range' }]
+        }
+      ]
+      for (const { request, issues } of rejected) {
+        assert.throws(
+          () => preflight({ ...request, id: 'synthetic_native' }),
+          (error: unknown) => {
+            assert(error instanceof NativeRequestPreflightError)
+            assert.equal(error.outcome, 'not_dispatched')
+            assert.deepEqual(error.parameterDiagnostic?.issues, issues)
+            assert.doesNotMatch(JSON.stringify(error.parameterDiagnostic), /wB|wC:p1|nowhere|123/)
+            return true
+          },
+          JSON.stringify(request) + ' 必须带出字段级诊断'
+        )
+      }
+      assert.throws(
+        () => preflight({ method: 'pane.read', params: { pane: 'wC:p1', lines: 8000 }, id: 'synthetic_native' }),
+        (error: unknown) => {
+          assert(error instanceof NativeRequestPreflightError)
+          assert.equal(error.parameterDiagnostic?.parameter_help?.source, 'herdr_installed_schema')
+          assert.deepEqual(error.parameterDiagnostic?.parameter_help?.required, ['pane_id', 'source'])
+          assert.deepEqual(error.parameterDiagnostic?.parameter_help?.optional, ['format', 'lines', 'strip_ansi'])
+          return true
+        }
+      )
+      // 纠正后通过预检：lines:8000 只受运行时窗口约束，不是 schema 上界。
+      preflight({
+        method: 'pane.read',
+        params: { pane_id: 'wC:p1', source: 'recent', lines: 8000 },
+        id: 'synthetic_native'
+      })
+      preflight({ method: 'workspace.close', params: { workspace_id: 'wB' }, id: 'synthetic_native' })
+    } finally {
+      await f.close()
+    }
+  }
+)

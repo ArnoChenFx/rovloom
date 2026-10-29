@@ -130,15 +130,14 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 
 - `params_schema`：有明确方法条件分支且能准确提取时，返回原生参数 schema 及本地 `$defs` 引用闭包，保留枚举、组合条件、数字边界、`description` 和 `$comment`。当前 0.14.3 的审核普通方法中包括 `pane.list`、`agent.prompt/send/wait/keys`。
 - `schema_annotations`：原生 request/response 文档根的 `$comment`、`description` 原文，附 `document_uri` 与 JSON Pointer。根注释属于整个文档，不应当作当前方法独有的约束。
-- `params_schema_source` 区分 `installed_native_schema` 与 `rovloom_reviewed_subset`。`wait.output` 即使原生覆盖为 `generic_params_only`，也返回审核 schema：必填 pane/match、正 u32 pane、禁止 NUL、秒数 0..3600。match 的 `maxLength:4096` 只是字符上界，准确 UTF-8 字节上限另由 `x-maxUtf8Bytes:4096` 表达；客户端须检查该扩展，不能将字符数当字节数。无法准确投影的原生条件不丢弃，执行仍核验完整原始 schema 和审核参数子集。
+- `params_schema_source` 区分 `installed_native_schema` 与 `rovloom_reviewed_subset`。原生只给 `generic_params_only` 的审核普通方法，也返回 Rovloom 审核 schema：必填、类型、枚举、范围、互斥与依赖，未知字段一律拒绝；`schema_status` 仍如实保持原生结论，两个来源并列、各自标注，审核子集不覆盖原生结论。文本字段的 UTF-8 字节上限由 `x-maxUtf8Bytes` 表达（例如 `wait.output` 的 match 为 4096，`maxLength` 只是字符上界）；客户端须检查该扩展，不能将字符数当字节数。无法准确投影的原生条件不丢弃，执行仍核验完整原始 schema 和审核参数子集。执行校验、`params_schema` 与拒绝诊断来自同一份审核定义，三者不会各自漂移。
 - discover 页和 describe 返回 `subset_revision`：它以原生 contract_ref 为命名空间，标识当前可见方法及审核参数定义，方法新增/删除或终端开关改变会更新；同一集合仅排序变化不更新。客户端用 `(contract_ref, subset_revision)` 缓存目录。该修订只用于缓存失效，不代表授权或调用许可；执行仍复核当前契约、能力与设备范围。`contract_ref` 继续标识已批准原生来源，新增方法不迫使旧配对重建身份。
 
 例如 `agent.prompt` 的原生根注释明确说明：等待模式须先观察到新的 working/blocked 转换，再匹配 `until`；`agent.wait` 则只是当前状态匹配器。快速回复或缺少正向状态证据时，前者可能一直未匹配，即使 Agent 实际已答完。MCP 可直接读到原生注释和下面的审核提示。
 
-`runtime_describe` 对 `agent.start`、`agent.wait`、`agent.prompt`、`pane.run`、`wait.output` 附带
-`parameter_help`：必填/可选字段、依赖规则和示例，来源标记为
-`rovloom_reviewed_subset`。它是 Rovloom 已审核子集的调用指南，原来的
-`schema_status` 仍表示安装版原生 schema 的覆盖情况。`runtime_discover` 不附带这些示例。
+`runtime_describe` 对每个已审核普通方法附带 `parameter_help`：必填/可选字段与允许取值，来源标记为
+`rovloom_reviewed_subset`；`agent.start`、`agent.wait`、`agent.prompt`、`pane.run`、`wait.output` 另有依赖规则和示例。
+它是 Rovloom 已审核子集的调用指南，原来的 `schema_status` 仍表示安装版原生 schema 的覆盖情况。`runtime_discover` 不附带这些示例。
 
 `agent.start` 必填 `name` 和 `kind`，两者均须匹配 `^[a-z][a-z0-9_-]{0,31}$`（小写 ASCII 字母开头，最长 32 字符）；格式错误会在登记前定位到 `/params/name` 或 `/params/kind`，规则为 `pattern`。`kind` 还须是原生已安装的 Agent，格式有效不证明该 Agent 可用。`pane` 是可选字段：提供时使用已有 pane，省略时由 Luvus 新建 pane；可用 `anchor` 指定分屏锚点，不能同时传 `pane` 和 `anchor`。启动回包中的 `pane` 是后续应使用的真实标识，`ready:true` 不代表一轮 prompt 已完成。
 
@@ -160,7 +159,7 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 - `agent.prompt` 仍选 Agent 的 `target`；指定 `until` 或 `timeout_s` 时必须同时指定 `wait:true`。
 - `timeout_s` 是原生方法的秒数；`runtime_call.deadline` 是整个 Rovloom 调用的固定截止，须覆盖原生等待与 RPC 开销。不会根据参数自动延长已经登记的 deadline。
 - Luvus RPC 默认最长等待 10 分钟，并受原调用 deadline、取消和撤权约束；发现 endpoint、读取 schema 的准备超时仍是 30 秒。本机已有的显式短超时继续生效。
-- 登记前参数拒绝保留 `native_request_invalid` 与 `outcome:"not_dispatched"`。上述方法的常见错误附带 `gateway_error.details.issues`，例如 `/params/pane` 缺失、`/params/wait` 必须为 true，以及同一份固定调用指南；不回显用户值或原生错误文本。无法安全定位具体字段时，返回 `/params` 与 `invalid_value` 作为通用参数拒绝提示，不表示已经定位到某个字段。
+- 登记前参数拒绝保留 `native_request_invalid` 与 `outcome:"not_dispatched"`。所有已审核普通方法的参数错误都附带 `gateway_error.details.issues`，例如 `/params/pane` 缺失、`/params/lines` 超出范围、`/params/wait` 必须为 true，以及同一份固定调用指南 `parameter_help`；路径与规则同源于上面的审核 schema，不回显用户值、未知字段名或原生错误文本。选择器互斥、未知字段或枚举取值无法定位到单个字段时，返回 `/params` 与 `one_of` 或 `invalid_value` 作为对象级提示，不表示已经定位到某个字段。
 
 - `pane.read` 接受 `pane` 和 `lines`。`agent.read` 接受 `target`、`lines` 和 `source`。`lines` 最大为 1000，只取末尾行。返回的 `text`、`content_revision`、`terminal_id` 来自 Luvus。
 - `agent.prompt` 的 `until` 和 `timeout_s` 必须与 `wait:true` 一起使用。
