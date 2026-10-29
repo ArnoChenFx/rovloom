@@ -111,6 +111,13 @@ function branchParams(document: JsonObject, branch: JsonObject): JsonObject | un
   return relocate(selected) ? { ...object(selected), $schema: document.$schema!, $defs: defs } : undefined
 }
 
+/** 运行时行窗口只属于这两个原生读取方法；它是原生运行时约束而非 params_schema 上界，describe 与拒绝诊断共用此处。 */
+export function herdrLineWindow(method: string) {
+  return method === 'pane.read' || method === 'agent.read'
+    ? ({ parameter: 'lines', selection: 'last_lines', native_max_lines: 1000, guarantees_frame_fit: false } as const)
+    : undefined
+}
+
 /** 仅为方法描述重定位官方参数引用，执行时仍使用原始完整安装 schema。 */
 export function describeHerdrParams(document: JsonObject, method: string): JsonObject {
   const branch = methodBranches(document).get(method)
@@ -165,16 +172,7 @@ export function describeHerdrContract(
                   frame_size_basis: 'utf8_json_including_lf',
                   response_pagination: 'unavailable',
                   response_objects: false,
-                  ...(method === 'pane.read' || method === 'agent.read'
-                    ? {
-                        line_window: {
-                          parameter: 'lines',
-                          selection: 'last_lines',
-                          native_max_lines: 1000,
-                          guarantees_frame_fit: false
-                        }
-                      }
-                    : {})
+                  ...(herdrLineWindow(method) ? { line_window: herdrLineWindow(method) } : {})
                 },
                 completion:
                   method === 'agent.prompt' || method === 'agent.wait' ? 'native_agent_state_only' : 'native_response'
