@@ -127,7 +127,7 @@ async function withGateway(binary, f, cwd, env, inspect, prefix = [], runtime = 
     ...(controlId ? ['--non-interactive', '--service-id', controlId] : [])
   ]
   // runtime 只替换启动方式（原生或一次性 Alpine 容器）；argv、环境与断言完全相同。
-  const { child, cleanup } = spawnSmokeChild(binary, args, { cwd, env }, { runtime })
+  const { child, cleanup, stop } = spawnSmokeChild(binary, args, { cwd, env }, { runtime })
   let stdout = ''
   let stderr = ''
   let failure
@@ -190,7 +190,7 @@ async function withGateway(binary, f, cwd, env, inspect, prefix = [], runtime = 
     if (controlId) {
       await requestStopPipe(windowsStopPipe('gateway', realpathSync(binary), f.configPath, controlId))
     } else {
-      child.kill('SIGTERM')
+      stop('SIGTERM')
     }
     const result = await completion
     assert.equal(result.signal, null, 'product_gateway_signal')

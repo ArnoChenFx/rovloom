@@ -130,6 +130,15 @@ export function alpineRuntime(options = {}) {
           // create 已确认容器身份，start 不再创建容器；杀死附着客户端不会与创建发生竞争。
           this.args = ['start', '--attach', '--interactive', containerId]
         },
+        stop(signal) {
+          if (!containerId || !['SIGTERM', 'SIGKILL'].includes(signal)) {
+            throw new Error('invalid_alpine_signal')
+          }
+          const result = invoke(['kill', '--signal', signal, containerId], 5_000)
+          if (result.error || result.status !== 0) {
+            throw new Error('alpine_signal_failed')
+          }
+        },
         cleanup() {
           if (!attempted || removed) {
             return

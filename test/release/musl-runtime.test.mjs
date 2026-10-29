@@ -64,10 +64,12 @@ test(
       '/tmp/rovloom-home:/tmp/rovloom-home'
     ])
     assert(!mounted.some(/** 根目录不能被整体暴露。 */ (value) => value.startsWith('/:/')))
+    launch.stop('SIGTERM')
+    assert.deepEqual(calls[1].args, ['kill', '--signal', 'SIGTERM', 'a'.repeat(64)])
     launch.cleanup()
     launch.cleanup()
-    assert.deepEqual(calls[1].args, ['rm', '--force', 'a'.repeat(64)])
-    assert.equal(calls.length, 2)
+    assert.deepEqual(calls[2].args, ['rm', '--force', 'a'.repeat(64)])
+    assert.equal(calls.length, 3)
     // 未带冒号的绝对路径只应是可执行文件与工作目录；HOME 只作为环境值出现。
     assert.deepEqual([...new Set(args.filter((value) => value.startsWith('/tmp/') && !value.includes(':')))].sort(), [
       '/tmp/rovloom-bin/rovloom',

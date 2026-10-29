@@ -16,7 +16,12 @@ export function spawnSmokeChild(executable, args, options, { spawnChild = spawn,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe']
     })
-    return { child, cleanup: () => launch?.cleanup?.() }
+    return {
+      child,
+      // Docker CLI 收到 SIGTERM 可先退出并返回 context canceled；产品信号必须经已确认的容器 ID 发送。
+      stop: (signal) => (launch?.stop ? launch.stop(signal) : child.kill(signal)),
+      cleanup: () => launch?.cleanup?.()
+    }
   } catch (error) {
     launch?.cleanup?.()
     throw error

@@ -95,7 +95,7 @@ test(
       const bytes = readFileSync(configPath)
       let generation
       for (let attempt = 0; attempt < 2; attempt++) {
-        const { child, cleanup } = spawnSmokeChild(
+        const { child, cleanup, stop } = spawnSmokeChild(
           executable,
           [...prefix, 'gateway', '--config', configPath],
           { cwd: process.cwd(), env },
@@ -157,11 +157,18 @@ test(
           assert.equal(stored, generation)
         } finally {
           clearTimeout(timer)
-          if (child.exitCode === null && child.signalCode === null) {
-            child.kill(process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM')
+          let stoppingFailure
+          try {
+            if (child.exitCode === null && child.signalCode === null) {
+              stop(process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM')
+            }
+          } catch (error) {
+            stoppingFailure = error
+            child.kill('SIGKILL')
           }
           const [code, signal] = await closed
           cleanup()
+          assert.ifError(stoppingFailure)
           if (process.platform !== 'win32') {
             assert.equal(code, 0, diagnostic)
             assert.equal(signal, null)
