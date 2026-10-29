@@ -5,7 +5,8 @@ export const RELEASE_MANIFEST = 'release-manifest.json'
 export const RELEASE_MAX_BINARY_BYTES = 256 * 1024 * 1024
 export type ReleaseOs = 'linux' | 'darwin' | 'windows'
 export type ReleaseArch = 'x64' | 'arm64'
-export type ReleasePlatform = Readonly<{ os: ReleaseOs; arch: ReleaseArch; libc: 'glibc' | null }>
+export type ReleaseLibc = 'glibc' | 'musl'
+export type ReleasePlatform = Readonly<{ os: ReleaseOs; arch: ReleaseArch; libc: ReleaseLibc | null }>
 export type ReleaseAsset = Readonly<ReleasePlatform & { name: string; size: number; sha256: string }>
 export type ReleaseManifest = Readonly<{
   schemaVersion: 1
@@ -68,23 +69,39 @@ export function versionFromTag(tag: string): string {
   return version
 }
 
-// 清单平台必须完整表达 libc，Linux 只有 glibc；未知或 musl 绝不按同名资产接纳。
+// 清单平台必须完整表达 libc；Linux 只接纳 glibc 与 musl，非 Linux 必须为 null，未知值一律拒绝。
 export function releasePlatform(os: string, arch: string, libc: unknown): ReleasePlatform {
   if (
     !['linux', 'darwin', 'windows'].includes(os) ||
     !['x64', 'arm64'].includes(arch) ||
-    (os === 'linux' ? libc !== 'glibc' : libc !== null)
+    (os === 'linux' ? libc !== 'glibc' && libc !== 'musl' : libc !== null)
   ) {
     throw new Error('invalid_release_platform')
   }
-  return Object.freeze({ os: os as ReleaseOs, arch: arch as ReleaseArch, libc: libc as 'glibc' | null })
+  return Object.freeze({ os: os as ReleaseOs, arch: arch as ReleaseArch, libc: libc as ReleaseLibc | null })
 }
 
-// 唯一资产名称绑定版本与完整平台元组；返回原始未压缩二进制名。
+// 唯一资产名称绑定版本与完整平台元组；Linux 用 libc 后缀区分 glibc 与 musl，返回原始未压缩二进制名。
 export function assetName(version: string, platform: ReleasePlatform): string {
   parseReleaseVersion(version)
   releasePlatform(platform.os, platform.arch, platform.libc)
-  return `rovloom-${version}-${platform.os}-${platform.arch}${platform.os === 'windows' ? '.exe' : ''}`
+  const suffix = platform.os === 'linux' && platform.libc === 'musl' ? '-musl' : ''
+  return `rovloom-${version}-${platform.os}-${platform.arch}${suffix}${platform.os === 'windows' ? '.exe' : ''}`
+}
+
+/** 官方支持矩阵：Linux 每种架构各有 glibc 与 musl，其它 OS 只有单一 libc null 资产。 */
+export function officialReleasePlatforms(): readonly ReleasePlatform[] {
+  return Object.freeze(
+    ['linux', 'darwin', 'windows'].flatMap(
+      /** 顺序固定为 linux 的 glibc/musl 成对，再 macOS、Windows。 */ (os) =>
+        ['x64', 'arm64'].flatMap(
+          /** 每个架构各一条；只有 Linux 展开两种 libc。 */ (arch) =>
+            os === 'linux'
+              ? [releasePlatform(os, arch, 'glibc'), releasePlatform(os, arch, 'musl')]
+              : [releasePlatform(os, arch, null)]
+        )
+    )
+  )
 }
 
 // 仅判断本版本清单或受支持平台的唯一二进制名，避免网络层再维护一套命名正则。
@@ -93,11 +110,9 @@ export function officialReleaseAssetName(version: string, name: string): boolean
   if (name === RELEASE_MANIFEST) {
     return true
   }
-  for (const os of ['linux', 'darwin', 'windows']) {
-    for (const arch of ['x64', 'arm64']) {
-      if (name === assetName(version, releasePlatform(os, arch, os === 'linux' ? 'glibc' : null))) {
-        return true
-      }
+  for (const platform of officialReleasePlatforms()) {
+    if (name === assetName(version, platform)) {
+      return true
     }
   }
   return false
@@ -132,7 +147,8 @@ export function validateReleaseManifest(input: unknown, tag: string, stableOnly 
     (stableOnly && parseReleaseVersion(version).prerelease.length !== 0) ||
     !Array.isArray(value.assets) ||
     value.assets.length < 1 ||
-    value.assets.length > 6
+    // 上限为官方矩阵规模：Linux x64/arm64 各有 glibc 与 musl，再加 macOS 与 Windows 四种。
+    value.assets.length > 8
   ) {
     throw new Error('invalid_release_manifest')
   }

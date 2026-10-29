@@ -111,7 +111,7 @@ function seed(f) {
 }
 
 /** 子进程固定15秒期限与2MiB输出上限；失败及关闭均等待直接child的真实close。 */
-async function withGateway(binary, f, cwd, env, inspect, prefix = []) {
+async function withGateway(binary, f, cwd, env, inspect, prefix = [], runtime = undefined) {
   // Windows复用既有角色关停管道；标识仅绑定本轮自有启动，不登记系统任务或声称服务验收。
   const controlId =
     process.platform === 'win32'
@@ -120,22 +120,21 @@ async function withGateway(binary, f, cwd, env, inspect, prefix = []) {
           .digest('hex')
       : undefined
   const started = performance.now()
-  const child = spawn(
-    binary,
-    [
-      ...prefix,
-      'gateway',
-      '--config',
-      f.configPath,
-      ...(controlId ? ['--non-interactive', '--service-id', controlId] : [])
-    ],
-    {
-      cwd,
-      env,
-      shell: false,
-      stdio: ['pipe', 'pipe', 'pipe']
-    }
-  )
+  const args = [
+    ...prefix,
+    'gateway',
+    '--config',
+    f.configPath,
+    ...(controlId ? ['--non-interactive', '--service-id', controlId] : [])
+  ]
+  // runtime 只替换启动方式（原生或一次性 Alpine 容器）；argv、环境与断言完全相同。
+  const launch = runtime ? runtime.wrap(binary, args, { cwd, env }) : null
+  const child = spawn(launch ? launch.file : binary, launch ? launch.args : args, {
+    cwd: launch ? launch.cwd : cwd,
+    env: launch ? launch.env : env,
+    shell: false,
+    stdio: ['pipe', 'pipe', 'pipe']
+  })
   let stdout = ''
   let stderr = ''
   let failure
@@ -234,14 +233,15 @@ async function withGateway(binary, f, cwd, env, inspect, prefix = []) {
 }
 
 /**
- * 六平台均以实际产品验收Gateway；Windows通过既有管道请求正常关闭，不用强杀充当成功。
+ * 八个资产目标均以实际产品验收Gateway；Windows通过既有管道请求正常关闭，不用强杀充当成功。
  * launch 用于 npm 包：由绝对路径的 bun 直接运行已安装入口（不复制文件），identity 记录被验收包的摘要。
  */
 export async function smokeGatewayProduct(
   binary,
   version,
   assets = loadManagementAssets(join(dirname(binary), 'webui')),
-  launch = undefined
+  launch = undefined,
+  runtime = undefined
 ) {
   assert(['linux', 'darwin', 'win32'].includes(process.platform), 'product_gateway_storage_platform_unsupported')
   assert(/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/u.test(version), 'product_smoke_version_required')
@@ -277,7 +277,7 @@ export async function smokeGatewayProduct(
         ? { USERPROFILE: home, TEMP: f.root, TMP: f.root, SystemRoot: process.env.SystemRoot }
         : {})
     }
-    const checked = await runSmokeChild(executable, [...prefix, '--version'], { cwd, env })
+    const checked = await runSmokeChild(executable, [...prefix, '--version'], { cwd, env }, { runtime })
     assert.equal(checked.status, 0)
     assert.equal(checked.stdout, '')
     assert.equal(checked.stderr, `Rovloom ${version}\n`)
@@ -379,7 +379,8 @@ export async function smokeGatewayProduct(
         writer.close()
         writer = undefined
       },
-      prefix
+      prefix,
+      runtime
     )
     for (const name of ['gateway.db.lock']) {
       assert.equal(existsSync(join(f.state, name)), false, 'product_gateway_lock_not_released')
@@ -422,5 +423,17 @@ export async function smokeGatewayProduct(
 if (import.meta.main) {
   const [binary, version] = process.argv.slice(2)
   assert.equal(process.argv.length, 4, 'Usage: bun scripts/release/gateway-smoke.mjs /built/product-binary version')
-  console.log(JSON.stringify(await smokeGatewayProduct(resolve(binary), version)))
+  const { smokeRuntime } = await import('./runtime.mjs')
+  const runtime = smokeRuntime()
+  console.log(
+    JSON.stringify(
+      await smokeGatewayProduct(
+        resolve(binary),
+        version,
+        undefined,
+        undefined,
+        runtime.kind === 'alpine' ? runtime : undefined
+      )
+    )
+  )
 }

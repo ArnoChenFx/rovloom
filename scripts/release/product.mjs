@@ -5,6 +5,6 @@ export const product = {
   assets: [],
   // Gateway切片保留独立验收；完整门禁另含同产物Connector和真实原生ping。
   gatewaySmoke: 'scripts/release/gateway-smoke.mjs',
-  // 六目标须真实验收Gateway；只有Linux x64接通同产物原生Owner，任何失败均拒绝收据。
+  // 八个目标须真实验收Gateway；只有glibc Linux x64接通同产物原生Owner，任何失败均拒绝收据。
   releaseSmoke: 'scripts/release/product-smoke.mjs'
 }

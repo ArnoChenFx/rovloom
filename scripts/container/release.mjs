@@ -6,6 +6,7 @@ import {
   RELEASE_REPOSITORY,
   RELEASE_MANIFEST,
   assetName,
+  officialReleasePlatforms,
   parseReleaseJson,
   parseReleaseVersion,
   validateReleaseManifest,
@@ -50,17 +51,22 @@ export async function releaseContext(event, api, request = fetch) {
   assert.equal(release.prerelease, parseReleaseVersion(context.version).prerelease.length > 0)
   assert.equal(typeof release.body, 'string')
   assert(release.body.includes(`<!-- rovloom-release:1 ${context.tag} ${context.commit} -->`))
-  assert(Array.isArray(release.assets), 'Expected complete six-binary release')
+  assert(Array.isArray(release.assets), 'Expected complete release asset list')
   const names = new Set(release.assets.map(/** 重复或额外资产不能混入镜像来源。 */ (asset) => asset.name))
   const expected = [RELEASE_MANIFEST, 'SHA256SUMS']
   const npm = `rovloom-${context.version}.tgz`
   if (names.has(npm)) {
     expected.push(npm)
   }
-  for (const os of ['linux', 'darwin', 'windows']) {
-    for (const arch of ['x64', 'arm64']) {
-      expected.push(assetName(context.version, { os, arch, libc: os === 'linux' ? 'glibc' : null }))
-    }
+  // 期望集合直接来自资产契约的官方平台矩阵，容器发布端不再自维护一份命名表。
+  // 但 musl 是后加的资产：早于它的已公开版本只有 glibc 六项，补发镜像时必须按该版本的真实集合核对，
+  // 否则历史版本的 GHCR 恢复会永久失败。判据只看远端实际存在的 musl 资产，不接受其它额外资产。
+  const platforms = officialReleasePlatforms().filter(
+    /** 只有远端确实发布了某个 libc 资产时才要求它。 */ (platform) =>
+      platform.libc !== 'musl' || names.has(assetName(context.version, platform))
+  )
+  for (const platform of platforms) {
+    expected.push(assetName(context.version, platform))
   }
   assert.equal(release.assets.length, expected.length, 'Unexpected release assets')
   assert.equal(names.size, expected.length, 'Duplicate or missing release assets')
@@ -85,7 +91,8 @@ export async function releaseContext(event, api, request = fetch) {
   }
   const manifest = validateReleaseManifest(parseReleaseJson(metadata.get(RELEASE_MANIFEST), 1_048_576), context.tag)
   assert.equal(manifest.commit, context.commit, 'Release manifest commit differs')
-  assert.equal(manifest.assets.length, 6, 'Expected complete six-binary manifest')
+  // 清单必须与本次实际发布的平台集合一致：早于 musl 的历史版本仍只有六项。
+  assert.equal(manifest.assets.length, platforms.length, 'Manifest asset count differs from the released platform set')
   const sums = new Map()
   for (const line of metadata.get('SHA256SUMS').toString('utf8').trimEnd().split('\n')) {
     const match = /^([a-f0-9]{64})  ([^\r\n]+)$/u.exec(line)

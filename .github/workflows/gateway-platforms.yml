@@ -19,8 +19,14 @@ jobs:
         include:
           - runner: ubuntu-24.04
             target: bun-linux-x64
+          - runner: ubuntu-24.04
+            target: bun-linux-x64-musl
+            alpine: '1'
           - runner: ubuntu-24.04-arm
             target: bun-linux-arm64
+          - runner: ubuntu-24.04-arm
+            target: bun-linux-arm64-musl
+            alpine: '1'
           - runner: macos-15-intel
             target: bun-darwin-x64
           - runner: macos-15
@@ -41,8 +47,15 @@ jobs:
       - name: Verify ordinary files, schema provenance, atomic config, locks and unknown recovery
         run: bun --no-env-file test ./test/storage/file-platforms.test.ts ./test/storage/database-aliases.test.ts ./test/connector/herdr/gateway-schema.test.ts ./test/cli/config-init.test.ts
       - name: Build actual standalone product
+        env:
+          # 矩阵目标决定编译产物；不传会让 musl 项编出 glibc 二进制再自我否定。
+          TARGET: ${{ matrix.target }}
+          # musl 产物只在 Alpine 容器内构建与运行；其余目标保持原生路径。
+          ROVLOOM_MUSL_ALPINE: ${{ matrix.alpine || '0' }}
         run: bun --no-env-file run release:build
       - name: Run actual standalone and production Gateway twice with persistent state
+        # musl 目标由 Alpine 容器步骤验收，宿主机无法加载 musl 加载器。
+        if: matrix.alpine != '1'
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
@@ -51,4 +64,15 @@ jobs:
           executable="$PWD/dist/release/$TARGET/candidate/rovloom"
           if [[ "$TARGET" == bun-windows-* ]]; then executable="$(cygpath -w "$executable.exe")"; fi
           export ROVLOOM_GATEWAY_EXECUTABLE="$executable"
+          bun --no-env-file test ./test/release/gateway-platform.test.mjs
+      - name: Run the musl Gateway twice inside an Alpine container
+        if: matrix.alpine == '1'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          executable="$PWD/dist/release/$TARGET/candidate/rovloom"
+          export ROVLOOM_GATEWAY_EXECUTABLE="$executable"
+          export ROVLOOM_MUSL_ALPINE=1
           bun --no-env-file test ./test/release/gateway-platform.test.mjs

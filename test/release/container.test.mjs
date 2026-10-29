@@ -11,7 +11,7 @@ import {
   matchExistingIndex,
   releaseContext
 } from '../../scripts/container/release.mjs'
-import { assetName } from '../../src/release/contract.ts'
+import { assetName, officialReleasePlatforms } from '../../src/release/contract.ts'
 
 /** 内存元数据严格对应现行发布合同，fake二进制只测字节验证，不作为产品验收。 */
 function fixture(npm = false) {
@@ -30,14 +30,14 @@ function fixture(npm = false) {
   }
   const bytes = Buffer.from('synthetic-container-binary')
   const hash = /** 合成内容仍由真实摘要算法核验。 */ (value) => createHash('sha256').update(value).digest('hex')
-  const assets = ['linux', 'darwin', 'windows'].flatMap(
-    /** 覆盖全部六个平台的固定资产名。 */ (os) =>
-      ['x64', 'arm64'].map(
-        /** 不在JSON中引入下载URL。 */ (arch) => {
-          const platform = { os, arch, libc: os === 'linux' ? 'glibc' : null }
-          return { ...platform, name: assetName(context.version, platform), size: bytes.length, sha256: hash(bytes) }
-        }
-      )
+  // 覆盖资产契约的全部八个平台（Linux x64/arm64 各有 glibc 与 musl），名称由契约生成。
+  const assets = officialReleasePlatforms().map(
+    /** 不在JSON中引入下载URL。 */ (platform) => ({
+      ...platform,
+      name: assetName(context.version, platform),
+      size: bytes.length,
+      sha256: hash(bytes)
+    })
   )
   const manifest = Buffer.from(
     JSON.stringify({ schemaVersion: 1, repository: 'ArnoChenFx/rovloom', ...context, bun: '1.4.3', assets }) + '\n'
@@ -166,10 +166,75 @@ test(
   }
 )
 
+test(
+  'container publisher still accepts a pre-musl release that shipped only the six glibc binaries',
+  /** 历史版本没有 musl 资产；补发镜像时必须按该版本真实集合核对，否则 GHCR 恢复会永久失败。 */ async () => {
+    const f = fixture()
+    const glibc = officialReleasePlatforms().filter((platform) => platform.libc !== 'musl')
+    const muslNames = officialReleasePlatforms()
+      .filter((platform) => platform.libc === 'musl')
+      .map((platform) => assetName(f.context.version, platform))
+    // 从远端资产集合里移除 musl 项，模拟 0.7.1 这类只有 glibc 的已公开版本。
+    f.release.assets = f.release.assets.filter((asset) => !muslNames.includes(asset.name))
+    for (const name of muslNames) {
+      f.files.delete(name)
+    }
+    const assets = glibc.map((platform) => ({
+      os: platform.os,
+      arch: platform.arch,
+      libc: platform.libc,
+      name: assetName(f.context.version, platform),
+      size: f.bytes.length,
+      sha256: f.hash(f.bytes)
+    }))
+    const manifest = Buffer.from(
+      JSON.stringify({ schemaVersion: 1, repository: 'ArnoChenFx/rovloom', ...f.context, bun: '1.4.3', assets }) + '\n'
+    )
+    f.files.set('release-manifest.json', manifest)
+    const metadata = f.release.assets.find((asset) => asset.name === 'release-manifest.json')
+    metadata.size = manifest.length
+    metadata.digest = 'sha256:' + f.hash(manifest)
+    // SHA256SUMS 自身不入列，且必须与当前远端资产集合完全对应。
+    const sums = Buffer.from(
+      [...f.files]
+        .filter(([name]) => name !== 'SHA256SUMS')
+        .map(([name, data]) => `${f.hash(data)}  ${name}\n`)
+        .join('')
+    )
+    f.files.set('SHA256SUMS', sums)
+    const checksums = f.release.assets.find((asset) => asset.name === 'SHA256SUMS')
+    checksums.size = sums.length
+    checksums.digest = 'sha256:' + f.hash(sums)
+    assert.deepEqual(await releaseContext(f.event, f.api, f.request), f.context)
+    // 六项历史版本仍必须拒绝真正的额外资产，而不是因为缺 musl 就放宽集合校验。
+    f.release.assets.push({ ...f.release.assets[0], name: 'rovloom-0.1.0-linux-x64-uclibc' })
+    await assert.rejects(releaseContext(f.event, f.api, f.request), /Unexpected release assets/u)
+    // 清单声明了 musl 资产、远端却没有该资产时同样失败，不会被"缺 musl"的兼容分支放过。
+    const missing = fixture()
+    missing.release.assets = missing.release.assets.filter((asset) => asset.name !== muslNames[0])
+    missing.files.delete(muslNames[0])
+    const sumsOnly = Buffer.from(
+      [...missing.files]
+        .filter(([name]) => name !== 'SHA256SUMS')
+        .map(([name, data]) => `${missing.hash(data)}  ${name}\n`)
+        .join('')
+    )
+    missing.files.set('SHA256SUMS', sumsOnly)
+    const checksumsOnly = missing.release.assets.find((asset) => asset.name === 'SHA256SUMS')
+    checksumsOnly.size = sumsOnly.length
+    checksumsOnly.digest = 'sha256:' + missing.hash(sumsOnly)
+    await assert.rejects(
+      releaseContext(missing.event, missing.api, missing.request),
+      /Manifest asset count differs|Unexpected release assets/u
+    )
+  }
+)
+
 test('container publisher accepts legacy assets and a checksummed same-version npm tarball', async () => {
   for (const npm of [false, true]) {
     const f = fixture(npm)
-    assert.equal(f.release.assets.length, npm ? 9 : 8)
+    // 八项二进制 + 清单 + 校验和，npm tarball 可选。
+    assert.equal(f.release.assets.length, officialReleasePlatforms().length + 2 + (npm ? 1 : 0))
     assert.deepEqual(await releaseContext(f.event, f.api, f.request), f.context)
   }
 })

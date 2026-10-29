@@ -66,6 +66,8 @@ jobs:
         shell: bash
         env:
           RELEASE_TARGET: ${{ matrix.target }}
+          # musl 目标在 glibc runner 上无法运行，验收改为一次性 Alpine 容器（先 apk add libstdc++）。
+          ROVLOOM_MUSL_ALPINE: ${{ matrix.libc == 'musl' && '1' || '0' }}
         run: bun --no-env-file scripts/release/package.mjs "$RUNNER_TEMP/release-stage"
       - uses: actions/upload-artifact@v7
         with:

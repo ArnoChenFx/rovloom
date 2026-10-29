@@ -1,4 +1,4 @@
-# 发布后人工触发：从真实公开 Release 下载六平台二进制和 npm 包 tarball，按 SHA256SUMS 校验并运行 --version；不构建、不写仓库。
+# 发布后人工触发：从真实公开 Release 下载八平台二进制和 npm 包 tarball，按 SHA256SUMS 校验并运行 --version；不构建、不写仓库。
 name: Verify published release
 on:
   workflow_dispatch:
@@ -17,8 +17,14 @@ jobs:
         include:
           - runner: ubuntu-24.04
             suffix: linux-x64
+          - runner: ubuntu-24.04
+            suffix: linux-x64-musl
+            alpine: '1'
           - runner: ubuntu-24.04-arm
             suffix: linux-arm64
+          - runner: ubuntu-24.04-arm
+            suffix: linux-arm64-musl
+            alpine: '1'
           - runner: macos-15-intel
             suffix: darwin-x64
           - runner: macos-15
@@ -49,7 +55,13 @@ jobs:
           if command -v sha256sum >/dev/null 2>&1; then actual=$(sha256sum "$asset" | awk '{print $1}'); else actual=$(shasum -a 256 "$asset" | awk '{print $1}'); fi
           [ "$expected" = "$actual" ] || { echo "checksum mismatch"; exit 1; }
           chmod +x "$asset"
-          out=$("./$asset" --version 2>&1 | tr -d '\r')
+          if [[ "${{ matrix.alpine }}" == '1' ]]; then
+            # musl 产物无法在 glibc runner 上执行：在 Alpine 内先装 libstdc++，再运行下载到的原字节。
+            out=$(docker run --rm -v "$PWD:/work" -w /work -e ASSET="$asset" alpine:3.20 \
+              sh -c 'apk add --no-cache libstdc++ >/dev/null && exec "./$ASSET" --version' 2>&1 | tr -d '\r')
+          else
+            out=$("./$asset" --version 2>&1 | tr -d '\r')
+          fi
           echo "$out"
           [ "$out" = "Rovloom $version" ] || { echo "unexpected version output"; exit 1; }
   npm-package:

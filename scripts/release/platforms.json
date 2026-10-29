@@ -8,10 +8,24 @@
   },
   {
     "os": "linux",
+    "arch": "x64",
+    "libc": "musl",
+    "runner": "ubuntu-24.04",
+    "target": "bun-linux-x64-musl"
+  },
+  {
+    "os": "linux",
     "arch": "arm64",
     "libc": "glibc",
     "runner": "ubuntu-24.04-arm",
     "target": "bun-linux-arm64"
+  },
+  {
+    "os": "linux",
+    "arch": "arm64",
+    "libc": "musl",
+    "runner": "ubuntu-24.04-arm",
+    "target": "bun-linux-arm64-musl"
   },
   {
     "os": "darwin",

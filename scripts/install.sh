@@ -17,7 +17,7 @@ fail() { printf '%s\n' "$1" >&2; exit 1; }
 usage() {
   printf '%s\n' 'Usage: sh install.sh [--install-dir /absolute/path] [--print-asset]' \
     'Installs the latest stable ArnoChenFx/rovloom release to ~/.local/bin.' \
-    'Requires curl and sha256sum (Linux) or shasum (macOS). Linux requires glibc.' \
+    'Requires curl and sha256sum (Linux) or shasum (macOS). Linux needs glibc or musl.' \
     'Installing a binary does not establish Gateway/Connector platform support.'
 }
 while [ "$#" -gt 0 ]; do
@@ -32,11 +32,16 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 case "$install_dir" in /*) ;; *) fail 'Install directory must be absolute.';; esac
+libc=''
 case "$(uname -s)" in
   Linux)
     os=linux
-    getconf GNU_LIBC_VERSION 2>/dev/null | LC_ALL=C grep -Eq '^glibc [0-9]+\.[0-9]+' \
-      || fail 'Only glibc Linux binaries are available.' ;;
+    # 只有 getconf 的 glibc 版本行能正面证明 glibc；其它 Linux（含 getconf 缺失的 Alpine）按 musl 选择。
+    if getconf GNU_LIBC_VERSION 2>/dev/null | LC_ALL=C grep -Eq '^glibc [0-9]+\.[0-9]+'; then
+      libc=glibc
+    else
+      libc=musl
+    fi ;;
   Darwin) os=darwin ;;
   *) fail 'Unsupported operating system. Windows requires install.ps1.' ;;
 esac
@@ -64,6 +69,7 @@ case "$version" in *[!0-9.]*) fail 'Latest release must resolve to a canonical s
 printf '%s\n' "$version" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$' \
   || fail 'Latest release must resolve to a canonical stable version; existing program was kept.'
 asset=rovloom-$version-$os-$arch
+if [ "$libc" = musl ]; then asset=$asset-musl; fi
 if [ "$print_asset" = true ]; then printf '%s\n' "$asset"; exit 0; fi
 if command -v sha256sum >/dev/null 2>&1; then
   hash_program=sha256sum
@@ -105,3 +111,7 @@ mv -f -- "$stage/rovloom" "$destination" || fail 'Unable to replace program; exi
 printf 'Installed Rovloom %s at %s\n' "$version" "$destination"
 printf '%s\n' 'Run the full path with --help. Add its directory to PATH if desired.' \
   'This installs the binary only; role configuration and platform runtime acceptance are separate.'
+if [ "$libc" = musl ]; then
+  printf '%s\n' 'This is the musl build: it needs libstdc++ (Alpine: apk add libstdc++).' \
+    'Luvus managed native process control is unavailable on musl; Gateway, Herdr and Luvus attach work.'
+fi

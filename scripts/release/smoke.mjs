@@ -14,7 +14,7 @@ export const cliChecks = [
 ]
 
 /** 清洁工作目录不包含源码、node_modules 或 bun；只传递 Windows 加载器所需的系统路径。 */
-export async function smokeStandalone(binary, checks = cliChecks) {
+export async function smokeStandalone(binary, checks = cliChecks, runtime = undefined) {
   const temporary = mkdtempSync(join(tmpdir(), 'rovloom-standalone-'))
   let primaryFailure
   let failed = false
@@ -40,11 +40,13 @@ export async function smokeStandalone(binary, checks = cliChecks) {
       ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR } : {})
     }
     for (const check of checks) {
-      const result = await runSmokeChild(executable, check.args, {
-        cwd,
-        env,
-        input: check.input ?? ''
-      })
+      // runtime 是第四个启动选项，不属于子进程环境。
+      const result = await runSmokeChild(
+        executable,
+        check.args,
+        { cwd, env, input: check.input ?? '' },
+        runtime ? { runtime } : {}
+      )
       assert.equal(result.signal, null)
       assert.equal(result.status, check.code, `Unexpected exit for ${JSON.stringify(check.args)}: ${result.stderr}`)
       if (check.stdout) {
@@ -78,6 +80,7 @@ if (import.meta.main) {
   if (!binary || process.argv.length !== 3) {
     throw new Error('Usage: bun scripts/release/smoke.mjs /absolute/candidate-binary')
   }
-  const results = await smokeStandalone(resolve(binary))
+  const { smokeRuntime } = await import('./runtime.mjs')
+  const results = await smokeStandalone(resolve(binary), cliChecks, smokeRuntime())
   console.log(JSON.stringify({ scope: 'cli-preview', isolatedRuntime: 'pass', checks: results }, null, 2))
 }

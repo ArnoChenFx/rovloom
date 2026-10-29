@@ -23,6 +23,7 @@ import { configDocument, readConfig } from '../../src/cli/config.ts'
 import { createProductionCliRuntime } from '../../src/cli/production.ts'
 import { createProductSources } from '../../src/cli/product-sources.ts'
 import { runCli } from '../../src/cli/run.ts'
+import { smokeRuntime } from '../../scripts/release/runtime.mjs'
 
 // 向内核申请并释放测试端口；不扫描或连接用户的既有监听器。
 async function port() {
@@ -42,6 +43,8 @@ test(
     const home = mkdtempSync(join(realpathSync(tmpdir()), 'rovloom-gateway-native-'))
     const main = fileURLToPath(new URL('../../src/cli/main.ts', import.meta.url))
     const executable = process.env.ROVLOOM_GATEWAY_EXECUTABLE ?? process.execPath
+    // musl 候选在 glibc 宿主上无法直接执行；ROVLOOM_MUSL_ALPINE=1 时改由 Alpine 容器启动。
+    const runtime = smokeRuntime()
     const prefix = process.env.ROVLOOM_GATEWAY_EXECUTABLE ? [] : ['--no-env-file', main]
     const env = {
       HOME: home,
@@ -78,12 +81,24 @@ test(
         )
       )
       for (const action of ['check', 'check-runtime']) {
-        const checked = spawnSync(executable, [...prefix, 'config', action, '--config', configPath], {
-          env,
-          input: '',
-          encoding: 'utf8',
-          timeout: 10_000
-        })
+        const launch =
+          runtime.kind === 'alpine'
+            ? runtime.wrap(executable, [...prefix, 'config', action, '--config', configPath], {
+                cwd: process.cwd(),
+                env
+              })
+            : null
+        const checked = spawnSync(
+          launch ? launch.file : executable,
+          launch ? launch.args : [...prefix, 'config', action, '--config', configPath],
+          {
+            env: launch ? launch.env : env,
+            cwd: launch ? launch.cwd : undefined,
+            input: '',
+            encoding: 'utf8',
+            timeout: 10_000
+          }
+        )
         assert.equal(checked.error, undefined)
         assert.equal(checked.status, 0, checked.stderr)
         assert.equal(existsSync(state), false)
@@ -91,10 +106,19 @@ test(
       const bytes = readFileSync(configPath)
       let generation
       for (let attempt = 0; attempt < 2; attempt++) {
-        const child = spawn(executable, [...prefix, 'gateway', '--config', configPath], {
-          env,
-          stdio: ['pipe', 'pipe', 'pipe']
-        })
+        const gatewayLaunch =
+          runtime.kind === 'alpine'
+            ? runtime.wrap(executable, [...prefix, 'gateway', '--config', configPath], { cwd: process.cwd(), env })
+            : null
+        const child = spawn(
+          gatewayLaunch ? gatewayLaunch.file : executable,
+          gatewayLaunch ? gatewayLaunch.args : [...prefix, 'gateway', '--config', configPath],
+          {
+            env: gatewayLaunch ? gatewayLaunch.env : env,
+            cwd: gatewayLaunch ? gatewayLaunch.cwd : undefined,
+            stdio: ['pipe', 'pipe', 'pipe']
+          }
+        )
         let diagnostic = ''
         let stdout = ''
         const closed = once(child, 'close')

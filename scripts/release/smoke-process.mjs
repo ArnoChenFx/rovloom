@@ -3,8 +3,11 @@ import { spawn } from 'node:child_process'
 import { rm } from 'node:fs/promises'
 import { setTimeout as pause } from 'node:timers/promises'
 
-/** 固定时间/输出上限不放宽；超限只终止本次直接 child，close 前绝不结算或开始目录清理。 */
-export function runSmokeChild(executable, args, options, { spawnChild = spawn, timeout = 15_000 } = {}) {
+/**
+ * 固定时间/输出上限不放宽；超限只终止本次直接 child，close 前绝不结算或开始目录清理。
+ * runtime 只替换启动方式（原生或一次性 Alpine 容器），不改变参数、环境与断言。
+ */
+export function runSmokeChild(executable, args, options, { spawnChild = spawn, timeout = 15_000, runtime } = {}) {
   if (!Number.isInteger(timeout) || timeout < 1 || timeout > 15_000) {
     throw new Error('invalid_smoke_timeout')
   }
@@ -14,9 +17,10 @@ export function runSmokeChild(executable, args, options, { spawnChild = spawn, t
   }
   return new Promise(
     /** 所有失败均等到真实 close，避免 exit/error/kill 请求被误当作文件和管道已释放。 */ (resolve, reject) => {
-      const child = spawnChild(executable, args, {
-        cwd: options.cwd,
-        env: options.env,
+      const launch = runtime ? runtime.wrap(executable, args, { cwd: options.cwd, env: options.env }) : null
+      const child = spawnChild(launch ? launch.file : executable, launch ? launch.args : args, {
+        cwd: launch ? launch.cwd : options.cwd,
+        env: launch ? launch.env : options.env,
         shell: false,
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe']
