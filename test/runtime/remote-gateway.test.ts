@@ -356,7 +356,7 @@ test(
         const herdr = f.herdr!.providers[0]!
         for (const route of [
           { target: f.target, reference: contractRef(f.snapshot.source), method: 'pane.list' },
-          { target: herdr.target, reference: herdr.contract_ref!, method: 'ping' }
+          { target: herdr.target, reference: f.herdr!.describe().contract_ref, method: 'ping' }
         ]) {
           const args = {
             target: route.target,
@@ -529,7 +529,7 @@ test('无静态 raw 清单也能派发，mixed 通道保留并发 Herdr 调用',
         native_request: { method: 'ping', params: {} },
         options: {
           binding_revision: 1,
-          contract_ref: herdr.contract_ref!,
+          contract_ref: f.herdr!.describe().contract_ref,
           deadline: f.state.store.clock() + 30000
         }
       })

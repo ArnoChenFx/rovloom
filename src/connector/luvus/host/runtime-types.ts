@@ -2,7 +2,9 @@
 import type { NativeWireBackend, NativeContractRecord } from '../backend.js'
 import type { TrustedNativeContext } from '../contract/index.js'
 import type { LuvusLocalConfig, DispatchClaims, LuvusRpcHost, LuvusNativeAuth } from '../index.js'
-import type { RuntimeProviderBinding, GatewayHostedProviders } from '../../../runtime/types.js'
+import type { ProviderIdentity, GatewayHostedProviders } from '../../../runtime/types.js'
+import type { CallAdmissionOptions } from '../../../store.js'
+import type { JsonObject } from '../../../wire/types.js'
 import type { GatewayIdentitySource } from '../../../mcp/management.js'
 import type { Principal } from '../../../router.js'
 import type {
@@ -20,7 +22,13 @@ import type {
   ProviderBinding,
   V2Target
 } from '../../../wire/types.js'
-export type RuntimeProvider = RuntimeProviderBinding &
+/** Luvus 自己的契约检查接缝；不作为公共 Gateway 端口。 */
+type LuvusProviderBinding = ProviderIdentity &
+  Readonly<{
+    contract_ref?: string
+    preflightRequest?(request: JsonObject, options?: CallAdmissionOptions): void
+  }>
+export type RuntimeProvider = LuvusProviderBinding &
   Readonly<{
     contract: NativeContractRecord
     /** 本 provider 实际实现的目录；它是后端暴露面，不是 caller 权限清单。 */
@@ -32,7 +40,7 @@ export type RuntimeProvider = RuntimeProviderBinding &
     validateAttempt?: NativeWireBackend['validateAttempt']
   }>
 // 受保护 pin 与当前认证 epoch 分离；此接缝不接受本机 Owner、编译句柄或原生许可的 JSON。
-export type RemoteLuvusRuntimeProvider = RuntimeProviderBinding &
+export type RemoteLuvusRuntimeProvider = LuvusProviderBinding &
   Readonly<{
     remote_luvus: true
     open(

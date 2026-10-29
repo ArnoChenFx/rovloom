@@ -9,7 +9,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { createHerdrGatewayResources } from '../../../src/connector/herdr/provider.js'
 import { fixedHerdrSource } from '../../../src/connector/herdr/review.js'
 import { NativeRequestPreflightError } from '../../../src/connector/preflight.js'
-import { WireError } from '../../../src/wire/index.js'
+import { contractRef, WireError } from '../../../src/wire/index.js'
+import { checkProviderRequest } from '../../runtime/provider-port-helpers.js'
 import { Store } from '../../../src/store.js'
 import { connected, management, options } from '../../storage/helpers.js'
 import { privateHerdrTestRoot } from './private-root.js'
@@ -49,7 +50,8 @@ test(
     const f = await herdrFixture()
     try {
       const hosted = f.resource.providers[0]!
-      const preflight = hosted.preflightRequest!
+      const preflight = (request: Parameters<typeof checkProviderRequest>[1]) =>
+        checkProviderRequest(hosted, request, contractRef(fixedHerdrSource()))
       for (const request of [
         { method: 'workspace.get', params: {} },
         { method: 'workspace.get', params: { workspace_id: 123 } },

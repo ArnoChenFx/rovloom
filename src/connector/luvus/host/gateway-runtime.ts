@@ -1,13 +1,14 @@
 /** Luvus 的来源注册表、远端 epoch 与 Wire 装配；公共调度只接收会话和预检。 */
 import { GatewayError } from '../../../contracts.js'
 import type { ProviderSnapshot, ProviderBinding, V2Target } from '../../../wire/types.js'
-import { boundedJson, contractRef, fail, LIMITS, uint, validateProvider, validateTarget } from '../../../wire/index.js'
+import { boundedJson, contractRef, fail, LIMITS, validateProvider, validateTarget } from '../../../wire/index.js'
 import type { Session, Readiness } from '../../../transport/common.js'
 import type { Connection, SocketChannel } from '../../../transport/index.js'
 import { closeSession } from '../../../transport/common.js'
 import { composeGatewaySessions, type ProviderSessionGroup } from '../../../runtime/provider-sessions.js'
 import { createProviderGatewayRuntime } from '../../../runtime/gateway.js'
-import type { GatewayHostedProviders, GatewayProviderServices, RuntimeProviderBinding } from '../../../runtime/types.js'
+import type { GatewayHostedProviders, GatewayProviderServices, GatewayProviderPort } from '../../../runtime/types.js'
+import { responseRetention } from '../../../runtime/response-retention.js'
 import { createLuvusRequestPreflight, luvusValidation } from '../preflight.js'
 import { createDeviceLifecycleAdapter } from '../persistence.js'
 import type {
@@ -19,7 +20,7 @@ import type {
 
 function prepareLuvusGateway(options: GatewayRuntimeOptions) {
   const store = options.lifecycle.store
-  const providers = new Map<string, RuntimeProviderBinding & { max_response_bytes: number }>()
+  const providers = new Map<string, GatewayProviderPort>()
   const nativeProviders = new Map<string, RuntimeProvider>()
   const remoteProviders = new Map<string, RemoteLuvusRuntimeProvider>()
   const machineModes = new Map<string, 'local' | 'remote'>()
@@ -33,11 +34,6 @@ function prepareLuvusGateway(options: GatewayRuntimeOptions) {
     validateTarget(provider.target)
     if (provider.target.machine_id !== binding.machine_id || provider.target.provider_id !== binding.provider_id) {
       fail('provider_binding_mismatch')
-    }
-    const responseBudget = LIMITS.frame_bytes
-    uint(responseBudget)
-    if (!responseBudget || responseBudget > LIMITS.frame_bytes) {
-      fail('transport_limit')
     }
     const name = key(binding)
     const remote =
@@ -82,23 +78,26 @@ function prepareLuvusGateway(options: GatewayRuntimeOptions) {
     }
     const requestShape = native ? createLuvusRequestPreflight(native.contract.compiled) : undefined
     providers.set(name, {
-      ...provider,
-      admissionOptions(request, admission) {
-        return luvusValidation('luvus', request, admission)
+      ready: () => provider.ready(),
+      admit(request, admission, register) {
+        return register(luvusValidation('luvus', request, admission), (candidate) => {
+          // 已批准的显式 pin 在其它原生预检前核对，保留旧错误优先级和重复 key 的原意图。
+          if (provider.contract_ref !== undefined && admission.contract_ref !== provider.contract_ref) {
+            fail('contract_unavailable')
+          }
+          const live = nativeProviders.get(name)
+          if (live?.catalog_methods && !live.catalog_methods.includes(candidate.method as string)) {
+            throw new GatewayError('forbidden')
+          }
+          const expected = provider.contract_ref ?? (live ? contractRef(live.contract.wire.source) : undefined)
+          if ((expected !== undefined && admission.contract_ref !== expected) || (remoteProviders.has(name) && !live)) {
+            fail('contract_unavailable')
+          }
+          requestShape?.(candidate)
+          provider.preflightRequest?.(candidate, admission)
+        })
       },
-      preflightRequest(request, admission) {
-        const live = nativeProviders.get(name)
-        if (live?.catalog_methods && !live.catalog_methods.includes(request.method as string)) {
-          throw new GatewayError('forbidden')
-        }
-        const expected = provider.contract_ref ?? (live ? contractRef(live.contract.wire.source) : undefined)
-        if ((expected !== undefined && admission?.contract_ref !== expected) || (remoteProviders.has(name) && !live)) {
-          fail('contract_unavailable')
-        }
-        requestShape?.(request)
-        provider.preflightRequest?.(request, admission)
-      },
-      max_response_bytes: responseBudget,
+      retainEvidence: responseRetention(LIMITS.frame_bytes),
       binding: Object.freeze(binding),
       target: Object.freeze(structuredClone(provider.target))
     })
@@ -186,7 +185,7 @@ function prepareLuvusGateway(options: GatewayRuntimeOptions) {
         }
       }
       /** 已失效来源永不复查为 ready；独立来源 getter 的失败只收紧对应 provider。 */
-      function providerReady(provider: RuntimeProviderBinding): boolean {
+      function providerReady(provider: GatewayProviderPort): boolean {
         if (fencedNative.has(key(provider.binding))) {
           return false
         }
@@ -369,7 +368,7 @@ function prepareLuvusGateway(options: GatewayRuntimeOptions) {
           throw error
         }
         /** Luvus原组只报告自己的来源，不递归读取组合会话或借用Herdr就绪。 */
-        function nativeReadiness(entries: readonly RuntimeProviderBinding[]): Readiness {
+        function nativeReadiness(entries: readonly GatewayProviderPort[]): Readiness {
           return {
             providers: entries.map(
               /** 原Luvus就绪逐项核对canonical配置和当前政策。 */ (provider) => ({

@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createProviderGatewayRuntime } from '../../src/runtime/gateway.js'
+import { responseRetention } from '../../src/runtime/response-retention.js'
 import type {
   GatewayProviderServices,
   ProviderGatewayRuntimeOptions,
@@ -24,6 +25,7 @@ type Settings = {
   ready?: boolean
   revision?: string
   max_response_bytes?: number
+  missingPort?: 'admit' | 'retainEvidence'
   binding?: Partial<ProviderBinding>
   afterSession?: () => void
   observed?: { releases: number }
@@ -91,7 +93,14 @@ async function fixture(settings: Settings = {}) {
       {
         binding: { ...binding, ...settings.binding },
         target: paired.target,
-        max_response_bytes: settings.max_response_bytes ?? DEFAULT_LIMITS.object_bytes,
+        admit:
+          settings.missingPort === 'admit'
+            ? (undefined as never)
+            : (request, admission, register) => register(admission, () => {}),
+        retainEvidence:
+          settings.missingPort === 'retainEvidence'
+            ? (undefined as never)
+            : responseRetention(settings.max_response_bytes ?? DEFAULT_LIMITS.object_bytes),
         ready: /** 设备认证不能代替当前 provider 的独立健康，回调关闭也不能越过fence。 */ () => {
           if (settings.stage === 'provider') {
             closeFromCallback()
@@ -476,7 +485,7 @@ for (const stage of ['session', 'adapter', 'readiness', 'provider'] as const) {
   )
 }
 
-for (const invalid of ['binding', 'zero', 'oversized'] as const) {
+for (const invalid of ['binding', 'admit', 'retainEvidence'] as const) {
   test(
     'neutral Gateway rejects startup provider ' + invalid + ' and still releases its owner',
     /** 启动配置不能伪造canonical provider或扩大硬预算，失败仍按已有Gateway生命周期清理。 */ async () => {
@@ -484,13 +493,17 @@ for (const invalid of ['binding', 'zero', 'oversized'] as const) {
       const settings: Settings = { observed }
       if (invalid === 'binding') {
         settings.binding = { config_ref: 'other_config' }
-      } else if (invalid === 'zero') {
-        settings.max_response_bytes = 0
       } else {
-        settings.max_response_bytes = LIMITS.object_bytes + 1
+        settings.missingPort = invalid
       }
       await assert.rejects(fixture(settings))
       assert.equal(observed.releases, 1)
     }
   )
 }
+
+test('provider 工厂的响应保留端口拒绝零或超过 Wire 上限的预算', () => {
+  for (const budget of [0, -1, LIMITS.frame_bytes + 1]) {
+    assert.throws(() => responseRetention(budget))
+  }
+})

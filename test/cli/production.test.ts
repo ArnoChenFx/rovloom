@@ -548,7 +548,12 @@ test(
               {
                 binding,
                 target,
-                max_response_bytes: 16_384,
+                admit() {
+                  throw new Error('unused_native_admission_fixture')
+                },
+                retainEvidence(plan) {
+                  return plan
+                },
                 ready: /* 无原生实例不能报告ready。 */ () => false
               }
             ],

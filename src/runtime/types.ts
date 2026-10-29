@@ -2,7 +2,8 @@
 import type { NativeRequest } from '../contracts.js'
 import type { GatewayIdentitySource, CallerIdentity } from '../mcp/management.js'
 import type { Principal } from '../router.js'
-import type { CallAdmissionOptions, Store } from '../store.js'
+import type { CallAdmission, CallAdmissionOptions, Store } from '../store.js'
+import type { ResponseEvidencePlan } from '../wire/evidence.js'
 import type {
   ChannelRegistry,
   SocketChannel,
@@ -13,21 +14,23 @@ import type {
 } from '../transport/index.js'
 import type { JsonObject, ProviderBinding, V2Target } from '../wire/types.js'
 
-export type RuntimeProviderBinding = Readonly<{
+export type ProviderIdentity = Readonly<{
   binding: ProviderBinding
   target: V2Target
-  // 来自独立受保护设备配置的预期政策修订，不从本机政策复制或设备广告自证。
-  peer_policy_revision?: string
   // 就绪由各 provider 的受保护实际来源重新核对，不能由设备认证或广告建立。
   ready(): boolean
-  // 旧 Luvus 入口固定为 1MiB；中性入口必须显式提供此预算。
-  max_response_bytes?: number
-  // 配对时批准的实测来源所对应的契约引用；存在时，准入只接受带此引用的调用，任何版本的 provider 都以其批准的实测契约为准。
-  contract_ref?: string
-  // 可选原生完整根预检只验证登记候选，不创建 permit；接收 Store 本次真实 native request ID。
-  preflightRequest?(request: JsonObject, options?: CallAdmissionOptions): void
-  admissionOptions?(request: NativeRequest, options: CallAdmissionOptions): CallAdmissionOptions
 }>
+/** 只交付本次已认证目标的登记能力；provider 不能改 caller、目标或绕过 Router 授权。 */
+export type RegisterProviderCall = (
+  options: CallAdmissionOptions,
+  check: (request: JsonObject) => void
+) => CallAdmission
+/** Provider 完整履行准入与证据保留，公共宿主不猜默认策略或解释协议字段。 */
+export type GatewayProviderPort = ProviderIdentity &
+  Readonly<{
+    admit(request: NativeRequest, options: CallAdmissionOptions, register: RegisterProviderCall): CallAdmission
+    retainEvidence(plan: ResponseEvidencePlan): ResponseEvidencePlan
+  }>
 export type GatewayProviderServices = Readonly<{
   store: Store
   router: import('../router.js').Router
@@ -39,7 +42,7 @@ export type ProviderGatewayRuntimeOptions = Readonly<{
   lifecycle: Pick<DeviceLifecycleWiring, 'store' | 'identityHost'>
   channels?: ChannelRegistry
   identities: GatewayIdentitySource
-  providers: readonly (RuntimeProviderBinding & { max_response_bytes: number })[]
+  providers: readonly GatewayProviderPort[]
   session(connection: Connection, channel: SocketChannel, services: GatewayProviderServices): Session
   hosted?: readonly GatewayHostedProviders[]
   provider_snapshot_machines?: readonly string[]

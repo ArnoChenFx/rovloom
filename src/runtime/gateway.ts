@@ -8,10 +8,10 @@ import type { Session, Readiness, Adapter } from '../transport/common.js'
 import type { TrustedAttempt } from '../wire/backend.js'
 import type { Call } from '../store.js'
 import type { ProviderBinding, V2Target } from '../wire/types.js'
-import { boundedJson, fail, LIMITS, uint, validateProvider, validateTarget } from '../wire/index.js'
+import { boundedJson, fail, validateProvider, validateTarget } from '../wire/index.js'
 import { createTrustedRequestScope } from './request-scope.js'
 import { composeGatewaySessions, type ProviderSessionGroup } from './provider-sessions.js'
-import type { ProviderGatewayRuntimeOptions, RuntimeCallInput, RuntimeProviderBinding } from './types.js'
+import type { ProviderGatewayRuntimeOptions, RuntimeCallInput, GatewayProviderPort } from './types.js'
 
 /** provider 交付原 Wire 会话；唯一常驻宿主只管理认证、调度和生命周期。 */
 export async function createProviderGatewayRuntime(options: ProviderGatewayRuntimeOptions) {
@@ -20,7 +20,7 @@ export async function createProviderGatewayRuntime(options: ProviderGatewayRunti
   const store = options.lifecycle.store
   const scope = createTrustedRequestScope(options.identities)
   const router = new Router(store)
-  const providers = new Map<string, RuntimeProviderBinding>()
+  const providers = new Map<string, GatewayProviderPort>()
   let sessionCleanupFailed = false
   let closing: Promise<void> | undefined
   let transport: ReturnType<typeof createGateway> | undefined
@@ -111,18 +111,19 @@ export async function createProviderGatewayRuntime(options: ProviderGatewayRunti
       ) {
         fail('provider_binding_mismatch')
       }
-      uint(provider.max_response_bytes)
-      if (!provider.max_response_bytes || provider.max_response_bytes > LIMITS.frame_bytes) {
-        fail('transport_limit')
+      if (typeof provider.admit !== 'function' || typeof provider.retainEvidence !== 'function') {
+        fail('runtime_provider_invalid')
       }
       const name = key(binding)
       if (providers.has(name)) {
         fail('runtime_provider_conflict')
       }
       providers.set(name, {
-        ...provider,
         binding: Object.freeze(binding),
-        target: Object.freeze(structuredClone(provider.target))
+        target: Object.freeze(structuredClone(provider.target)),
+        ready: provider.ready.bind(provider),
+        admit: provider.admit.bind(provider),
+        retainEvidence: provider.retainEvidence.bind(provider)
       })
     }
     const offer = structuredClone(options.listener.offer ?? OFFER)
@@ -145,7 +146,7 @@ export async function createProviderGatewayRuntime(options: ProviderGatewayRunti
       session(connection, channel) {
         let retaining: string | undefined
         const isolated = connection.negotiated.capabilities.includes('provider_fence')
-        function providerReady(provider: RuntimeProviderBinding): boolean {
+        function providerReady(provider: GatewayProviderPort): boolean {
           try {
             return provider.ready() === true
           } catch (error) {
@@ -265,19 +266,7 @@ export async function createProviderGatewayRuntime(options: ProviderGatewayRunti
             try {
               const plan = originalWire.planEvidence(frame)
               const configured = attempt ? providers.get(key(attempt.binding.target)) : undefined
-              const maxBytes = configured?.max_response_bytes ?? LIMITS.frame_bytes
-              if (plan.evidence.response_bytes > maxBytes) {
-                // 只收窄原 Wire 的保留意图：仍提交真实摘要，超 provider 预算不保存原文。
-                return {
-                  ...plan,
-                  content: {
-                    status: plan.content.status,
-                    expires_at: plan.content.expires_at,
-                    delivery: 'metadata_only' as const
-                  }
-                }
-              }
-              return plan
+              return configured ? configured.retainEvidence(plan) : plan
             } finally {
               retaining = previous
             }
@@ -372,20 +361,12 @@ export async function createProviderGatewayRuntime(options: ProviderGatewayRunti
         }
         const providerKey = key(input.target)
         const configured = providers.get(providerKey)!
-        const requestedContract = input.options.contract_ref
-        const admitted = router.admit(
-          principal(),
-          input.target,
+        principal()
+        const admitted = configured.admit(
           input.native_request,
-          configured.admissionOptions?.(input.native_request, input.options) ?? input.options,
-          /** 首次登记在授权事务内比对当前批准契约；旧 key 仍返回原意图，不受新契约影响。 */
-          (request) => {
-            const expected = configured.contract_ref
-            if (expected !== undefined && requestedContract !== expected) {
-              fail('contract_unavailable')
-            }
-            return configured.preflightRequest?.(request, input.options)
-          }
+          input.options,
+          /** 登记能力固定本次 caller/目标/请求，仍由 Router 在 Store 事务内分配真实原生 ID。 */
+          (admission, check) => router.admit(principal(), input.target, input.native_request, admission, check)
         )
         if (admitted.created) {
           try {

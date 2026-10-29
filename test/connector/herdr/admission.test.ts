@@ -166,9 +166,13 @@ async function admissionFixture(methods: readonly string[], approved = source) {
     providers: [
       {
         ...provider,
-        preflightRequest: /** 只观察完整根使用的实际 ID，原工厂验证仍原样执行。 */ (request: JsonObject) => {
-          preflightRequests.push(structuredClone(request))
-          provider.preflightRequest!(request)
+        admit(request, admission, register) {
+          return provider.admit(request, admission, (options, check) =>
+            register(options, (candidate) => {
+              preflightRequests.push(structuredClone(candidate))
+              check(candidate)
+            })
+          )
         }
       }
     ],
