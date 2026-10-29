@@ -18,7 +18,7 @@ MCP 不再按方法名分配 token 权限：在已批准的目标与 `dispatch/r
 
 远端 raw 授权由可信 Gateway 在通过身份、目标和动作检查后逐次提供，取代旧配对清单这道显式 gate。它不证明 Gateway 拥有远端 OS 进程的 Owner 身份；authority 先复核实际认证 epoch、来源、契约、已实现方法与参数，再生成只绑定本次实际 caller、方法、来源、连接和固定 deadline 的原生许可。目录和调用准入使用同一 provider 暴露面，静态分类表或原生广告不能额外开放接口。
 
-升级并重启 Gateway 与 Connector 后，原 token 和配对继续使用，不需要手改多份文件。provider 目录只暴露当前后端实际实现的契约；设备运行开关与原生参数校验仍决定方法/参数是否可用。新配对的全方法标志无法由 0.6.9 解释，回滚前须恢复升级前两端完整状态，见[运维指南](OPERATIONS.md#升级与回滚)。
+升级并重启 Gateway 与 Connector 后，原 token 和配对继续使用，不需要手改多份文件。provider 目录只暴露当前后端实际实现的契约；设备运行开关与原生参数校验仍决定方法/参数是否可用。新配对的全方法标志无法由 0.6.9 及更早版本解释，回滚前须恢复升级前两端完整状态，见[运维指南](OPERATIONS.md#升级与回滚)。
 
 Gateway 在编码阶段拒绝请求时，尚未写入设备通道；调用账本记录
 `not_dispatched` 和 Gateway 的 `dispatch_refused` 审计（含固定错误码），释放该次调用的

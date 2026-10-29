@@ -32,6 +32,16 @@ const RELEASE_NOTES = Object.freeze({
     ],
     upgrade:
       'Connectors through v0.6.8 report available parallelism in `host_profile.cpus`. Upgrade and reconnect the Connector to report the system-visible logical CPU count; the Gateway does not convert old reports. Device scope on a token is an optional registry field: leaving it unset keeps today’s visibility, and an older binary refuses a registry that contains it (`invalid_config`) instead of ignoring it.'
+  },
+  '0.7.0': {
+    highlights: [
+      'Provider authorization is now only the token device scope plus the Connector terminal-execution switch; per-method and per-action grants are gone, and the caller registry is rewritten to schema v2 without them.',
+      'Luvus and Herdr share one control layout under `control/<provider>/` and one content-addressed schema store; existing Connectors migrate their old control records on first start without re-pairing.',
+      'The Gateway reclaims unreferenced `managed/schema_<sha256>.json` on its own: hourly, after seven days of continuous non-reference, 32 files / 16 MiB per pass.',
+      'The public Gateway only accepts a provider port that implements admission and evidence retention, so adding a provider no longer touches the shared wiring.'
+    ],
+    upgrade:
+      'Upgrade Gateway and every Connector together. Connectors migrate their old control records (`native-setup.json`, `herdr-setup.json`, `control/luvus-claims.db`, `hr/control/claims.db`, root/owner records) to `control/<provider>/` on first start and keep the original SQLite ledgers, tokens, device credentials and pairing — no re-pairing is needed, and an active ledger holder makes the migration refuse rather than proceed. The caller registry is rewritten to schema v2, which drops per-method/action grants, `local_policy`, `gateway_policy` and the standalone result-delete permission; `runtime_response_discard` is now available to any token that can see the call, so narrow it with device scope if that matters. Old policy and raw-grant fields are still read for compatibility but grant nothing. Rollback requires stopping both ends and restoring the same pre-upgrade backup with the matching binaries: an older binary refuses a v2 registry and a policy-free configuration instead of ignoring them.'
   }
 })
 
