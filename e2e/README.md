@@ -31,9 +31,10 @@ Herdr 二进制必须是固定的 0.9.5（SHA-256 `14d9e8bc…929d`，夹具会�
 
 ## 从零部署（真实首次配对）
 
-默认场景用预置夹具跳过首次配对。`e2e/quickstart.py` 则按 Quick Start 在真实 pty 终端里走完整流程：
-自动创建 Connector 用户文件 → 选择 Herdr → Gateway 批准配对 → Connector 输入地址与一次性码 → 发现并初始化原生
-→ Gateway 批准 → `connector_ready`。Herdr 不写 `runtime_bin_dirs`，由 `PATH` 自动发现。
+默认场景用预置夹具跳过首次配对。`e2e/quickstart.py` 则按 Quick Start 走完整流程：`rovloom config init connector --provider herdr|luvus` 生成 Connector 配置
+→ `rovloom gateway --issue-code` 签发一机一码并打印加入命令 → `rovloom connector --join <码>` 一条命令配对并启动
+→ Connector 日志出现 `connector_transport ready provider_ready=true`（脚本以 `provider_ready=true` 判定就绪）。
+Herdr 不写 `runtime_bin_dirs`，由 `PATH` 自动发现。
 
 ```sh
 python3 e2e/quickstart.py --binary dist/release/bun-linux-x64/candidate/rovloom --herdr /tmp/herdr \
@@ -43,10 +44,11 @@ python3 e2e/quickstart.py --binary dist/release/bun-linux-x64/candidate/rovloom 
 `--then` 会拿到 `MCP_CONFIG`（URL、Bearer、target）。`herdr-session.mjs` 使用官方 MCP SDK 验证只读调用及
 workspace 创建后的计数，不调用模型。可选的 Agent 两轮对话方法见下节，须另外核实授权与累计剩余预算。
 
-`--repair` 在就绪后重新配对同一设备（`rovloom gateway --repair-device` + `rovloom connector --repair`，均在 pty 里）：断言本机凭据文件被替换、
-`connector_ready` 再次出现，并用**未改变的 MCP Bearer** 跑 `--then` 链路（授权与原生设置不变）。
+`--repair` 在就绪后停止 Connector，用 `rovloom gateway --issue-code` 重新签发一张新码，再次 `rovloom connector --join`
+（本机重置本地状态，作为新设备重新配对）：断言本机凭据文件被替换、`pairing_completed` 与 `provider_ready=true` 再次出现，
+并用**未改变的 MCP Bearer** 跑 `--then` 链路（授权与原生设置不变）。
 
-`--second-device`（Herdr）在就绪后用 `rovloom gateway --add-device` 再配对第二台 Connector（独立 HOME），然后用 `two-devices-check.mjs`、原 Bearer 对两台设备各完成一次真实调用。
+`--second-device`（Herdr）在就绪后再用 `rovloom gateway --issue-code` 签发一张新码，配对第二台 Connector（独立 HOME；第一台继续运行并自行重连），然后用 `two-devices-check.mjs`、原 Bearer 对两台设备各完成一次真实调用。
 
 ## 两台“机器”（独立容器、真实 TCP）
 

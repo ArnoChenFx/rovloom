@@ -86,19 +86,18 @@ docker compose run --rm gateway admin list
 
 ## 通过终端签发配对码
 
-后台服务没有交互终端。在 Compose 目录的真实终端中用同一组卷运行一次前台命令即可打印加入命令：
+后台服务没有交互终端。无法使用管理页时，先停止后台服务，再在 Compose 目录的真实终端中用同一组卷运行一次前台命令打印加入命令。不要让第二个 Gateway 使用同一份数据，包括在服务运行时再执行 `docker compose run`：
 
 ```sh
+docker compose stop gateway
 docker compose run --rm --service-ports gateway gateway --issue-code
 ```
 
-必须带 `--service-ports`：`docker compose run` 默认不发布 Compose 里的端口，不带的话打印的
-地址从主机不可达。全新卷先执行上面的 init 命令。把打印的加入命令复制到 Connector 主机
-（Linux x64、macOS 或 Windows x64）执行。不要让第二个 Gateway 使用同一份数据。
+必须带 `--service-ports`：`docker compose run` 默认不发布 Compose 里的端口，不带的话打印的地址从主机不可达。全新卷先执行上面的 init 命令。把打印的加入命令复制到 Connector 主机（Linux x64、macOS 或 Windows x64）执行，一条命令，无问答无批准。
 
-到达 `connector_ready` 后，先停止 Connector，再按 Ctrl-C 停止前台 Gateway。执行 `docker compose up -d`，然后重新启动主机 Connector。配置和配对保留在卷中。
+Connector 输出 `connector_transport ready provider_ready=true` 即配对完成：按 Ctrl-C 停止前台 Gateway，执行 `docker compose up -d`，Connector 会按指数退避自动重连。配置和配对保留在卷中。
 
-加入更多设备或重新配对某台设备时，在管理页生成新配对码（或按上节用 `--issue-code` 打印一条），到目标主机执行显示的加入命令即可；后台 Gateway 全程不停，见[配对](CONFIGURATION-zh.md#配对)。
+之后加入更多设备或重新配对某台设备时，在管理页生成新配对码，到目标主机执行显示的加入命令即可；此时后台 Gateway 无需停止，见[配对](CONFIGURATION-zh.md#配对)。
 
 ## 配置、停止与升级
 
