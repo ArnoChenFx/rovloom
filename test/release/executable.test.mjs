@@ -8,7 +8,7 @@ import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { setTimeout as wait } from 'node:timers/promises'
 import { test } from 'node:test'
-import { buildStandalone, sha256 } from '../../scripts/release/build.mjs'
+import { buildStandalone, requestedTarget, sha256 } from '../../scripts/release/build.mjs'
 import { smokeStandalone } from '../../scripts/release/smoke.mjs'
 import { loadManagementAssets } from '../../src/admin/assets.ts'
 import { cleanupSmokeDirectory, runSmokeChild } from '../../scripts/release/smoke-process.mjs'
@@ -261,6 +261,23 @@ test(
         buildStandalone({ entrypoint: 'test/release/probe.mjs', target: 'bun-windows-x64' }),
         /native Windows build/u
       )
+    }
+    // CI 声明的目标必须精确匹配受支持集合，不能被宿主平台悄悄覆盖。
+    for (const target of [
+      'bun-linux-x64-musl',
+      'bun-linux-arm64-musl',
+      'bun-linux-x64',
+      'bun-darwin-arm64',
+      'bun-windows-x64'
+    ]) {
+      assert.equal(requestedTarget({ TARGET: target }), target)
+      assert.equal(requestedTarget({ RELEASE_TARGET: target }), target)
+    }
+    // 未声明（或空值）时回退到宿主平台；非空声明必须精确受支持。
+    assert.equal(requestedTarget({}), undefined)
+    assert.equal(requestedTarget({ TARGET: '' }), undefined)
+    for (const declared of ['bun-linux-x64-glibc', 'bun-linux-x64-musl-extra', 'linux-x64-musl']) {
+      assert.throws(() => requestedTarget({ TARGET: declared }), /Unsupported standalone target/u)
     }
     // musl 只有 Linux 提供，且后缀必须精确；其余写法在编译前就被拒绝。
     for (const target of [

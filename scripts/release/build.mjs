@@ -169,20 +169,37 @@ export async function buildStandalone({
   return { binary, manifest, directory }
 }
 
+/**
+ * 默认目标优先取 CI 显式声明的 TARGET/RELEASE_TARGET（musl 目标在 glibc runner 上无法由宿主推断），
+ * 未声明时沿用宿主平台；两者都必须是受支持的编译目标。
+ */
+export function requestedTarget(env = process.env) {
+  const declared = env.RELEASE_TARGET ?? env.TARGET
+  if (!declared) {
+    return undefined
+  }
+  if (!/^bun-(?:linux-(?:x64|arm64)(?:-musl)?|darwin-(?:x64|arm64)|windows-(?:x64|arm64))$/u.test(declared)) {
+    throw new Error('Unsupported standalone target')
+  }
+  return declared
+}
+
 if (import.meta.main) {
   const args = process.argv.slice(2)
   if (args.length > 1 || (args.length === 1 && args[0] !== '--probe')) {
     throw new Error('Usage: bun scripts/release/build.mjs [--probe]')
   }
   const probe = args[0] === '--probe'
+  const target = requestedTarget()
   const output = await buildStandalone(
     probe
       ? {
           entrypoint: 'test/release/probe.mjs',
           workers: ['test/release/probe-worker.mjs'],
-          probe
+          probe,
+          ...(target ? { target } : {})
         }
-      : product
+      : { ...product, ...(target ? { target } : {}) }
   )
   console.log(JSON.stringify(output.manifest, null, 2))
 }

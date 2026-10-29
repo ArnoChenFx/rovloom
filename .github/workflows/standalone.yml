@@ -70,6 +70,7 @@ jobs:
           set -euo pipefail
           version="$(bun --no-env-file -p 'JSON.parse(await Bun.file("package.json").text()).version')"
           # 容器内先 apk add libstdc++（musl 产物的 NEEDED 依赖），再跑 --version 与真实 Gateway。
+          # TARGET 已由 matrix 提供，release:build 据此编译 musl 目标而不是宿主 glibc 目标。
           ROVLOOM_MUSL_ALPINE=1 bun --no-env-file run release:build
           ROVLOOM_MUSL_ALPINE=1 bun --no-env-file run release:smoke "$PWD/dist/release/$TARGET/candidate/rovloom"
           ROVLOOM_MUSL_ALPINE=1 bun --no-env-file scripts/release/product-smoke.mjs "$PWD/dist/release/$TARGET/candidate/rovloom" "$version"
