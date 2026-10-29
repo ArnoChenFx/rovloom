@@ -2,9 +2,12 @@
 import { existsSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-/** 固定镜像与包；不接受环境提供的镜像名、仓库或额外包。 */
+/** 固定镜像与包；不接受环境提供的镜像名、仓库或额外包。
+ *  su-exec 只用来把真实命令降回宿主 uid/gid：装包必须以容器 root 运行，
+ *  而产品写出的状态目录归当前用户，属主才能与直接执行一致。
+ */
 export const ALPINE_IMAGE = 'alpine:3.20'
-export const ALPINE_PACKAGES = Object.freeze(['libstdc++'])
+export const ALPINE_PACKAGES = Object.freeze(['libstdc++', 'su-exec'])
 
 /**
  * 构建容器运行时。容器与宿主共享 uid/gid 与网络命名空间：产物仍归当前用户，
@@ -76,16 +79,15 @@ export function alpineRuntime(options = {}) {
         // 产品在容器内绑定 127.0.0.1；共享宿主网络命名空间后驱动进程才能访问这些端口。
         '--network',
         'host',
-        '--user',
-        `${uid}:${gid}`,
         '--workdir',
         cwd,
         ...directories.flatMap(/** 绝对路径原样挂载。 */ (directory) => ['-v', `${directory}:${directory}`]),
         image,
         'sh',
         '-c',
-        // 装包只用镜像自身的 PATH；随后 env -i 清空容器环境，只注入本次产品的环境。
-        `apk add --no-cache ${packages.join(' ')} >/dev/null && exec env -i "$@"`,
+        // 装包必须以容器 root 运行（apk 数据库不可写即 99），装完再用 su-exec 降回宿主 uid/gid，
+        // 使产物写出的文件仍归当前用户，行为与直接执行一致。
+        `apk add --no-cache ${packages.join(' ')} >/dev/null && exec su-exec ${uid}:${gid} env -i "$@"`,
         'rovloom-alpine',
         ...pairs,
         executable,

@@ -17,7 +17,7 @@ test(
     const runtime = alpineRuntime({ docker: 'docker', uid: 1000, gid: 1000, exists })
     assert.equal(runtime.image, ALPINE_IMAGE)
     assert.deepEqual([...runtime.packages], [...ALPINE_PACKAGES])
-    assert.deepEqual([...ALPINE_PACKAGES], ['libstdc++'])
+    assert.deepEqual([...ALPINE_PACKAGES], ['libstdc++', 'su-exec'])
     const launch = runtime.wrap('/tmp/rovloom-bin/rovloom', ['--version'], { cwd, env })
     assert.equal(launch.file, 'docker')
     assert.equal(launch.cwd, cwd)
@@ -25,15 +25,19 @@ test(
     assert.deepEqual(args.slice(0, 2), ['run', '--rm'])
     // 共享宿主网络命名空间，产品绑定的 127.0.0.1 端口才能被驱动进程访问。
     assert.deepEqual(args.slice(2, 4), ['--network', 'host'])
-    assert.deepEqual(args.slice(4, 6), ['--user', '1000:1000'])
-    assert.deepEqual(args.slice(6, 8), ['--workdir', cwd])
+    assert.deepEqual(args.slice(4, 6), ['--workdir', cwd])
+    // 容器以 root 启动（apk 数据库需要写权限），不再以 --user 降权。
+    assert(!args.includes('--user'))
     // 结构固定为：... [shell, 标记, 环境对..., 可执行文件, ...argv]。
     assert.deepEqual(args.slice(-2), ['/tmp/rovloom-bin/rovloom', '--version'])
     const marker = args.indexOf('rovloom-alpine')
     assert.deepEqual(args.slice(marker + 1, -2), ['PATH=', 'HOME=/tmp/rovloom-home', 'LANG=C.UTF-8', 'NO_COLOR=1'])
     const shell = args[args.indexOf('-c') + 1]
-    // 先装 libstdc++（musl 产物 NEEDED 依赖它），再以 env -i 清空容器环境执行真实命令。
-    assert.match(shell, /^apk add --no-cache libstdc\+\+ >\/dev\/null && exec env -i "\$@"/u)
+    // 先装 libstdc++ 与 su-exec（musl 产物 NEEDED 依赖前者），再以 su-exec 降回宿主 uid/gid
+    // 并用 env -i 清空容器环境执行真实命令。
+    assert.match(shell, /^apk add --no-cache libstdc\+\+ su-exec >\/dev\/null && exec su-exec 1000:1000 env -i "\$@"/u)
+    // 降权目标必须等于宿主 uid/gid，产物写出的文件才仍归当前用户。
+    assert(shell.includes('su-exec 1000:1000'), 'the command must drop back to the host uid/gid')
     for (const pair of ['PATH=', 'HOME=/tmp/rovloom-home', 'LANG=C.UTF-8', 'NO_COLOR=1']) {
       assert(args.includes(pair), `missing environment ${pair}`)
     }
