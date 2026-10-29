@@ -25,7 +25,9 @@ AI 客户端 ──MCP Streamable HTTP──▶ Gateway ──Wire v2 (WS/WSS)�
 | `runtime_result_read` | 按句柄分页读结果，`max_bytes` 不超过 16 KiB，带摘要；本页字节是合法 UTF-8 时额外给出 `text`，与 base64 的 `chunk` 逐字节一致，页边界切开多字节字符或整页回复超字节预算时不提供 |
 | `runtime_response_discard` | 丢弃已保存的响应正文 |
 
-- 调用终态：`responded`、`not_dispatched`（确定未写出）、`outcome_unknown`（可能已执行，不会自动重发）。同一 `client_request_key` 加同一请求返回原调用，不同请求报 `conflict`。
+- 调用终态：`responded`、`not_dispatched`（确定未写出）、`outcome_unknown`（可能已执行，不会自动重发）。同一主体在 `metadata_ttl` 内使用同一 `client_request_key` 加同一请求返回原调用；“同一请求”包括原始绝对 `deadline`，重算 deadline 会报 `conflict`。幂等重试须复用原 key、原请求和原绝对 deadline（即使该 deadline 已过期）；`wait_ms` 只控制等待，不参与意图判定。
+- 首次登记须满足 Gateway 当前时间 `now < deadline <= now + 600_000`（Unix 毫秒）；已到期返回 `deadline_exceeded`，超过十分钟返回 `invalid_deadline`，不应原样重试。有效去重记录命中时返回原调用，不刷新期限。
+- 完整工具参数（整个 `arguments` 对象）的规范 JSON UTF-8 上限为 65,536 字节，包含 target、contract_ref、deadline 等开销，非单字段限制。超限仍返回 JSON-RPC `-32602`，但附带 `data: {reason: "arguments_too_large", limit_bytes: 65536, hint: ...}`；应缩小参数，仅在原生方法语义允许时拆成较小调用，不原样重试。它与 discover 的 `request_frame_bytes`（provider 原生帧预算，包含实际请求 ID 等开销）是独立门槛，通过工具参数预算不保证能通过帧预算。
 - 细则：[MCP Streamable HTTP](protocol/MCP-HTTP.md)。
 
 ### 设备详情与原生版本

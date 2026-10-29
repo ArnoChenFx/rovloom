@@ -1,7 +1,9 @@
 // 用真实SDK异步派发窗口复现重复ID/取消竞争，断言实际SDK关联被清理，不用成功stub替代协议。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
+import { Server } from '@modelcontextprotocol/sdk/server/index.js'
+import { ErrorCode, ListToolsRequestSchema, McpError, type JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
+import { rpcResponse } from './http-fixture.js'
 import { createMcpFacade } from '../../src/mcp/facade.js'
 import { FacadeHttpTransport } from '../../src/mcp/http-transport.js'
 import { FacadeServiceError, type ServiceContext } from '../../src/mcp/types.js'
@@ -186,3 +188,82 @@ test(
     }
   }
 )
+
+test('HTTP transport 只重建固定超限 data，SDK 的其它字段、文案和 data 继续剥离', async () => {
+  const transport = new FacadeHttpTransport({ sessionIdGenerator: () => 'error-data-test', keepAliveMs: 0 })
+  const server = new Server({ name: 'error-data-test', version: '1' }, { capabilities: { tools: {} } })
+  let code = ErrorCode.InvalidParams
+  let data: unknown
+  server.setRequestHandler(ListToolsRequestSchema, () => {
+    throw new McpError(code, 'SYNTHETIC_SECRET_DO_NOT_PRINT', data)
+  })
+  await server.connect(transport)
+  const send = async (message: JSONRPCMessage) => {
+    const reservation = transport.reserve(message)
+    assert.notEqual(reservation, false)
+    return transport.handleReservedRequest(
+      new Request('http://127.0.0.1:1/mcp', {
+        method: 'POST',
+        headers: {
+          accept: 'application/json, text/event-stream',
+          'content-type': 'application/json',
+          'mcp-session-id': 'error-data-test',
+          'mcp-protocol-version': '2025-11-25'
+        }
+      }),
+      { parsedBody: message },
+      reservation || undefined
+    )
+  }
+  try {
+    await rpcResponse(
+      await send({
+        jsonrpc: '2.0',
+        id: 'init',
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-11-25',
+          capabilities: {},
+          clientInfo: { name: 'error-data-test', version: '1' }
+        }
+      })
+    )
+    await send({ jsonrpc: '2.0', method: 'notifications/initialized' })
+    for (const [errorCode, errorData, allow] of [
+      [
+        ErrorCode.InvalidParams,
+        {
+          reason: 'arguments_too_large',
+          limit_bytes: 65536,
+          hint: 'SYNTHETIC_SECRET_DO_NOT_PRINT',
+          private_path: 'SYNTHETIC_SECRET_DO_NOT_PRINT'
+        },
+        true
+      ],
+      [ErrorCode.InternalError, { reason: 'arguments_too_large', limit_bytes: 65536 }, false],
+      [ErrorCode.InvalidParams, { reason: 'arguments_too_large', limit_bytes: 65537 }, false],
+      [ErrorCode.InvalidParams, { reason: 'SYNTHETIC_SECRET_DO_NOT_PRINT', limit_bytes: 65536 }, false]
+    ] as const) {
+      code = errorCode
+      data = errorData
+      const reply = await rpcResponse(await send({ jsonrpc: '2.0', id: 'check', method: 'tools/list' }))
+      assert('error' in reply)
+      assert.deepEqual(reply.error, {
+        code,
+        message: code === ErrorCode.InvalidParams ? 'Invalid params' : 'Internal error',
+        ...(allow
+          ? {
+              data: {
+                reason: 'arguments_too_large',
+                limit_bytes: 65536,
+                hint: 'reduce tool arguments; split into smaller calls only when supported by the native method'
+              }
+            }
+          : {})
+      })
+      assert(!JSON.stringify(reply).includes('SYNTHETIC_SECRET_DO_NOT_PRINT'))
+    }
+  } finally {
+    await server.close()
+  }
+})

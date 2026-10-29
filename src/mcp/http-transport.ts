@@ -10,7 +10,7 @@ import {
   ErrorCode,
   type JSONRPCMessage
 } from '@modelcontextprotocol/sdk/types.js'
-import { MAX_MCP_BYTES } from './schema.js'
+import { ARGUMENTS_TOO_LARGE_DATA, MAX_MCP_BYTES } from './schema.js'
 
 type PublicId = string | number
 export type RequestReservation = Readonly<{ externalId: PublicId; internalId: number }>
@@ -167,7 +167,7 @@ export class FacadeHttpTransport extends WebStandardStreamableHTTPServerTranspor
 
   private cancelSdk?: (id: number) => void
 
-  // 响应恢复公共ID，并移除SDK错误data和异常原文；超预算立即结束该会话。
+  // 响应恢复公共ID；仅重建固定的参数超限诊断，其余SDK错误data和异常原文全部移除。
   override async send(message: JSONRPCMessage): Promise<void> {
     if (this.stopped) {
       return
@@ -181,12 +181,25 @@ export class FacadeHttpTransport extends WebStandardStreamableHTTPServerTranspor
         return
       }
       const id = reservation.externalId
+      const data = 'error' in message ? message.error.data : undefined
       outgoing =
         'error' in message
           ? {
               jsonrpc: '2.0',
               id,
-              error: { code: message.error.code, message: messages[message.error.code] ?? 'Request failed' }
+              error: {
+                code: message.error.code,
+                message: messages[message.error.code] ?? 'Request failed',
+                ...(message.error.code === ErrorCode.InvalidParams &&
+                typeof data === 'object' &&
+                data !== null &&
+                'reason' in data &&
+                data.reason === ARGUMENTS_TOO_LARGE_DATA.reason &&
+                'limit_bytes' in data &&
+                data.limit_bytes === MAX_MCP_BYTES
+                  ? { data: ARGUMENTS_TOO_LARGE_DATA }
+                  : {})
+              }
             }
           : { ...message, id }
     }
