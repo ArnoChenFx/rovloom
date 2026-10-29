@@ -146,6 +146,11 @@ export class SimplePairingHttp {
     return this.#codes
   }
 
+  /** schema 已发布而 registry 尚未提交的整个异步窗口都受保护。 */
+  get publishing(): boolean {
+    return this.#closed || this.#applying.size > 0
+  }
+
   /** Store 受保护写端口的授权回调：只放行本类登记过的 provider 首次定义。 */
   authorizeManagement(request: ManagementRequest): { actor: string; confirmation_id: string } {
     if (request.action !== 'providers_manage' || request.fence !== 'new' || this.#closed) {

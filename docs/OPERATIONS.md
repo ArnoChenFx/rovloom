@@ -23,6 +23,7 @@
 |---|---|---|
 | `managed/providers.json` | Gateway / Connector | 已批准 provider 条目与契约 pin |
 | `managed/schema_<sha256>.json` | Gateway / Connector | 配对时取得的原始 schema 字节，按内容寻址；Herdr 与 Luvus 共用同一布局 |
+| `managed/schema-gc.json` | Gateway | 无引用 schema 的候选与观察时间；后台回收进度，不是第二份引用计数 |
 | `managed/management.json`、`managed/mcp-callers.json`、`managed/management-sessions.json` | Gateway | 管理员、令牌注册表与登录绑定 |
 | `gateway.db`（及 `.lock`、`.degraded`） | Gateway | 唯一账本 |
 | `managed/{pairing,device,providers}.json`、`control/{luvus,herdr}/setup.json` | Connector | 配对记录与原生准备记录 |
@@ -35,7 +36,11 @@ Connector 首次升级在读取 provider 配置前，把 Rovloom 管理的旧 `n
 
 `connector --unpair` / 换码会把 Connector 的配对记录、整个 control、隔离根以及内容寻址 schema 一并退役到 `retired/<批次>/`，批次内的 `manifest.json` 记录原目录和文件清单。`managed/retirement.json` 保证中断后继续同一批次；批次不再需要且已备份后可整体清理，不逐文件猜测活动引用。未知文件及用户附着实例不参与退役。
 
-Gateway 的 schema 文件是同摘要可共享的契约资料，不随一次调用或结果 TTL 删除。失败配对留下的已发布 schema 保留供重入，不会覆盖或自动删除。仅在停止 Gateway、备份完整状态后核对当前 providers、保留的旧配置/恢复资料及未完成配对引用，再清理确认无引用的文件；不能只凭 mtime 或某一个 provider 已撤销判断可删除。回滚/恢复使用完整同批状态备份。
+Gateway 默认在启动后及每小时自动回收本机 `managed/schema_<sha256>.json`，无需停服或手工清理。它重新读取当前 provider 注册表，并与 Store 中仍存在的 provider 及其已加载配置核对；同摘要只要还有任意一个引用就保留，禁用、撤销或离线不等于删除引用。删除最后设备引用或失败配对留下的文件，观察为无引用满七天后才回收；重新配对引用同一摘要会取消候选。配对从发布 schema 到提交注册表的整个窗口暂停回收。每轮至多删除 32 个文件、合计 16 MiB，积压由后续轮次继续处理。
+
+候选时间原子保存到 `managed/schema-gc.json`，短暂重启可续算；超过两小时未完成检查或时钟跳变时重新观察七天。注册表、Store 覆盖关系、迁移/退役记录或回收进度无法核实时，本轮保留文件并在 CLI 输出一次 `schema_cleanup_deferred`，下小时自动重试；文件摘要冲突同样保留供诊断，不以损坏数据推断无引用。排除旧 `herdr-schema_*`、链接、未知文件、目录外文件及 Connector `retired/`，不触碰原生工作数据。回收进度损坏时停止 Gateway，从完整备份恢复进度文件，或仅移走 `schema-gc.json` 让新版从七天观察重新开始；不要删除 provider/schema 来绕过核对。
+
+配对传输原始字节，Gateway 与 Connector 各自保存需要的本地副本，不跨机器引用文件。历史配置或备份必须携带自己的 schema，不能只复制一个指向活动目录的路径并依赖它永久保留；升级/回滚使用两端完整同批状态备份。旧布局文件的离线整理仍须先备份并核对引用，不纳入后台自动删除。
 
 ### 升级与回滚
 

@@ -26,6 +26,7 @@ Gateway 的持久状态保存在单个 SQLite 库 `<data.directory>/gateway.db` 
 - 数据目录内的文件和子目录计入受管存储，不要放入不相关文件。符号链接文件按目标大小计入，不递归符号链接目录。
 - Gateway 运行时持有 `gateway.db.lock`，正常退出时删除。锁里记录持有者的进程身份（PID 与启动标识）；异常退出后再次启动时，只有证明记录的进程已不存在（或 PID 已被无关进程复用）才自动删除并接管，SQLite 回滚日志随后自行恢复。持有者仍在运行、锁为空或格式未知、当前平台没有进程身份证据时，Gateway 拒绝启动；确认没有 Gateway 进程仍在运行后，手工删除该文件再启动。
 - 配置文件和 managed JSON 先写入排他临时文件并同步，再原子发布。已有文件损坏时不会被默认值覆盖。
+- Gateway 的原始 schema 按摘要共享，不随调用 TTL 删除。后台每小时核对引用，无引用观察七天后分批回收；候选时间保存在 `managed/schema-gc.json`，不增加 SQLite 表或修改 schema 版本。禁用 provider 仍保留引用，Connector 的 `retired/` 不自动清理。完整规则与故障恢复见[运维指南](OPERATIONS.md#程序管理的持久文件)。
 
 ## 主机报告与连接时间缓存
 

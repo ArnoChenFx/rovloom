@@ -25,6 +25,7 @@ import { REGISTRY_MAX_BYTES } from './token-registry.js'
 import { readRuntimeJson, runtimeReference } from './runtime-files.js'
 import { createRuntimeCliRuntime } from './runtime.js'
 import { SimplePairingHttp, PairingReplayCache } from './simple-pairing.js'
+import { GatewaySchemaGc } from './gateway-schema-gc.js'
 import type { CliSetup } from './setup-runtime.js'
 import { boundedJson, object, fields, WIRE_MAJOR, WIRE_MINOR } from '../wire/index.js'
 import { readRuntimeConfig } from './runtime-config.js'
@@ -250,6 +251,7 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
       let state: ReturnType<typeof openGatewayState> | undefined
       // 单码直连配对面：state 打开后立即建立；Store 受保护写端口的授权回调经此转发。
       let simple: SimplePairingHttp | undefined
+      let schemaGc: GatewaySchemaGc | undefined
       // 配对发布落盘后唤醒本轮重开；每个 Gateway 化身各自一份，未配对时永不兑现。
       let resolveActivation: (() => void) | undefined
       const activationReload = new Promise<void>((resolve) => {
@@ -259,6 +261,7 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
       const release = /* 关闭所有交付者并最终回收同一双库；不因某个provider释放失败遗留writer。 */ () => {
         closing ??= Promise.resolve().then(
           /* shutdown始终撤去会话和caller来源，外部provider仍须报告其真实物理释放结果。 */ async () => {
+            schemaGc?.close()
             try {
               try {
                 await simple?.close()
@@ -328,6 +331,29 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
           /* 发布落盘后重开以加载新 provider 与 caller 来源。 */ () => resolveActivation?.(),
           pairingReplays
         )
+        schemaGc = new GatewaySchemaGc(config, {
+          busy: () => simple!.publishing,
+          retained: () => {
+            // 磁盘 registry 与 Store 必须覆盖同一组现有 provider；禁用不解除引用。
+            const current = readRuntimeConfig(config).providers
+            const references = new Set(
+              state!.store
+                .resources()
+                .flatMap((machine) =>
+                  machine.provider_ids.map(
+                    (provider) => state!.store.provider(machine.machine_id, provider)!.config_ref
+                  )
+                )
+            )
+            if ([...references].some((reference) => !current.some((entry) => entry.reference === reference))) {
+              throw new CliError('configuration_required')
+            }
+            // 已删除设备的旧运行资源已编译；不让启动快照永久钉住它们的文件。
+            return settings.providers.filter((entry) => references.has(entry.reference))
+          },
+          deferred: () => setup?.schemaCleanupDeferred()
+        })
+        schemaGc.start()
         protectedManagement?.bindResources(
           /* 管理员授权按 Store 当前设备/provider 生成。 */ () => state!.store.resources()
         )
