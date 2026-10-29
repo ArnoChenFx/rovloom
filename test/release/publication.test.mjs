@@ -493,6 +493,15 @@ test('Release 说明按版本生成：没有该版本条目就不带升级提示
   assert.match(major, /no re-pairing is needed/u)
   assert.match(major, /runtime_response_discard/u)
   assert.match(major, /restoring the same pre-upgrade backup/u)
+  // 0.7.1 只讲审核参数 schema、subset_revision 与 CPU 配额；不沿用 0.7.0 的授权模型提示。
+  const minor = releaseBody({ tag: 'v0.7.1', version: '0.7.1', commit: 'e'.repeat(40) })
+  assert(!minor.includes('token device scope'))
+  assert(!minor.includes('schema v2'))
+  assert(!minor.includes('control/<provider>/'))
+  assert.match(minor, /x-maxUtf8Bytes/u)
+  assert.match(minor, /subset_revision/u)
+  assert.match(minor, /cpu_quota_status/u)
+  assert.match(minor, /never proof of unlimited capacity/u)
   // 未登记的版本不继承任何旧提示，只保留固定的公共段落与契约标记。
   const future = releaseBody({ tag: 'v0.9.9', version: '0.9.9', commit: 'b'.repeat(40) })
   assert(!future.includes('Upgrade note'))
