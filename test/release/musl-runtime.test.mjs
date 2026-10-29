@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import { ALPINE_IMAGE, ALPINE_PACKAGES, alpineRuntime } from '../../scripts/release/alpine.mjs'
 import { nativeRuntime, smokeRuntime } from '../../scripts/release/runtime.mjs'
 import { runtimeLibc } from '../../scripts/release/libc.mjs'
-import { assertPlatformMatrix, nativePlatform } from '../../scripts/release/metadata.mjs'
+import { assertPlatformMatrix, declaredPlatform, assertHostMatchesPlatform } from '../../scripts/release/metadata.mjs'
 
 const cwd = '/tmp/rovloom-cwd'
 const env = Object.freeze({ PATH: '', HOME: '/tmp/rovloom-home', LANG: 'C.UTF-8', NO_COLOR: '1' })
@@ -105,7 +105,7 @@ test(
 )
 
 test(
-  'native platform selection matches libc so a musl target cannot pass on a glibc runner',
+  'the declared target picks the platform, so a musl job can run on a glibc runner',
   /** 矩阵与契约逐项一致，且每个 target 都是对应平台的 Bun 编译目标。 */ () => {
     const matrix = assertPlatformMatrix()
     assert.equal(matrix.length, 8)
@@ -127,9 +127,19 @@ test(
       ['glibc', 'musl', 'glibc', 'musl']
     )
     if (process.platform === 'linux' && process.arch === 'x64') {
-      const selected = nativePlatform()
-      assert.equal(selected.libc, runtimeLibc())
-      assert.equal(selected.target, selected.libc === 'musl' ? 'bun-linux-x64-musl' : 'bun-linux-x64')
+      // 平台必须按 CI 声明的目标选，而不是按宿主 libc：musl job 就跑在 glibc runner 上。
+      const musl = declaredPlatform('bun-linux-x64-musl')
+      assert.equal(musl.libc, 'musl')
+      assert.equal(musl.target, 'bun-linux-x64-musl')
+      const glibc = declaredPlatform('bun-linux-x64')
+      assert.equal(glibc.libc, 'glibc')
+      // 同 OS 同架构的 runner 可以验收 musl 目标；libc 不参与 musl 的宿主断言。
+      assert.equal(assertHostMatchesPlatform(musl), musl)
+      assert.equal(assertHostMatchesPlatform(glibc), glibc)
+    }
+    // 未声明的目标、别名或交叉架构都必须被拒，不能悄悄回退到宿主平台。
+    for (const target of [undefined, '', 'linux-x64-musl', 'bun-linux-x64-glibc']) {
+      assert.throws(() => declaredPlatform(target), /Unsupported declared release target/u)
     }
   }
 )

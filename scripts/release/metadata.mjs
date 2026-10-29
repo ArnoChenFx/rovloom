@@ -42,15 +42,26 @@ export async function validateProductVersion(context, directory = root) {
   assert.equal(PRODUCT_VERSION, context.version, 'Tag and PRODUCT_VERSION differ')
 }
 
-/** 公开平台字段使用 Node/Bun 命名；归档中的 aarch64 只属于官方工具链下载名。 */
-export function nativePlatform() {
-  const os = process.platform === 'win32' ? 'windows' : process.platform
-  const libc = runtimeLibc()
+/**
+ * 按 CI 声明的编译目标选择矩阵项。musl 目标在 glibc runner 上编得出来但跑不起来，
+ * 因此不能像原生目标那样由宿主 libc 推断；是否允许在该 runner 上验收由调用处的运行时检查决定。
+ */
+export function declaredPlatform(target = process.env.RELEASE_TARGET) {
   const platform = platforms.find(
-    /** 精确选择运行中的 OS/arch/libc，禁止模拟交叉验收或把 musl 目标当 glibc 运行。 */ (item) =>
-      item.os === os && item.arch === process.arch && item.libc === libc
+    /** 声明的目标必须精确等于矩阵中的编译目标，不接受别名或交叉推断。 */ (item) => item.target === target
   )
-  assert(platform, 'Unsupported native release platform')
+  assert(platform, 'Unsupported declared release target')
+  return platform
+}
+
+/** 宿主必须与被声明的平台同 OS 与同架构；libc 只在 glibc 目标上还要求一致。 */
+export function assertHostMatchesPlatform(platform) {
+  const os = process.platform === 'win32' ? 'windows' : process.platform
+  assert.equal(os, platform.os, 'Runner OS must match the declared target')
+  assert.equal(process.arch, platform.arch, 'Runner arch must match the declared target')
+  if (platform.libc !== 'musl') {
+    assert.equal(runtimeLibc(), platform.libc, 'Runner libc must match the declared target')
+  }
   return platform
 }
 

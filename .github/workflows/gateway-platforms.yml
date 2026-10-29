@@ -48,6 +48,8 @@ jobs:
         run: bun --no-env-file test ./test/storage/file-platforms.test.ts ./test/storage/database-aliases.test.ts ./test/connector/herdr/gateway-schema.test.ts ./test/cli/config-init.test.ts
       - name: Build actual standalone product
         env:
+          # 矩阵目标决定编译产物；不传会让 musl 项编出 glibc 二进制再自我否定。
+          TARGET: ${{ matrix.target }}
           # musl 产物只在 Alpine 容器内构建与运行；其余目标保持原生路径。
           ROVLOOM_MUSL_ALPINE: ${{ matrix.alpine || '0' }}
         run: bun --no-env-file run release:build

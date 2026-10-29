@@ -8,10 +8,11 @@ import { product } from './product.mjs'
 import { smokeStandalone, cliChecks } from './smoke.mjs'
 import {
   assetName,
+  assertHostMatchesPlatform,
   assertPlatformMatrix,
+  declaredPlatform,
   encode,
   fileMetadata,
-  nativePlatform,
   releaseContext,
   root,
   validateProductVersion
@@ -56,9 +57,10 @@ export async function packageProduct(context, destination) {
   await validateProductVersion(context)
   assertPlatformMatrix()
   const acceptance = productSmokePath()
-  const platform = nativePlatform()
-  assert.equal(process.env.RELEASE_TARGET, platform.target, 'Runner must execute the target natively')
-  // musl 产物在 glibc runner 上编得出来但跑不起来，因此只有该目标改由 Alpine 容器执行。
+  // 平台按 CI 声明的编译目标选择：musl 目标在 glibc runner 上编得出来但跑不起来，
+  // 因此不能像原生目标那样由宿主 libc 推断；宿主只要求同 OS 同架构。
+  const platform = assertHostMatchesPlatform(declaredPlatform())
+  // musl 产物只能由 Alpine 容器验收；其余目标必须原生验收，任一不符即拒绝。
   const runtime = smokeRuntime(undefined, { roots: [root] })
   if (platform.libc === 'musl') {
     assert.equal(runtime.kind, 'alpine', 'musl target must be accepted inside an Alpine container')
