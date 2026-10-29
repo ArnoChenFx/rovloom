@@ -1,6 +1,6 @@
 // 持久化 SQLite 调用账本与设备生命周期，按固定期限治理内容、预算，并在提交后通知宿主回收上下文。
 import { DatabaseSync } from 'node:sqlite'
-import { closeSync, existsSync, openSync, unlinkSync } from 'node:fs'
+import { closeSync, existsSync, unlinkSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { canonical, digest, GatewayError, validateRequest } from './contracts.js'
@@ -38,7 +38,7 @@ import { recordMigrationSnapshot } from './storage/migration-snapshot.js'
 import { CachedDatabase } from './storage/database.js'
 import { createPrivate, databasePath, privateFile, privatePath } from './storage/files.js'
 import { assertSnapshotDirectoryBoundary, snapshotCleanup, snapshotDirectory } from './storage/snapshot-directory.js'
-import { lockContent, recoverStaleLock } from './storage/lock-recovery.js'
+import { createHeldLock, recoverStaleLock } from './storage/lock-recovery.js'
 import { reviewedHerdrRequest } from './connector/herdr/methods.js'
 
 export { DEFAULT_RETENTION }
@@ -145,10 +145,10 @@ export class Store {
     if (path !== ':memory:') {
       path = databasePath(path)
       this.path = path
-      // 上次异常退出留下的锁：只有锁里记录的持有者进程已死才删除，其余（存活、空锁、旧格式）仍报 EEXIST。
+      // 上次异常退出留下的锁：只有持有者已死才删除（带内核锁标记的以内核为准，其余看锁里记录的进程身份），
+      // 其余（存活、空锁、旧格式）仍报 EEXIST。新锁在写入身份前先持内核锁，句柄保持打开到 close。
       recoverStaleLock(path + '.lock', GATEWAY_LOCK_FORMAT)
-      createPrivate(path + '.lock', lockContent(GATEWAY_LOCK_FORMAT))
-      this.lock = openSync(path + '.lock', 'r')
+      this.lock = createHeldLock(path + '.lock', GATEWAY_LOCK_FORMAT)
     }
     try {
       if (path !== ':memory:' && !existsSync(path)) {
@@ -408,9 +408,14 @@ export class Store {
   // 关闭并删除本实例持有的 writer 锁，允许正常退出后的新实例打开。
   private releaseLock(): void {
     if (this.lock !== undefined) {
-      closeSync(this.lock)
-      unlinkSync(this.path + '.lock')
+      const lock = this.lock
       this.lock = undefined
+      try {
+        // 先删锁文件再关句柄：关闭才释放内核锁，删除窗口里别人无法接管同一个 inode。
+        unlinkSync(this.path + '.lock')
+      } finally {
+        closeSync(lock)
+      }
     }
   }
   // 停止维护定时器，通知宿主销毁上下文，再关闭数据库并释放 writer 锁。
