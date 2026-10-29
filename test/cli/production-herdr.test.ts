@@ -20,6 +20,8 @@ import { routeProductionSources } from '../../src/cli/product-sources.js'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
 import { createManagementSessionAuthority } from '../../src/runtime/management-session.js'
 import { privateHerdrTestRoot } from '../connector/herdr/private-root.js'
+import { checkProviderRequest } from '../runtime/provider-port-helpers.js'
+import { contractRef } from '../../src/wire/index.js'
 
 /** 真实私有路径和完整 pin 仅用于拒绝反例；假 binary 摘要不符，执行标记必须永远不存在。 */
 function fixture() {
@@ -294,10 +296,14 @@ test(
         assert.fail('neutral gateway required')
       }
       const provider = resource.providers[0]!
-      assert.equal(typeof provider.preflightRequest, 'function')
+      assert.equal(typeof provider.admit, 'function')
       assert.throws(
         /** 缺 target/text 的 agent.prompt 在登记前收敛为确定未派发的公共预检码。 */ () =>
-          provider.preflightRequest!({ id: 'fixture_id', method: 'agent.prompt', params: {} }),
+          checkProviderRequest(
+            provider,
+            { id: 'fixture_id', method: 'agent.prompt', params: {} },
+            contractRef(fixedHerdrSource())
+          ),
         { name: 'GatewayError', code: 'native_request_invalid' }
       )
       await assert.rejects(sources.connector!(f.config, f.refs()), { code: 'herdr_binary_identity_changed' })
@@ -305,7 +311,11 @@ test(
       await Promise.all([resource.release(), resource.release()])
       assert.throws(
         /** 已关闭的 Gateway 预检不能从同一 schema 文件恢复许可。 */ () =>
-          provider.preflightRequest!({ id: 'fixture_id', method: 'ping', params: {} }),
+          checkProviderRequest(
+            provider,
+            { id: 'fixture_id', method: 'ping', params: {} },
+            contractRef(fixedHerdrSource())
+          ),
         /herdr_provider_closed/
       )
     } finally {

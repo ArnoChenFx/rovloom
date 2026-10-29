@@ -181,6 +181,10 @@ runtime_call
 
 公共 `runtime/gateway.ts` 仅接收既有 provider 会话组，管理唯一 Store、认证、调度、结果与关闭生命周期。Luvus 的远端 pin/epoch、UHP 能力绑定、验证模式和参数预检位于 `connector/luvus/host/gateway-runtime.ts`；Luvus Connector 装配位于同目录 `connector-runtime.ts`。Herdr 保留自己的会话、原生 schema 和 endpoint 实证。公共预检错误在 `connector/preflight.ts`，provider 先生成脱敏诊断，MCP 门面只投影公共结构。
 
+公共 `GatewayProviderPort` 由身份/目标/就绪事实和两个必须实现的命令组成：`admit` 完成 provider 自己的准入，`retainEvidence` 决定原响应证据的保留。Gateway 不接收 `max_response_bytes`、`contract_ref`、`preflightRequest` 或 `admissionOptions` 组成的可选策略集合。登记回调固定本次 caller、目标和原请求，由 Router 在 Store 事务内授权并分配原生请求 ID；provider 仍在该事务内核对契约、验证完整原生根，重复 key 不重跑首次登记检查。响应预算由各 provider 工厂固定并复用证据保留收窄函数，不改变真实摘要、期限或结果归属。
+
 两种编译器复用 `connector/compiler-worker.ts` 的 Worker 所有权、实例隔离、deadline、取消与结算。协议版本、产物字段、schema 身份、原生根及 Ajv 产物安装仍分别核验。Luvus 使用 UHP 多文档/方法分支并返回 Check，Herdr 使用三个完整根并拒绝 Promise；这些差异不通过公共框架伪造一致。
 
 进程基础机制审计：两种 provider 已实际共用 `storage/process-identity.ts` 的 PID/启动身份与死亡证明、`connector/native-record-files.ts` 的记录发布/代次核对、`connector/path-identity.ts` 的路径实证，以及 `connector/claims.ts` / `connector/crash-recovery.ts` 的唯一发送与锁恢复。Luvus managed 进程的 pidfd/endpoint 与 root Owner、Herdr 的 close 后清理 receipt 和不同 daemon 启动语义继续分别实现；取消等待、请求终止与确认真实退出不能合并为同一个成功信号。相关单测、真实 managed 崩溃恢复和 OS 回归分别验证这些边界。控制布局、迁移和退役规则见运维指南。
+
+Gateway schema 回收属于持有 Store writer 的 CLI 宿主：依据当前 registry 与 Store 的实际引用扫描，不维护额外引用计数。异步配对的发布/提交窗口通过原配对所有者的在途状态阻止回收；每轮同步核对与删除不与同进程提交交错。候选观察七天且摘要重新核验后才分批删除；重启进度仅记录候选时间，不替代引用事实。运行时不因 provider 禁用或离线释放其持久 schema，Connector 的原生工作目录与退役批次不属于这项回收。

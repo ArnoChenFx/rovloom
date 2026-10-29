@@ -4,7 +4,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync, writeFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
+import { setTimeout as pause } from 'node:timers/promises'
 import { PassThrough } from 'node:stream'
 import { openGatewayState } from '../../src/runtime/state.js'
 import {
@@ -22,6 +23,8 @@ import { writeSetupJson } from '../../src/cli/setup-files.js'
 import { setupReference, setupTarget } from '../../src/cli/setup-targets.js'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
 import { hash } from '../../src/wire/index.js'
+import { GatewaySchemaGc, SCHEMA_GC_GRACE } from '../../src/cli/gateway-schema-gc.js'
+import { publishSchema, schemaReference } from '../../src/connector/schema-store.js'
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'rovloom-pairing-recovery-'))
@@ -36,6 +39,8 @@ function fixture() {
   const replays = new PairingReplayCache()
   http = new SimplePairingHttp(state, config, () => {}, replays)
   return {
+    root,
+    config,
     state,
     get http() {
       return http
@@ -95,6 +100,40 @@ function io() {
     signal: new AbortController().signal
   }
 }
+
+test('真实异步配对保护已发布但尚未提交的 schema，提交后由新 registry 接续保留', async () => {
+  const f = fixture()
+  const gc = new GatewaySchemaGc(f.config, { retained: () => [], busy: () => f.http.publishing })
+  let pending: Promise<Response> | undefined
+  try {
+    const issued = f.http.codes.create()
+    const manifest = installation(issued.code)
+    const raw = Buffer.from(manifest.installations[0]!.value.schema_bundle)
+    const path = schemaReference(f.root, hash(raw))
+    publishSchema(path, raw)
+    writeSetupJson(runtimeReference(f.root, 'schema-gc'), {
+      version: 1,
+      checked_at: Date.now(),
+      candidates: [{ file: basename(path), unreferenced_at: Date.now() - SCHEMA_GC_GRACE - 1000 }]
+    })
+    pending = f.http.handle(post(issued.code, manifest))!
+    for (let turns = 0; !f.http.publishing && turns < 100; turns++) {
+      await pause(1)
+    }
+    assert.equal(f.http.publishing, true)
+    assert.equal(existsSync(runtimeReference(f.root, 'providers')), false)
+    assert.equal(gc.sweep(), false)
+    assert(existsSync(path))
+    assert.equal((await pending).status, 200)
+    assert.equal(f.http.publishing, false)
+    assert.equal(gc.sweep(), true)
+    assert(existsSync(path))
+  } finally {
+    gc.close()
+    await pending
+    await f.close()
+  }
+})
 
 test('错误秘密不推进码状态，正确秘密随后仍可配对', async () => {
   const f = fixture()

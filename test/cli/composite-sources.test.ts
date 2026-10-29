@@ -35,7 +35,10 @@ function resource(kind: 'luvus' | 'herdr', events: string[]): ProductionGatewayR
   const provider = {
     binding,
     target,
-    max_response_bytes: 65536,
+    admit: () => {
+      throw new Error('component_native_unavailable')
+    },
+    retainEvidence: (plan: import('../../src/wire/evidence.js').ResponseEvidencePlan) => plan,
     ready: /** 资源探针从不声称native已就绪。 */ () => false,
     preflightRequest: /** 意外准入明确失败，不允许缺后端mock成功。 */ () => {
       throw new Error('component_native_unavailable')
@@ -71,7 +74,7 @@ function authority() {
 }
 
 test(
-  '混合Gateway保留原providers/preflight/session/catalog，唯一runtime建立后才绑定Luvus目录',
+  '混合Gateway保留原providers/session/catalog，唯一runtime建立后才绑定Luvus目录',
   /** 只检查端口同一性，不启动角色。 */ async () => {
     const config = configTemplate('gateway')
     if (config.role !== 'gateway') {
@@ -112,7 +115,7 @@ test(
       const catalog = mixed.catalog
       assert.equal(mixed.providers, luvus.providers)
       assert.equal(mixed.hosted[0]!.providers, herdr.providers)
-      assert.equal(mixed.providers[0]!.preflightRequest, luvus.providers[0]!.preflightRequest)
+      assert.equal(mixed.providers[0]!.ready, luvus.providers[0]!.ready)
       assert.equal(catalog.select(herdr.providers[0]!.target), herdr.catalog)
       assert.equal(catalog.select(luvus.providers[0]!.target), undefined)
       const nativeCatalog = { resolve: /** 这里只记录绑定原目录端口，不返回假的native来源。 */ () => undefined }

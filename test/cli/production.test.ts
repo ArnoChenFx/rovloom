@@ -19,7 +19,7 @@ import { createServer } from 'node:net'
 import { once } from 'node:events'
 import { spawn, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -38,6 +38,8 @@ import { readRuntimeJson, runtimeReference } from '../../src/cli/runtime-files.j
 import { openGatewayState } from '../../src/runtime/state.js'
 import { FIXED_LUVUS_SCHEMA_SHA256, FIXED_LUVUS_SHA256 } from '../../src/connector/luvus/host/native-control.js'
 import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../../src/connector/luvus/host/native-source.js'
+import { publishSchema, schemaReference } from '../../src/connector/schema-store.js'
+import { SCHEMA_GC_GRACE } from '../../src/cli/gateway-schema-gc.js'
 import { DatabaseSync } from 'node:sqlite'
 import { startHttpFacade } from '../../src/mcp/http.js'
 import type { ProviderCatalogSource } from '../../src/mcp/catalog.js'
@@ -114,6 +116,48 @@ async function fixture() {
   }
   return { root, state, refs, config, url, source, auth, path, providers }
 }
+
+test('生产 Gateway 默认自动回收已观察七天的孤立 schema，并随宿主关闭释放维护任务', async () => {
+  for (const missingRegistry of [false, true]) {
+    const f = await fixture()
+    let active: Awaited<ReturnType<NonNullable<ReturnType<typeof createProductionCliRuntime>['gateway']>>> | undefined
+    try {
+      const raw = Buffer.from('{"orphan":"failed-pairing"}')
+      const path = schemaReference(f.state, createHash('sha256').update(raw).digest('hex'))
+      publishSchema(path, raw)
+      writeFileSync(
+        runtimeReference(f.state, 'schema-gc'),
+        JSON.stringify({
+          version: 1,
+          checked_at: Date.now(),
+          candidates: [{ file: basename(path), unreferenced_at: Date.now() - SCHEMA_GC_GRACE - 1000 }]
+        })
+      )
+      if (missingRegistry) {
+        // 数据库仍有 provider、磁盘 registry 却缺失：不能把它误判成无引用孤儿。
+        openGatewayState({ state_directory: f.state, changed() {} }).close()
+        const seed = new DatabaseSync(join(f.state, 'gateway.db'))
+        try {
+          seed
+            .prepare('INSERT INTO machines(machine_id,name,status) VALUES(?,?,?)')
+            .run('synthetic', 'synthetic', 'pending')
+          seed.prepare('INSERT INTO providers VALUES(?,?,?,?,?,?)').run('synthetic', 'luvus', 'luvus', 'missing', 1, 1)
+        } finally {
+          seed.close()
+        }
+      }
+      active = await createProductionCliRuntime().gateway!(f.config)
+      assert.equal(existsSync(path), missingRegistry)
+      assert.equal(existsSync(join(f.state, 'gateway.db.lock')), true)
+      await active.close()
+      active = undefined
+      assert.equal(existsSync(join(f.state, 'gateway.db.lock')), false)
+    } finally {
+      await active?.close()
+      rmSync(f.root, { recursive: true, force: true })
+    }
+  }
+})
 
 test(
   '生产混合Gateway保留真实Luvus远端pin与Herdr目录，标准loader核对全部引用且原始字节仍验pin',
@@ -504,7 +548,12 @@ test(
               {
                 binding,
                 target,
-                max_response_bytes: 16_384,
+                admit() {
+                  throw new Error('unused_native_admission_fixture')
+                },
+                retainEvidence(plan) {
+                  return plan
+                },
                 ready: /* 无原生实例不能报告ready。 */ () => false
               }
             ],

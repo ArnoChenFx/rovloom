@@ -59,6 +59,11 @@ export class CliSetup {
     }
   }
 
+  /** 后台维护失败只报告固定码；后续小时自动重试，不把私有状态打印出来。 */
+  schemaCleanupDeferred(): void {
+    this.#io?.stderr.write('schema_cleanup_deferred\n')
+  }
+
   // 仅观察正式Connector持有的transport，不认证HTTP、不创建新epoch、不根据静态配置自报ready。
   observe(running: RunningConnector): void {
     if (!running.transport) {

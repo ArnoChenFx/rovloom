@@ -10,7 +10,8 @@ import {
   connectorAdmissionAdapter,
   createConnectorAdmissionBackend
 } from '../../runtime/connector-attempts.js'
-import type { GatewayProviderServices, RuntimeProviderBinding } from '../../runtime/types.js'
+import type { GatewayProviderServices, GatewayProviderPort } from '../../runtime/types.js'
+import { responseRetention } from '../../runtime/response-retention.js'
 import type { Principal } from '../../router.js'
 import type { LedgerInvalidation } from '../../storage/model.js'
 import type { Connection, ConnectorWireSession, Session, SocketChannel } from '../../transport/index.js'
@@ -69,7 +70,7 @@ export type HerdrProviderRefConfig = Readonly<{
 }>
 export type HerdrGatewayResources = Readonly<{
   kind: 'provider'
-  providers: readonly (RuntimeProviderBinding & { max_response_bytes: number })[]
+  providers: readonly GatewayProviderPort[]
   catalog: HerdrProviderCatalogProvider
   describe(): ReturnType<typeof describeHerdrContract>
   session(connection: Connection, channel: SocketChannel, services: GatewayProviderServices): Session
@@ -425,27 +426,29 @@ export async function createHerdrGatewayResources(
     kind: 'provider',
     catalog,
     describe: describeCurrent,
-    providers: Object.freeze([
+    providers: Object.freeze<GatewayProviderPort[]>([
       {
         binding,
         target: config.target,
-        max_response_bytes: 65_536,
-        contract_ref: reference,
-        preflightRequest: /** 使用同一已编译完整根预检真实登记请求；不生成原生 permit 或发送字节。 */ (
-          request: JsonObject
-        ) => {
-          assertCurrent()
-          try {
-            codec.encode(request)
-          } catch (error) {
-            // 预检拒绝发生在登记前，是确定未派发的客户端参数错误；与 Luvus 预检同一投影，
-            // 不把原生 schema 细节进 MCP 诊断（不含参数、路径或字段指针）。
-            if (error instanceof WireError && error.code === 'herdr_native_request_invalid') {
-              throw new NativeRequestPreflightError()
+        retainEvidence: responseRetention(65_536),
+        admit(request, admission, register) {
+          return register(admission, (candidate) => {
+            if (admission.contract_ref !== reference) {
+              fail('contract_unavailable')
             }
-            throw error
-          }
-          assertCurrent()
+            assertCurrent()
+            try {
+              codec.encode(candidate)
+            } catch (error) {
+              // 预检拒绝发生在登记前，是确定未派发的客户端参数错误；与 Luvus 预检同一投影，
+              // 不把原生 schema 细节进 MCP 诊断（不含参数、路径或字段指针）。
+              if (error instanceof WireError && error.code === 'herdr_native_request_invalid') {
+                throw new NativeRequestPreflightError()
+              }
+              throw error
+            }
+            assertCurrent()
+          })
         },
         ready: /** 仅本地契约先决条件；认证 peer 的 readiness 仍由原 transport 计算。 */ () => {
           assertCurrent()
