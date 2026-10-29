@@ -95,10 +95,10 @@ runtime_describe {
 
 Read the actual coverage and description fields before filling `params`:
 
-- Read `params_schema_source` when present: `installed_native_schema` preserves the native schema closure; `rovloom_reviewed_subset` is an explicitly reviewed supplement. `wait.output` has a reviewed schema even when native `schema_status` remains `generic_params_only`. Enforce `x-maxUtf8Bytes` as UTF-8 bytes; JSON Schema `maxLength` counts characters.
+- Read `params_schema_source` when present: `installed_native_schema` preserves the native schema closure; `rovloom_reviewed_subset` is an explicitly reviewed supplement. The ordinary Luvus methods have a reviewed schema even when native `schema_status` remains `generic_params_only`. Enforce `x-maxUtf8Bytes` as UTF-8 bytes; JSON Schema `maxLength` counts characters.
 - Luvus `schema_annotations` exposes native request/response document `$comment` and `description`, with `document_uri` and JSON Pointer. Document-root notes describe the document; they are not necessarily specific to this method.
 - Cache discovery/description with `(contract_ref, subset_revision)`. The latter changes with the visible method set or reviewed parameter definition, without changing the approved native source identity. It appears on discovery pages and describe, not every method row; it invalidates caches and never grants execution permission.
-- `schema_status: "generic_params_only"` means there is no native per-method parameter schema. Use available `parameter_help` and the [runtime reference](references/runtimes.md); do not invent a complete schema or reuse another provider's field names. `parameter_help.source: "rovloom_reviewed_subset"` identifies Rovloom's reviewed guide, not native schema coverage.
+- `schema_status: "generic_params_only"` means there is no native per-method parameter schema. Use the reviewed `params_schema` (see `params_schema_source`), `parameter_help` and the [runtime reference](references/runtimes.md); do not invent a complete schema or reuse another provider's field names. `parameter_help.source: "rovloom_reviewed_subset"` identifies Rovloom's reviewed guide, not native schema coverage.
 
 `terminal_execution` still describes the local gate. Description grants no execution permission. These detailed schemas, notes and examples belong to `runtime_describe`; `runtime_discover` remains a summary list.
 
@@ -173,7 +173,7 @@ A Gateway refusal returns `isError: true` with `gateway_error: { code }`.
 | `confirmation_required` | The user must confirm | Hand the confirmation request to the user verbatim |
 
 `native_request_invalid` additionally carries `outcome: "not_dispatched"` — that is the **only** refusal that confirms "nothing ran, safe to fix the parameters and resubmit".
-For supported Luvus methods, `gateway_error.details.issues` contains fixed field paths and rules such as `/params/pane` with `required`, or `/params/wait` with `required_true`. When the reviewed diagnostics cannot safely locate the rejected parameter, `/params` with `invalid_value` indicates a general parameter rejection; it does not identify a specific field. The details omit user values and raw native error text; they are not a complete list of every possible parameter error.
+For reviewed Luvus methods and for Herdr (derived from the installed schema), `gateway_error.details.issues` contains fixed field paths and rules such as `/params/pane` with `required`, `/params/lines` with `range`, or `/params/wait` with `required_true`. When the diagnostics cannot safely locate the rejected parameter (selector mutual exclusion, an unknown field, an enum value), `/params` with `one_of` or `invalid_value` indicates a general parameter rejection; it does not identify a specific field. The details omit user values and raw native error text; they are not a complete list of every possible parameter error.
 
 ## Recipes
 
