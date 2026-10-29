@@ -70,6 +70,15 @@ const RELEASE_NOTES = Object.freeze({
     ],
     upgrade:
       'Nothing to migrate: pairings, tokens and ledgers are unchanged. Stop the old Gateway before starting this one: a still-running pre-0.8.1 Gateway holds no kernel lock and is protected only by the previous PID check, so never run two Gateways on the same data. A lock written by 0.8.1 carries `kernel_lock`; where the filesystem cannot provide `flock` (and on macOS and Windows) the PID check applies as before. Luvus `subset_revision` changes because the reviewed definitions are now part of it, so clients that cache `(contract_ref, subset_revision)` refetch descriptions once.'
+  },
+  '0.8.2': {
+    highlights: [
+      'Luvus parameter validation now has a single definition. The hand-written per-method field checks (about 300 lines) are removed: execution validation, the published `runtime_describe.params_schema` and the rejection diagnostics all read the Rovloom-reviewed schema, so they can no longer drift apart. Compared with the hand-written checks it replaces, on all 36 ordinary methods and 162,300 generated parameter sets, no request that was refused is now accepted and none that was accepted is now refused.',
+      'A method without a reviewed schema is refused with `luvus_operation_params_invalid` instead of being left to separate code. All 36 ordinary methods have one, so nothing changes today; a future method cannot ship unchecked.',
+      'The e2e quickstart harness (test tooling, not part of the binary) now reclaims its private servers and work directory when it is interrupted, so repeated runs no longer leave processes and about 140 MB of state behind.'
+    ],
+    upgrade:
+      'Nothing to migrate and no behaviour change is expected: pairings, tokens, ledgers and the published schemas are the same as in 0.8.1.'
   }
 })
 

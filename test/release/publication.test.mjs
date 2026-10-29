@@ -559,6 +559,15 @@ test('Release 说明按版本生成：没有该版本条目就不带升级提示
   assert(!patch.includes('linux-x64-musl'))
   assert(!patch.includes('owned_pidfd_unavailable'))
   assert(!patch.includes('x-maxUtf8Bytes'))
+  // 0.8.2 只讲 Luvus 参数校验收敛为审核 schema 一份；不沿用 0.8.1 的诊断、写锁与依赖要点。
+  const single = releaseBody({ tag: 'v0.8.2', version: '0.8.2', commit: 'd'.repeat(40) })
+  assert.match(single, /single definition/u)
+  assert.match(single, /162,300/u)
+  assert.match(single, /luvus_operation_params_invalid/u)
+  assert.match(single, /Nothing to migrate and no behaviour change is expected/u)
+  assert(!single.includes('kernel `flock`'))
+  assert(!single.includes('details.issues'))
+  assert(!single.includes('never run two Gateways on the same data'))
   // 未登记的版本不继承任何旧提示，只保留固定的公共段落与契约标记。
   const future = releaseBody({ tag: 'v0.9.9', version: '0.9.9', commit: 'b'.repeat(40) })
   assert(!future.includes('Upgrade note'))
