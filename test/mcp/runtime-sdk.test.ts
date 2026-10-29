@@ -85,6 +85,18 @@ test(
           })
           assert.equal(refused.isError, true)
           assert.deepEqual(refused.structuredContent, { gateway_error: { code: 'contract_unavailable' } })
+          lifecycle.phase('deadline_rejections')
+          for (const [offset, code] of [
+            [700_000, 'invalid_deadline'],
+            [0, 'deadline_exceeded']
+          ] as const) {
+            const rejected = await invoke({
+              name: 'runtime_call',
+              arguments: { ...args, deadline: f.state.store.clock() + offset }
+            })
+            assert.equal(rejected.isError, true)
+            assert.deepEqual(rejected.structuredContent, { gateway_error: { code } })
+          }
           const reader = new DatabaseSync(join(f.native.root, 'gateway/gateway.db'), { readOnly: true })
           try {
             assert.equal(reader.prepare('SELECT count(*) AS n FROM calls').get()!.n, 0)
@@ -99,6 +111,13 @@ test(
           lifecycle.phase('duplicate')
           const duplicate = data(await invoke({ name: 'runtime_call', arguments: args }))
           assert.equal(duplicate.call_id, call.call_id)
+          assert.deepEqual(duplicate.result, call.result)
+          const conflict = await invoke({
+            name: 'runtime_call',
+            arguments: { ...args, deadline: args.deadline + 1 }
+          })
+          assert.equal(conflict.isError, true)
+          assert.deepEqual(conflict.structuredContent, { gateway_error: { code: 'conflict' } })
           assert.equal(call.state, 'responded')
           assert.equal(call.contract_ref, f.reference)
           assert.equal(f.native.state.responses, 1)

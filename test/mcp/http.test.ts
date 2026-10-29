@@ -413,7 +413,7 @@ test(
         )
         assert.equal(events[0].args.client_request_key, client_request_key)
         assert.equal(events[0].args.validation, undefined)
-        assert.equal(events[0].args.wait_ms, 0)
+        assert.equal('wait_ms' in events[0].args, false)
       }
     )
   }

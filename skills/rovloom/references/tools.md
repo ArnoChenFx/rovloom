@@ -1,6 +1,6 @@
 # Tool reference
 
-The authoritative definition is `src/mcp/schema.ts` in the repository; this is a caller-facing summary. Every parameter object rejects unknown fields at its root, and a wrong shape returns `invalid_arguments` (or `Invalid tool arguments` at the JSON-RPC layer).
+The authoritative definition is `src/mcp/schema.ts` in the repository; this is a caller-facing summary. Every tool parameter object rejects unknown fields at its root. A wrong shape returns JSON-RPC `-32602 Invalid params`; direct service callers receive `invalid_arguments`. Oversized tool arguments carry the fixed error data described under Transport and limits.
 
 ## Shared shapes
 
@@ -128,10 +128,10 @@ Parameters:
 | `expected_binding_revision` | yes | From `providers_get` |
 | `contract_ref` | yes | From `runtime_discover` / `runtime_describe` |
 | `native_request` | yes | `{ method, params? }` |
-| `deadline` | yes | Absolute future Unix milliseconds; at registration it must be in the future and no more than 10 minutes out |
+| `deadline` | yes | Absolute Unix milliseconds; first registration requires Gateway `now < deadline <= now + 600000`. Past/equal returns `deadline_exceeded`; more than 10 minutes ahead returns `invalid_deadline`. Retries must reuse the original absolute value, even after expiry |
 | `wait_ms` | no | 0–5000, default 0; only bounds this HTTP short wait |
 | `validation` | no | `strict` / `raw-contract` |
-| `client_request_key` | no | Deduplication key within one principal |
+| `client_request_key` | no | Deduplication key within one principal; reuse the original key, request and absolute `deadline` on retries |
 
 When `validation` is omitted the Gateway picks per provider and method:
 
@@ -143,7 +143,7 @@ Explicitly supplying a mode the method does not accept is refused before registr
 
 Native schema and reviewed-parameter rejection returns `gateway_error.code: "native_request_invalid"` with `outcome: "not_dispatched"`. The guided Luvus methods (`agent.start`, `agent.wait`, `agent.prompt`, `pane.run`, `wait.output`) can also return `details: { issues: [{ path, rule }], parameter_help }`. Common fixed paths locate missing `pane`/`command`/`match`, invalid `agent.start` name/kind (`/params/name` or `/params/kind`, rule `pattern`), the `wait:true` dependency, mutually exclusive selectors or `timeout_s` bounds; values and unknown field names are not echoed. `agent.start` requires name and kind, both matching `^[a-z][a-z0-9_-]{0,31}$`; pane is optional and omitting it creates a new pane. Read its guide before choosing between pane and anchor. If no specific safe diagnostic is available, `/params` with `invalid_value` reports a general parameter rejection. Fix against the guide and original schema, rather than treating every rejection as a connection failure.
 
-`client_request_key` deduplicates over `metadata_ttl`. The same key with the same intent returns the original `call_id`; the same key with a different intent returns `conflict`. The Gateway neither generates nor replaces keys, so idempotent retries must reuse the original.
+`client_request_key` deduplicates over `metadata_ttl`. The same key with the same intent returns the original `call_id`; the same key with a different intent returns `conflict`. The intent includes the original absolute `deadline`: recalculating `deadline = now + duration` with the same key returns `conflict`. Idempotent retries must reuse the original key, request and absolute deadline, even after that deadline has expired while the dedup record remains valid. A match returns the original call without refreshing deadlines or dispatching again. `wait_ms` only controls waiting and may change. The Gateway neither generates nor replaces keys.
 
 For a new intent, a stale `contract_ref` returns `gateway_error: {code: "contract_unavailable"}` after authorization and before call registration. It creates no call, consumes no key, sends no Wire request and keeps the device connection open. Refresh `runtime_discover/describe` to obtain the current reference. Existing keys continue to refer to the original call even if the native contract changes; changing that key's reference is a different intent and returns `conflict`. Do not submit a possibly executed call under a fresh key merely because its original contract is now unavailable.
 
@@ -219,7 +219,7 @@ A standalone action: it requires current identity, device access and original pr
 | Endpoint | `POST/GET/DELETE /mcp`; no query, userinfo or other path |
 | Request body | 1 MiB (checked before JSON parsing, under the deadline) |
 | Total request headers | 16 KiB |
-| Single tool's arguments | 64 KiB |
+| Single tool's arguments | ≤ 65,536 UTF-8 bytes of canonical JSON for the entire `arguments` object, including all fields |
 | Complete JSON-RPC response | 64 KiB |
 | String request ID | 128 bytes; at most 1024 protocol correlations |
 | `tools/list` | 5 items per page, using the standard `nextCursor` |
@@ -230,6 +230,8 @@ A standalone action: it requires current identity, device access and original pr
 | Luvus endpoint discovery / schema preparation | Default 30 seconds |
 | Concurrent tool requests per session | 16, beyond which `busy` |
 
+- Over-budget tool arguments return JSON-RPC `-32602` (no `structuredContent`) with fixed `data: {reason: "arguments_too_large", limit_bytes: 65536, hint: "reduce tool arguments; split into smaller calls only when supported by the native method"}`. Reduce the payload; split only if the native method supports equivalent smaller calls. Do not retry unchanged. Other malformed arguments retain the generic protocol error without echoing values.
+- This MCP limit covers the complete arguments, not a single native field. UTF-8 characters and JSON escapes count by encoded bytes. The catalog's `request_frame_bytes` is an independent provider native frame limit including generated native IDs and frame overhead; passing the MCP arguments budget does not guarantee passing that limit.
 - Duplicate JSON keys, invalid or truncated UTF-8, over-deep nodes and batched JSON-RPC are all rejected.
 - Resubmitting the same request ID while it is in flight returns 409.
 - There is no event store: no event replay is promised after a disconnect.

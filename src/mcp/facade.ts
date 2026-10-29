@@ -11,13 +11,15 @@ import { canonical, digest } from '../contracts.js'
 import { cliMessages, type CliLanguage } from '../cli/messages.js'
 import { validateHostProfile } from '../wire/index.js'
 import {
+  ARGUMENTS_TOO_LARGE_DATA,
   isToolName,
   MAX_MCP_BYTES,
   parseToolArguments,
   PRODUCT_VERSION,
   toolDefinition,
   toolNames,
-  TOOLS_PAGE_SIZE
+  TOOLS_PAGE_SIZE,
+  ToolArgumentsTooLargeError
 } from './schema.js'
 import {
   FacadeServiceError,
@@ -240,8 +242,12 @@ export function createMcpFacade(options: FacadeOptions): Server {
       let args
       try {
         args = parseToolArguments(name, request.params.arguments ?? {})
-      } catch {
-        throw new McpError(ErrorCode.InvalidParams, 'Invalid tool arguments')
+      } catch (error) {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          'Invalid tool arguments',
+          error instanceof ToolArgumentsTooLargeError ? ARGUMENTS_TOO_LARGE_DATA : undefined
+        )
       }
       if (inflight >= 16) {
         return failed('busy')

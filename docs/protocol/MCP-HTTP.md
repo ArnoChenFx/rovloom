@@ -26,7 +26,7 @@
 |---|---|
 | 请求体 | 1 MiB，在 JSON 解析之前检查并受 deadline 约束 |
 | 请求头总量 | 16 KiB |
-| 单个工具参数 | 64 KiB |
+| 单个工具参数 | 整个 `arguments` 对象规范 JSON 的 UTF-8 字节数 ≤ 65,536，含全部字段开销 |
 | 完整 JSON-RPC 响应（含文本副本与转义） | 64 KiB |
 | 字符串请求 ID | 128 字节，协议关联最多 1024 项 |
 | `tools/list` | 每页 5 项，使用 SDK 标准的 `nextCursor` |
@@ -64,14 +64,14 @@
 
 ### runtime_call
 
-- `expected_binding_revision`、`contract_ref` 和 `deadline` 必填。`deadline` 是未来的 Unix 毫秒绝对时间，登记时须在 10 分钟之内。
+- `expected_binding_revision`、`contract_ref` 和 `deadline` 必填。`deadline` 是 Unix 毫秒绝对时间，首次登记须满足 Gateway 当前时间 `now < deadline <= now + 600_000`；已到期返回 `deadline_exceeded`，超过十分钟返回 `invalid_deadline`，都不建立调用或占用 key。安全整数/正数等形状违例仍属于工具参数错误。
 - `wait_ms` 默认 0，上限 5000，只控制前端短等，与执行期限独立。
 - `validation` 省略时由 Gateway 按 provider 与方法选择：
   - Herdr 使用 `strict`。
   - Luvus 的 `pane.list`、`agent.prompt`、`agent.send`、`agent.wait`、`agent.keys` 使用 `strict`。
   - Luvus 其余已审核方法（如 `workspace.list`）使用 `raw-contract`。
   - 显式给出与方法要求不符的模式，会在登记前以 `native_request_invalid` 拒绝。
-- `client_request_key`（可选）在同一主体内去重，窗口为 `metadata_ttl`。Gateway 不生成也不更换 key。重发同一意图必须使用原 key。
+- `client_request_key`（可选）在同一主体内去重，窗口为 `metadata_ttl`。Gateway 不生成也不更换 key。重发同一意图必须使用原 key、原请求和原始绝对 `deadline`。deadline 参与幂等摘要，重算它会得到 `conflict`；`wait_ms` 不参与意图判定。只要去重记录有效，原 deadline 已过期仍返回原调用，不延长期限或再次派发。
 - 超过 `wait_ms` 仍未完成时，返回 `call_id` 与当前状态。用 `runtime_call_get` 查询，超时不代表可以重新提交。
 
 ### 结果与取消
@@ -85,12 +85,19 @@
 
 ### 错误
 
-- 网关拒绝返回 `isError: true` 与 `gateway_error: {code}`。`code` 取下列之一：`backend_unavailable`、`invalid_arguments`、`native_request_invalid`、`internal_error`、`unauthenticated`、`forbidden`、`unavailable`、`not_found`、`conflict`、`invalid_cursor`、`binding_revision_conflict`、`contract_unavailable`、`unsupported`、`confirmation_required`、`storage_exhausted`、`storage_degraded`、`content_unavailable`、`deadline_exceeded`、`busy`。
+- 网关拒绝返回 `isError: true` 与 `gateway_error: {code}`。`code` 取下列之一：`backend_unavailable`、`invalid_arguments`、`invalid_deadline`、`native_request_invalid`、`internal_error`、`unauthenticated`、`forbidden`、`unavailable`、`not_found`、`conflict`、`invalid_cursor`、`binding_revision_conflict`、`contract_unavailable`、`unsupported`、`confirmation_required`、`storage_exhausted`、`storage_degraded`、`content_unavailable`、`deadline_exceeded`、`busy`。
 - 有效 token 可调用其可见设备上 provider 的全部已暴露方法，Connector 的终端执行开关控制直接终端操作。没有逐方法、provider、read/dispatch/cancel、caller/local/gateway 策略或 raw grant。未知或未实现方法不在暴露目录内；`runtime_describe not_found` 不区分原生不存在或后端未适配。
 - 新调用的 `contract_ref` 与当前批准契约不符时，授权后的登记预检返回 `gateway_error: {code: "contract_unavailable"}`，不建立 call、不占用请求 key、不发送 Wire 帧，也不关闭设备连接。重新 `runtime_discover/describe` 获取当前引用后才能提交新意图；不要将拒绝理解为原生执行失败。已存在的同 key、同请求仍查询原调用，不因契约变化而重新派发；同 key 换契约引用是不同请求，返回 `conflict`。
 - `native_request_invalid` 在 Luvus 或 Herdr 的完整请求 schema 于登记预检阶段被拒时附带 `outcome: "not_dispatched"`：此时还没有建立 call 或派发锚点，坏请求不占用 key，不发送 Wire 帧，不关闭设备连接。已有 key 仍返回原调用的真实状态，旧的 unknown 不会倒退或重派。预检通过不授予执行权限，网关不返回参数或 schema 的错误正文。
-- 响应超过 64 KiB 时，只返回 `response_too_large`、`truncated`、字节数、hash 和适用的 `call_id`，不制造句柄，也不再次执行。
-- 未知工具或非法参数返回固定的 JSON-RPC 错误，不回显请求值、异常、路径或栈。
+- 工具结果超过预算时，业务门面只返回 `response_too_large`、`truncated`、字节数、hash 和适用的 `call_id`，不制造句柄，也不再次执行。如果最终完整 JSON-RPC 响应仍超过 64 KiB，transport 对该请求返回同 ID 的 `-32603` 与固定 `data: {reason: "response_too_large", limit_bytes: 65536}`，保留会话及其它在途请求。没有请求关联的超限通知/服务端请求只拒绝该次发送。超限不证明原生未执行，不能据此自动重发。
+- 工具参数超出 65,536 字节时，在准入前返回 JSON-RPC `-32602`，不产生 `structuredContent`，固定错误 data 为：
+
+  ```json
+  {"reason":"arguments_too_large","limit_bytes":65536,"hint":"reduce tool arguments; split into smaller calls only when supported by the native method"}
+  ```
+
+  预算针对整个 arguments，不是单个 command/text；多字节字符按 UTF-8、转义按 JSON 编码后的字节计数。调用方应缩小参数，仅在原生方法语义允许时拆分，不原样重试。discover 的 `request_frame_bytes` 是独立的 provider 原生帧预算，还包含实际原生 ID 等帧开销；通过 MCP 参数预算不保证能通过它。
+- 未知工具或其它非法参数仍返回固定 JSON-RPC 错误；transport 只重建上述固定超限 data，其余 SDK 错误 data 被移除，不回显请求值、异常、路径或栈。
 
 ## 分页与游标
 

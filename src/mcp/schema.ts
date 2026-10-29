@@ -7,6 +7,19 @@ import { cliMessages, type CliLanguage, type MessageKey } from '../cli/messages.
 
 export { MCP_REVISION, PRODUCT_VERSION } from './version.js'
 export const MAX_MCP_BYTES = 65_536
+export const ARGUMENTS_TOO_LARGE_DATA = Object.freeze({
+  reason: 'arguments_too_large',
+  limit_bytes: MAX_MCP_BYTES,
+  hint: 'reduce tool arguments; split into smaller calls only when supported by the native method'
+})
+
+/** 只标记完整工具参数超出字节预算，不与 schema 或 JSON 形状错误混用。 */
+export class ToolArgumentsTooLargeError extends Error {
+  constructor() {
+    super('arguments_too_large')
+    this.name = 'ToolArgumentsTooLargeError'
+  }
+}
 export const MAX_RESULT_BYTES = 16_384
 export const MAX_WAIT_MS = 5_000
 export const TOOLS_PAGE_SIZE = 5
@@ -58,10 +71,18 @@ const schemas: Record<ToolName, Tool['inputSchema']> = {
       ...targetProperties,
       contract_ref: { type: 'string', pattern: '^[a-f0-9]{64}$' },
       native_request: object({ method: text, params: {} }, ['method']),
-      deadline: revision,
+      deadline: {
+        ...revision,
+        description:
+          'Absolute Unix milliseconds. First registration requires Gateway now < deadline <= now + 600000; otherwise deadline_exceeded or invalid_deadline. Idempotent retries must reuse the original absolute deadline, even after expiry.'
+      },
       wait_ms: wait,
       validation: { enum: ['strict', 'raw-contract'] },
-      client_request_key: id
+      client_request_key: {
+        ...id,
+        description:
+          'Deduplication key within one principal and metadata_ttl. Reuse the same request, including the original absolute deadline; changing deadline returns conflict. wait_ms only controls waiting.'
+      }
     },
     [...targetRequired, 'contract_ref', 'native_request', 'deadline']
   ),
@@ -135,27 +156,17 @@ export function isToolName(name: string): name is ToolName {
   return Object.hasOwn(schemas, name)
 }
 
-// 复制并有界校验 JSON 参数，拒绝访问器与循环，再补充保守等待默认值。
+// 复制并有界校验 JSON 参数，拒绝访问器与循环；默认值由消费处应用，不改变二次校验的字节数。
 export function parseToolArguments<K extends ToolName>(name: K, value: unknown): ToolArguments[K] {
   // 复用现有 JSON 边界；不触发 getter，也不允许后续共享对象改变请求。
   const encoded = canonical(value)
   if (Buffer.byteLength(encoded) > MAX_MCP_BYTES) {
-    throw new Error('invalid_arguments')
+    throw new ToolArgumentsTooLargeError()
   }
   const snapshot: unknown = JSON.parse(encoded)
   if (!validators.get(name)?.(snapshot)) {
     throw new Error('invalid_arguments')
   }
-  const args = snapshot as Record<string, unknown>
-  if (name === 'runtime_call') {
-    // validation 不在此补默认：Luvus 通用方法须用 raw-contract，由准入按 provider 和方法选择。
-    args.wait_ms ??= 0
-  }
-  if (name === 'runtime_call_get') {
-    args.wait_ms ??= 0
-  }
-  if (name === 'runtime_result_read') {
-    args.max_bytes ??= 4096
-  }
-  return args as ToolArguments[K]
+  // 保留省略字段：facade 与 service 会各自验证，不能因中间补默认值而挤占客户端预算。
+  return snapshot as ToolArguments[K]
 }

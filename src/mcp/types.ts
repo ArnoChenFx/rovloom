@@ -112,6 +112,7 @@ export interface GatewayService {
 export const SERVICE_ERROR_CODES = [
   'backend_unavailable',
   'invalid_arguments',
+  'invalid_deadline',
   'native_request_invalid',
   'internal_error',
   'unauthenticated',

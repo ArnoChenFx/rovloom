@@ -152,7 +152,7 @@ Windows uses the explicitly selected existing user with S4U, without storing a p
   'mcp.tool.runtime_describe':
     'Describe the exact methods\u2019 native parameters, categories and limits under an explicit Target/revision.',
   'mcp.tool.runtime_call':
-    'Submit one native call for an explicit Target/revision/contract. deadline is an absolute millisecond deadline; wait_ms only controls short waits; no retries or provider management.',
+    'Submit one native call for an explicit Target/revision/contract. First registration requires Gateway now < deadline <= now + 600000 (Unix ms); idempotent retries reuse the same key, request and absolute deadline. wait_ms only controls short waits. Complete tool arguments are limited to 65536 UTF-8 JSON bytes; no automatic retries or provider management.',
   'mcp.tool.runtime_call_get':
     'Read a call under the current ownership, both-end policies and content gating; a short-wait timeout does not change the execution deadline.',
   'mcp.tool.runtime_call_cancel':
@@ -293,7 +293,7 @@ Windows 使用显式选择的既有用户与 S4U，不保存密码、不要求�
   'mcp.tool.runtime_discover': '发现显式 Target/revision 的有效能力及来源；不授予执行权限。',
   'mcp.tool.runtime_describe': '描述显式 Target/revision 下精确方法的原生参数、分类和限制。',
   'mcp.tool.runtime_call':
-    '提交一次显式 Target/revision/契约的原生调用。deadline 是绝对毫秒期限，wait_ms 只控制短等；不重试或管理 provider。',
+    '提交一次显式 Target/revision/契约的原生调用。首次登记须满足 Gateway now < deadline ≤ now + 600000（Unix 毫秒）；幂等重试复用原 key、请求和绝对 deadline。wait_ms 只控制短等；完整工具参数上限为 65536 个 UTF-8 JSON 字节；不自动重试或管理 provider。',
   'mcp.tool.runtime_call_get': '按当前归属、双端策略和内容门禁读取调用；短等到期不改变执行期限。',
   'mcp.tool.runtime_call_cancel': '请求停止等待或桥接；仅报告服务可确认程度，不承诺原生回滚。',
   'mcp.tool.runtime_result_read': '按当前读取授权和期限读取有界结果页；cursor 由服务绑定 caller 和原结果。',

@@ -10,7 +10,7 @@ import {
   ErrorCode,
   type JSONRPCMessage
 } from '@modelcontextprotocol/sdk/types.js'
-import { MAX_MCP_BYTES } from './schema.js'
+import { ARGUMENTS_TOO_LARGE_DATA, MAX_MCP_BYTES } from './schema.js'
 
 type PublicId = string | number
 export type RequestReservation = Readonly<{ externalId: PublicId; internalId: number }>
@@ -167,7 +167,7 @@ export class FacadeHttpTransport extends WebStandardStreamableHTTPServerTranspor
 
   private cancelSdk?: (id: number) => void
 
-  // 响应恢复公共ID，并移除SDK错误data和异常原文；超预算立即结束该会话。
+  // 响应恢复公共ID；仅重建固定的参数超限诊断，其余SDK错误data和异常原文全部移除。
   override async send(message: JSONRPCMessage): Promise<void> {
     if (this.stopped) {
       return
@@ -181,19 +181,45 @@ export class FacadeHttpTransport extends WebStandardStreamableHTTPServerTranspor
         return
       }
       const id = reservation.externalId
+      const data = 'error' in message ? message.error.data : undefined
       outgoing =
         'error' in message
           ? {
               jsonrpc: '2.0',
               id,
-              error: { code: message.error.code, message: messages[message.error.code] ?? 'Request failed' }
+              error: {
+                code: message.error.code,
+                message: messages[message.error.code] ?? 'Request failed',
+                ...(message.error.code === ErrorCode.InvalidParams &&
+                typeof data === 'object' &&
+                data !== null &&
+                'reason' in data &&
+                data.reason === ARGUMENTS_TOO_LARGE_DATA.reason &&
+                'limit_bytes' in data &&
+                data.limit_bytes === MAX_MCP_BYTES
+                  ? { data: ARGUMENTS_TOO_LARGE_DATA }
+                  : {})
+              }
             }
           : { ...message, id }
     }
     if (Buffer.byteLength(JSON.stringify(outgoing)) > MAX_MCP_BYTES) {
-      this.onerror?.(new Error('response_too_large'))
-      await this.close()
-      return
+      const error = new Error('response_too_large')
+      this.onerror?.(error)
+      // 没有关联的通知/服务端请求只拒绝本次发送，让发送方结清等待，不能关闭共享会话。
+      if (internalId === undefined || !('id' in outgoing)) {
+        throw error
+      }
+      // 交给 SDK 正常投递一个有界终态，释放当前 HTTP 流与双方关联，不声明原生未派发。
+      outgoing = {
+        jsonrpc: '2.0',
+        id: outgoing.id,
+        error: {
+          code: ErrorCode.InternalError,
+          message: 'Internal error',
+          data: { reason: 'response_too_large', limit_bytes: MAX_MCP_BYTES }
+        }
+      }
     }
     try {
       await super.send(outgoing)
