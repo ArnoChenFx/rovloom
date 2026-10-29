@@ -95,6 +95,38 @@ def luvus_servers(binary_dir):
     return sorted(found)
 
 
+def stop_servers(binary_dir):
+    """结束本次部署私有目录里的 herdr/luvus server。
+
+    Connector 在附着模式下自建的 server 会在 Connector 退出后继续运行（这是产品行为），但它们属于本轮私有目录，
+    测试结束必须回收，否则每跑一次就留下一个常驻进程。先 TERM，等不到再 KILL。
+    """
+    for sig, grace in ((signal.SIGTERM, 5.0), (signal.SIGKILL, 2.0)):
+        pids = [pid for pid, _ in luvus_servers(binary_dir)]
+        if not pids:
+            return
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                pass
+        end = time.monotonic() + grace
+        while time.monotonic() < end and luvus_servers(binary_dir):
+            time.sleep(0.1)
+
+
+def discard_work(work, keep_state):
+    """清理自动创建的工作目录：成功则整个删除；失败或被打断时只留下小体积的状态与日志供排查。
+
+    二进制副本（约 110 MB）和 herdr/luvus 副本（约 16 MB）可再生，任何结果下都删除。
+    """
+    if not keep_state:
+        shutil.rmtree(work, ignore_errors=True)
+        return
+    for name in ('bin', 'hb'):
+        shutil.rmtree(os.path.join(work, name), ignore_errors=True)
+
+
 def sudo_service(binary, *step):
     """一次性 CI 虚拟机里用已有的免密 sudo 运行 `rovloom service ...`（产品代码自身从不提权）。"""
     return subprocess.run(['/usr/bin/sudo', '-n', '--', binary, 'service', *step],
@@ -165,6 +197,10 @@ def main():
     env_c = {**base, 'HOME': home_c, 'PATH': f'{herdr_dir}:/usr/bin:/bin'}
     terms = []
     gateway = None
+    status = finished = None
+    # 被 timeout / CI 取消终止时也要走 finally：SIGTERM 默认直接结束解释器，会留下孤儿 server 与工作目录。
+    for signum in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, lambda number, _frame: sys.exit(128 + number))
     try:
         # 按 Quick Start 显式生成 provider 配置，不先启动再 Ctrl-C 或手改 provider。
         initialized = subprocess.run([rov, 'config', 'init', 'connector', '--provider',
@@ -485,17 +521,14 @@ def main():
                 connector.pump(1.0); gateway.pump(0.3)
                 print('--- gateway tail ---\n' + redact(ANSI.sub(b'', gateway.log).decode('utf8', 'replace')), flush=True)
                 print('--- connector tail ---\n' + redact(ANSI.sub(b'', connector.log).decode('utf8', 'replace')), flush=True)
+        finished = status  # 只有跑到这里才算跑完；中途被信号或异常打断时保持 None
         sys.exit(status)
     finally:
+        # 清理期间不再响应终止信号，保证清理本身跑完。
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            signal.signal(signum, signal.SIG_IGN)
         for term in reversed(terms):
             term.stop()
-        if args.legacy_wait_output or args.upgrade_from:
-            # 此场景的 daemon 来自本轮私有 binary/HOME，不属于用户已有实例。
-            for pid, _ in luvus_servers(herdr_dir):
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
         if args.service:
             # 先让服务收到正常停止请求，再撤销开机登记；尽力而为，不影响测试结论。
             for step in (['stop', '--role', 'connector'], ['uninstall', '--role', 'connector']):
@@ -504,6 +537,14 @@ def main():
                     print('SERVICE', step[0], done.returncode, (done.stdout + done.stderr).strip()[:200], flush=True)
                 except Exception as error:
                     print('SERVICE', step[0], 'error', error, flush=True)
+        # 不论哪个场景，私有目录里的 herdr/luvus server 都属于本轮，不是用户已有的实例；
+        # 清理尽力而为，不能盖掉真正的失败。
+        try:
+            stop_servers(herdr_dir)
+        except Exception as error:
+            print('CLEANUP servers error', error, flush=True)
+        if args.work is None:
+            discard_work(work, keep_state=finished != 0)
 
 
 if __name__ == '__main__':
