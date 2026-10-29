@@ -44,6 +44,11 @@ python3 e2e/quickstart.py --binary dist/release/bun-linux-x64/candidate/rovloom 
 `--then` 会拿到 `MCP_CONFIG`（URL、Bearer、target）。`herdr-session.mjs` 使用官方 MCP SDK 验证只读调用及
 workspace 创建后的计数，不调用模型。可选的 Agent 两轮对话方法见下节，须另外核实授权与累计剩余预算。
 
+不带 `--work` 时脚本自己创建 `~/.rq-*` 并在结束时清理：成功则整个删除；失败或被 `timeout`、CI 取消终止（SIGTERM/SIGHUP 同样会走清理）时
+只保留 `c`、`g`、`mcp.json` 这类小体积状态与日志，约 110 MB 的二进制副本总是删除。无论哪种结局，本轮私有目录里的 herdr/luvus server
+都会被回收——Connector 在附着模式下自建的 server 会在 Connector 退出后继续运行（这是产品行为），收尾由脚本负责。
+显式传入的 `--work` 目录不会被删除。SIGKILL 无法被捕获，`timeout -k` 的强杀仍会留下残余，需手工清理。
+
 `--repair` 在就绪后停止 Connector，用 `rovloom gateway --issue-code` 重新签发一张新码，再次 `rovloom connector --join`
 （本机重置本地状态，作为新设备重新配对）：断言本机凭据文件被替换、`pairing_completed` 与 `provider_ready=true` 再次出现，
 并用**未改变的 MCP Bearer** 跑 `--then` 链路（授权与原生设置不变）。
