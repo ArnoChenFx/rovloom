@@ -538,6 +538,18 @@ test('Release 说明按版本生成：没有该版本条目就不带升级提示
   assert.match(minor, /subset_revision/u)
   assert.match(minor, /cpu_quota_status/u)
   assert.match(minor, /never proof of unlimited capacity/u)
+  // 0.8.0 只讲 musl 资产与安装器；不沿用 0.7.1 的审核参数与 CPU 配额提示。
+  const musl = releaseBody({ tag: 'v0.8.0', version: '0.8.0', commit: 'f'.repeat(40) })
+  assert(!musl.includes('x-maxUtf8Bytes'))
+  assert(!musl.includes('subset_revision'))
+  assert(!musl.includes('cpu_quota_status'))
+  assert(!musl.includes('token device scope'))
+  assert.match(musl, /linux-x64-musl/u)
+  assert.match(musl, /linux-arm64-musl/u)
+  assert.match(musl, /glibc, macOS and Windows asset names and bytes are unchanged/u)
+  assert.match(musl, /apk add libstdc\+\+/u)
+  assert.match(musl, /owned_pidfd_unavailable/u)
+  assert.match(musl, /pidfd_open/u)
   // 未登记的版本不继承任何旧提示，只保留固定的公共段落与契约标记。
   const future = releaseBody({ tag: 'v0.9.9', version: '0.9.9', commit: 'b'.repeat(40) })
   assert(!future.includes('Upgrade note'))
