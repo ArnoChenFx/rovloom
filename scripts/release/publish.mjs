@@ -42,6 +42,15 @@ const RELEASE_NOTES = Object.freeze({
     ],
     upgrade:
       'Upgrade Gateway and every Connector together. Connectors migrate their old control records (`native-setup.json`, `herdr-setup.json`, `control/luvus-claims.db`, `hr/control/claims.db`, root/owner records) to `control/<provider>/` on first start and keep the original SQLite ledgers, tokens, device credentials and pairing — no re-pairing is needed, and an active ledger holder makes the migration refuse rather than proceed. The caller registry is rewritten to schema v2, which drops per-method/action grants, `local_policy`, `gateway_policy` and the standalone result-delete permission; `runtime_response_discard` is now available to any token that can see the call, so narrow it with device scope if that matters. Old policy and raw-grant fields are still read for compatibility but grant nothing. Rollback requires stopping both ends and restoring the same pre-upgrade backup with the matching binaries: an older binary refuses a v2 registry and a policy-free configuration instead of ignoring them.'
+  },
+  '0.7.1': {
+    highlights: [
+      '`wait.output` now has a machine-readable parameter schema even though native coverage stays generic: required `pane`/`match`, a real u32 pane, no NUL, and `timeout_s` in 0..3600 seconds. Its 4096 limit is UTF-8 bytes via the `x-maxUtf8Bytes` keyword; `maxLength` alone counts characters.',
+      '`runtime_discover` and `runtime_describe` return `subset_revision` next to `contract_ref`, so a client can cache a directory by the method set it actually sees without changing the approved native source identity.',
+      'The Connector reports Linux cgroup CPU bandwidth as an optional fractional `cpu_quota` with a paired `cpu_quota_status` (limited / unlimited / unknown / partial / unsupported), so four visible CPUs with a half-core quota no longer look like four usable cores.'
+    ],
+    upgrade:
+      '`cpu_quota` needs both ends on Wire minor 3 (`host_cpu_quota`, dependent on `host_profile`) and a reconnecting Connector: an older Gateway never receives the two new fields, and a report without them means an older Connector rather than no limit. Read `cpu_quota_status` before using the number — only `unlimited` proves the fully inspected visible hierarchy has no limit, `partial` keeps a known upper bound but may miss a tighter ancestor, and `null` is never proof of unlimited capacity. `params_schema_source` distinguishes `installed_native_schema` from `rovloom_reviewed_subset`; strict validators must register `x-maxUtf8Bytes` to enforce the byte limit. Existing pairings, tokens and ledgers are unchanged.'
   }
 })
 

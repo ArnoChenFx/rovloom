@@ -1,6 +1,6 @@
 {
   "name": "rovloom",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "license": "Apache-2.0",
   "description": "Rovloom: multi-machine MCP gateway and connector for Luvus/Herdr runtimes",
