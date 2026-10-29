@@ -481,6 +481,18 @@ test('Release 说明按版本生成：没有该版本条目就不带升级提示
   assert.match(latest, /token scope/u)
   assert.match(latest, /logical CPU count/u)
   assert.match(latest, /does not convert old reports/u)
+  // 0.7.0 是授权模型替换与 schema 自动回收的版本，只讲自己的变更与真正的回滚边界。
+  const major = releaseBody({ tag: 'v0.7.0', version: '0.7.0', commit: 'd'.repeat(40) })
+  assert(!major.includes('wait.output'))
+  assert(!major.includes('35-method Luvus grants'))
+  assert(!major.includes('mcp.public_url'))
+  assert(!major.includes('logical CPU count'))
+  assert.match(major, /token device scope/u)
+  assert.match(major, /schema v2/u)
+  assert.match(major, /control\/<provider>\//u)
+  assert.match(major, /no re-pairing is needed/u)
+  assert.match(major, /runtime_response_discard/u)
+  assert.match(major, /restoring the same pre-upgrade backup/u)
   // 未登记的版本不继承任何旧提示，只保留固定的公共段落与契约标记。
   const future = releaseBody({ tag: 'v0.9.9', version: '0.9.9', commit: 'b'.repeat(40) })
   assert(!future.includes('Upgrade note'))
