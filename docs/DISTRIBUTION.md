@@ -20,7 +20,7 @@ bun run release:smoke /absolute/path/to/dist/release/bun-linux-x64/candidate/rov
 - 产品候选的 `release:build` 与 `release:smoke`；Windows 另验证 EXE 图标与控制台子系统。
 - 一次性服务生命周期验收：在一次性托管虚拟机上走真实 OS 服务注册。
 - [产品 smoke](../scripts/release/product-smoke.mjs)：八个目标都运行[Gateway smoke](../scripts/release/gateway-smoke.mjs)，验证认证 MCP、管理页白名单资源、正常关闭与 Luvus/Herdr schema 工厂。glibc Linux x64 另运行[双角色 smoke](../scripts/release/dual-role-smoke.mjs)：从同一 binary 启动 Gateway 与 Connector，经回环 WebSocket 接纳合成设备身份，调用官方 Herdr 的 `ping`，经 MCP 读回持久化结果。其余七个目标返回 `connector: unsupported`。
-- musl 目标（`bun-linux-x64-musl`、`bun-linux-arm64-musl`）在 glibc runner 上编得出来但跑不起来，因此构建后的全部运行验收都在一次性 Alpine 容器内完成：`docker run --rm alpine:3.20`，先 `apk add libstdc++`，再执行 `--version` 与真实 Gateway 产品 smoke（[alpine.mjs](../scripts/release/alpine.mjs)）。宿主 runner 只负责编译，不会假装做过原生验收。
+- musl 目标（`bun-linux-x64-musl`、`bun-linux-arm64-musl`）在 glibc runner 上编得出来但跑不起来，因此构建后的全部运行验收都在一次性 Alpine 容器内完成：`docker create` 取得固定容器 ID 后 `docker start --attach`，先 `apk add libstdc++`，再执行 `--version` 与真实 Gateway 产品 smoke（[alpine.mjs](../scripts/release/alpine.mjs)）。宿主 runner 只负责编译，不会假装做过原生验收。验收完成或失败后按已确认 ID 强制删除容器；删除未确认时保留私有目录，不以 Docker 客户端退出冒充容器退出。
 
 smoke 不调用模型、不使用真实外部凭据、不安装系统服务（服务验收除外）。官方 Herdr 下载使用固定 SHA256、大小和时间限制，只在本轮私有目录运行。该 CI 只上传短期 Actions artifacts，不签名、不发布 Release。
 

@@ -46,6 +46,11 @@ jobs:
         run: bun --no-env-file install --frozen-lockfile --ignore-scripts
       - name: Verify ordinary files, schema provenance, atomic config, locks and unknown recovery
         run: bun --no-env-file test ./test/storage/file-platforms.test.ts ./test/storage/database-aliases.test.ts ./test/connector/herdr/gateway-schema.test.ts ./test/cli/config-init.test.ts
+      - name: Verify Alpine container ownership and failure cleanup
+        if: matrix.alpine == '1'
+        env:
+          ROVLOOM_DOCKER_TESTS: '1'
+        run: bun --no-env-file test ./test/release/musl-lifecycle.test.mjs
       - name: Build actual standalone product
         env:
           # 矩阵目标决定编译产物；不传会让 musl 项编出 glibc 二进制再自我否定。

@@ -57,8 +57,9 @@ jobs:
           chmod +x "$asset"
           if [[ "${{ matrix.alpine }}" == '1' ]]; then
             # musl 产物无法在 glibc runner 上执行：在 Alpine 内先装 libstdc++，再运行下载到的原字节。
+            # 只在容器内合并产品输出；Docker 拉取日志与 apk 诊断留在宿主 stderr。
             out=$(docker run --rm -v "$PWD:/work" -w /work -e ASSET="$asset" alpine:3.20 \
-              sh -c 'apk add --no-cache libstdc++ >/dev/null && exec "./$ASSET" --version' 2>&1 | tr -d '\r')
+              sh -c 'apk add --no-cache libstdc++ >/dev/null && exec "./$ASSET" --version 2>&1' | tr -d '\r')
           else
             out=$("./$asset" --version 2>&1 | tr -d '\r')
           fi
