@@ -38,6 +38,53 @@ test('spawn 同步失败仍删除已确认的容器，只使用创建返回的�
   assert.deepEqual(calls[1], ['rm', '--force', 'c'.repeat(64)])
 })
 
+test('create 明确失败时保留原始诊断，不把「没有容器」报成删除失败', () => {
+  const calls = []
+  const runtime = alpineRuntime({
+    runDocker(_file, args) {
+      calls.push(args)
+      return { status: 1, stdout: '', stderr: 'Unable to find image alpine:3.20 locally' }
+    }
+  })
+  assert.throws(
+    () => spawnSmokeChild('/fixture/product', [], { cwd, env: {} }, { runtime }),
+    /** 镜像拉取失败是诊断本身；未确认 ID 的自有容器不存在，不能冒充 smoke_cleanup_unknown。 */ (error) =>
+      error.message === 'alpine_create_failed' && error.code === undefined
+  )
+  // create 已由 Docker 判定失败，没有可删除的容器，也就不再尝试 rm。
+  assert.deepEqual(
+    calls.map((args) => args[0]),
+    ['create']
+  )
+})
+
+test('create 未返回 ID 但启动本身出错时按随机名尽力删除，删除失败才报清理未知', () => {
+  const names = []
+  const make = (rmStatus) =>
+    alpineRuntime({
+      runDocker(_file, args) {
+        if (args[0] === 'create') {
+          names.push(args[2])
+          return {
+            status: null,
+            stdout: '',
+            error: Object.assign(new Error('spawnSync docker ETIMEDOUT'), { code: 'ETIMEDOUT' })
+          }
+        }
+        return { status: rmStatus, stdout: '' }
+      }
+    })
+  assert.throws(
+    () => spawnSmokeChild('/fixture/product', [], { cwd, env: {} }, { runtime: make(0) }),
+    /alpine_create_failed/u
+  )
+  assert.match(names[0], /^rovloom-smoke-[a-f0-9-]+$/u)
+  assert.throws(
+    () => spawnSmokeChild('/fixture/product', [], { cwd, env: {} }, { runtime: make(1) }),
+    /** 创建结果不可知且按名字也删不掉：只能如实报清理未确认。 */ (error) => error.code === 'smoke_cleanup_unknown'
+  )
+})
+
 test('容器删除失败不交付正常 close，也不删除仍可能挂载的 smoke 目录', async () => {
   let temporary
   const runtime = {

@@ -103,6 +103,8 @@ export function alpineRuntime(options = {}) {
       let containerId
       let attempted = false
       let removed = false
+      // 只有 create 交付确认 ID 后才有可删除的自有容器；未确认时不把「没有容器」误报成删除失败。
+      let created = false
       const invoke = (args, timeout) =>
         runDocker(docker, args, {
           cwd,
@@ -123,10 +125,20 @@ export function alpineRuntime(options = {}) {
           }
           attempted = true
           const result = invoke(command, timeout)
-          if (result.error || result.status !== 0 || !/^[a-f0-9]{64}\s*$/u.test(result.stdout)) {
+          const id = typeof result.stdout === 'string' ? result.stdout.trim() : ''
+          if (result.status !== 0 || !/^[a-f0-9]{64}$/u.test(id)) {
+            // Docker 明确失败（镜像拉不到、名字冲突）说明容器没建，保留原始诊断即可；
+            // 但 spawn 失败或超时意味着 create 可能已经建好，只能按随机名尽力删除。
+            if (result.error) {
+              const cleaned = invoke(['rm', '--force', name], 5_000)
+              if (cleaned.error || cleaned.status !== 0) {
+                throw Object.assign(new Error('alpine_create_unconfirmed'), { code: 'smoke_cleanup_unknown' })
+              }
+            }
             throw new Error('alpine_create_failed')
           }
-          containerId = result.stdout.trim()
+          containerId = id
+          created = true
           // create 已确认容器身份，start 不再创建容器；杀死附着客户端不会与创建发生竞争。
           this.args = ['start', '--attach', '--interactive', containerId]
         },
@@ -143,8 +155,13 @@ export function alpineRuntime(options = {}) {
           if (!attempted || removed) {
             return
           }
+          if (!created) {
+            // create 未确认：没有自有容器需要删除，prepare 已判定容器状态或按随机名清理过。
+            removed = true
+            return
+          }
           // 不使用 --rm：即使进程自然退出，容器也保留到本所有者确认删除，rm 成功即为 daemon 的删除确认。
-          const result = invoke(['rm', '--force', containerId ?? name], 5_000)
+          const result = invoke(['rm', '--force', containerId], 5_000)
           if (result.error || result.status !== 0) {
             throw Object.assign(new Error('alpine_cleanup_unconfirmed'), { code: 'smoke_cleanup_unknown' })
           }
