@@ -89,7 +89,7 @@
 - 有效 token 可调用其可见设备上 provider 的全部已暴露方法，Connector 的终端执行开关控制直接终端操作。没有逐方法、provider、read/dispatch/cancel、caller/local/gateway 策略或 raw grant。未知或未实现方法不在暴露目录内；`runtime_describe not_found` 不区分原生不存在或后端未适配。
 - 新调用的 `contract_ref` 与当前批准契约不符时，授权后的登记预检返回 `gateway_error: {code: "contract_unavailable"}`，不建立 call、不占用请求 key、不发送 Wire 帧，也不关闭设备连接。重新 `runtime_discover/describe` 获取当前引用后才能提交新意图；不要将拒绝理解为原生执行失败。已存在的同 key、同请求仍查询原调用，不因契约变化而重新派发；同 key 换契约引用是不同请求，返回 `conflict`。
 - `native_request_invalid` 在 Luvus 或 Herdr 的完整请求 schema 于登记预检阶段被拒时附带 `outcome: "not_dispatched"`：此时还没有建立 call 或派发锚点，坏请求不占用 key，不发送 Wire 帧，不关闭设备连接。已有 key 仍返回原调用的真实状态，旧的 unknown 不会倒退或重派。预检通过不授予执行权限，网关不返回参数或 schema 的错误正文。
-- 响应超过 64 KiB 时，只返回 `response_too_large`、`truncated`、字节数、hash 和适用的 `call_id`，不制造句柄，也不再次执行。
+- 工具结果超过预算时，业务门面只返回 `response_too_large`、`truncated`、字节数、hash 和适用的 `call_id`，不制造句柄，也不再次执行。如果最终完整 JSON-RPC 响应仍超过 64 KiB，transport 对该请求返回同 ID 的 `-32603` 与固定 `data: {reason: "response_too_large", limit_bytes: 65536}`，保留会话及其它在途请求。没有请求关联的超限通知/服务端请求只拒绝该次发送。超限不证明原生未执行，不能据此自动重发。
 - 工具参数超出 65,536 字节时，在准入前返回 JSON-RPC `-32602`，不产生 `structuredContent`，固定错误 data 为：
 
   ```json
