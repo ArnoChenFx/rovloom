@@ -11,7 +11,7 @@ import {
   matchExistingIndex,
   releaseContext
 } from '../../scripts/container/release.mjs'
-import { assetName } from '../../src/release/contract.ts'
+import { assetName, officialReleasePlatforms } from '../../src/release/contract.ts'
 
 /** 内存元数据严格对应现行发布合同，fake二进制只测字节验证，不作为产品验收。 */
 function fixture(npm = false) {
@@ -30,14 +30,14 @@ function fixture(npm = false) {
   }
   const bytes = Buffer.from('synthetic-container-binary')
   const hash = /** 合成内容仍由真实摘要算法核验。 */ (value) => createHash('sha256').update(value).digest('hex')
-  const assets = ['linux', 'darwin', 'windows'].flatMap(
-    /** 覆盖全部六个平台的固定资产名。 */ (os) =>
-      ['x64', 'arm64'].map(
-        /** 不在JSON中引入下载URL。 */ (arch) => {
-          const platform = { os, arch, libc: os === 'linux' ? 'glibc' : null }
-          return { ...platform, name: assetName(context.version, platform), size: bytes.length, sha256: hash(bytes) }
-        }
-      )
+  // 覆盖资产契约的全部八个平台（Linux x64/arm64 各有 glibc 与 musl），名称由契约生成。
+  const assets = officialReleasePlatforms().map(
+    /** 不在JSON中引入下载URL。 */ (platform) => ({
+      ...platform,
+      name: assetName(context.version, platform),
+      size: bytes.length,
+      sha256: hash(bytes)
+    })
   )
   const manifest = Buffer.from(
     JSON.stringify({ schemaVersion: 1, repository: 'ArnoChenFx/rovloom', ...context, bun: '1.4.3', assets }) + '\n'
@@ -169,7 +169,8 @@ test(
 test('container publisher accepts legacy assets and a checksummed same-version npm tarball', async () => {
   for (const npm of [false, true]) {
     const f = fixture(npm)
-    assert.equal(f.release.assets.length, npm ? 9 : 8)
+    // 八项二进制 + 清单 + 校验和，npm tarball 可选。
+    assert.equal(f.release.assets.length, officialReleasePlatforms().length + 2 + (npm ? 1 : 0))
     assert.deepEqual(await releaseContext(f.event, f.api, f.request), f.context)
   }
 })

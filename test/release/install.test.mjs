@@ -45,7 +45,9 @@ function fixture({
   writeFileSync(binary, payload)
   const selectedOs = os === 'Darwin' ? 'darwin' : 'linux'
   const selectedArch = ['arm64', 'aarch64'].includes(arch) ? 'arm64' : 'x64'
-  const asset = `rovloom-${version}-${selectedOs}-${selectedArch}`
+  // 安装器只在 glibc 由 getconf 正面证明时选 glibc 资产；其余 Linux 一律选 -musl 资产。
+  const selectedLibc = selectedOs === 'linux' && !/^glibc [0-9]/u.test(libc) ? '-musl' : ''
+  const asset = `rovloom-${version}-${selectedOs}-${selectedArch}${selectedLibc}`
   let sums = `${digest}  ${asset}\n`
   if (failure === 'hash') {
     sums = `${'a'.repeat(64)}  ${asset}\n`
@@ -147,11 +149,45 @@ if (process.platform !== 'win32') {
           f.close()
         }
       }
-      for (const input of [{ os: 'Windows_NT' }, { arch: 'armv7l' }, { libc: 'musl 1.2' }]) {
+      for (const input of [{ os: 'Windows_NT' }, { arch: 'armv7l' }]) {
         const f = fixture(input)
         try {
           assert.notEqual(f.run(['--print-asset']).status, 0)
           assert.equal(existsSync(f.requests), false)
+        } finally {
+          f.close()
+        }
+      }
+    }
+  )
+
+  test(
+    'shell installer selects musl Linux assets for non-glibc hosts without touching the glibc names',
+    /** 非 glibc 报告、空报告与缺失报告都归入 musl 资产；安装仍走摘要校验与原子替换。 */ () => {
+      for (const [arch, libc, expected] of [
+        ['x86_64', 'musl 1.2.5', 'linux-x64-musl'],
+        ['aarch64', 'musl 1.2.5', 'linux-arm64-musl'],
+        // 非标准或空报告同样归入 musl 资产，不静默回退到 glibc。
+        ['x86_64', '', 'linux-x64-musl']
+      ]) {
+        const f = fixture({ arch, libc })
+        try {
+          const selected = f.run(['--print-asset'])
+          assert.equal(selected.status, 0, selected.stderr)
+          assert.equal(selected.stdout, `rovloom-${version}-${expected}\n`)
+          assert.equal(readFileSync(f.requests, 'utf8'), `${latestEndpoint}\n`)
+          const installed = f.run(['--install-dir', f.install])
+          assert.equal(installed.status, 0, installed.stderr)
+          assert.deepEqual(readFileSync(join(f.install, 'rovloom')), payload)
+          // 预览已解析过一次 latest，这里只看安装本身的三次请求。
+          assert.deepEqual(readFileSync(f.requests, 'utf8').trim().split('\n').slice(-3), [
+            latestEndpoint,
+            `https://github.com/ArnoChenFx/rovloom/releases/download/v${version}/SHA256SUMS`,
+            `https://github.com/ArnoChenFx/rovloom/releases/download/v${version}/rovloom-${version}-${expected}`
+          ])
+          // musl 安装必须提示 libstdc++ 依赖与 Luvus managed 限制，不冒充完整功能。
+          assert.match(installed.stdout, /apk add libstdc\+\+/u)
+          assert.match(installed.stdout, /Luvus managed/u)
         } finally {
           f.close()
         }

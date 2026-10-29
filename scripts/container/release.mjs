@@ -6,6 +6,7 @@ import {
   RELEASE_REPOSITORY,
   RELEASE_MANIFEST,
   assetName,
+  officialReleasePlatforms,
   parseReleaseJson,
   parseReleaseVersion,
   validateReleaseManifest,
@@ -50,17 +51,16 @@ export async function releaseContext(event, api, request = fetch) {
   assert.equal(release.prerelease, parseReleaseVersion(context.version).prerelease.length > 0)
   assert.equal(typeof release.body, 'string')
   assert(release.body.includes(`<!-- rovloom-release:1 ${context.tag} ${context.commit} -->`))
-  assert(Array.isArray(release.assets), 'Expected complete six-binary release')
+  assert(Array.isArray(release.assets), 'Expected complete eight-binary release')
   const names = new Set(release.assets.map(/** 重复或额外资产不能混入镜像来源。 */ (asset) => asset.name))
   const expected = [RELEASE_MANIFEST, 'SHA256SUMS']
   const npm = `rovloom-${context.version}.tgz`
   if (names.has(npm)) {
     expected.push(npm)
   }
-  for (const os of ['linux', 'darwin', 'windows']) {
-    for (const arch of ['x64', 'arm64']) {
-      expected.push(assetName(context.version, { os, arch, libc: os === 'linux' ? 'glibc' : null }))
-    }
+  // 期望集合直接来自资产契约的官方平台矩阵，容器发布端不再自维护一份命名表。
+  for (const platform of officialReleasePlatforms()) {
+    expected.push(assetName(context.version, platform))
   }
   assert.equal(release.assets.length, expected.length, 'Unexpected release assets')
   assert.equal(names.size, expected.length, 'Duplicate or missing release assets')
@@ -85,7 +85,7 @@ export async function releaseContext(event, api, request = fetch) {
   }
   const manifest = validateReleaseManifest(parseReleaseJson(metadata.get(RELEASE_MANIFEST), 1_048_576), context.tag)
   assert.equal(manifest.commit, context.commit, 'Release manifest commit differs')
-  assert.equal(manifest.assets.length, 6, 'Expected complete six-binary manifest')
+  assert.equal(manifest.assets.length, officialReleasePlatforms().length, 'Expected complete eight-binary manifest')
   const sums = new Map()
   for (const line of metadata.get('SHA256SUMS').toString('utf8').trimEnd().split('\n')) {
     const match = /^([a-f0-9]{64})  ([^\r\n]+)$/u.exec(line)

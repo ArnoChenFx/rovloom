@@ -8,9 +8,11 @@ import {
   RELEASE_REPOSITORY,
   RELEASE_MANIFEST,
   assetName,
+  officialReleasePlatforms,
   versionFromTag,
   validateReleaseManifest
 } from '../../src/release/contract.ts'
+import { runtimeLibc } from './libc.mjs'
 export { assetName, versionFromTag }
 export const repository = RELEASE_REPOSITORY
 export const manifestName = RELEASE_MANIFEST
@@ -43,11 +45,36 @@ export async function validateProductVersion(context, directory = root) {
 /** 公开平台字段使用 Node/Bun 命名；归档中的 aarch64 只属于官方工具链下载名。 */
 export function nativePlatform() {
   const os = process.platform === 'win32' ? 'windows' : process.platform
+  const libc = runtimeLibc()
   const platform = platforms.find(
-    /** 精确选择运行中的 OS/arch，禁止模拟交叉验收。 */ (item) => item.os === os && item.arch === process.arch
+    /** 精确选择运行中的 OS/arch/libc，禁止模拟交叉验收或把 musl 目标当 glibc 运行。 */ (item) =>
+      item.os === os && item.arch === process.arch && item.libc === libc
   )
   assert(platform, 'Unsupported native release platform')
   return platform
+}
+
+/** 矩阵与契约的官方平台集合必须逐项一致，避免 CI 或资产清单出现未声明的平台。 */
+export function assertPlatformMatrix() {
+  assert.deepEqual(
+    platforms.map(
+      /** 只比较公开平台元组，runner 与编译目标属于设施字段。 */ (item) => ({
+        os: item.os,
+        arch: item.arch,
+        libc: item.libc
+      })
+    ),
+    officialReleasePlatforms().map((item) => ({ os: item.os, arch: item.arch, libc: item.libc })),
+    'Release matrix does not match the asset contract'
+  )
+  for (const item of platforms) {
+    assert.equal(
+      item.target,
+      `bun-${item.os}-${item.arch}${item.libc === 'musl' ? '-musl' : ''}`,
+      'Target must be the Bun compile target for its platform'
+    )
+  }
+  return platforms
 }
 
 /** 读取普通文件的完整字节计算公开长度和 SHA-256，拒绝目录、符号链接及空产物。 */

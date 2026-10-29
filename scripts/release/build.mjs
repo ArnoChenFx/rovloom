@@ -74,7 +74,8 @@ export async function buildStandalone({
   if (process.cwd() !== root) {
     throw new Error('Run the release build from the repository root')
   }
-  if (!/^bun-(?:linux|darwin|windows)-(?:x64|arm64)$/u.test(target)) {
+  // musl 只有 Linux 提供；后缀必须显式出现，不能靠宿主 libc 推断。
+  if (!/^bun-(?:linux-(?:x64|arm64)(?:-musl)?|darwin-(?:x64|arm64)|windows-(?:x64|arm64))$/u.test(target)) {
     throw new Error('Unsupported standalone target')
   }
   if (target.startsWith('bun-windows-') && process.platform !== 'win32') {

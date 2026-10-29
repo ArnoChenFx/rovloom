@@ -262,5 +262,19 @@ test(
         /native Windows build/u
       )
     }
+    // musl 只有 Linux 提供，且后缀必须精确；其余写法在编译前就被拒绝。
+    for (const target of [
+      'bun-darwin-x64-musl',
+      'bun-windows-x64-musl',
+      'bun-linux-x64-musl-extra',
+      'bun-linux-x64-glibc',
+      'bun-linux-x86',
+      'linux-x64-musl'
+    ]) {
+      await assert.rejects(
+        buildStandalone({ entrypoint: 'test/release/probe.mjs', target }),
+        /Unsupported standalone target/u
+      )
+    }
   }
 )

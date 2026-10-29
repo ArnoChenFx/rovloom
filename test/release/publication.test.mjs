@@ -7,6 +7,7 @@ import { resolve } from 'node:path'
 import { test } from 'node:test'
 import {
   assemble,
+  assertPlatformMatrix,
   assetName,
   encode,
   fileMetadata,
@@ -19,6 +20,7 @@ import {
 import { productSmokePath } from '../../scripts/release/package.mjs'
 import { githubClient, verifyRemoteTag } from '../../scripts/release/github.mjs'
 import { publish, releaseBody } from '../../scripts/release/publish.mjs'
+import { officialReleaseAssetName, officialReleasePlatforms, releasePlatform } from '../../src/release/contract.ts'
 
 const context = { tag: 'v0.1.1', version: '0.1.1', commit: 'a'.repeat(40) }
 
@@ -168,22 +170,54 @@ test(
 )
 
 test(
-  'six platform names identify native target and libc without ambiguous aliases',
-  /** 固定支持矩阵与下载名。 */ () => {
-    assert.equal(platforms.length, 6)
-    assert.equal(new Set(platforms.map(/** 每个 OS/arch 只能出现一次。 */ (item) => `${item.os}-${item.arch}`)).size, 6)
-    for (const platform of platforms) {
-      assert.equal(platform.target, `bun-${platform.os}-${platform.arch}`)
-      assert.equal(platform.libc, platform.os === 'linux' ? 'glibc' : null)
-      assert.match(
-        assetName(context.version, platform),
-        /^rovloom-0\.1\.1-(?:linux|darwin|windows)-(?:x64|arm64)(?:\.exe)?$/u
-      )
-    }
-    assert.throws(
-      /** 不允许同名 musl 资产混入 glibc 矩阵。 */ () =>
-        assetName(context.version, { os: 'linux', arch: 'x64', libc: 'musl' })
+  'eight platform names identify native target and libc without ambiguous aliases',
+  /** 固定支持矩阵与下载名：Linux 每种架构各有 glibc 与 musl，两者不能共用同名资产。 */ () => {
+    assert.equal(platforms.length, 8)
+    assert.equal(
+      new Set(platforms.map(/** 每个 OS/arch/libc 只能出现一次。 */ (item) => `${item.os}-${item.arch}-${item.libc}`))
+        .size,
+      8
     )
+    for (const platform of platforms) {
+      assert.equal(platform.target, `bun-${platform.os}-${platform.arch}${platform.libc === 'musl' ? '-musl' : ''}`)
+      assert.equal(platform.libc, platform.os === 'linux' ? platform.libc : null)
+      assert(['glibc', 'musl'].includes(platform.libc) || platform.libc === null)
+      const name = assetName(context.version, platform)
+      assert.match(name, /^rovloom-0\.1\.1-(?:linux|darwin|windows)-(?:x64|arm64)(?:-musl)?(?:\.exe)?$/u)
+      // musl 后缀只属于 Linux，Windows 的 .exe 只属于 Windows，二者不会互相污染。
+      assert.equal(name.includes('-musl'), platform.os === 'linux' && platform.libc === 'musl')
+      assert.equal(name.endsWith('.exe'), platform.os === 'windows')
+      assert(officialReleaseAssetName(context.version, name))
+    }
+    assertPlatformMatrix()
+    // glibc 与 musl 在相同版本/OS/arch 下必须得到不同资产名，否则发行会撞名。
+    assert.notEqual(
+      assetName(context.version, { os: 'linux', arch: 'x64', libc: 'glibc' }),
+      assetName(context.version, { os: 'linux', arch: 'x64', libc: 'musl' })
+    )
+    assert.deepEqual(
+      officialReleasePlatforms().map((item) => `${item.os}-${item.arch}-${item.libc}`),
+      [
+        'linux-x64-glibc',
+        'linux-x64-musl',
+        'linux-arm64-glibc',
+        'linux-arm64-musl',
+        'darwin-x64-null',
+        'darwin-arm64-null',
+        'windows-x64-null',
+        'windows-arm64-null'
+      ]
+    )
+    for (const bad of [
+      /** 未知 libc、非 Linux 携带 libc、非规范 os/arch 一律拒绝。 */ { os: 'linux', arch: 'x64', libc: 'uclibc' },
+      { os: 'linux', arch: 'x64', libc: null },
+      { os: 'darwin', arch: 'x64', libc: 'musl' },
+      { os: 'linux', arch: 'armv7', libc: 'glibc' }
+    ]) {
+      assert.throws(() => assetName(context.version, bad))
+      assert.throws(() => releasePlatform(bad.os, bad.arch, bad.libc))
+    }
+    assert(!officialReleaseAssetName(context.version, `rovloom-0.1.1-linux-x64-uclibc`))
   }
 )
 
@@ -226,7 +260,8 @@ test(
       const bundle = assemble(context, temporary.directory)
       assert.equal(bundle.manifestBytes, assemble(context, temporary.directory).manifestBytes)
       assert.equal(bundle.checksumsBytes, assemble(context, temporary.directory).checksumsBytes)
-      assert.equal(bundle.manifest.assets.length, 6)
+      assert.equal(bundle.manifest.assets.length, platforms.length)
+      assert.equal(bundle.manifest.assets.length, 8)
       assert.deepEqual(Object.keys(bundle.manifest), [
         'schemaVersion',
         'repository',
@@ -313,7 +348,8 @@ test(
       state.failUpload = 0
       await publish(context, bundle, api)
       assert.equal(state.release.draft, false)
-      assert.equal(state.assets.length, 8)
+      // 八项二进制 + 清单 + 校验和（无 npm tarball 时）。
+      assert.equal(state.assets.length, platforms.length + 2)
     } finally {
       temporary.cleanup()
     }
