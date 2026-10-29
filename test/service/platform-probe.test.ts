@@ -2,7 +2,7 @@
 import { phaseTiming } from '../support/phase-timing.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
@@ -266,10 +266,17 @@ async function nativeProbe(plan: CommandPlan, start: typeof spawn = spawn, obser
   return result
 }
 
+// 原生解析器是宿主自带的系统工具；容器和精简镜像可能没有它，此时无从验证，显式跳过而不是失败。
+const nativeParser: Partial<Record<NodeJS.Platform, string>> = {
+  linux: '/usr/bin/systemd-analyze',
+  darwin: '/usr/bin/plutil'
+}
+const parserMissing = nativeParser[process.platform] !== undefined && !existsSync(nativeParser[process.platform]!)
+
 test(
   '实际宿主原生解析器接受开机声明且不执行注册或启动',
   // 工具及诊断总界限35秒，留两秒回收余量；Windows功能十秒，POSIX操作十秒保持独立。
-  { timeout: 37000 },
+  { timeout: 37000, skip: parserMissing ? '宿主没有原生解析器' : false },
   /* 一个原生平台只证明自己的格式解析能力。 */ async () => {
     const platform = process.platform
     assert(['linux', 'darwin', 'win32'].includes(platform))
