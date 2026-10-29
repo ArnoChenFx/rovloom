@@ -1,5 +1,6 @@
 // 已审核子集的调用提示与固定字段诊断；不冒充安装版原生 JSON Schema，不返回请求值。
 import type { ParameterDiagnostic, ParameterIssueRule } from '../../mcp/diagnostic.js'
+import { luvusReviewedFields, luvusReviewedIssues, luvusReviewedValidator } from './reviewed-params.js'
 const sentinelAdvice =
   'Use wait.output when runtime_discover lists it for this target. If it is not listed, it is not exposed by this provider; do not probe runtime_call. Old output and prompt echo can match, so verify the reply separately.'
 const sentinelUnavailable =
@@ -91,7 +92,7 @@ export function luvusParameterHelp(
   visibleMethods?: readonly string[]
 ): Record<string, unknown> | undefined {
   if (!Object.hasOwn(help, method)) {
-    return undefined
+    return reviewedHelp(method)
   }
   const guide = { source: 'rovloom_reviewed_subset', ...JSON.parse(JSON.stringify(help[method as Method])) }
   if (method === 'agent.prompt' && visibleMethods && !visibleMethods.includes('wait.output')) {
@@ -100,41 +101,43 @@ export function luvusParameterHelp(
   return guide
 }
 
-/** 只定位固定方法的已知字段和依赖关系，不复制未知键、参数值或原生/Ajv 错误文本。 */
+/** 未手写提示的已审核方法，必填、可选字段与允许取值都来自同一份已审核 schema。 */
+function reviewedHelp(method: string): Record<string, unknown> | undefined {
+  const fields = luvusReviewedFields(method)
+  if (!fields) {
+    return undefined
+  }
+  return {
+    source: 'rovloom_reviewed_subset',
+    required: fields.required,
+    optional: fields.optional,
+    ...(Object.keys(fields.values).length > 0 ? { allowed_values: fields.values } : {})
+  }
+}
+
+/** 只定位已审核方法的已知字段和依赖关系，不复制未知键、参数值或原生/Ajv 错误文本。 */
 export function luvusParameterDiagnostic(request: unknown): LuvusParameterDiagnostic | undefined {
   if (
     !request ||
     typeof request !== 'object' ||
     !('method' in request) ||
     typeof request.method !== 'string' ||
-    !Object.hasOwn(help, request.method)
+    (!Object.hasOwn(help, request.method) && !luvusReviewedValidator(request.method))
   ) {
     return undefined
   }
-  const method = request.method as Method
+  const method = request.method
   const issues: { path: string; rule: Rule }[] = []
   const params = 'params' in request ? request.params : undefined
   if (!params || typeof params !== 'object' || Array.isArray(params)) {
     issues.push({ path: '/params', rule: 'object' })
   } else {
+    // 必填、类型、枚举、范围与未知字段和执行校验来自同一份已审核 schema。
+    const reviewed = luvusReviewedIssues(method, params)
+    issues.push(...reviewed.primary)
     const values = params as Record<string, unknown>
-    for (const key of help[method].required) {
-      if (values[key] === undefined) {
-        issues.push({ path: '/params/' + key, rule: 'required' })
-      }
-    }
-    if (method === 'agent.start') {
-      for (const key of ['name', 'kind']) {
-        if (
-          values[key] !== undefined &&
-          (typeof values[key] !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(values[key]))
-        ) {
-          issues.push({ path: '/params/' + key, rule: 'pattern' })
-        }
-      }
-      if (values.pane !== undefined && values.anchor !== undefined) {
-        issues.push({ path: '/params/pane', rule: 'one_of' })
-      }
+    if (method === 'agent.start' && values.pane !== undefined && values.anchor !== undefined) {
+      issues.push({ path: '/params/pane', rule: 'one_of' })
     }
     if (method === 'agent.wait' && (values.status === undefined) === (values.statuses === undefined)) {
       issues.push({ path: '/params/statuses', rule: 'one_of' })
@@ -146,33 +149,39 @@ export function luvusParameterDiagnostic(request: unknown): LuvusParameterDiagno
     ) {
       issues.push({ path: '/params/wait', rule: 'required_true' })
     }
-    if (
-      method !== 'pane.run' &&
-      values.timeout_s !== undefined &&
-      (typeof values.timeout_s !== 'number' ||
-        !Number.isFinite(values.timeout_s) ||
-        values.timeout_s < 0 ||
-        values.timeout_s > 3600)
-    ) {
-      issues.push({ path: '/params/timeout_s', rule: 'range' })
+    // 根路径兜底只在没有任何字段级解释时出现，避免把未知字段或枚举与真实原因并列。
+    if (issues.length === 0) {
+      issues.push(...reviewed.secondary)
     }
   }
-  return { method, issues }
+  const seen = new Set<string>()
+  return {
+    method,
+    issues: issues.filter((issue) => {
+      const key = issue.path + ' ' + issue.rule
+      if (seen.has(key)) {
+        return false
+      }
+      seen.add(key)
+      return true
+    })
+  }
 }
 
 /** MCP 只投影固定路径/规则与程序自带提示；服务即使误带额外字段也不能回显请求或异常正文。 */
 export function publicLuvusParameterDiagnostic(value: LuvusParameterDiagnostic): ParameterDiagnostic | undefined {
-  if (!Object.hasOwn(help, value.method)) {
+  const fields = luvusReviewedFields(value.method)
+  if (!fields) {
     return undefined
   }
-  const entry = help[value.method as Method]
-  const fields: readonly string[] = [...entry.required, ...entry.optional]
+  const names = [...fields.required, ...fields.optional]
   const issues = value.issues
     .slice(0, 8)
     .filter(
       (issue) =>
         rules.includes(issue.rule) &&
-        (issue.path === '/params' || fields.some((field) => issue.path === '/params/' + field))
+        (issue.path === '/params' ||
+          names.some((field) => issue.path === '/params/' + field || issue.path.startsWith('/params/' + field + '/')))
     )
     .map((issue) => ({ path: issue.path, rule: issue.rule }))
   // 这里只投影已经拒绝的请求；无法安全定位时给出固定根路径，不复述未知字段或原生错误。

@@ -58,11 +58,14 @@ test('agent.start 名称诊断可定位、describe 说明可选 pane，纠正后
     const described = await call('runtime_describe', { ...route, method: 'agent.start' })
     const description = described.structuredContent!.data as {
       schema_status: string
-      params_schema?: unknown
+      params_schema?: { required: string[] }
+      params_schema_source?: string
       parameter_help: { required: string[]; optional: string[]; rules: string[] }
     }
+    // 原生结论仍是 generic_params_only；审核子集 schema 以独立来源标注并与执行校验同源。
     assert.equal(description.schema_status, 'generic_params_only')
-    assert.equal(description.params_schema, undefined)
+    assert.equal(description.params_schema_source, 'rovloom_reviewed_subset')
+    assert.deepEqual(description.params_schema!.required, ['name', 'kind'])
     assert.deepEqual(description.parameter_help.required, ['name', 'kind'])
     assert(description.parameter_help.optional.includes('pane'))
     assert(description.parameter_help.rules.some((rule) => rule.includes('Omitting pane creates a new pane')))
