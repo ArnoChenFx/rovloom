@@ -61,6 +61,9 @@ export async function smokeStandalone(binary, checks = cliChecks, runtime = unde
     primaryFailure = error
     failed = true
   }
+  if (primaryFailure?.code === 'smoke_cleanup_unknown') {
+    throw primaryFailure
+  }
   try {
     await cleanupSmokeDirectory(temporary)
   } catch (error) {

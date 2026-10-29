@@ -1,7 +1,7 @@
 // 对真实入口和可选的实际单文件候选验收空 Gateway；仅使用临时 HOME 与回环动态端口。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import {
   chmodSync,
   existsSync,
@@ -24,6 +24,7 @@ import { createProductionCliRuntime } from '../../src/cli/production.ts'
 import { createProductSources } from '../../src/cli/product-sources.ts'
 import { runCli } from '../../src/cli/run.ts'
 import { smokeRuntime } from '../../scripts/release/runtime.mjs'
+import { runSmokeChild, spawnSmokeChild } from '../../scripts/release/smoke-process.mjs'
 
 // 向内核申请并释放测试端口；不扫描或连接用户的既有监听器。
 async function port() {
@@ -60,6 +61,7 @@ test(
       chmodSync(search, 0o111)
     }
     const configPath = join(directory, 'gateway.json')
+    let cleanupUnknown = false
     try {
       const defaults = readOrCreateRoleConfig('gateway', configPath, { home, platform: process.platform })
       const mcp = await port()
@@ -81,24 +83,11 @@ test(
         )
       )
       for (const action of ['check', 'check-runtime']) {
-        const launch =
+        const args = [...prefix, 'config', action, '--config', configPath]
+        const checked =
           runtime.kind === 'alpine'
-            ? runtime.wrap(executable, [...prefix, 'config', action, '--config', configPath], {
-                cwd: process.cwd(),
-                env
-              })
-            : null
-        const checked = spawnSync(
-          launch ? launch.file : executable,
-          launch ? launch.args : [...prefix, 'config', action, '--config', configPath],
-          {
-            env: launch ? launch.env : env,
-            cwd: launch ? launch.cwd : undefined,
-            input: '',
-            encoding: 'utf8',
-            timeout: 10_000
-          }
-        )
+            ? await runSmokeChild(executable, args, { cwd: process.cwd(), env }, { runtime, timeout: 10_000 })
+            : spawnSync(executable, args, { env, input: '', encoding: 'utf8', timeout: 10_000 })
         assert.equal(checked.error, undefined)
         assert.equal(checked.status, 0, checked.stderr)
         assert.equal(existsSync(state), false)
@@ -106,18 +95,11 @@ test(
       const bytes = readFileSync(configPath)
       let generation
       for (let attempt = 0; attempt < 2; attempt++) {
-        const gatewayLaunch =
-          runtime.kind === 'alpine'
-            ? runtime.wrap(executable, [...prefix, 'gateway', '--config', configPath], { cwd: process.cwd(), env })
-            : null
-        const child = spawn(
-          gatewayLaunch ? gatewayLaunch.file : executable,
-          gatewayLaunch ? gatewayLaunch.args : [...prefix, 'gateway', '--config', configPath],
-          {
-            env: gatewayLaunch ? gatewayLaunch.env : env,
-            cwd: gatewayLaunch ? gatewayLaunch.cwd : undefined,
-            stdio: ['pipe', 'pipe', 'pipe']
-          }
+        const { child, cleanup } = spawnSmokeChild(
+          executable,
+          [...prefix, 'gateway', '--config', configPath],
+          { cwd: process.cwd(), env },
+          { runtime }
         )
         let diagnostic = ''
         let stdout = ''
@@ -179,6 +161,7 @@ test(
             child.kill(process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM')
           }
           const [code, signal] = await closed
+          cleanup()
           if (process.platform !== 'win32') {
             assert.equal(code, 0, diagnostic)
             assert.equal(signal, null)
@@ -198,6 +181,9 @@ test(
       }
       assert.deepEqual(readFileSync(configPath), bytes)
       assert.equal(readConfig(configPath).state_dir, state)
+    } catch (error) {
+      cleanupUnknown = error?.code === 'smoke_cleanup_unknown'
+      throw error
     } finally {
       if (process.platform !== 'win32') {
         chmodSync(search, 0o700)
@@ -206,7 +192,9 @@ test(
         // 子进程已结束后才回收本例临时对象，不影响真实关闭和崩溃锁的前置断言。
         Bun.gc(true)
       }
-      rmSync(home, { recursive: true, force: true })
+      if (!cleanupUnknown) {
+        rmSync(home, { recursive: true, force: true })
+      }
     }
   }
 )

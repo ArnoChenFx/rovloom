@@ -1,7 +1,6 @@
 /** 复制真实单文件产物到隔离目录，验收Gateway/HTTP/MCP/管理面和两个schema工厂；不宣称Connector或跨机通过。 */
 import assert from 'node:assert/strict'
 import { CLI_ERROR_CODES } from '../../src/cli/config.ts'
-import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -19,7 +18,7 @@ import { createManagementHttpRead } from '../../src/webui/http-client.ts'
 import { createManagementWriteClient } from '../../src/webui/write-client.ts'
 import { createDeviceManagementFlow } from '../../src/webui/write-flow.ts'
 import { gatewaySmokeFixture, managementProof, mcpProof } from './gateway-fixture.mjs'
-import { cleanupSmokeDirectory, runSmokeChild } from './smoke-process.mjs'
+import { cleanupSmokeDirectory, runSmokeChild, spawnSmokeChild } from './smoke-process.mjs'
 import { requestStopPipe, windowsStopPipe } from '../../src/service/windows-control.ts'
 
 /** 固定离线公开schema仅作为受保护测试输入；原生进程、模型及长期设备凭据均不参与。 */
@@ -128,13 +127,7 @@ async function withGateway(binary, f, cwd, env, inspect, prefix = [], runtime = 
     ...(controlId ? ['--non-interactive', '--service-id', controlId] : [])
   ]
   // runtime 只替换启动方式（原生或一次性 Alpine 容器）；argv、环境与断言完全相同。
-  const launch = runtime ? runtime.wrap(binary, args, { cwd, env }) : null
-  const child = spawn(launch ? launch.file : binary, launch ? launch.args : args, {
-    cwd: launch ? launch.cwd : cwd,
-    env: launch ? launch.env : env,
-    shell: false,
-    stdio: ['pipe', 'pipe', 'pipe']
-  })
+  const { child, cleanup } = spawnSmokeChild(binary, args, { cwd, env }, { runtime })
   let stdout = ''
   let stderr = ''
   let failure
@@ -187,7 +180,7 @@ async function withGateway(binary, f, cwd, env, inspect, prefix = [], runtime = 
       failure ??= new Error('product_smoke_timeout')
       child.kill('SIGKILL')
     },
-    15_000
+    Math.max(1, 15_000 - (performance.now() - started))
   )
   try {
     await inspect(/** 启动等待只观察自己的child，不按PID或程序名寻找进程。 */ () => !closed, started)
@@ -229,6 +222,7 @@ async function withGateway(binary, f, cwd, env, inspect, prefix = [], runtime = 
     }
     await completion
     clearTimeout(timeout)
+    cleanup()
   }
 }
 
@@ -249,6 +243,7 @@ export async function smokeGatewayProduct(
   let client
   let writer
   let flow
+  let cleanupUnknown = false
   try {
     seed(f)
     if (process.platform === 'win32') {
@@ -408,6 +403,9 @@ export async function smokeGatewayProduct(
       gracefulShutdown: true,
       connector: 'pending'
     }
+  } catch (error) {
+    cleanupUnknown = error?.code === 'smoke_cleanup_unknown'
+    throw error
   } finally {
     flow?.dispose()
     writer?.close()
@@ -416,7 +414,9 @@ export async function smokeGatewayProduct(
       // 产品退出和写锁释放已断言，仅回收父进程已close的只读SQLite包装后清理自有目录。
       Bun.gc(true)
     }
-    await cleanupSmokeDirectory(f.root)
+    if (!cleanupUnknown) {
+      await cleanupSmokeDirectory(f.root)
+    }
   }
 }
 

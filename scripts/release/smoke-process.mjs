@@ -3,6 +3,26 @@ import { spawn } from 'node:child_process'
 import { rm } from 'node:fs/promises'
 import { setTimeout as pause } from 'node:timers/promises'
 
+/** 启动前取得容器身份；同步启动失败也先清理已创建的自有容器。 */
+export function spawnSmokeChild(executable, args, options, { spawnChild = spawn, runtime, timeout = 15_000 } = {}) {
+  const launch = runtime ? runtime.wrap(executable, args, { cwd: options.cwd, env: options.env }) : null
+  try {
+    launch?.prepare?.(timeout)
+    const child = spawnChild(launch ? launch.file : executable, launch ? launch.args : args, {
+      ...options,
+      cwd: launch ? launch.cwd : options.cwd,
+      env: launch ? launch.env : options.env,
+      shell: false,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+    return { child, cleanup: () => launch?.cleanup?.() }
+  } catch (error) {
+    launch?.cleanup?.()
+    throw error
+  }
+}
+
 /**
  * 固定时间/输出上限不放宽；超限只终止本次直接 child，close 前绝不结算或开始目录清理。
  * runtime 只替换启动方式（原生或一次性 Alpine 容器），不改变参数、环境与断言。
@@ -17,14 +37,8 @@ export function runSmokeChild(executable, args, options, { spawnChild = spawn, t
   }
   return new Promise(
     /** 所有失败均等到真实 close，避免 exit/error/kill 请求被误当作文件和管道已释放。 */ (resolve, reject) => {
-      const launch = runtime ? runtime.wrap(executable, args, { cwd: options.cwd, env: options.env }) : null
-      const child = spawnChild(launch ? launch.file : executable, launch ? launch.args : args, {
-        cwd: launch ? launch.cwd : options.cwd,
-        env: launch ? launch.env : options.env,
-        shell: false,
-        windowsHide: true,
-        stdio: ['pipe', 'pipe', 'pipe']
-      })
+      const started = performance.now()
+      const { child, cleanup } = spawnSmokeChild(executable, args, options, { spawnChild, runtime, timeout })
       const chunks = { stdout: [], stderr: [] }
       let size = 0
       let failure
@@ -45,7 +59,7 @@ export function runSmokeChild(executable, args, options, { spawnChild = spawn, t
           failure ??= Object.assign(new Error('standalone_smoke_timeout'), { code: 'smoke_timeout' })
           stop()
         },
-        timeout
+        Math.max(1, timeout - (performance.now() - started))
       )
       for (const stream of ['stdout', 'stderr']) {
         child[stream].on(
@@ -72,6 +86,12 @@ export function runSmokeChild(executable, args, options, { spawnChild = spawn, t
         'close',
         /** close 表示退出与 stdio 关闭；不能使用较早的 exit 或 kill 返回值替代。 */ (status, signal) => {
           clearTimeout(timer)
+          try {
+            cleanup()
+          } catch (error) {
+            reject(error)
+            return
+          }
           if (failure) {
             reject(failure)
           } else {

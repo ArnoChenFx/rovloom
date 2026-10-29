@@ -1,5 +1,7 @@
 /** 用一次性 Alpine 容器运行 musl 产物：先装 libstdc++，再以隔离环境执行真实命令。 */
 import { existsSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { dirname } from 'node:path'
 
 /** 固定镜像与包；不接受环境提供的镜像名、仓库或额外包。
@@ -22,6 +24,7 @@ export function alpineRuntime(options = {}) {
   const uid = options.uid ?? process.getuid?.() ?? 0
   const gid = options.gid ?? process.getgid?.() ?? 0
   const exists = options.exists ?? existsSync
+  const runDocker = options.runDocker ?? spawnSync
   // 镜像必须是 `名称[:tag]` 形式（不含 shell 元字符）；包名只允许发行包名字符。
   if (!/^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$/u.test(image)) {
     throw new Error('invalid_alpine_runtime')
@@ -73,9 +76,12 @@ export function alpineRuntime(options = {}) {
         )
         .map(/** 每个变量作为独立 argv，避免任何 shell 引号解析。 */ ([key, value]) => `${key}=${value}`)
       const directories = mounts(executable, args, cwd, env)
+      const name = `rovloom-smoke-${randomUUID()}`
       const command = [
-        'run',
-        '--rm',
+        'create',
+        '--name',
+        name,
+        '--interactive',
         // 产品在容器内绑定 127.0.0.1；共享宿主网络命名空间后驱动进程才能访问这些端口。
         '--network',
         'host',
@@ -94,7 +100,48 @@ export function alpineRuntime(options = {}) {
         ...args
       ]
       // docker CLI 自身需要宿主 PATH；产品环境由上面的 env -i 单独注入。
-      return { file: docker, args: command, cwd, env: process.env }
+      let containerId
+      let attempted = false
+      let removed = false
+      const invoke = (args, timeout) =>
+        runDocker(docker, args, {
+          cwd,
+          env: process.env,
+          encoding: 'utf8',
+          timeout,
+          maxBuffer: 1_048_576,
+          windowsHide: true
+        })
+      return {
+        file: docker,
+        args: [],
+        cwd,
+        env: process.env,
+        prepare(timeout = 15_000) {
+          if (attempted) {
+            throw new Error('alpine_launch_already_prepared')
+          }
+          attempted = true
+          const result = invoke(command, timeout)
+          if (result.error || result.status !== 0 || !/^[a-f0-9]{64}\s*$/u.test(result.stdout)) {
+            throw new Error('alpine_create_failed')
+          }
+          containerId = result.stdout.trim()
+          // create 已确认容器身份，start 不再创建容器；杀死附着客户端不会与创建发生竞争。
+          this.args = ['start', '--attach', '--interactive', containerId]
+        },
+        cleanup() {
+          if (!attempted || removed) {
+            return
+          }
+          // 不使用 --rm：即使进程自然退出，容器也保留到本所有者确认删除，rm 成功即为 daemon 的删除确认。
+          const result = invoke(['rm', '--force', containerId ?? name], 5_000)
+          if (result.error || result.status !== 0) {
+            throw Object.assign(new Error('alpine_cleanup_unconfirmed'), { code: 'smoke_cleanup_unknown' })
+          }
+          removed = true
+        }
+      }
     }
   }
 }

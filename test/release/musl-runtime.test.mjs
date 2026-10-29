@@ -14,18 +14,33 @@ const exists = /** 只有本次明确声明的目录存在，不读取宿主文�
 test(
   'musl product acceptance runs the real binary inside one Alpine container with libstdc++',
   /** 断言只有启动方式被替换：argv、环境与 cwd 语义保持不变。 */ () => {
-    const runtime = alpineRuntime({ docker: 'docker', uid: 1000, gid: 1000, exists })
+    const calls = []
+    const runtime = alpineRuntime({
+      docker: 'docker',
+      uid: 1000,
+      gid: 1000,
+      exists,
+      runDocker(file, args) {
+        calls.push({ file, args })
+        return { status: 0, stdout: 'a'.repeat(64) + '\n' }
+      }
+    })
     assert.equal(runtime.image, ALPINE_IMAGE)
     assert.deepEqual([...runtime.packages], [...ALPINE_PACKAGES])
     assert.deepEqual([...ALPINE_PACKAGES], ['libstdc++', 'su-exec'])
     const launch = runtime.wrap('/tmp/rovloom-bin/rovloom', ['--version'], { cwd, env })
     assert.equal(launch.file, 'docker')
     assert.equal(launch.cwd, cwd)
-    const args = launch.args
-    assert.deepEqual(args.slice(0, 2), ['run', '--rm'])
+    launch.prepare()
+    assert.deepEqual(launch.args, ['start', '--attach', '--interactive', 'a'.repeat(64)])
+    const args = calls[0].args
+    assert.equal(args[0], 'create')
+    assert.equal(args[1], '--name')
+    assert.match(args[2], /^rovloom-smoke-[a-f0-9-]+$/u)
+    assert.equal(args[3], '--interactive')
     // 共享宿主网络命名空间，产品绑定的 127.0.0.1 端口才能被驱动进程访问。
-    assert.deepEqual(args.slice(2, 4), ['--network', 'host'])
-    assert.deepEqual(args.slice(4, 6), ['--workdir', cwd])
+    assert.deepEqual(args.slice(4, 6), ['--network', 'host'])
+    assert.deepEqual(args.slice(6, 8), ['--workdir', cwd])
     // 容器以 root 启动（apk 数据库需要写权限），不再以 --user 降权。
     assert(!args.includes('--user'))
     // 结构固定为：... [shell, 标记, 环境对..., 可执行文件, ...argv]。
@@ -49,6 +64,10 @@ test(
       '/tmp/rovloom-home:/tmp/rovloom-home'
     ])
     assert(!mounted.some(/** 根目录不能被整体暴露。 */ (value) => value.startsWith('/:/')))
+    launch.cleanup()
+    launch.cleanup()
+    assert.deepEqual(calls[1].args, ['rm', '--force', 'a'.repeat(64)])
+    assert.equal(calls.length, 2)
     // 未带冒号的绝对路径只应是可执行文件与工作目录；HOME 只作为环境值出现。
     assert.deepEqual([...new Set(args.filter((value) => value.startsWith('/tmp/') && !value.includes(':')))].sort(), [
       '/tmp/rovloom-bin/rovloom',
@@ -63,12 +82,22 @@ test(
     for (const options of [{ image: 'alpine:3.20; rm -rf /' }, { packages: ['libstdc++ && id'] }, { image: '' }]) {
       assert.throws(() => alpineRuntime(options), /invalid_alpine_runtime/u)
     }
-    const runtime = alpineRuntime({ exists, uid: 0, gid: 0 })
+    let createArgs
+    const runtime = alpineRuntime({
+      exists,
+      uid: 0,
+      gid: 0,
+      runDocker(_file, args) {
+        createArgs = args
+        return { status: 0, stdout: 'b'.repeat(64) }
+      }
+    })
     const launch = runtime.wrap('/tmp/rovloom-bin/rovloom', ['--help'], {
       cwd,
       env: { HOME: '/tmp/rovloom-home', PATH: undefined, EMPTY: '' }
     })
-    const pairs = launch.args.slice(launch.args.indexOf('rovloom-alpine') + 1, -2)
+    launch.prepare()
+    const pairs = createArgs.slice(createArgs.indexOf('rovloom-alpine') + 1, -2)
     // undefined 不进入环境；空字符串必须保留（产品 smoke 显式使用空 PATH）。
     assert.deepEqual(pairs, ['HOME=/tmp/rovloom-home', 'EMPTY='])
   }
