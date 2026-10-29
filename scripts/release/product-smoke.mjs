@@ -6,6 +6,7 @@ import { resolve } from 'node:path'
 import { smokeGatewayProduct } from './gateway-smoke.mjs'
 import { smokeDualRoleProduct } from './dual-role-smoke.mjs'
 import { runtimeLibc } from './libc.mjs'
+import { smokeRuntime } from './runtime.mjs'
 
 /** 每项目标必须运行实际Gateway；Linux x64不能跳过原生Owner，未支持角色明确标记。 */
 export async function smokeProduct(binary, version, options = {}) {
@@ -14,7 +15,15 @@ export async function smokeProduct(binary, version, options = {}) {
   binary = resolve(binary)
   assert(lstatSync(binary).isFile(), 'product_binary_required')
   const digest = createHash('sha256').update(readFileSync(binary)).digest('hex')
-  const gateway = await smokeGatewayProduct(binary, version)
+  // musl 目标在 glibc runner 上跑不起来；ROVLOOM_MUSL_ALPINE=1 时改由 Alpine 容器执行真实 Gateway。
+  const runtime = smokeRuntime()
+  const gateway = await smokeGatewayProduct(
+    binary,
+    version,
+    undefined,
+    undefined,
+    runtime.kind === 'alpine' ? runtime : undefined
+  )
   assert.equal(gateway.product_sha256, digest, 'product_gateway_binary_mismatch')
   assert.deepEqual(gateway.schemaFactories, ['luvus', 'herdr'])
   // Gateway切片的pending不能变成角色支持声明；只有glibc Linux x64必须且能够运行原生Owner。

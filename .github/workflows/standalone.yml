@@ -59,6 +59,21 @@ jobs:
       - name: Verify actual Windows PE icon and console subsystem
         if: runner.os == 'Windows'
         run: python scripts/release/verify-windows-icon.py dist/release/${{ matrix.target }}/probe/packaging-probe.exe
+      - name: Build and accept the musl product inside an Alpine container
+        # musl 产物在 glibc runner 上编得出来但跑不起来；构建与全部运行验收都只在 alpine 容器内进行。
+        if: matrix.libc == 'musl'
+        id: musl
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          version="$(bun --no-env-file -p 'JSON.parse(await Bun.file("package.json").text()).version')"
+          # 容器内先 apk add libstdc++（musl 产物的 NEEDED 依赖），再跑 --version 与真实 Gateway。
+          ROVLOOM_MUSL_ALPINE=1 bun --no-env-file run release:build
+          ROVLOOM_MUSL_ALPINE=1 bun --no-env-file run release:smoke "$PWD/dist/release/$TARGET/candidate/rovloom"
+          ROVLOOM_MUSL_ALPINE=1 bun --no-env-file scripts/release/product-smoke.mjs "$PWD/dist/release/$TARGET/candidate/rovloom" "$version"
+          echo 'present=true' >> "$GITHUB_OUTPUT"
       - name: Build and smoke the existing product CLI when present
         id: product
         shell: bash
@@ -66,6 +81,11 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          if [[ "${{ matrix.libc }}" == 'musl' ]]; then
+            echo 'musl target accepted inside Alpine; native CLI smoke is not applicable.'
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [[ -f src/cli/main.ts && -f src/connector/luvus/contract/compiler-worker.ts ]]; then
             bun --no-env-file run release:build
             extension=''
@@ -80,7 +100,7 @@ jobs:
             echo 'present=false' >> "$GITHUB_OUTPUT"
           fi
       - name: Verify real service lifecycle in disposable hosted VM with explicit OS authorization
-        if: steps.product.outputs.present == 'true'
+        if: steps.product.outputs.present == 'true' && matrix.libc != 'musl'
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
@@ -92,7 +112,8 @@ jobs:
           export ROVLOOM_SERVICE_EXECUTABLE="dist/release/$TARGET/candidate/rovloom$extension"
           bun --no-env-file scripts/service/native-smoke.mjs 2>&1 | tee -a "$RUNNER_TEMP/test-phases.log"
       - name: Accept real standalone Gateway and explicit unsupported native roles
-        if: matrix.target != 'bun-linux-x64'
+        # musl 目标已在 Alpine 容器步骤内完成 Gateway 验收。
+        if: matrix.target != 'bun-linux-x64' && matrix.libc != 'musl'
         shell: bash
         env:
           TARGET: ${{ matrix.target }}

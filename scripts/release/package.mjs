@@ -8,6 +8,7 @@ import { product } from './product.mjs'
 import { smokeStandalone, cliChecks } from './smoke.mjs'
 import {
   assetName,
+  assertPlatformMatrix,
   encode,
   fileMetadata,
   nativePlatform,
@@ -15,6 +16,7 @@ import {
   root,
   validateProductVersion
 } from './metadata.mjs'
+import { smokeRuntime } from './runtime.mjs'
 
 /** 产品接线必须交付专属验收程序，不能以预览开关、测试入口或临时生成脚本跳过验收。 */
 export function productSmokePath(specification = product, directory = root) {
@@ -52,9 +54,17 @@ function run(program, args) {
 /** 同一真实入口和插件构建产品，隔离核对版本并执行 HTTP/WebUI/Worker 产品验收。 */
 export async function packageProduct(context, destination) {
   await validateProductVersion(context)
+  assertPlatformMatrix()
   const acceptance = productSmokePath()
   const platform = nativePlatform()
   assert.equal(process.env.RELEASE_TARGET, platform.target, 'Runner must execute the target natively')
+  // musl 产物在 glibc runner 上编得出来但跑不起来，因此只有该目标改由 Alpine 容器执行。
+  const runtime = smokeRuntime(undefined, { roots: [root] })
+  if (platform.libc === 'musl') {
+    assert.equal(runtime.kind, 'alpine', 'musl target must be accepted inside an Alpine container')
+  } else {
+    assert.equal(runtime.kind, 'native', 'non-musl targets must be accepted natively')
+  }
   const output = await buildStandalone({ ...product, target: platform.target })
   assert.equal(output.manifest.entrypoint, product.entrypoint)
   assert.equal(output.manifest.scope, 'cli-preview-candidate')
@@ -64,7 +74,7 @@ export async function packageProduct(context, destination) {
         ? { ...check, stderr: new RegExp(`^Rovloom ${context.version.replaceAll('.', '\\.')}\\r?\\n$`, 'u') }
         : check
   )
-  await smokeStandalone(output.binary, checks)
+  await smokeStandalone(output.binary, checks, runtime.kind === 'alpine' ? runtime : undefined)
   // 该脚本由产品入口负责：只复制此 binary，在空 cwd/PATH 和隔离用户目录验收真实 HTTP 服务及全部资源。
   run(process.execPath, ['--no-env-file', acceptance, output.binary, context.version])
   if (platform.os === 'windows') {
