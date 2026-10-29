@@ -2,6 +2,7 @@
 import type { NativeMethodContract } from './contract/index.js'
 import { LUVUS_OPERATION_READ, LUVUS_OPERATION_WRITE, luvusMethod } from './methods.js'
 import { LuvusAdapterError } from './types.js'
+import { WAIT_OUTPUT_MATCH_BYTES } from './reviewed-params.js'
 import { boundedJson, fields, object } from '../../wire/index.js'
 
 export type LuvusOperationDescriptor = Readonly<{
@@ -205,7 +206,7 @@ export function validateLuvusOperationParams(method: string, input: unknown): vo
     } else if (method === 'wait.output') {
       fields(params, ['pane', 'match'], ['timeout_s'])
       pane(params.pane)
-      text(params.match, 4096)
+      text(params.match, WAIT_OUTPUT_MATCH_BYTES)
       if (
         params.timeout_s !== undefined &&
         (typeof params.timeout_s !== 'number' ||

@@ -3,7 +3,7 @@ import { fields, object, uint, fail, id } from './validation.js'
 import type { Capability, Negotiated, VersionOffer } from './types.js'
 
 export const WIRE_MAJOR = 2
-export const WIRE_MINOR = 2
+export const WIRE_MINOR = 3
 // 2.x 中的可选能力仍须双方明确广告；较高 minor 不能隐式启用它们。
 const CAPABILITIES: Readonly<Record<Capability, number>> = Object.freeze({
   rpc: 0,
@@ -14,7 +14,8 @@ const CAPABILITIES: Readonly<Record<Capability, number>> = Object.freeze({
   late_evidence: 0,
   // 设备平台在 welcome 后单独上报；老 Gateway 协商不到它，握手行为不变。
   device_platform: 1,
-  host_profile: 2
+  host_profile: 2,
+  host_cpu_quota: 3
 })
 
 // 校验版本广告，要求能力列表无重复且必需能力均已广告。
@@ -102,6 +103,9 @@ export function validateNegotiated(value: unknown, offer?: VersionOffer): assert
     ) {
       fail('invalid_negotiation')
     }
+  }
+  if (v.capabilities.includes('host_cpu_quota') && !v.capabilities.includes('host_profile')) {
+    fail('invalid_capabilities')
   }
   if (v.capabilities.includes('provider_snapshot') && !v.capabilities.includes('rpc')) {
     fail('invalid_capabilities')

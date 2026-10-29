@@ -226,7 +226,7 @@ function device(value: DeviceSnapshot): void {
 
 /** 浏览器单独列举设备 host DTO，不能将原生正文、网络或环境附加字段带入页面。 */
 function host(value: NonNullable<DeviceSnapshot['host']>, observedAt: number, lastSeen?: number | null): void {
-  record(value, [
+  const required = [
     'os',
     'arch',
     'cpus',
@@ -236,7 +236,8 @@ function host(value: NonNullable<DeviceSnapshot['host']>, observedAt: number, la
     'providers',
     'reported_at',
     'source'
-  ])
+  ]
+  record(value, [...required, 'cpu_quota', 'cpu_quota_status'], required)
   record(value.os, ['family', 'distribution', 'kernel'])
   choice(value.os.family, ['linux', 'darwin', 'win32'])
   for (const entry of [value.os.distribution, value.os.kernel]) {
@@ -255,6 +256,31 @@ function host(value: NonNullable<DeviceSnapshot['host']>, observedAt: number, la
   }
   if (value.cpus !== null && value.cpus > 262144) {
     invalid()
+  }
+  if (
+    value.cpu_quota !== undefined &&
+    value.cpu_quota !== null &&
+    (value.os.family !== 'linux' ||
+      typeof value.cpu_quota !== 'number' ||
+      !Number.isFinite(value.cpu_quota) ||
+      value.cpu_quota <= 0 ||
+      value.cpu_quota > 262144)
+  ) {
+    invalid()
+  }
+  if (Object.hasOwn(value, 'cpu_quota') !== Object.hasOwn(value, 'cpu_quota_status')) {
+    invalid()
+  }
+  if (Object.hasOwn(value, 'cpu_quota_status')) {
+    choice(value.cpu_quota_status, ['limited', 'unlimited', 'unknown', 'partial', 'unsupported'])
+    const finite = value.cpu_quota_status === 'limited' || value.cpu_quota_status === 'partial'
+    if (
+      (finite ? typeof value.cpu_quota !== 'number' : value.cpu_quota !== null) ||
+      (value.cpu_quota_status === 'unlimited' && value.os.family !== 'linux') ||
+      (value.cpu_quota_status === 'unsupported' && value.os.family === 'linux')
+    ) {
+      invalid()
+    }
   }
   choice(value.container, ['docker', 'podman', 'none', 'unknown'])
   if (typeof value.agent_version !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._+~-]{0,127}$/.test(value.agent_version)) {

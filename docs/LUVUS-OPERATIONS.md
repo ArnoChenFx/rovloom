@@ -42,7 +42,7 @@ Luvus 没有 `window.*` 方法。窗口选择沿 Luvus 自己的 workspace、tab
 
 Luvus 0.14.3 的数字 `pane` 是进程级递增分配的 ID，不是布局中的第几个位置。分屏、交换或移动不会对同一个存活 pane 重新编号，因此同一原生实例中可以跨调用复用。原生进程重启恢复 pane 时会重新分配，不能把重启后的相同数字视为原终端。
 
-`pane.list` 当前没有返回 `terminal_id`，但选定 pane 后可用 `pane.get({pane})` 同时读取 `terminal_id`、`workspace_id` 和 `tab_id`；`agent.read` 也会返回终端身份。保存完整 provider target 和这些身份，不必仅因布局变化就重新猜 pane 编号。`terminal_id` 是终端生命周期身份，不是所有 pane 方法都接受的 selector；不能把它直接塞进 `pane` 字段。
+`pane.list` 的 `pane` 与 `session.snapshot` 的 `pane_id` 是同一进程内的同一个数字 ID，`pane.get` 入参仍叫 `pane`。`pane.list` 当前没有返回 `terminal_id`，但选定 pane 后可用 `pane.get({pane})` 同时读取 `terminal_id`、`workspace_id` 和 `tab_id`；`agent.read` 也会返回终端身份。保存完整 provider target 和这些身份，不必仅因布局变化就重新猜 pane 编号。`terminal_id` 是终端生命周期身份，不是所有 pane 方法都接受的 selector；不能把它直接塞进 `pane` 字段。
 
 | 查询 | pane 标识字段 | 终端 / 拓扑身份 |
 |---|---|---|
@@ -51,6 +51,8 @@ Luvus 0.14.3 的数字 `pane` 是进程级递增分配的 ID，不是布局中�
 | `pane.get` 结果 | `pane` | 有 `terminal_id/workspace_id/tab_id` |
 
 从 snapshot 行构造 `pane.get` 参数时用 `{"pane": row.pane_id}`，从 list 行则用 `{"pane": row.pane}`；请求键仍是 `pane`，不能直接改为 `pane_id`。Rovloom 保留原生字段名，不静默补齐或重命名。get 也不是 list 的严格超集：list 有 get 未提供的详细历史指标。
+
+跨重启重新定位时，先调用 `session.snapshot` 枚举当前 `pane_id/terminal_id`，再以 `pane.get({pane: row.pane_id})` 取得当前 `workspace_id/tab_id`，结合保存的拓扑重新确认目标。旧数字 pane ID 不可跨进程复用；PTY 重建后的新 `terminal_id` 也不能自动当成旧终端身份。`pane.list` 带有原生 `history_*` 诊断字段，Rovloom 不裁剪正文；仅需层级定位时优先 snapshot，再 get 选中 pane，详细状态按需调用 `pane.status`。将 list 的诊断迁至 status 属于原生接口变更。
 
 `workspace_id/tab_id` 随保存的拓扑对象恢复；`terminal_id` 仅在同一个 PTY 存活期间跨移动、客户端断开重连保持，PTY 重建就会变化。数字 workspace/tab 是位置坐标，会随拓扑变化，不能与数字 pane 的进程内 ID 混为一谈。原生字段一致性缺口跟踪在 [issue #291](https://github.com/ArnoChenFx/rovloom/issues/291)，不在 Rovloom 中改写原生正文。
 
@@ -75,7 +77,7 @@ Luvus 0.14.3 的数字 `pane` 是进程级递增分配的 ID，不是布局中�
 
 ### 先确认当前 provider 已暴露
 
-先对实际 target 运行 `runtime_discover`，再 describe 和调用。未列出表示当前 provider 未暴露该方法，可能是后端未实现、原生契约/能力未提供或运行设置不允许；不需要编辑 caller/local/raw 方法清单。`agent.prompt.parameter_help` 根据当前目录给出可用性提示，原生 generic 参数仍以 `generic_params_only` 和 `parameter_help` 展示，不合成专用原生 schema。
+先对实际 target 运行 `runtime_discover`，再 describe 和调用。未列出表示当前 provider 未暴露该方法，可能是后端未实现、原生契约/能力未提供或运行设置不允许；不需要编辑 caller/local/raw 方法清单。`agent.prompt.parameter_help` 根据当前目录给出可用性提示，原生覆盖仍为 `generic_params_only`；`wait.output` 另提供标注 `params_schema_source: "rovloom_reviewed_subset"` 的机器可读审核 schema，保留 `parameter_help`，不冒充安装版原生分支。
 
 `runtime_describe not_found` 是当前目录不存在该方法，不是整个原生安装的全局查询。`forbidden` 仍可表示 token 不可见的设备或原生权限拒绝，不再用于 token 方法白名单。
 
@@ -128,7 +130,8 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 
 - `params_schema`：有明确方法条件分支且能准确提取时，返回原生参数 schema 及本地 `$defs` 引用闭包，保留枚举、组合条件、数字边界、`description` 和 `$comment`。当前 0.14.3 的审核普通方法中包括 `pane.list`、`agent.prompt/send/wait/keys`。
 - `schema_annotations`：原生 request/response 文档根的 `$comment`、`description` 原文，附 `document_uri` 与 JSON Pointer。根注释属于整个文档，不应当作当前方法独有的约束。
-- 安装 schema 只有通用参数时，`schema_status` 仍为 `generic_params_only`，不会补造原生 `params_schema`；无法准确投影的额外条件也保持缺失。执行校验始终使用完整原始 schema。
+- `params_schema_source` 区分 `installed_native_schema` 与 `rovloom_reviewed_subset`。`wait.output` 即使原生覆盖为 `generic_params_only`，也返回审核 schema：必填 pane/match、正 u32 pane、禁止 NUL、秒数 0..3600。match 的 `maxLength:4096` 只是字符上界，准确 UTF-8 字节上限另由 `x-maxUtf8Bytes:4096` 表达；客户端须检查该扩展，不能将字符数当字节数。无法准确投影的原生条件不丢弃，执行仍核验完整原始 schema 和审核参数子集。
+- discover 页和 describe 返回 `subset_revision`：它以原生 contract_ref 为命名空间，标识当前可见方法及审核参数定义，方法新增/删除或终端开关改变会更新；同一集合仅排序变化不更新。客户端用 `(contract_ref, subset_revision)` 缓存目录。该修订只用于缓存失效，不代表授权或调用许可；执行仍复核当前契约、能力与设备范围。`contract_ref` 继续标识已批准原生来源，新增方法不迫使旧配对重建身份。
 
 例如 `agent.prompt` 的原生根注释明确说明：等待模式须先观察到新的 working/blocked 转换，再匹配 `until`；`agent.wait` 则只是当前状态匹配器。快速回复或缺少正向状态证据时，前者可能一直未匹配，即使 Agent 实际已答完。MCP 可直接读到原生注释和下面的审核提示。
 

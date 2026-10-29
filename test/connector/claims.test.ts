@@ -32,7 +32,7 @@ function binding(call = 'call1'): AttemptBinding {
 /** 在非共享可写祖先下创建私有目录，返回显式时钟和首次/正常打开选项。 */
 function setup() {
   const root = mkdtempSync(
-    join(process.env.LUVUS_TEST_ROOT ?? fileURLToPath(new URL('../../../../', import.meta.url)), '.luvus-claims-')
+    join(process.env.LUVUS_TEST_ROOT ?? fileURLToPath(new URL('../../', import.meta.url)), '.luvus-claims-')
   )
   const path = join(root, 'claims.sqlite')
   const clock = { now: 100 }

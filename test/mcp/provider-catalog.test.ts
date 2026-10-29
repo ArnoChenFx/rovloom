@@ -108,3 +108,42 @@ test(
     }
   }
 )
+
+test('公开 subset_revision 随可见方法集变化，契约引用保持原生身份且排序不影响修订', () => {
+  const f = storeFixture()
+  try {
+    let methods = [{ method: 'pane.read' }]
+    const resolve = () => ({
+      target,
+      local_provider: f.store.provider(target.machine_id, target.provider_id)!,
+      contract_ref: 'a'.repeat(64),
+      capability_revision: 'unchanged_native_revision',
+      expires_at: f.store.clock() + 30_000,
+      methods,
+      describe: (method: string) => ({ method })
+    })
+    const view = () =>
+      authorizedCatalog({
+        store: f.store,
+        principal: f.current(),
+        currentPrincipal: f.current,
+        target,
+        expected_binding_revision: 1,
+        terminalExecutionState: () => false,
+        provider: { kind: 'provider', resolve }
+      })
+    const first = view()
+    methods = [{ method: 'pane.read' }, { method: 'wait.output' }]
+    const second = view()
+    assert.equal(first.scope.contract_ref, second.scope.contract_ref)
+    assert.notEqual(first.subset_revision, second.subset_revision)
+    assert.equal(second.describe('wait.output').subset_revision, second.subset_revision)
+    assert(second.methods.every((method) => !Object.hasOwn(method, 'subset_revision')))
+    methods.reverse()
+    assert.equal(view().subset_revision, second.subset_revision)
+    methods.push({ method: 'pane.run' })
+    assert.equal(view().subset_revision, second.subset_revision)
+  } finally {
+    f.close()
+  }
+})

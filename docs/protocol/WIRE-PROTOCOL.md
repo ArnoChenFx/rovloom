@@ -1,6 +1,6 @@
 # Wire v2：Gateway 与 Connector 的消息协议
 
-Wire 当前版本为 major **2** / minor **2**。每条 WebSocket 消息是一个 UTF-8 JSON 信封。编解码在 `src/wire/`，Luvus 原生校验经 `src/connector/luvus/wire.ts` 接入（Luvus 后端接口在 `src/connector/luvus/backend.ts`，公共 attempt 账本事实在 `src/wire/backend.ts`），见 [原生契约](NATIVE-CONTRACT.md)。认证、存储和传输由宿主提供可信实现，见 [通道](../TRANSPORT.md)。总览见 [协议总览](../PROTOCOL.md)。
+Wire 当前版本为 major **2** / minor **3**。每条 WebSocket 消息是一个 UTF-8 JSON 信封。编解码在 `src/wire/`，Luvus 原生校验经 `src/connector/luvus/wire.ts` 接入（Luvus 后端接口在 `src/connector/luvus/backend.ts`，公共 attempt 账本事实在 `src/wire/backend.ts`），见 [原生契约](NATIVE-CONTRACT.md)。认证、存储和传输由宿主提供可信实现，见 [通道](../TRANSPORT.md)。总览见 [协议总览](../PROTOCOL.md)。
 
 Luvus / Herdr 的原生协议、UHP 标识和 fixture 保持原样，Wire 不改写它们。
 
@@ -25,6 +25,7 @@ Luvus / Herdr 的原生协议、UHP 标识和 fixture 保持原样，Wire 不改
 | `late_evidence` | 为 `outcome_unknown` 的同一 attempt 补充证据 |
 | `device_platform` | Connector 上报本机 os / arch / Linux 发行版标识。minor ≥ 1 |
 | `host_profile` | Connector 在 welcome 后一次上报最小主机信息；minor ≥ 2，不建立执行许可 |
+| `host_cpu_quota` | `host_profile` 内可选的小数核 CPU 配额；minor ≥ 3，必须同时协商 `host_profile` |
 
 ## 信封与消息类型
 
@@ -41,7 +42,7 @@ Luvus / Herdr 的原生协议、UHP 标识和 fixture 保持原样，Wire 不改
 | `provider_snapshot` | Connector → Gateway | binding, target, source, capabilities, capability_revision |
 | `terminal_execution_state` | Connector → Gateway | binding, enabled |
 | `device_platform` | Connector → Gateway | os, arch, distribution |
-| `host_profile` | Connector → Gateway | os, arch, cpus, memory_bytes, container, agent_version, providers |
+| `host_profile` | Connector → Gateway | os, arch, cpus, memory_bytes, container, agent_version, providers；协商 `host_cpu_quota` 后可带 cpu_quota 与 cpu_quota_status |
 | `provider_fenced` | 双向 | binding |
 | `request` | Gateway → Connector | attempt, expected_binding_revision, native_request, validation |
 | `accepted` | Connector → Gateway | attempt |
@@ -290,3 +291,5 @@ Herdr、Luvus 与混合模式采用相同权限模型：Gateway 核对 token 的
 该报告和有效收包时间在当前 Gateway 进程内有界保留，读取不续期；断开后 link_since 为 null，重启或恢复代次变更后未知。详细字段与边界见[设备详情](../PROTOCOL.md#设备详情与原生版本)。
 
 新配对与登记不保存 methods/actions 或 caller/local/gateway 策略；旧字段只在兼容解码边界接纳并忽略。
+
+`host_cpu_quota` 只扩展当前 host 报告，不产生新消息。未协商时 Connector 必须同时剥离 `cpu_quota` 与 `cpu_quota_status`，Gateway 拒绝未经协商携带它的帧；因此旧 Gateway 不会因未知字段断连。两个字段须同时存在，状态为 limited / unlimited / unknown / partial / unsupported。unsupported 仅用于非 Linux，表示不支持此探测；unknown 表示无法核实。limited/partial 要求正的有限小数核；unknown/unlimited/unsupported 要求 null。unlimited 仅用于 Linux。只有 unlimited 表示完整可见层级未限额；partial 说明已知有限上界但链未走完，null 不可自行解读为无限。只从当前进程可见 cgroup CPU 带宽上限取得，取可见祖先的最小值，不代表实际可用并行度。

@@ -33,7 +33,9 @@ test('prompt 帮助只推荐当前完整目标可见的输出等待，后端暴�
     assert(rules.some((rule) => rule.includes('runtime_discover') && rule.includes('prompt echo')))
     const wait = await f.service.execute('runtime_describe', { ...route, method: 'wait.output' }, context())
     assert.equal(wait.data.schema_status, 'generic_params_only')
-    assert.equal(wait.data.params_schema, undefined)
+    assert(wait.data.params_schema)
+    assert.equal(wait.data.params_schema_source, 'rovloom_reviewed_subset')
+    assert.equal(wait.data.subset_revision, visible.data.subset_revision)
     assert(
       (wait.data.parameter_help as { rules: string[] }).rules.some((rule) => rule.includes('existing marker can match'))
     )

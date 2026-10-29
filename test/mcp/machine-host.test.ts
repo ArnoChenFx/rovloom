@@ -12,11 +12,13 @@ import type { ReplyData, ToolArguments } from '../../src/mcp/types.js'
 import type { Administrator } from '../../src/mcp/management.js'
 import { checkManagementReadReply } from '../../src/webui/validate.js'
 
-const offer = { major: 2, minor: 2, capabilities: ['rpc', 'host_profile'], required: ['rpc'] }
+const offer = { major: 2, minor: 3, capabilities: ['rpc', 'host_profile', 'host_cpu_quota'], required: ['rpc'] }
 const report: HostProfileReport = {
   os: { family: 'linux', distribution: 'debian-12', kernel: '6.1.0-31-amd64' },
   arch: 'x86_64',
   cpus: 4,
+  cpu_quota: 0.5,
+  cpu_quota_status: 'limited',
   memory_bytes: 17179869184,
   container: 'docker',
   agent_version: '0.6.7',
@@ -180,3 +182,52 @@ test(
     }
   }
 )
+
+test('旧 Gateway 不接收 CPU 配额字段，双方 minor 3 且显式广告才启用', async () => {
+  const old = { major: 2, minor: 2, capabilities: ['rpc', 'host_profile'], required: ['rpc'] }
+  assert.deepEqual(negotiate(offer, old).capabilities, ['host_profile', 'rpc'])
+  assert(negotiate(offer, offer).capabilities.includes('host_cpu_quota'))
+  const f = fixture({ offer: old })
+  try {
+    const paired = f.pair('quota_legacy')
+    const client = f.connector(() => paired.credential, { offer, hostProfile: () => report })
+    const scope = { machine_ids: [paired.machine_id], include_host: true }
+    await until(() => !!f.gateway.observations.snapshot(scope).machine_metadata?.[0]?.host)
+    const host = f.gateway.observations.snapshot(scope).machine_metadata![0]!.host!
+    assert.equal(host.cpus, 4)
+    assert.equal('cpu_quota' in host, false)
+    assert.equal('cpu_quota_status' in host, false)
+    assert.equal(client.status().failure, undefined)
+    for (const quota of [0, -1, Infinity, NaN, '0.5']) {
+      assert.throws(() => validateHostProfile({ ...report, cpu_quota: quota }))
+    }
+    validateHostProfile({ ...report, cpu_quota: null, cpu_quota_status: 'unknown' })
+    validateHostProfile({ ...report, cpu_quota: null, cpu_quota_status: 'unlimited' })
+    validateHostProfile({ ...report, cpu_quota: 0.5, cpu_quota_status: 'partial' })
+    for (const extra of [
+      { cpu_quota_status: undefined },
+      { cpu_quota_status: 'unlimited' },
+      { cpu_quota: null },
+      { cpu_quota_status: 'guess' }
+    ]) {
+      assert.throws(() => validateHostProfile({ ...report, ...extra }))
+    }
+  } finally {
+    f.stop()
+  }
+})
+
+test('CPU 配额 unsupported 仅用于非 Linux 且数值为 null，旧 unknown 报告保持可读', () => {
+  for (const family of ['linux', 'darwin', 'win32'] as const) {
+    const host = { ...report, os: { family, distribution: null, kernel: null } }
+    validateHostProfile({ ...host, cpu_quota: null, cpu_quota_status: 'unknown' })
+    const unsupported = { ...host, cpu_quota: null, cpu_quota_status: 'unsupported' }
+    if (family === 'linux') {
+      assert.throws(() => validateHostProfile(unsupported))
+    } else {
+      validateHostProfile(unsupported)
+      assert.throws(() => validateHostProfile({ ...host, cpu_quota: null, cpu_quota_status: 'unlimited' }))
+    }
+    assert.throws(() => validateHostProfile({ ...unsupported, cpu_quota: 0.5 }))
+  }
+})

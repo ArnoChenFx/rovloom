@@ -11,6 +11,7 @@ import { FacadeServiceError } from '../../mcp/types.js'
 import { boundedJson, contractRef, hash, LIMITS, WireError } from '../../wire/index.js'
 import type { JsonObject, ProviderBinding, V2Target } from '../../wire/types.js'
 import { luvusParameterHelp } from './parameter-help.js'
+import { luvusReviewedParams } from './reviewed-params.js'
 
 /** 宿主已认证 epoch 交付的 Luvus 目录来源；不从工具参数或 session listing 构造。 */
 export type GatewayCatalogSource = Readonly<{
@@ -84,7 +85,16 @@ export function luvusCatalogProvider(options: {
           if (resolved.supported_methods !== undefined && !resolved.supported_methods.includes(method.method)) {
             continue
           }
-          methods.push(JSON.parse(boundedJson({ ...method, contract_ref: ref })) as JsonObject)
+          const reviewed = luvusReviewedParams(method.method)
+          methods.push(
+            JSON.parse(
+              boundedJson({
+                ...method,
+                contract_ref: ref,
+                ...(reviewed ? { reviewed_params_sha256: hash(boundedJson(reviewed)) } : {})
+              })
+            ) as JsonObject
+          )
         }
         cursor = page.next_cursor ?? undefined
       } while (cursor)
@@ -105,10 +115,17 @@ export function luvusCatalogProvider(options: {
           }
           try {
             const parameterHelp = luvusParameterHelp(method, names)
+            const description = catalog.describe(method)
+            const reviewed = luvusReviewedParams(method)
             return JSON.parse(
               boundedJson({
-                ...catalog.describe(method),
+                ...description,
                 contract_ref: ref,
+                ...(description.params_schema
+                  ? { params_schema_source: 'installed_native_schema' }
+                  : reviewed
+                    ? { params_schema: reviewed, params_schema_source: 'rovloom_reviewed_subset' }
+                    : {}),
                 ...(parameterHelp ? { parameter_help: parameterHelp } : {})
               })
             ) as JsonObject

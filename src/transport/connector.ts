@@ -350,8 +350,12 @@ export function createConnector(options: ConnectorOptions) {
       const report = options.hostProfile?.()
       void Promise.resolve(report).catch(() => {})
       if (report) {
+        const { cpu_quota, cpu_quota_status, ...basic } = report
         value = {
-          ...report,
+          ...basic,
+          ...(active.negotiated.capabilities.includes('host_cpu_quota')
+            ? { cpu_quota: cpu_quota ?? null, cpu_quota_status: cpu_quota_status ?? 'unknown' }
+            : {}),
           providers:
             current.nativeVersions?.() ??
             current.providerSnapshot?.().map((snapshot) => ({

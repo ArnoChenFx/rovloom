@@ -189,7 +189,22 @@ export function authorizedCatalog(options: AuthorizedCatalogOptions) {
       terminalExecutionCatalog(binding.kind, method.method as string, terminal).visible
   )
   current()
+  // 只覆盖当前授权后方法集；不将隐藏方法或动态观察期限纳入公开缓存标识。
+  const subsetRevision = hash(
+    boundedJson(
+      {
+        contract_ref: source.contract_ref,
+        methods: [...visible].sort((left, right) => {
+          const a = left.method as string
+          const b = right.method as string
+          return a < b ? -1 : a > b ? 1 : 0
+        })
+      },
+      LIMITS.object_bytes
+    )
+  )
   return {
+    subset_revision: subsetRevision,
     metadata: metadataOf(source) as ProviderMetadata,
     methods: visible.map<JsonObject>(
       /* 契约引用取同一 owner 快照，不使用条目自报的另一引用。 */ (method) => {
@@ -223,6 +238,7 @@ export function authorizedCatalog(options: AuthorizedCatalogOptions) {
         ...description,
         method,
         contract_ref: source.contract_ref,
+        subset_revision: subsetRevision,
         ...(entry.details ? { terminal_execution: entry.details } : {})
       }
     }
