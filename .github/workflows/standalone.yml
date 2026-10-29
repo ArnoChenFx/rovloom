@@ -55,6 +55,9 @@ jobs:
         if: runner.os == 'Windows'
         run: bun --no-env-file test ./test/release/gateway-smoke.test.mjs ./test/release/publication.test.mjs
       - name: Compile and run isolated packaging probe, including omitted-Worker rejection
+        # musl 项不在本机编译探针：探针按宿主 libc 编译，dist/release/<musl-target>/probe 不会有产物，
+        # 后续上传会因 if-no-files-found: error 而失败。musl 的产品验收已由上面的 Alpine 步骤完成。
+        if: matrix.libc != 'musl'
         run: bun --no-env-file test ./test/release/executable.test.mjs
       - name: Verify actual Windows PE icon and console subsystem
         if: runner.os == 'Windows'
@@ -135,6 +138,7 @@ jobs:
           version="$(bun --no-env-file -p 'JSON.parse(await Bun.file("package.json").text()).version')"
           bun --no-env-file scripts/release/product-smoke.mjs "$PWD/dist/release/$TARGET/candidate/rovloom" "$version"
       - name: Upload packaging probe evidence
+        if: matrix.libc != 'musl'
         timeout-minutes: 5
         uses: actions/upload-artifact@v7
         with:
@@ -147,6 +151,8 @@ jobs:
             dist/release/${{ matrix.target }}/probe/rovloom.ico
       - name: Compile and execute the real schema Worker when present
         id: native
+        # musl 项由 Alpine 容器步骤验收产品，本机探针路径不适用。
+        if: matrix.libc != 'musl'
         shell: bash
         run: |
           set -euo pipefail
