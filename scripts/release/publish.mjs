@@ -51,6 +51,15 @@ const RELEASE_NOTES = Object.freeze({
     ],
     upgrade:
       '`cpu_quota` needs both ends on Wire minor 3 (`host_cpu_quota`, dependent on `host_profile`) and a reconnecting Connector: an older Gateway never receives the two new fields, and a report without them means an older Connector rather than no limit. Read `cpu_quota_status` before using the number — only `unlimited` proves the fully inspected visible hierarchy has no limit, `partial` keeps a known upper bound but may miss a tighter ancestor, and `null` is never proof of unlimited capacity. `params_schema_source` distinguishes `installed_native_schema` from `rovloom_reviewed_subset`; strict validators must register `x-maxUtf8Bytes` to enforce the byte limit. Existing pairings, tokens and ledgers are unchanged.'
+  },
+  '0.8.0': {
+    highlights: [
+      'The release now ships `linux-x64-musl` and `linux-arm64-musl` alongside the six glibc, macOS and Windows binaries. The glibc, macOS and Windows asset names and bytes are unchanged, so existing downloads and scripts keep working.',
+      '`install.sh` picks the `-musl` asset on any Linux that cannot prove glibc through `getconf GNU_LIBC_VERSION`, so Alpine no longer fails with "Only glibc Linux binaries are available". Checksum verification and atomic replacement are unchanged.',
+      'The musl binaries need `libstdc++` at runtime (Alpine: `apk add libstdc++`), and the installer says so after a musl install.'
+    ],
+    upgrade:
+      'A musl build cannot drive Luvus managed native process control: musl 1.2.5 exports `poll`, `getsockopt` and `__errno_location` but not `pidfd_open` or `pidfd_send_signal`, so managed Luvus sessions fail closed with `owned_pidfd_unavailable`. Gateway, Herdr and Luvus attach work on musl. The glibc assets are unchanged and nothing about pairing, tokens or ledgers moves — download the `-musl` asset only if your Linux has no glibc.'
   }
 })
 
