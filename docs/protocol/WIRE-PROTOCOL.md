@@ -232,18 +232,18 @@ Connector 不依赖 Gateway 额外交付的 TTL 或上下文。受保护配置�
 
 ## 可信 context 与原生校验
 
-已认证 context 由宿主提供，包括：当前连接事实、`resolveProvider`、`resolveContract`、双边 `ProviderPolicies`、各 kind 的 `NativePayloadValidator`、`resolveAttempt` 和 `resolveNativeSource`。缺任何一个必要来源都默认拒绝。`authenticated` / `active` 是外部事实输入，不由 epoch 或 `welcome` 自报产生。codec 不实现 TLS、凭据认证、签发或撤销。
+已认证 context（`AuthenticatedContext`）由宿主提供：当前连接事实 `connection`、`resolveProvider`、`resolveContract`、按 provider kind 选择的 `validators`（`NativePayloadValidator`）和 `resolveAttempt`。缺任何一个必要来源都默认拒绝。`authenticated` / `active` 是外部事实输入，不由 epoch 或 `welcome` 自报产生。codec 不实现 TLS、凭据认证、签发或撤销。
 
 校验流程：
 
-1. Wire 先拒绝 `native_request` 中调用方的 id / auth，核对登记的 method 与 mode。
-2. 从 `resolveAttempt` 的绑定注入 `native_request_id`，把完整原生请求交给 validator。validator 按可信 `ProviderBinding.kind` 选择，不用消息自报的字段。
+1. Wire 先拒绝 `native_request` 中调用方的 `id` / `auth`，再用 `resolveAttempt` 从受信账本取回该 attempt 登记的 `method` 与 `mode`，核对完整 binding，并核对当前 provider 绑定（启用、kind、revision）与契约（`resolveContract` 的来源和 `validated` 状态），以及协商的 `rpc` 能力。消息里的 `method`、`expected_binding_revision` 与 `validation` 必须与登记一致。
+2. 把可信的 `native_request_id` 补入原生请求，交给 validator。validator 按可信 `ProviderBinding.kind` 选择，不用消息自报的字段。
 3. `raw-contract` 在原生薄适配中映射为原生的 `raw_contract`。原生检查失败转为只含 code 的 `WireError`。异常的 message 与原始 data 被清除，只保留合法 code 或通用的 `native_*` 错误。成功的校验必须实际返回 undefined。
-4. 响应必须有该 attempt 的 opaque `native_handle`，以及 `resolveNativeSource` 当前返回的独立可信来源，缺失即拒绝。handle 由原生校验流程生成，按完整 AttemptBinding 保存在受信进程内，不能从响应内容重建。
+4. `response` 同样先由 `resolveAttempt` 取回登记上下文，再以该上下文（binding、method、mode）调用 `validateResponse`。响应里的 attempt 必须与登记的完整 binding 逐项相同，调用身份不能从响应内容重建。
 
-`validateRequest` 校验后端暴露方法、原生参数、实际来源和完整 binding。`strict` 对 generic / unavailable 分别报参数契约不完整或不可用；`raw-contract` 只标记原生参数 schema 覆盖程度，不是额外授权，也不产生 raw grant。
+`validateRequest` / `validateResponse` 校验后端暴露方法、原生参数、实际来源和完整 binding。`strict` 对 generic / unavailable 分别报参数契约不完整或不可用；`raw-contract` 只标记原生参数 schema 覆盖程度，不是额外授权，也不产生 raw grant。
 
-`createLuvusWireAdapter` 实现 Luvus 的 Check / handle 适配：从 backend 取得登记的请求、双端 provider 和独立的 `nativeSource`，私有保存最初的 `DispatchPermit`，并逐次重新授权结果读取。精确签名见 [原生契约](NATIVE-CONTRACT.md)。
+`createLuvusWireAdapter` 实现 Luvus 的 Check / permit 适配：它的 `NativeWireBackend` 提供已认证连接（`connection()`）、Gateway 登记的 provider 与 Connector 本机 provider（`provider` / `localProvider`）、契约记录（`contract`）和独立核验的原生来源（`nativeSource(callId, attemptId)`）；适配器私有保存最初的 `DispatchPermit`，并逐次重新授权结果读取。精确签名见 [原生契约](NATIVE-CONTRACT.md)。
 
 ## Provider scope 权限
 
@@ -256,12 +256,12 @@ Herdr、Luvus 与混合模式采用相同权限模型：Gateway 核对 token 的
 | 接口 | 宿主必须保证的输入与原子后续 |
 |---|---|
 | `registeredRequestDigest(payload, callerId)` | 来自已认证的调用方。摘要绑定完整 Target、provider、revision、kind、契约、登记条件、validation 和 native request，不含新分配的 call / attempt / native ID |
-| `resolveAttempt` | 返回原完整 AttemptBinding、method、mode、transport、feature，以及存在时的原 native handle。不从消息补建 |
-| `assertProviderAccess` | 当前可信的 provider snapshot 与双方完整 scope |
+| `resolveAttempt` | 返回原完整 AttemptBinding、method 与 mode。不从消息补建 |
+| `resolveProvider` / `resolveContract` | 当前可信的 provider 绑定（启用、kind、revision）与已核验的契约来源；禁用、撤销与 binding 漂移在这里被拒绝 |
 | `planResponseEvidence(frame, context, anchor, now)` | 持久的派发锚点、固定的内容与墓碑期限、内容状态。事务成功后才发布状态 |
 
 - `registeredRequestDigest` 是已登记意图的规范摘要，不是自动迁移或重签旧 key 的授权。重试必须继续使用原 `client_request_key` 和原登记数据，不能因发现新的 provider revision 或契约而重算、重派。同一主体在窗口内，同 key 同摘要只返回原 call，摘要不同报 conflict。key 只由 Gateway Store 处理，不进入 Wire。
-- 迟到响应必须仍在有效认证的连接上，当前 provider 启用，revision、contract 与全部 attempt 精确匹配，原 native handle / source 与完整原生响应通过校验。对 `outcome_unknown` 的补证需要 `late_evidence` 能力。缺锚点、旧 attempt、墓碑已删、冲突、旧 revision 一律拒绝，不创建执行。
+- 迟到响应必须仍在有效认证的连接上，当前 provider 启用，revision、contract 与全部 attempt 精确匹配，完整原生响应通过该 kind 的 validator 校验（Luvus 适配器用封存的响应上下文和独立核验的原生来源复核）。对 `outcome_unknown` 的补证需要 `late_evidence` 能力。缺锚点、旧 attempt、墓碑已删、冲突、旧 revision 一律拒绝，不创建执行。
 - 证据计划恒为 `dispatch: false`。原超时、取消的历史与 TTL 不变。相同 hash 与长度的重复响应不产生 payload 或句柄的写入意图。
 - 内容已过期、被丢弃、不可用，或当前分类、内容权限、read scope 不允许时，只保留元数据：ID、接收时间、hash、长度、result / error 类别。不恢复原文，不生成句柄，不续期。
 - `ResponseEvidencePlan` 没有持久化副作用。宿主必须在同一个 writer 事务中再次核对原锚点、证据 hash 与长度、固定期限和当前状态后提交。事务失败时保持 `outcome_unknown`，不发布 `responded`，也不制造重派。

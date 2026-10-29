@@ -118,7 +118,7 @@ directory before pairing if necessary.
 
 A Gateway with no caller state is in the **pairing required** state. MCP returns
 401 and the management page shows only an empty shell until an administrator
-exists. First native approval creates one local caller for the reviewed Target.
+exists. The first pairing creates one local caller for the reviewed Target.
 Its Bearer is shown only on the verified local terminal and kept privately by
 Rovloom. Copy it into the MCP client's secret storage. It expires after 30 days
 by default and is managed with `rovloom token`. Device credentials, MCP Bearers
@@ -356,7 +356,7 @@ path to a real directory (not a symlink, file or missing path) owned by root or 
 Connector user and not writable by group or others; anything else is skipped silently.
 At most 16 directories are kept, explicit ones first. If a service manager gives the
 Connector a minimal `PATH`, list the directories explicitly in the single Connector
-user file **before approving native setup**:
+user file **before running `connector --join`**:
 
 ```json
 {
@@ -478,7 +478,7 @@ disconnect does not stop the Gateway.
 |---|---|---|---|
 | Help, version, template, `config check` | Yes | Yes | Yes |
 | Role file creation, Gateway start, `config check-runtime` | Yes | Yes | Yes |
-| First-pairing approval (local terminal) | Yes (x64) | Yes (x64, arm64) | Yes (x64) |
+| Pairing (`connector --join`) and native setup | Yes (x64) | Yes (x64, arm64) | Yes (x64) |
 | Native Connector | x64 | x64, arm64, attach mode only | x64, attach mode only |
 | Service: Gateway | systemd | LaunchDaemon | boot task (S4U) |
 | Service: Connector | x64 | x64, arm64, LaunchDaemon | x64, boot task (S4U) |

@@ -65,7 +65,6 @@ Rovloom 使用宿主实际安装的程序导出的 schema 原字节，按协议�
 | `checkDispatch` | 全部门禁通过后签发不可从 JSON 复制的 `DispatchPermit` |
 | `checkResponseShape` / `checkResponse` | 前者只证明结构。后者再关联原候选或 permit、native ID、方法结果和可信来源 |
 | `sealResponseContext` / `checkResponseOnly` / `releaseResponseContext` | 从真实 RPC permit 封存最小响应约束，供内容清理后核对迟到响应。`checkResponseOnly` 只返回校验结论，不返回载荷，不授予读取或派发能力 |
-| `releaseRequestContext` | 撤销同一 RPC 候选的全部许可及请求登记 |
 
 Gateway 可把 `checkRequestShape` 接入首次登记事务的同步预检。非法参数使登记回滚，后续 Wire 与实际 I/O 门禁仍完整复验。
 

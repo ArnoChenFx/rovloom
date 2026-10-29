@@ -93,22 +93,18 @@ and MCP Bearer issuance. The Gateway stays in the background throughout this flo
 
 ## First pairing from a terminal
 
-The background service has no interactive terminal. In a real terminal in the Compose directory, stop it and run a foreground Gateway on the same volumes:
+The background service has no interactive terminal. If you cannot use the management page, stop the service and print a join command from a foreground Gateway on the same volumes. Never run two Gateways on the same data, including `docker compose run` next to a running service:
 
 ```sh
 docker compose stop gateway
-docker compose run --rm --service-ports gateway
+docker compose run --rm --service-ports gateway gateway --issue-code
 ```
 
-`--service-ports` is required: `docker compose run` does not publish the Compose ports by default, so without it the Connector cannot reach the Gateway. Run the init command above before starting a fresh volume.
+`--service-ports` is required: `docker compose run` does not publish the Compose ports by default, so without it the printed address is not reachable from the Connector host. Run the init command above before starting a fresh volume.
 
-Keep this terminal open for pairing and native installation approval. On the Connector host (Linux x64, macOS or Windows x64), run `rovloom connector` in another local terminal and follow [Start and pair](QUICK-START.md#3-start-and-pair). Never run a second Gateway on the same data.
+Copy the printed join command to the Connector host (Linux x64, macOS or Windows x64) and run it: one command, no prompts or approvals (see [Start and pair](QUICK-START.md#3-start-and-pair)). When the Connector logs `connector_transport ready provider_ready=true`, pairing is finished. Stop the foreground Gateway with Ctrl-C and run `docker compose up -d`; the Connector reconnects on its own with exponential backoff. Configuration and pairing stay in the volumes.
 
-When setup reaches `connector_ready`, stop the Connector, then stop the foreground Gateway with Ctrl-C. Run `docker compose up -d` and restart the host Connector. Configuration and pairing stay in the volumes.
-
-To add another device or re-pair a device, generate a new pairing code on the management page (or run
-`docker compose run --rm gateway gateway --issue-code`) and run the displayed join command on the target host.
-The background Gateway never stops; see [Pairing](CONFIGURATION.md#pairing).
+To add another device or re-pair a device later, generate a new pairing code on the management page and run the displayed join command on the target host. The background Gateway does not need to stop; see [Pairing](CONFIGURATION.md#pairing).
 
 ## Configure, stop and upgrade
 
