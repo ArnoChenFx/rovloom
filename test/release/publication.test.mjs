@@ -550,6 +550,15 @@ test('Release 说明按版本生成：没有该版本条目就不带升级提示
   assert.match(musl, /apk add libstdc\+\+/u)
   assert.match(musl, /owned_pidfd_unavailable/u)
   assert.match(musl, /pidfd_open/u)
+  // 0.8.1 只讲参数诊断、写锁与依赖修复；不沿用 0.8.0 的 musl 要点。
+  const patch = releaseBody({ tag: 'v0.8.1', version: '0.8.1', commit: 'e'.repeat(40) })
+  assert.match(patch, /details\.issues/u)
+  assert.match(patch, /params_schema_source: rovloom_reviewed_subset/u)
+  assert.match(patch, /kernel `flock`/u)
+  assert.match(patch, /never run two Gateways on the same data/u)
+  assert(!patch.includes('linux-x64-musl'))
+  assert(!patch.includes('owned_pidfd_unavailable'))
+  assert(!patch.includes('x-maxUtf8Bytes'))
   // 未登记的版本不继承任何旧提示，只保留固定的公共段落与契约标记。
   const future = releaseBody({ tag: 'v0.9.9', version: '0.9.9', commit: 'b'.repeat(40) })
   assert(!future.includes('Upgrade note'))
