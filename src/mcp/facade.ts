@@ -82,7 +82,16 @@ function publicReply(name: ToolName, data: Record<string, unknown>): Record<stri
     try {
       if (data.host && typeof data.host === 'object') {
         const host = data.host as Record<string, unknown>
-        const report = pick(host, ['os', 'arch', 'cpus', 'memory_bytes', 'container', 'agent_version', 'providers'])
+        const report = pick(host, [
+          'os',
+          'arch',
+          'cpus',
+          'cpu_quota',
+          'memory_bytes',
+          'container',
+          'agent_version',
+          'providers'
+        ])
         report.os = pick(host.os as Record<string, unknown>, ['family', 'distribution', 'kernel'])
         const providers = new Set(Array.isArray(data.targets) ? data.targets.map((target) => target.provider_id) : [])
         report.providers = (host.providers as Record<string, unknown>[])

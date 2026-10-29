@@ -592,19 +592,22 @@ export class StoreGatewayService implements GatewayService {
       if (request.name === 'runtime_describe') {
         return catalog.describe(request.args.method)
       }
-      return this.page(
-        catalog.methods,
-        request.args,
-        {
-          principal: principal.id,
-          target: request.args.target,
-          name: request.name,
-          catalog: catalog.scope,
-          args: queryArguments(request.args)
-        },
-        now,
-        catalog.expires_at
-      )
+      return {
+        ...this.page(
+          catalog.methods,
+          request.args,
+          {
+            principal: principal.id,
+            target: request.args.target,
+            name: request.name,
+            catalog: catalog.scope,
+            args: queryArguments(request.args)
+          },
+          now,
+          catalog.expires_at
+        ),
+        subset_revision: catalog.subset_revision
+      }
     }
     if (!['machines_list', 'machines_get', 'providers_list', 'providers_get'].includes(request.name)) {
       throw new FacadeServiceError('backend_unavailable')

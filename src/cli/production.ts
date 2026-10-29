@@ -105,7 +105,8 @@ export function productionOffer(): VersionOffer {
       'terminal_execution_state',
       'dispatch_refusal',
       'device_platform',
-      'host_profile'
+      'host_profile',
+      'host_cpu_quota'
     ],
     required: ['rpc']
   }

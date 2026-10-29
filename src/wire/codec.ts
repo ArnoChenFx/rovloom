@@ -181,7 +181,7 @@ export function validateDevicePlatform(value: unknown): asserts value is DeviceP
 /** 主机声明只接受粗粒度固定字段；来源、上报时间由 Gateway 补充，远端不能自行指定。 */
 export function validateHostProfile(value: unknown): asserts value is HostProfileReport {
   const p = object(value)
-  fields(p, ['os', 'arch', 'cpus', 'memory_bytes', 'container', 'agent_version', 'providers'])
+  fields(p, ['os', 'arch', 'cpus', 'memory_bytes', 'container', 'agent_version', 'providers'], ['cpu_quota'])
   const os = object(p.os)
   fields(os, ['family', 'distribution', 'kernel'])
   oneOf(os.family, ['linux', 'darwin', 'win32'])
@@ -203,6 +203,17 @@ export function validateHostProfile(value: unknown): asserts value is HostProfil
     }
   }
   if (p.cpus !== null && Number(p.cpus) > 262144) {
+    fail('invalid_host_profile')
+  }
+  if (
+    p.cpu_quota !== undefined &&
+    p.cpu_quota !== null &&
+    (os.family !== 'linux' ||
+      typeof p.cpu_quota !== 'number' ||
+      !Number.isFinite(p.cpu_quota) ||
+      p.cpu_quota <= 0 ||
+      p.cpu_quota > 262144)
+  ) {
     fail('invalid_host_profile')
   }
   oneOf(p.container, ['docker', 'podman', 'none', 'unknown'])
@@ -426,6 +437,9 @@ function decode(input: string | Uint8Array, context: CodecContext, limit: number
   switch (frame.type) {
     case 'host_profile':
       capability(context, 'host_profile')
+      if (Object.hasOwn(p, 'cpu_quota')) {
+        capability(context, 'host_cpu_quota')
+      }
       validateHostProfile(p)
       break
     case 'device_platform':

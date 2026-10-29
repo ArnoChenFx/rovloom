@@ -67,7 +67,7 @@ export type ReplyData = {
   machines_get: MachineDetailsView
   providers_list: Page<McpProviderView>
   providers_get: McpProviderView
-  runtime_discover: Page<JsonObject>
+  runtime_discover: Page<JsonObject> & { subset_revision?: string }
   runtime_describe: JsonObject
   runtime_call: CallView
   runtime_call_get: CallView

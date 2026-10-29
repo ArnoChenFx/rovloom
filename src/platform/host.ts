@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { cpus as visibleCpus, release, totalmem } from 'node:os'
 import type { HostProfileReport } from '../wire/types.js'
 import { probePlatform } from './device.js'
+import { probeCpuQuota } from './cpu-quota.js'
 
 export function probeHostProfile(agentVersion: string): HostProfileReport | undefined {
   const platform = probePlatform()
@@ -56,6 +57,7 @@ export function probeHostProfile(agentVersion: string): HostProfileReport | unde
     }),
     arch: platform.arch === 'x64' ? 'x86_64' : 'aarch64',
     cpus,
+    cpu_quota: probeCpuQuota(platform.os),
     memory_bytes: memory,
     container,
     agent_version: agentVersion,

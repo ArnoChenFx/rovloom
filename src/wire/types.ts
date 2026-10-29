@@ -40,6 +40,7 @@ export type Capability =
   | 'late_evidence'
   | 'device_platform'
   | 'host_profile'
+  | 'host_cpu_quota'
 export type VersionOffer = {
   major: number
   minor: number
@@ -99,6 +100,8 @@ export type HostProfileReport = Readonly<{
   arch: 'x86_64' | 'aarch64'
   /** os.cpus().length 的系统可见逻辑 CPU 数量；不是物理核数或容器 CPU 配额。 */
   cpus: number | null
+  /** 可见 cgroup 层级中的最紧 CPU 带宽配额（可为小数核）；null 表示未限额或未知。 */
+  cpu_quota?: number | null
   memory_bytes: number | null
   container: 'docker' | 'podman' | 'none' | 'unknown'
   agent_version: string
