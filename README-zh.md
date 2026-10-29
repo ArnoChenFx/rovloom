@@ -62,8 +62,11 @@ Windows PowerShell 与 Docker Gateway 见[快速开始](docs/QUICK-START-zh.md)�
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
-| Gateway | x64、arm64 | x64、arm64 | x64、arm64 |
-| Connector | x64 | x64, arm64 | x64 |
+| Gateway | x64、arm64（glibc / musl） | x64、arm64 | x64、arm64 |
+| Connector | x64（glibc；musl 下无 Luvus managed） | x64, arm64 | x64 |
+
+Linux musl 版需要 C++ 运行时（Alpine：`apk add libstdc++`），且不能用 Luvus managed 原生进程管理；
+详见[分发说明](docs/DISTRIBUTION.md)。
 
 Connector 所在机器需要先装 **Herdr** 或 **Luvus**；各平台安装命令见[快速开始第 2 节](docs/QUICK-START-zh.md#2-准备-connector-所在机器)。
 
