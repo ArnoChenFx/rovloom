@@ -224,11 +224,12 @@ export function validateHostProfile(value: unknown): asserts value is HostProfil
     fail('invalid_host_profile')
   }
   if (Object.hasOwn(p, 'cpu_quota_status')) {
-    oneOf(p.cpu_quota_status, ['limited', 'unlimited', 'unknown', 'partial'])
+    oneOf(p.cpu_quota_status, ['limited', 'unlimited', 'unknown', 'partial', 'unsupported'])
     const finite = p.cpu_quota_status === 'limited' || p.cpu_quota_status === 'partial'
     if (
       (finite ? typeof p.cpu_quota !== 'number' : p.cpu_quota !== null) ||
-      (p.cpu_quota_status === 'unlimited' && os.family !== 'linux')
+      (p.cpu_quota_status === 'unlimited' && os.family !== 'linux') ||
+      (p.cpu_quota_status === 'unsupported' && os.family === 'linux')
     ) {
       fail('invalid_host_profile')
     }

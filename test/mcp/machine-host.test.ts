@@ -216,3 +216,18 @@ test('旧 Gateway 不接收 CPU 配额字段，双方 minor 3 且显式广告才
     f.stop()
   }
 })
+
+test('CPU 配额 unsupported 仅用于非 Linux 且数值为 null，旧 unknown 报告保持可读', () => {
+  for (const family of ['linux', 'darwin', 'win32'] as const) {
+    const host = { ...report, os: { family, distribution: null, kernel: null } }
+    validateHostProfile({ ...host, cpu_quota: null, cpu_quota_status: 'unknown' })
+    const unsupported = { ...host, cpu_quota: null, cpu_quota_status: 'unsupported' }
+    if (family === 'linux') {
+      assert.throws(() => validateHostProfile(unsupported))
+    } else {
+      validateHostProfile(unsupported)
+      assert.throws(() => validateHostProfile({ ...host, cpu_quota: null, cpu_quota_status: 'unlimited' }))
+    }
+    assert.throws(() => validateHostProfile({ ...unsupported, cpu_quota: 0.5 }))
+  }
+})

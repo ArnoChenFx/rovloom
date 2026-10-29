@@ -272,11 +272,12 @@ function host(value: NonNullable<DeviceSnapshot['host']>, observedAt: number, la
     invalid()
   }
   if (Object.hasOwn(value, 'cpu_quota_status')) {
-    choice(value.cpu_quota_status, ['limited', 'unlimited', 'unknown', 'partial'])
+    choice(value.cpu_quota_status, ['limited', 'unlimited', 'unknown', 'partial', 'unsupported'])
     const finite = value.cpu_quota_status === 'limited' || value.cpu_quota_status === 'partial'
     if (
       (finite ? typeof value.cpu_quota !== 'number' : value.cpu_quota !== null) ||
-      (value.cpu_quota_status === 'unlimited' && value.os.family !== 'linux')
+      (value.cpu_quota_status === 'unlimited' && value.os.family !== 'linux') ||
+      (value.cpu_quota_status === 'unsupported' && value.os.family === 'linux')
     ) {
       invalid()
     }

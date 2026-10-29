@@ -292,4 +292,4 @@ Herdr、Luvus 与混合模式采用相同权限模型：Gateway 核对 token 的
 
 新配对与登记不保存 methods/actions 或 caller/local/gateway 策略；旧字段只在兼容解码边界接纳并忽略。
 
-`host_cpu_quota` 只扩展当前 host 报告，不产生新消息。未协商时 Connector 必须同时剥离 `cpu_quota` 与 `cpu_quota_status`，Gateway 拒绝未经协商携带它的帧；因此旧 Gateway 不会因未知字段断连。两个字段须同时存在，状态为 limited / unlimited / unknown / partial。limited/partial 要求正的有限小数核；unknown/unlimited 要求 null。只有 unlimited 表示完整可见层级未限额；partial 说明已知有限上界但链未走完，null 不可自行解读为无限。只从当前进程可见 cgroup CPU 带宽上限取得，取可见祖先的最小值，不代表实际可用并行度。
+`host_cpu_quota` 只扩展当前 host 报告，不产生新消息。未协商时 Connector 必须同时剥离 `cpu_quota` 与 `cpu_quota_status`，Gateway 拒绝未经协商携带它的帧；因此旧 Gateway 不会因未知字段断连。两个字段须同时存在，状态为 limited / unlimited / unknown / partial / unsupported。unsupported 仅用于非 Linux，表示不支持此探测；unknown 表示无法核实。limited/partial 要求正的有限小数核；unknown/unlimited/unsupported 要求 null。unlimited 仅用于 Linux。只有 unlimited 表示完整可见层级未限额；partial 说明已知有限上界但链未走完，null 不可自行解读为无限。只从当前进程可见 cgroup CPU 带宽上限取得，取可见祖先的最小值，不代表实际可用并行度。

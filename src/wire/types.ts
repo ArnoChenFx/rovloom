@@ -102,7 +102,7 @@ export type HostProfileReport = Readonly<{
   cpus: number | null
   /** 可见 cgroup 层级中的最紧 CPU 带宽上界；须结合 status，null 不能单独解释为未限额。 */
   cpu_quota?: number | null
-  cpu_quota_status?: 'limited' | 'unlimited' | 'unknown' | 'partial'
+  cpu_quota_status?: 'limited' | 'unlimited' | 'unknown' | 'partial' | 'unsupported'
   memory_bytes: number | null
   container: 'docker' | 'podman' | 'none' | 'unknown'
   agent_version: string

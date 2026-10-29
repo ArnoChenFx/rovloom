@@ -56,7 +56,7 @@ export function probeCpuQuota(platform: string = process.platform, read: ReadCon
       result !== null ? (complete ? 'limited' : 'partial') : complete && observed ? 'unlimited' : 'unknown'
   })
   if (platform !== 'linux') {
-    return report()
+    return { cpu_quota: null, cpu_quota_status: 'unsupported' }
   }
   try {
     const memberships = read('/proc/self/cgroup', 65_536)

@@ -66,17 +66,18 @@ test('非本机层级、路径越界、读取失败或非 Linux 时不编造配�
     }),
     unknown
   )
+  const unsupported = { cpu_quota: null, cpu_quota_status: 'unsupported' }
   assert.deepEqual(
     probeCpuQuota('darwin', () => {
       throw new Error('must_not_read')
     }),
-    unknown
+    unsupported
   )
   assert.deepEqual(
     probeCpuQuota('win32', () => {
       throw new Error('must_not_read')
     }),
-    unknown
+    unsupported
   )
 })
 

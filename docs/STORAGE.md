@@ -41,7 +41,7 @@ MCP 的 `machines_get` 和管理页 `DeviceSnapshot` 详情可以包含 `host`�
 
 完整 host 只在双方协商能力并上报后出现，旧 Connector 缺报时整块省略。读取不会刷新报告时间；缓存被淘汰、Gateway 重启或恢复代次变化后，host 缺省、时间未知为 null。新认证 epoch 清除旧 host，等待重新上报。该缓存不计入持久备份，不承诺跨重启的在线历史；磁盘平台摘要仍按其独立寿命保留。
 
-采集发生在连接建立时，长连接期间的 provider 版本、内核或资源配置变化不会定时刷新 host；心跳只更新连接观察。需要新报告时，在适当窗口重连 Connector。双方支持 `host_cpu_quota` 时另报可选 `cpu_quota`，读取 Linux 当前进程可见 cgroup v1/v2 的祖先限额并保留小数核；配套 `cpu_quota_status` 区分 limited / unlimited / unknown / partial。null 本身不是未限额证明，只有 unlimited 才表示可见层级已查完且未限额；partial 保留已读上界但仍可能存在更紧祖先限制。旧连接同时省略这两个字段。它与其它 host 字段一样只存在于当前进程的连接时报告，不新增数据库列。`cpus` 是运行时 `os.cpus().length` 的系统可见逻辑 CPU 数量，不是物理核数、进程可用并行度或容器 CPU 配额；`memory_bytes` 是系统可见总量，不是容器内存限额。v0.6.8 及之前的 Connector 的旧并行度报告不会被 Gateway 换算；更新并重连 Connector 后才重新采集。
+采集发生在连接建立时，长连接期间的 provider 版本、内核或资源配置变化不会定时刷新 host；心跳只更新连接观察。需要新报告时，在适当窗口重连 Connector。双方支持 `host_cpu_quota` 时另报可选 `cpu_quota`，读取 Linux 当前进程可见 cgroup v1/v2 的祖先限额并保留小数核；配套 `cpu_quota_status` 区分 limited / unlimited / unknown / partial / unsupported。unsupported 表示非 Linux 平台不支持此探测（数值为 null），unknown 表示无法核实探测结果。null 本身不是未限额证明，只有 unlimited 才表示可见层级已查完且未限额；partial 保留已读上界但仍可能存在更紧祖先限制。旧连接同时省略这两个字段。它与其它 host 字段一样只存在于当前进程的连接时报告，不新增数据库列。`cpus` 是运行时 `os.cpus().length` 的系统可见逻辑 CPU 数量，不是物理核数、进程可用并行度或容器 CPU 配额；`memory_bytes` 是系统可见总量，不是容器内存限额。v0.6.8 及之前的 Connector 的旧并行度报告不会被 Gateway 换算；更新并重连 Connector 后才重新采集。
 
 管理页详情明确显示“连接时上报”、上报接收时间与来源；其中 provider 版本按当前管理员的 `providers_read` 授权过滤。设备列表保持轻量，不携带完整 host。缺报不影响旧设备页面。
 
