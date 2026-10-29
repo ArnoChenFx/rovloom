@@ -166,6 +166,70 @@ test(
   }
 )
 
+test(
+  'container publisher still accepts a pre-musl release that shipped only the six glibc binaries',
+  /** 历史版本没有 musl 资产；补发镜像时必须按该版本真实集合核对，否则 GHCR 恢复会永久失败。 */ async () => {
+    const f = fixture()
+    const glibc = officialReleasePlatforms().filter((platform) => platform.libc !== 'musl')
+    const muslNames = officialReleasePlatforms()
+      .filter((platform) => platform.libc === 'musl')
+      .map((platform) => assetName(f.context.version, platform))
+    // 从远端资产集合里移除 musl 项，模拟 0.7.1 这类只有 glibc 的已公开版本。
+    f.release.assets = f.release.assets.filter((asset) => !muslNames.includes(asset.name))
+    for (const name of muslNames) {
+      f.files.delete(name)
+    }
+    const assets = glibc.map((platform) => ({
+      os: platform.os,
+      arch: platform.arch,
+      libc: platform.libc,
+      name: assetName(f.context.version, platform),
+      size: f.bytes.length,
+      sha256: f.hash(f.bytes)
+    }))
+    const manifest = Buffer.from(
+      JSON.stringify({ schemaVersion: 1, repository: 'ArnoChenFx/rovloom', ...f.context, bun: '1.4.3', assets }) + '\n'
+    )
+    f.files.set('release-manifest.json', manifest)
+    const metadata = f.release.assets.find((asset) => asset.name === 'release-manifest.json')
+    metadata.size = manifest.length
+    metadata.digest = 'sha256:' + f.hash(manifest)
+    // SHA256SUMS 自身不入列，且必须与当前远端资产集合完全对应。
+    const sums = Buffer.from(
+      [...f.files]
+        .filter(([name]) => name !== 'SHA256SUMS')
+        .map(([name, data]) => `${f.hash(data)}  ${name}\n`)
+        .join('')
+    )
+    f.files.set('SHA256SUMS', sums)
+    const checksums = f.release.assets.find((asset) => asset.name === 'SHA256SUMS')
+    checksums.size = sums.length
+    checksums.digest = 'sha256:' + f.hash(sums)
+    assert.deepEqual(await releaseContext(f.event, f.api, f.request), f.context)
+    // 六项历史版本仍必须拒绝真正的额外资产，而不是因为缺 musl 就放宽集合校验。
+    f.release.assets.push({ ...f.release.assets[0], name: 'rovloom-0.1.0-linux-x64-uclibc' })
+    await assert.rejects(releaseContext(f.event, f.api, f.request), /Unexpected release assets/u)
+    // 清单声明了 musl 资产、远端却没有该资产时同样失败，不会被"缺 musl"的兼容分支放过。
+    const missing = fixture()
+    missing.release.assets = missing.release.assets.filter((asset) => asset.name !== muslNames[0])
+    missing.files.delete(muslNames[0])
+    const sumsOnly = Buffer.from(
+      [...missing.files]
+        .filter(([name]) => name !== 'SHA256SUMS')
+        .map(([name, data]) => `${missing.hash(data)}  ${name}\n`)
+        .join('')
+    )
+    missing.files.set('SHA256SUMS', sumsOnly)
+    const checksumsOnly = missing.release.assets.find((asset) => asset.name === 'SHA256SUMS')
+    checksumsOnly.size = sumsOnly.length
+    checksumsOnly.digest = 'sha256:' + missing.hash(sumsOnly)
+    await assert.rejects(
+      releaseContext(missing.event, missing.api, missing.request),
+      /Manifest asset count differs|Unexpected release assets/u
+    )
+  }
+)
+
 test('container publisher accepts legacy assets and a checksummed same-version npm tarball', async () => {
   for (const npm of [false, true]) {
     const f = fixture(npm)
