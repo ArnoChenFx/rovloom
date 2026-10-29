@@ -1,14 +1,14 @@
 /** 描述的审核 schema 与实际参数检查对照；UTF-8 字节限制使用已标注的扩展。 */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import Ajv2020 from 'ajv/dist/2020.js'
+import { Ajv2020 } from 'ajv/dist/2020.js'
 import type { AnySchema } from 'ajv'
 import { luvusReviewedParams } from '../../../src/connector/luvus/reviewed-params.js'
 import { validateLuvusOperationParams } from '../../../src/connector/luvus/operations.js'
 
 test('wait.output 的审核参数 schema 覆盖真实 u32、UTF-8 字节、NUL 和秒数边界', () => {
   const schema = luvusReviewedParams('wait.output')!
-  const ajv = new Ajv2020({ strict: false })
+  const ajv = new Ajv2020({ strict: true })
   ajv.addKeyword({
     keyword: 'x-maxUtf8Bytes',
     schemaType: 'number',

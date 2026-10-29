@@ -87,6 +87,7 @@ function publicReply(name: ToolName, data: Record<string, unknown>): Record<stri
           'arch',
           'cpus',
           'cpu_quota',
+          'cpu_quota_status',
           'memory_bytes',
           'container',
           'agent_version',

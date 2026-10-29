@@ -42,7 +42,7 @@ Luvus 没有 `window.*` 方法。窗口选择沿 Luvus 自己的 workspace、tab
 
 Luvus 0.14.3 的数字 `pane` 是进程级递增分配的 ID，不是布局中的第几个位置。分屏、交换或移动不会对同一个存活 pane 重新编号，因此同一原生实例中可以跨调用复用。原生进程重启恢复 pane 时会重新分配，不能把重启后的相同数字视为原终端。
 
-`pane.list` 当前没有返回 `terminal_id`，但选定 pane 后可用 `pane.get({pane})` 同时读取 `terminal_id`、`workspace_id` 和 `tab_id`；`agent.read` 也会返回终端身份。保存完整 provider target 和这些身份，不必仅因布局变化就重新猜 pane 编号。`terminal_id` 是终端生命周期身份，不是所有 pane 方法都接受的 selector；不能把它直接塞进 `pane` 字段。
+`pane.list` 的 `pane` 与 `session.snapshot` 的 `pane_id` 是同一进程内的同一个数字 ID，`pane.get` 入参仍叫 `pane`。`pane.list` 当前没有返回 `terminal_id`，但选定 pane 后可用 `pane.get({pane})` 同时读取 `terminal_id`、`workspace_id` 和 `tab_id`；`agent.read` 也会返回终端身份。保存完整 provider target 和这些身份，不必仅因布局变化就重新猜 pane 编号。`terminal_id` 是终端生命周期身份，不是所有 pane 方法都接受的 selector；不能把它直接塞进 `pane` 字段。
 
 | 查询 | pane 标识字段 | 终端 / 拓扑身份 |
 |---|---|---|
@@ -131,7 +131,7 @@ Luvus 在不同方法里使用不同的位置坐标。Rovloom 原样返回，不
 - `params_schema`：有明确方法条件分支且能准确提取时，返回原生参数 schema 及本地 `$defs` 引用闭包，保留枚举、组合条件、数字边界、`description` 和 `$comment`。当前 0.14.3 的审核普通方法中包括 `pane.list`、`agent.prompt/send/wait/keys`。
 - `schema_annotations`：原生 request/response 文档根的 `$comment`、`description` 原文，附 `document_uri` 与 JSON Pointer。根注释属于整个文档，不应当作当前方法独有的约束。
 - `params_schema_source` 区分 `installed_native_schema` 与 `rovloom_reviewed_subset`。`wait.output` 即使原生覆盖为 `generic_params_only`，也返回审核 schema：必填 pane/match、正 u32 pane、禁止 NUL、秒数 0..3600。match 的 `maxLength:4096` 只是字符上界，准确 UTF-8 字节上限另由 `x-maxUtf8Bytes:4096` 表达；客户端须检查该扩展，不能将字符数当字节数。无法准确投影的原生条件不丢弃，执行仍核验完整原始 schema 和审核参数子集。
-- discover 页、方法条目和 describe 都返回 `subset_revision`：它标识当前可见方法及审核参数定义，方法新增/删除或终端开关改变会更新；同一集合仅排序变化不更新。客户端用 `(contract_ref, subset_revision)` 缓存目录。`contract_ref` 继续标识已批准原生来源，新增方法不迫使旧配对重建身份。
+- discover 页和 describe 返回 `subset_revision`：它以原生 contract_ref 为命名空间，标识当前可见方法及审核参数定义，方法新增/删除或终端开关改变会更新；同一集合仅排序变化不更新。客户端用 `(contract_ref, subset_revision)` 缓存目录。该修订只用于缓存失效，不代表授权或调用许可；执行仍复核当前契约、能力与设备范围。`contract_ref` 继续标识已批准原生来源，新增方法不迫使旧配对重建身份。
 
 例如 `agent.prompt` 的原生根注释明确说明：等待模式须先观察到新的 working/blocked 转换，再匹配 `until`；`agent.wait` 则只是当前状态匹配器。快速回复或缺少正向状态证据时，前者可能一直未匹配，即使 Agent 实际已答完。MCP 可直接读到原生注释和下面的审核提示。
 

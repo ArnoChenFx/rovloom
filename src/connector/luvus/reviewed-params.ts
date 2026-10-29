@@ -34,6 +34,8 @@ export function luvusReviewedParams(method: string): JsonObject | undefined {
       },
       match: {
         type: 'string',
+        $comment:
+          'x-maxUtf8Bytes is a required custom keyword. Register it with strict validators; maxLength alone does not enforce the byte limit.',
         minLength: 1,
         maxLength: WAIT_OUTPUT_MATCH_BYTES,
         pattern: '^[^\\u0000]+$',

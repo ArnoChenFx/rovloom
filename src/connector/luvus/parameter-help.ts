@@ -25,6 +25,7 @@ const help = {
     optional: ['timeout_s'],
     rules: [
       'Wait for a literal substring in the selected pane. match is non-empty text, at most 4096 UTF-8 bytes; it is not a regex.',
+      'Enforce the params_schema x-maxUtf8Bytes keyword. maxLength counts characters and alone cannot guarantee an executable request. Register the custom keyword before using a strict JSON Schema validator.',
       'The native runtime first checks recent output, so an existing marker can match immediately. Use a fresh per-execution marker when appropriate.',
       'timeout_s is seconds (0..3600). Set it explicitly and leave RPC overhead before the absolute runtime_call deadline.',
       'A native type:wait response with matched:false means the observation ended without a match; it does not prove a command stopped or failed. No stdout or exit code is returned.'

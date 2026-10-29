@@ -1,6 +1,7 @@
 /** Linux cgroup CPU 带宽配额；只读当前进程所属层级，保留小数核，不从 cpus 猜测。 */
 import { posix } from 'node:path'
 import { readPrivateBytes } from '../storage/files.js'
+import type { HostProfileReport } from '../wire/types.js'
 
 type ReadControl = (path: string, maximum: number) => string | undefined
 
@@ -42,18 +43,27 @@ function unescapeMount(value: string): string {
   return value.replace(/\\([0-7]{3})/g, (_match, octal: string) => String.fromCharCode(parseInt(octal, 8)))
 }
 
-/** 读取挂载命名空间内可见的祖先上限，取最紧配额。不可核实或未限额均返回 null。 */
-export function probeCpuQuota(platform: string = process.platform, read: ReadControl = readControl): number | null {
+type QuotaObservation = Required<Pick<HostProfileReport, 'cpu_quota' | 'cpu_quota_status'>>
+
+/** 读取可见祖先上限；未知不能解释成未限额，未走完的链保留已读上界并标为 partial。 */
+export function probeCpuQuota(platform: string = process.platform, read: ReadControl = readControl): QuotaObservation {
+  let result: number | null = null
+  let observed = false
+  let complete = true
+  const report = (): QuotaObservation => ({
+    cpu_quota: result,
+    cpu_quota_status:
+      result !== null ? (complete ? 'limited' : 'partial') : complete && observed ? 'unlimited' : 'unknown'
+  })
   if (platform !== 'linux') {
-    return null
+    return report()
   }
   try {
     const memberships = read('/proc/self/cgroup', 65_536)
     const mounts = read('/proc/self/mountinfo', 1_048_576)
     if (memberships === undefined || mounts === undefined) {
-      return null
+      return report()
     }
-    let result: number | null = null
     for (const row of memberships.trim().split('\n')) {
       const member = /^[^:]+:([^:]*):(\/.*)$/.exec(row)
       if (!member) {
@@ -96,6 +106,7 @@ export function probeCpuQuota(platform: string = process.platform, read: ReadCon
                 throw new Error('cpu_quota_invalid')
               }
               quota = parseCpuQuota(parts[0]!, parts[1]!)
+              observed = true
             }
           } else {
             const raw = read(posix.join(directory, 'cpu.cfs_quota_us'), 1024)
@@ -105,6 +116,7 @@ export function probeCpuQuota(platform: string = process.platform, read: ReadCon
             }
             if (raw !== undefined && period !== undefined) {
               quota = parseCpuQuota(raw.trim(), period.trim())
+              observed = true
             }
           }
           if (quota !== null) {
@@ -115,14 +127,15 @@ export function probeCpuQuota(platform: string = process.platform, read: ReadCon
           }
           const parent = posix.dirname(directory)
           if (parent === directory || depth === 127) {
-            throw new Error('cpu_quota_invalid')
+            complete = false
+            break
           }
           directory = parent
         }
       }
     }
-    return result
   } catch {
-    return null
+    complete = false
   }
+  return report()
 }

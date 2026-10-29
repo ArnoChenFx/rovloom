@@ -212,7 +212,6 @@ export function authorizedCatalog(options: AuthorizedCatalogOptions) {
         return {
           ...method,
           contract_ref: source.contract_ref,
-          subset_revision: subsetRevision,
           ...(entry.details ? { terminal_execution: entry.details } : {})
         }
       }

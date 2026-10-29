@@ -47,10 +47,12 @@ test(
       const description = described.structuredContent!.data as {
         schema_status: string
         params_schema?: unknown
+        params_schema_source: string
         parameter_help: { source: string; required: string[] }
       }
       assert.equal(description.schema_status, 'generic_params_only')
-      assert.equal(description.params_schema, undefined)
+      assert(description.params_schema)
+      assert.equal(description.params_schema_source, 'rovloom_reviewed_subset')
       assert.equal(description.parameter_help.source, 'rovloom_reviewed_subset')
       assert.deepEqual(description.parameter_help.required, ['pane', 'match'])
       const input = { ...route, contract_ref: f.reference, deadline: f.state.store.clock() + 30_000 }

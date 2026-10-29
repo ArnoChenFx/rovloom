@@ -57,7 +57,7 @@ export function probeHostProfile(agentVersion: string): HostProfileReport | unde
     }),
     arch: platform.arch === 'x64' ? 'x86_64' : 'aarch64',
     cpus,
-    cpu_quota: probeCpuQuota(platform.os),
+    ...probeCpuQuota(platform.os),
     memory_bytes: memory,
     container,
     agent_version: agentVersion,

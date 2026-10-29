@@ -18,6 +18,7 @@ const report: HostProfileReport = {
   arch: 'x86_64',
   cpus: 4,
   cpu_quota: 0.5,
+  cpu_quota_status: 'limited',
   memory_bytes: 17179869184,
   container: 'docker',
   agent_version: '0.6.7',
@@ -195,11 +196,22 @@ test('旧 Gateway 不接收 CPU 配额字段，双方 minor 3 且显式广告才
     const host = f.gateway.observations.snapshot(scope).machine_metadata![0]!.host!
     assert.equal(host.cpus, 4)
     assert.equal('cpu_quota' in host, false)
+    assert.equal('cpu_quota_status' in host, false)
     assert.equal(client.status().failure, undefined)
     for (const quota of [0, -1, Infinity, NaN, '0.5']) {
       assert.throws(() => validateHostProfile({ ...report, cpu_quota: quota }))
     }
-    validateHostProfile({ ...report, cpu_quota: null })
+    validateHostProfile({ ...report, cpu_quota: null, cpu_quota_status: 'unknown' })
+    validateHostProfile({ ...report, cpu_quota: null, cpu_quota_status: 'unlimited' })
+    validateHostProfile({ ...report, cpu_quota: 0.5, cpu_quota_status: 'partial' })
+    for (const extra of [
+      { cpu_quota_status: undefined },
+      { cpu_quota_status: 'unlimited' },
+      { cpu_quota: null },
+      { cpu_quota_status: 'guess' }
+    ]) {
+      assert.throws(() => validateHostProfile({ ...report, ...extra }))
+    }
   } finally {
     f.stop()
   }

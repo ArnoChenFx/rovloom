@@ -181,7 +181,11 @@ export function validateDevicePlatform(value: unknown): asserts value is DeviceP
 /** 主机声明只接受粗粒度固定字段；来源、上报时间由 Gateway 补充，远端不能自行指定。 */
 export function validateHostProfile(value: unknown): asserts value is HostProfileReport {
   const p = object(value)
-  fields(p, ['os', 'arch', 'cpus', 'memory_bytes', 'container', 'agent_version', 'providers'], ['cpu_quota'])
+  fields(
+    p,
+    ['os', 'arch', 'cpus', 'memory_bytes', 'container', 'agent_version', 'providers'],
+    ['cpu_quota', 'cpu_quota_status']
+  )
   const os = object(p.os)
   fields(os, ['family', 'distribution', 'kernel'])
   oneOf(os.family, ['linux', 'darwin', 'win32'])
@@ -215,6 +219,19 @@ export function validateHostProfile(value: unknown): asserts value is HostProfil
       p.cpu_quota > 262144)
   ) {
     fail('invalid_host_profile')
+  }
+  if (Object.hasOwn(p, 'cpu_quota') !== Object.hasOwn(p, 'cpu_quota_status')) {
+    fail('invalid_host_profile')
+  }
+  if (Object.hasOwn(p, 'cpu_quota_status')) {
+    oneOf(p.cpu_quota_status, ['limited', 'unlimited', 'unknown', 'partial'])
+    const finite = p.cpu_quota_status === 'limited' || p.cpu_quota_status === 'partial'
+    if (
+      (finite ? typeof p.cpu_quota !== 'number' : p.cpu_quota !== null) ||
+      (p.cpu_quota_status === 'unlimited' && os.family !== 'linux')
+    ) {
+      fail('invalid_host_profile')
+    }
   }
   oneOf(p.container, ['docker', 'podman', 'none', 'unknown'])
   text(p.agent_version, 128)
@@ -437,7 +454,7 @@ function decode(input: string | Uint8Array, context: CodecContext, limit: number
   switch (frame.type) {
     case 'host_profile':
       capability(context, 'host_profile')
-      if (Object.hasOwn(p, 'cpu_quota')) {
+      if (Object.hasOwn(p, 'cpu_quota') || Object.hasOwn(p, 'cpu_quota_status')) {
         capability(context, 'host_cpu_quota')
       }
       validateHostProfile(p)

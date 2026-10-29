@@ -138,7 +138,7 @@ test('公开 subset_revision 随可见方法集变化，契约引用保持原生
     assert.equal(first.scope.contract_ref, second.scope.contract_ref)
     assert.notEqual(first.subset_revision, second.subset_revision)
     assert.equal(second.describe('wait.output').subset_revision, second.subset_revision)
-    assert(second.methods.every((method) => method.subset_revision === second.subset_revision))
+    assert(second.methods.every((method) => !Object.hasOwn(method, 'subset_revision')))
     methods.reverse()
     assert.equal(view().subset_revision, second.subset_revision)
     methods.push({ method: 'pane.run' })
