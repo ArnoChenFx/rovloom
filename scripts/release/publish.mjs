@@ -60,6 +60,16 @@ const RELEASE_NOTES = Object.freeze({
     ],
     upgrade:
       'A musl build cannot drive Luvus managed native process control: musl 1.2.5 exports `poll`, `getsockopt` and `__errno_location` but not `pidfd_open` or `pidfd_send_signal`, so managed Luvus sessions fail closed with `owned_pidfd_unavailable`. Gateway, Herdr and Luvus attach work on musl. The glibc assets are unchanged and nothing about pairing, tokens or ledgers moves — download the `-musl` asset only if your Linux has no glibc.'
+  },
+  '0.8.1': {
+    highlights: [
+      'Parameter rejections explain themselves on both providers. A request refused before registration (`native_request_invalid`, always `not_dispatched`) now carries `details.issues` (fixed paths and rules, never your values or unknown field names) and `parameter_help`. Herdr derives them from the installed schema, the same source as `runtime_describe.params_schema`; Luvus now covers every ordinary method instead of five.',
+      'Luvus `runtime_describe` publishes a Rovloom-reviewed `params_schema` (`params_schema_source: rovloom_reviewed_subset`) for the ordinary methods that the native schema only covers as `generic_params_only`. Execution validation, the published schema and the diagnostics come from one definition; the native `schema_status` is unchanged.',
+      'The Gateway write lock is now backed by a kernel `flock` on Linux. A Gateway killed by OOM or power loss restarts on its own even when the new process reuses the old PID, as in a restarted container, and a live Gateway in another container that shares the data volume is never mistaken for a dead one.',
+      'Transitive dependency advisories are fixed (`body-parser` 2.4.0, `fast-uri` 3.1.9; `bun audit` is clean), and the Docker first-pairing, wire protocol and e2e docs now describe the current flow.'
+    ],
+    upgrade:
+      'Nothing to migrate: pairings, tokens and ledgers are unchanged. Stop the old Gateway before starting this one: a still-running pre-0.8.1 Gateway holds no kernel lock and is protected only by the previous PID check, so never run two Gateways on the same data. A lock written by 0.8.1 carries `kernel_lock`; where the filesystem cannot provide `flock` (and on macOS and Windows) the PID check applies as before. Luvus `subset_revision` changes because the reviewed definitions are now part of it, so clients that cache `(contract_ref, subset_revision)` refetch descriptions once.'
   }
 })
 
