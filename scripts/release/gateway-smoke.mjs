@@ -233,7 +233,7 @@ async function withGateway(binary, f, cwd, env, inspect, prefix = [], runtime = 
 }
 
 /**
- * 六平台均以实际产品验收Gateway；Windows通过既有管道请求正常关闭，不用强杀充当成功。
+ * 八个资产目标均以实际产品验收Gateway；Windows通过既有管道请求正常关闭，不用强杀充当成功。
  * launch 用于 npm 包：由绝对路径的 bun 直接运行已安装入口（不复制文件），identity 记录被验收包的摘要。
  */
 export async function smokeGatewayProduct(

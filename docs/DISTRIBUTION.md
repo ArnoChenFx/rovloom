@@ -105,7 +105,7 @@ apk add libstdc++
 - 同一份源码重复打包得到逐字节相同的 tarball，所以重跑草稿的字节核对对它同样有效。
 - tarball 与二进制使用同一个 tag、版本和提交：tag 构建写出绑定三者与字节的收据，发布器据此核对。
 - 它的摘要只进入 `SHA256SUMS`，**不进 `release-manifest.json`**：已发布的客户端对 manifest 字段做封闭校验，新增字段会让它们无法读取新清单。
-- [npm-smoke.mjs](../scripts/release/npm-smoke.mjs) 在干净目录 `bun add` 该 tarball，验收 `bin` 链接、`--version`/`--help`/模板/`config check`、`bunx --package`、非 Bun 运行时（`node main.js`）的明确拒绝，并以 bun 直接运行已安装入口，复用 Gateway smoke 的认证 MCP、管理页内嵌资源、schema Worker 与正常关闭检查。它在 [Bun verification](../.github/workflows/bun.yml)、六平台 [Standalone CI](../.github/workflows/standalone.yml) 和 tag 发行的 `npm` job 中运行；需要访问 npm 注册表拉取两个运行时依赖。
+- [npm-smoke.mjs](../scripts/release/npm-smoke.mjs) 在干净目录 `bun add` 该 tarball，验收 `bin` 链接、`--version`/`--help`/模板/`config check`、`bunx --package`、非 Bun 运行时（`node main.js`）的明确拒绝，并以 bun 直接运行已安装入口，复用 Gateway smoke 的认证 MCP、管理页内嵌资源、schema Worker 与正常关闭检查。它在 [Bun verification](../.github/workflows/bun.yml)、八个资产目标的 [Standalone CI](../.github/workflows/standalone.yml) 和 tag 发行的 `npm` job 中运行；需要访问 npm 注册表拉取两个运行时依赖。
 - 入口 `src/cli/runtime-guard.ts` 在非 Bun 运行时或低于 `engines.bun` 下限的 Bun 上直接给出明确提示。
 - 已知限制：`rovloom service install` 只接受单文件二进制；tarball 安装的程序暂不能注册开机服务。
 

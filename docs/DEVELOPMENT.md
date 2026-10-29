@@ -147,7 +147,7 @@ Job 预算：Bun/Gateway 20 分钟、standalone 30 分钟、平台原语 10 分�
 
 CI 的固定 HTTPS 只读下载和 GitHub 元数据读取使用 `scripts/ci/read-network.mjs`：总预算内最多三次尝试、250/500 ms 退避，仅连接故障、408/429/500/502/503/504 和下载中断可重试。超大内容、证书错误、永久 HTTP 拒绝、无效重定向不重试；跨来源去除凭据。摘要校验、文件发布、native 安装/写入、服务控制、配对兑换和业务调用均不包重试，`outcome_unknown` 仍不自动重发。Release 校验的 curl 下载也仅设置两次有限网络重试。
 
-Herdr Worker 样本/编译/打包、Gateway schema 编译、Windows 原生解析器及损坏 cancel 负例的 ready/dispatch/closed 阶段输出固定 JSON 阶段耗时。Linux 全量测试及六平台服务 job 将样本写入 job summary 和 `*-test-phases` / `parser-phases-*` 产物；tee 保留测试退出码，报告和上传失败不改变测试结论。原 Windows 桥的 spawn / first statement / script / exit / close 分段观测继续保留。没有全局延长测试 timeout。#249 复测中，main `12242af` 的 258 次 Luvus RPC 容量回归单独运行 29,969 ms，距 30 秒上限仅约 31 ms；因此仅该长循环 fixture 改为 60 秒，并分开记录 expired/active 两轮耗时。每次 native deadline、断言和调用次数不变。另一轮完整运行捕获 Herdr 生产 Gateway 工厂在 5,510 ms 触到默认 5 秒测试期限，随后共享编译器仍忙导致三个关联失败；该用例增加编译阶段计时，并按产品编译期限 10 秒加测试收尾 5 秒设置外层预算，编译失败也清理 fixture。产品编译期限仍是 10 秒。
+Herdr Worker 样本/编译/打包、Gateway schema 编译、Windows 原生解析器及损坏 cancel 负例的 ready/dispatch/closed 阶段输出固定 JSON 阶段耗时。Linux 全量测试及八个资产目标的服务 job 将样本写入 job summary 和 `*-test-phases` / `parser-phases-*` 产物；tee 保留测试退出码，报告和上传失败不改变测试结论。原 Windows 桥的 spawn / first statement / script / exit / close 分段观测继续保留。没有全局延长测试 timeout。#249 复测中，main `12242af` 的 258 次 Luvus RPC 容量回归单独运行 29,969 ms，距 30 秒上限仅约 31 ms；因此仅该长循环 fixture 改为 60 秒，并分开记录 expired/active 两轮耗时。每次 native deadline、断言和调用次数不变。另一轮完整运行捕获 Herdr 生产 Gateway 工厂在 5,510 ms 触到默认 5 秒测试期限，随后共享编译器仍忙导致三个关联失败；该用例增加编译阶段计时，并按产品编译期限 10 秒加测试收尾 5 秒设置外层预算，编译失败也清理 fixture。产品编译期限仍是 10 秒。
 
 macOS 系统服务失败时额外查询一次固定 label 的 `launchctl print`，只输出退出码、stderr 和公开状态字段，过滤环境与完整声明；不会再次执行 stop。Gateway smoke 失败记录自有 child 生命周期、输出字节/摘要和白名单产品错误行，未知输出不公开。#217 仍需实际 Intel macOS 失败样本才能定位；本地 Linux 通过不能证明该偶发已修复。
 
