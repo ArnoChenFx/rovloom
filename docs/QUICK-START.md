@@ -118,7 +118,7 @@ herdr-core is a third runtime: the core's own agent-management API over a unix s
 TUI. It is Linux-only and accepts exactly the reviewed core versions, **0.1.14** and **0.1.15** — the handshake
 refuses any other version (older or newer) until it has been reviewed, and the binary digest and contract
 hash are recorded at pairing. Upgrading core replaces the binary, so a paired device fails closed
-(`herdr_core_installation_changed`) until you run `rovloom setup` again against the new core.
+(`herdr_core_installation_changed`) until you pair again with a fresh code (`rovloom connector --join …`, which re-pairs this machine as a new device against the new core).
 
 Install it from the official release manifest, verifying the archive yourself (never `curl | sh`):
 

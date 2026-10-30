@@ -58,7 +58,7 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 **0.1.15 的审核（2026-10-30）。** 结论是只改版本集合、不改档位表，依据四项：①`rpc.discover` 文档与 0.1.14 逐字相同，只差 `info.version` 与 `StatusResult.installed_by` 的一句说明（`test/connector/herdr-core/versions.test.ts` 把这两处抹平后断言相等，多出任何差异测试就变红）；②同一批 360 个候选参数在两个版本上被 core 接受或拒绝的结果逐条一致（0 条不同），58 个真实输出样本形状一致，Ajv 差分的宽松/严格清单一致；③上游 `29e6d37..d028423` 的净 diff 里，`api.rs` 只动了 `machine.add`/`machine.rename`（本期不开放），`terminal.*` 没有改动；④上游同一版本内加了又回退的「agent 回到 shell 时清除状态」（`d6c6d14`、`2451f84`、`d440864`）净改动为零，`foreground.rs` 不在净 diff 里。0.1.15 的其余改动不在我们的调用面：systemd 的关机守卫、RHEL8/NixOS 启动兼容都只在 `hc` 自动拉起（`systemd::spawn`）那条路径上，而 managed 模式直接 `execve serve`、从不走它；macOS 登录 shell、`hc update` 对包管理器安装的处理同理。
 
-配对记录二进制摘要与契约哈希，所以升级 core 等于换了二进制：已配对设备按现有语义失败关闭（`herdr_core_installation_changed` / `herdr_core_schema_unreviewed`），对新 core 重新运行 `rovloom setup` 即可。
+配对记录二进制摘要与契约哈希，所以升级 core 等于换了二进制：已配对设备按现有语义失败关闭（`herdr_core_installation_changed` / `herdr_core_schema_unreviewed`），用新的配对码重新配对即可（`rovloom connector --join …` 把这台机器作为新设备对新 core 重新配对；这与 Herdr TUI 换了二进制后的处理一致）。
 
 ### 输入与控制档（spike 第 5 条）
 
