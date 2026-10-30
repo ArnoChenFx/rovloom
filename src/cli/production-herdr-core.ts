@@ -6,6 +6,7 @@
 import { createHerdrCoreConnectorResources } from '../connector/herdr-core/connector.js'
 import { createHerdrCoreGatewayResources, parseHerdrCoreProviderRefConfig } from '../connector/herdr-core/provider.js'
 import { boundedJson, fields, object, parseJson } from '../wire/index.js'
+import { resolveTerminalExecution } from '../connector/terminal-execution.js'
 import { findHerdrCoreBinary, herdrCoreManagedDirs } from '../connector/herdr-core/managed.js'
 import { CliError, herdrCoreConfigHome, herdrCoreMode, herdrCoreSession } from './config.js'
 import type { ProductionCliSources, ProductionProviderReference } from './production.js'
@@ -62,14 +63,15 @@ export function createHerdrCoreProductionSources(): ProductionCliSources {
               // 只把显式配置的目录交给发现逻辑；省略时它按 PATH 找。
               binary: findHerdrCoreBinary(
                 config.native?.runtime_bin_dirs ? { runtime_bin_dirs: [...config.native.runtime_bin_dirs] } : {}
-              )
+              ),
+              ...(config.native?.agent_bin_dirs ? { agent_bin_dirs: [...config.native.agent_bin_dirs] } : {})
             }
           : undefined
       return createHerdrCoreConnectorResources({
         config: reference(references),
         now: Date.now,
         // 本机开关只来自 Connector 自己的配置；目录、Gateway 登记与最终写入共用这个观察值。
-        allow_terminal_execution: config.allow_terminal_execution === true,
+        allow_terminal_execution: resolveTerminalExecution(config.allow_terminal_execution),
         ...(managed ? { managed } : {})
       })
     }

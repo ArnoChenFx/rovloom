@@ -110,7 +110,8 @@ export async function prepareSetupHerdrCore(
       dirs: managed,
       binary: findHerdrCoreBinary(
         config.native?.runtime_bin_dirs ? { runtime_bin_dirs: [...config.native.runtime_bin_dirs] } : {}
-      )
+      ),
+      ...(config.native?.agent_bin_dirs ? { agent_bin_dirs: [...config.native.agent_bin_dirs] } : {})
     })
   }
   const pin = managed ? { runtime_dir: managed.run } : endpointPin(session)

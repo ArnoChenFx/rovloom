@@ -291,6 +291,8 @@ def main():
                 # Connector 自己拉起 core：不预先把 core 跑起来，也不经过 hc。
                 native_core['mode'] = 'managed'
             cfg['native'] = {'provider': 'herdr-core', 'herdr_core': native_core}
+            # 模板默认已开启终端执行；这里显式关闭，才能先验证“关闭”阶段，再翻成 true。
+            cfg['allow_terminal_execution'] = False
             open(path, 'w').write(json.dumps(cfg, indent=2) + '\n'); os.chmod(path, 0o600)
             if args.herdr_core_mode == 'managed':
                 print('HERDR_CORE_MANAGED_ROOT', managed_root, flush=True)

@@ -186,6 +186,42 @@ test('本机开关关闭时控制档在原生写入前拒绝，读取不受影�
   )
 })
 
+test('本机开关省略即开启，只有显式 false 关闭；目录上报与最终写入读同一个值', async () => {
+  for (const [label, extra, enabled] of [
+    ['省略', {}, true],
+    ['显式 true', { allow_terminal_execution: true }, true],
+    ['显式 false', { allow_terminal_execution: false }, false]
+  ] as const) {
+    const core = await startFakeCore({ discover: DISCOVER })
+    const { root, config } = fixture(core)
+    const attached = await attachment(core)
+    const resources = await createHerdrCoreConnectorResources({
+      config,
+      now: Date.now,
+      ...extra,
+      open: async () => attached
+    })
+    try {
+      const session = resources.session(connection())
+      assert.equal(session.terminalExecutionState?.()[0]?.enabled, enabled, label)
+      if (enabled) {
+        // 开启时同一个缺栅栏的请求越过开关，被参数审核的栅栏码拒绝（不是开关拒绝，且原生一次都没发）。
+        await assert.rejects(
+          execute(session, 'terminal.send', { terminal: 't1', text: 'x' }),
+          (error: unknown) => (error as { code?: string }).code === 'herdr_core_terminal_fence_required'
+        )
+        assert.deepEqual(core.requests, [])
+      } else {
+        await refuses(execute(session, 'terminal.send', fence({ text: 'x' })), 'terminal_execution_disabled')
+      }
+    } finally {
+      await resources.release()
+      await core.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+})
+
 test('名字与 machine/tN 不作为输入目标，宿主级方法仍不可调用', async () => {
   await withSession({ discover: DISCOVER }, async ({ core, session }) => {
     for (const [method, params] of [

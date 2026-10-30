@@ -131,7 +131,9 @@ tar -xzf herdr-core.tar.gz -C ~/.local/bin
 `mode: "managed"` 用 `native.runtime_bin_dirs`（或 `PATH`）里的 `herdr-core serve` 启动，并给它私有的
 `XDG_RUNTIME_DIR`/`XDG_STATE_HOME`/`XDG_CONFIG_HOME`；rovloom 不调用 `hc`、不下载或更新 core，Connector
 退出后 core 与终端继续运行。模板在 `<config_home>/herdr-core/templates/*.md`；managed 默认的 config home
-是私有空目录，用自己的模板就把 `native.herdr_core.config_home` 指向准备好的目录。
+是私有空目录，用自己的模板就把 `native.herdr_core.config_home` 指向准备好的目录。core 启动的终端继承它的环境：
+`PATH` 是 `/usr/bin:/bin`，前面按顺序加上 `native.agent_bin_dirs`（与 Luvus、Herdr 同一规则，把它设成 agent 所在目录），
+`HOME` 保持真实家目录，`XDG_*` 是私有目录。
 
 配对照常（`rovloom connector --join …`）。MCP 客户端能做的事：
 
@@ -144,9 +146,13 @@ tar -xzf herdr-core.tar.gz -C ~/.local/bin
 - 其余保持关闭：`machine.*`、`file.*`、`doc.set`、`server.stop/restart`、`terminal.attach`。
 
 要跟踪状态变化而不停 `terminal.list`，用长轮询 `terminal.events`：返回当前快照 + `after_seq`
-之后至多 `limit` 条事件（默认 64 条，最多等 30 秒）。把返回的 `next_after_seq` 带回去；
-`rebuilt:true` 表示状态被整份替换（丢过事件或 core 重启），更早的事件已经没了；`truncated:true`
-表示本地缓冲溢出。它是观察档，不需要 `allow_terminal_execution`。
+之后至多 `limit` 条事件（默认 64 条，最多等 30 秒）。把返回的 `next_after_seq` 带回去。
+`rebuilt`、`truncated`、`dropped` 是对**你这个 `after_seq`** 的回答，不会黏住：`rebuilt:true` 表示你的水位对不上了
+（比 core 当前水位还大，例如 core 重启后；或早于 feed 当前快照的起点），请用返回的 `terminals` 重建状态；
+`truncated:true` 且 `dropped:n` 表示本地缓冲已经挤掉了你还没读的 `n` 条事件。已消失终端的 `finished`、
+`removed`、`lost` 事件也会送达，不按快照过滤。已知局限：core 重启后 `core.id` 不变、`seq` 从 0 重来，
+一个恰好落在新范围内的旧水位无法分辨；请持续轮询，并把 `seq` 变小当作重启的信号。它是观察档，
+不需要 `allow_terminal_execution`。
 
 模板启动长这样（`argv[0]` 是模板名；`template: true` 让 rovloom 先用 `templates.list` 核对）：
 

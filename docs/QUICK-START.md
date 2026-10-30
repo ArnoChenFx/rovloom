@@ -143,11 +143,14 @@ select `attach`, or let the Connector start a private one with `managed`:
 `XDG_RUNTIME_DIR`/`XDG_STATE_HOME`/`XDG_CONFIG_HOME`; rovloom never calls `hc`, never downloads or
 updates core, and leaves the core and its terminals running when the Connector exits. Templates live
 in `<config_home>/herdr-core/templates/*.md`; with `managed` the default config home is private and
-empty, so set `native.herdr_core.config_home` to a directory where you keep templates.
+empty, so set `native.herdr_core.config_home` to a directory where you keep templates. Terminals the core
+starts inherit its environment: `PATH` is `/usr/bin:/bin` prefixed with `native.agent_bin_dirs` (the same rule
+as Luvus and Herdr, so set it to where your agents live), `HOME` stays your real home, and `XDG_*` are the
+private directories.
 
 Pair as usual (`rovloom connector --join …`). What the MCP client can do:
 
-- reads: `server.status`, `template.list`, `terminal.get`, `terminal.list`, `terminal.read`
+- reads: `server.status`, `templates.list`, `terminal.get`, `terminal.list`, `terminal.read`
   (`lines` up to 1000), `terminal.wait`;
 - input and lifecycle (`allow_terminal_execution` required): `terminal.send`, `terminal.keys`,
   `terminal.interrupt`, `terminal.put`, `terminal.kill`, `terminal.rm`, `terminal.keep`,
@@ -159,8 +162,13 @@ Pair as usual (`rovloom connector --join …`). What the MCP client can do:
 
 To follow status changes without polling `terminal.list`, long-poll `terminal.events`: it returns the
 current snapshot plus up to `limit` events after `after_seq` (default `limit` 64, wait ≤30s). Feed the
-returned `next_after_seq` back; `rebuilt:true` means the state was replaced (missed events or a core
-restart) and older events are gone, `truncated:true` means the local buffer overflowed. It is a read:
+returned `next_after_seq` back. `rebuilt`, `truncated` and `dropped` answer for *your* `after_seq` and
+never stick: `rebuilt:true` means your watermark no longer fits (it is ahead of the core, e.g. after a core
+restart, or older than the feed's current snapshot), so rebuild from `terminals`; `truncated:true` with
+`dropped:n` means the local buffer already evicted `n` events you had not read. Events of terminals that are
+gone (`finished`, `removed`, `lost`) are delivered too, not filtered against the snapshot. Known limit: the core
+keeps its `core.id` across restarts and `seq` restarts at 0, so a stale watermark that happens to be inside the
+new range cannot be told apart; poll continuously and treat a falling `seq` as a restart. It is a read:
 `allow_terminal_execution` is not needed.
 
 A template run looks like this (`argv[0]` is the template name; `template: true` makes rovloom check

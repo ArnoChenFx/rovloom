@@ -50,7 +50,7 @@ export type HerdrCoreConnectorOptions = Readonly<{
     enabled: boolean
   }>
   now(): number
-  /** 本机直接终端输入开关；省略即关闭。目录、Gateway 登记与最终写入三处共用同一个观察值。 */
+  /** 本机直接终端输入开关的观察值；执行端自己没有配置来源，未提供接缝即按关闭（失败关闭）。目录、Gateway 登记与最终写入三处共用同一个观察值。 */
   terminalExecution?: () => boolean
   /** 经 terminal.run 启动的终端上限；省略用默认值。 */
   max_run_terminals?: number

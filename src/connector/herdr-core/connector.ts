@@ -64,7 +64,7 @@ export async function createHerdrCoreConnectorResources(
   input: Readonly<{
     config: unknown
     now(): number
-    /** 本机直接终端输入开关；省略即关闭。控制档在目录、Gateway 登记与最终写入三处受它约束。 */
+    /** 本机直接终端输入开关；省略即开启（与 Herdr、Luvus 一致），只有显式 false 关闭。控制档在目录、Gateway 登记与最终写入三处受它约束。 */
     allow_terminal_execution?: boolean
     /** 本 Connector 同时存活的、经 terminal.run 启动的终端上限；省略用默认值。 */
     max_run_terminals?: number
@@ -72,7 +72,7 @@ export async function createHerdrCoreConnectorResources(
      * managed 模式：连接前确保 core 在跑（直接 exec `<bin> serve`，不用 `hc`）。
      * 每次尝试连接前都会调用，因此 Connector 重启后也能重新拉起并重新核对身份。
      */
-    managed?: Readonly<{ dirs: HerdrCoreManagedDirs; binary: string }>
+    managed?: Readonly<{ dirs: HerdrCoreManagedDirs; binary: string; agent_bin_dirs?: readonly string[] }>
     open?(config: HerdrCoreProviderRefConfig): Promise<HerdrCoreAttachment>
   }>
 ): Promise<HerdrCoreConnectorResources> {
@@ -89,7 +89,11 @@ export async function createHerdrCoreConnectorResources(
   const managed = input.managed
   const beforeAttach = managed
     ? /** 只保证端点可连；身份、版本与契约仍由 attachHerdrCore 完整核对。 */ () =>
-        ensureHerdrCoreManaged({ dirs: managed.dirs, binary: managed.binary })
+        ensureHerdrCoreManaged({
+          dirs: managed.dirs,
+          binary: managed.binary,
+          ...(managed.agent_bin_dirs ? { agent_bin_dirs: managed.agent_bin_dirs } : {})
+        })
     : undefined
   const installation =
     input.open !== undefined
@@ -106,7 +110,7 @@ export async function createHerdrCoreConnectorResources(
     fail('herdr_core_installation_changed')
   }
   const binding = provider(config)
-  // 只接受显式布尔值；省略保持关闭，字符串、数字和对象均不能隐式开启。
+  // 只接受显式布尔值；省略取默认值（开启），字符串、数字和对象既不能隐式开启也不能隐式关闭。
   const terminalExecution = pinTerminalExecution(input.allow_terminal_execution)
   const maxRunTerminals = input.max_run_terminals ?? HERDR_CORE_MAX_RUN_TERMINALS
   if (!Number.isSafeInteger(maxRunTerminals) || maxRunTerminals < 1 || maxRunTerminals > 1024) {

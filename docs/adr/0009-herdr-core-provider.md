@@ -162,8 +162,11 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 
 Wire 桥接只做普通 RPC，`events.subscribe` 是 framed 持续流，因此不暴露成 MCP 工具。要让控制端看到「哪个终端变成了 blocked/done」，`terminal.events` 由 Connector 自己实现：一条无过滤订阅 + 有界环形缓冲（默认 256 条），一次普通请求最多等 `timeout_ms`（≤30 秒），返回「当前终端快照（现读 `terminal.list`）+ 自 `after_seq` 以来至多 `limit` 条事件」。
 
-- `seq` 只在同一个 core 进程内有效；`after_seq` 大于当前水位（core 重启后归零）时丢弃旧水位、整份重建，返回 `rebuilt:true`，调用方必须从新水位重新开始。
-- 缓冲装不下时返回 `truncated:true` 与 `dropped` 计数，绝不静默丢事件。
+- `seq` 只在同一个 core 进程内有效；`after_seq` 大于当前水位（core 重启后归零）时丢弃旧水位、整份重建，返回 `rebuilt:true`，调用方必须从新水位重新开始。早于本订阅快照起点的水位（`missed`、EOF 后重新订阅）同样 `rebuilt:true`。
+- 缓冲已把调用方还没取走的事件挤掉时返回 `truncated:true` 与 `dropped` 条数，绝不静默丢事件。`rebuilt`/`truncated`/`dropped` 由调用方带来的 `after_seq` 与 feed 现有范围**现算**，不在 feed 上累积，因此追平后不会黏住（无过滤订阅的 `seq` 连续，空洞即丢失）。
+- 事件不按「终端是否还在快照里」过滤：`finished`/`removed`/`lost` 恰恰发生在终端消失之后；`address` 直接比对事件的终端，`labels` 用 feed 见过的快照里的标签。
+- 已知局限：core 重启后 `core.id` 不变，`seq` 归零，一个恰好落在新范围内的旧水位与正常续读无法区分；调用方应持续轮询，把 `seq` 变小当作重启信号。
+- 并发的多个轮询共用同一次订阅（单飞），同一条事件唤醒全部等待者；`next_after_seq` 用取定事件时的水位，读快照期间到达的事件留给下一次轮询。
 - 只用无过滤订阅（spike 4a1：按终端/标签过滤的订阅有空洞），`address`/`labels` 在 Connector 侧过滤快照与事件。
 - 观察档：不受 `allow_terminal_execution` 约束；参数（水位/条数/时限/过滤）逐项审核，多余字段拒绝；结果由本仓库的严格 schema 复验。
 - 订阅遇到 `missed`、EOF 或背压都按重建处理；Connector 重新附着后连接换了，feed 自己重建。

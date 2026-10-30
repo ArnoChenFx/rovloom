@@ -11,9 +11,11 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { accessSync, constants, lstatSync, mkdirSync, statSync } from 'node:fs'
+import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, isAbsolute, join, normalize } from 'node:path'
 import { setTimeout as pause } from 'node:timers/promises'
+import { agentSearchPath } from '../local/agent-path.js'
 import { ProviderAdapterError } from '../provider-error.js'
 import { fail } from '../../wire/index.js'
 
@@ -144,10 +146,17 @@ export function findHerdrCoreBinary(
   fail('herdr_core_binary_unavailable')
 }
 
-/** 拉起用的环境：只给 core 需要的最小集合，身份变量逐个显式设定，不透传宿主环境。 */
-export function herdrCoreManagedEnv(dirs: HerdrCoreManagedDirs): Record<string, string> {
+/**
+ * 拉起用的环境：只给 core 需要的最小集合，身份变量逐个显式设定，不透传宿主环境。
+ * core 启动的终端继承这份环境，所以 `PATH` 与 Luvus、Herdr 一致：固定系统路径，
+ * 只被 `native.agent_bin_dirs` 的规范绝对目录前置，agent 才找得到。
+ */
+export function herdrCoreManagedEnv(
+  dirs: HerdrCoreManagedDirs,
+  agentBinDirs?: readonly string[]
+): Record<string, string> {
   return {
-    PATH: '/usr/bin:/bin',
+    PATH: agentSearchPath(agentBinDirs, '/usr/bin:/bin'),
     HOME: process.env.HOME ?? '/',
     SHELL: '/bin/sh',
     TERM: 'xterm-256color',
@@ -161,18 +170,32 @@ export function herdrCoreManagedEnv(dirs: HerdrCoreManagedDirs): Record<string, 
   }
 }
 
-/** 套接字是否已经可用（只 stat，不连接；连接会由附着层做完整身份核对）。 */
-function socketReady(socket: string): boolean {
-  try {
-    return lstatSync(socket).isSocket()
-  } catch {
-    return false
-  }
+/**
+ * 套接字是否真的可连接：只建立并立刻关闭一个连接，不握手、不发任何字节（身份与版本由附着层完整核对）。
+ * 不能只 stat：core 与 holder 都被杀后套接字文件会残留，stat 看着正常却没人在听，
+ * 用它判断「已就绪」会让 managed 永远不再拉起。
+ */
+function socketConnectable(socket: string, timeoutMs = 500): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let settled = false
+    const probe = connect(socket)
+    const finish = (value: boolean): void => {
+      if (!settled) {
+        settled = true
+        probe.destroy()
+        resolve(value)
+      }
+    }
+    probe.once('connect', () => finish(true))
+    probe.once('error', () => finish(false))
+    probe.setTimeout(timeoutMs, () => finish(false))
+  })
 }
 
 /**
- * 确保 managed core 在跑：已有套接字就直接附着；否则起一个脱离本进程的 `serve` 并等它就绪。
- * 同 session 已有 core（core.lock 被占）时新起的进程会静默退出，此时等原 core 的套接字出现即可。
+ * 确保 managed core 在跑：套接字能连上就直接附着；否则（含残留的陈旧套接字文件）起一个脱离本进程的
+ * `serve` 并等它就绪。同 session 已有 core（core.lock 被占）时新起的进程会静默退出，此时等原 core 可连接即可；
+ * 陈旧套接字由新的 `serve` 自己接管（真实 core 0.1.14 实测）。
  * 任何失败都只给固定码，不拉起第二个实例、不自动重试成热循环。
  */
 export async function ensureHerdrCoreManaged(
@@ -182,15 +205,17 @@ export async function ensureHerdrCoreManaged(
     /** 测试注入点：默认用 node:child_process.spawn。 */
     spawnProcess?: typeof spawn
     timeout_ms?: number
+    /** `native.agent_bin_dirs`：前置到 core 及其终端的 PATH。 */
+    agent_bin_dirs?: readonly string[]
   }>
 ): Promise<void> {
-  if (socketReady(input.dirs.socket)) {
+  if (await socketConnectable(input.dirs.socket)) {
     return
   }
   const binary = absolute(input.binary, 'herdr_core_binary_unavailable')
   const launch = input.spawnProcess ?? spawn
   const child = launch(binary, ['serve'], {
-    env: herdrCoreManagedEnv(input.dirs),
+    env: herdrCoreManagedEnv(input.dirs, input.agent_bin_dirs),
     cwd: input.dirs.run,
     // 脱离 Connector：Connector 退出后 core 与终端继续运行。
     detached: true,
@@ -201,7 +226,7 @@ export async function ensureHerdrCoreManaged(
   // 新起的进程可能因 core.lock 被占而静默退出：这时原 core 的套接字随后会出现，继续等到期限。
   const deadline = Date.now() + (input.timeout_ms ?? START_TIMEOUT_MS)
   while (Date.now() < deadline) {
-    if (socketReady(input.dirs.socket)) {
+    if (await socketConnectable(input.dirs.socket)) {
       return
     }
     await pause(50)
