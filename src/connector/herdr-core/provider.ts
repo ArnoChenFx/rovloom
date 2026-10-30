@@ -47,6 +47,7 @@ import type {
 import { HERDR_CORE_PROVIDER_DESCRIPTOR } from './descriptor.js'
 import { herdrCoreSessionName } from './identity.js'
 import {
+  HERDR_CORE_BLOCKED_PARAMS,
   HERDR_CORE_EXPOSED_METHODS,
   HERDR_CORE_GUIDE,
   HERDR_CORE_METHOD_USAGE,
@@ -260,6 +261,8 @@ export function describeHerdrCoreContract(input: {
             tier: herdrCoreTier(method),
             description: input.contract.methodDescription(method),
             params_schema: input.contract.paramsSchema(method),
+            /** 审核表里一律拒绝的参数；它们不出现在 params_schema 里。 */
+            blocked_params: HERDR_CORE_BLOCKED_PARAMS,
             ...(HERDR_CORE_METHOD_USAGE[method] ? { usage: HERDR_CORE_METHOD_USAGE[method] } : {})
           })
       )
@@ -437,6 +440,7 @@ export async function createHerdrCoreGatewayResources(
             tier: found.tier,
             description: found.description,
             params_schema: structuredClone(found.params_schema),
+            blocked_params: found.blocked_params,
             ...(found.usage ? { usage: found.usage } : {}),
             /** 使用说明是全局的，逐条 describe 也带上，控制端不必先读整份目录。 */
             guide: described.guide

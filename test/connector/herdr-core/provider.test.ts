@@ -180,6 +180,9 @@ test('资源工厂登记五个端口，目录暴露读取与控制档，身份�
       assert.match(String((send.guide as string[])[2]), /wait=true/u)
       // 没有专门说明的方法不补造 usage。
       assert.equal(resolved.describe('server.status').usage, undefined)
+      // 一律拒绝的参数列在 blocked_params 里，不出现在 params_schema。
+      assert.deepEqual(send.blocked_params, ['caller', 'calls_you', 'core', 'on', 'parent', 'children_of'])
+      assert.equal(Object.hasOwn(params.properties, 'caller'), false)
       // terminal.run 本阶段开放，模板形态由 rovloom 自有参数声明。
       const run = resolved.describe('terminal.run')
       assert.equal(run.tier, 'host')

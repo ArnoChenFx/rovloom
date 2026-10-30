@@ -63,8 +63,8 @@ function frame(channel: number, kind: number, payload: Buffer): Buffer {
 /** 假 core 的进程内状态：每次 terminal.run 生成一个新的地址，terminal.list 报全部。 */
 type FakeState = { runs: number }
 
-/** 与真实结果字段一致的终端事实，供三元组核对。 */
-function terminal(options: FakeCoreOptions = {}): Record<string, unknown> {
+/** 与真实结果字段一致的终端事实，供三元组核对；测试覆盖 handler 时也用它拼结果。 */
+export function fakeTerminal(options: FakeCoreOptions = {}): Record<string, unknown> {
   return {
     address: 't1',
     created_ms: 1793335137041,
@@ -97,7 +97,7 @@ function terminal(options: FakeCoreOptions = {}): Record<string, unknown> {
 
 /** 第 index 个由 terminal.run 启动的终端；地址与 created_ms 逐次不同。 */
 function runTerminal(options: FakeCoreOptions, index: number): Record<string, unknown> {
-  return terminal({
+  return fakeTerminal({
     ...options,
     terminal: { ...options.terminal, address: 't' + index, created_ms: 1793335137041 + index }
   })
@@ -123,12 +123,12 @@ function defaultHandler(request: FakeCoreRequest, options: FakeCoreOptions, stat
     case 'terminal.list':
       return {
         terminals: Array.from({ length: Math.max(1, state.runs) }, (_, index) =>
-          state.runs === 0 ? terminal(options) : runTerminal(options, index + 1)
+          state.runs === 0 ? fakeTerminal(options) : runTerminal(options, index + 1)
         ),
         hidden_finished: 0
       }
     case 'terminal.get':
-      return terminal(options)
+      return fakeTerminal(options)
     case 'terminal.send':
       return { turn: 0, started: null, status: null, wait: null }
     case 'terminal.keys':
@@ -154,7 +154,7 @@ function defaultHandler(request: FakeCoreRequest, options: FakeCoreOptions, stat
     case 'terminal.kill':
     case 'terminal.keep':
     case 'terminal.label':
-      return terminal(options)
+      return fakeTerminal(options)
     case 'terminal.read':
       return { text: 'hello\n', complete: true, how: 'screen' }
     case 'terminal.wait':
@@ -236,7 +236,7 @@ export async function startFakeCore(options: FakeCoreOptions = {}): Promise<Fake
             subscription = 1
             // 真实 core 给新流 256 KiB 初始信用，之后靠客户端回补。
             credit = 256 * 1024
-            send(0, { jsonrpc: '2.0', id: request.id, result: { seq: 0, terminals: [terminal()], channel: 1 } })
+            send(0, { jsonrpc: '2.0', id: request.id, result: { seq: 0, terminals: [fakeTerminal()], channel: 1 } })
             pump()
             return
           }

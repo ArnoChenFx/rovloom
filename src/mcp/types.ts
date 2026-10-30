@@ -52,6 +52,22 @@ export type ProviderMetadata = {
   schema_sha256: string | null
 }
 export type McpProviderView = ProviderView & ProviderMetadata
+/** 逐调用拒绝原因的公开闭合集合；与 call-view.ts 的映射表一一对应。 */
+export type CallRefusalReason =
+  | 'blocked'
+  | 'status_mismatch'
+  | 'terminal_finished'
+  | 'not_found'
+  | 'machine_unknown'
+  | 'invalid_params'
+  | 'fence_mismatch'
+  | 'terminal_unavailable'
+  | 'terminal_execution_disabled'
+  | 'template_unavailable'
+  | 'template_ambiguous'
+  | 'capacity'
+  | 'unavailable'
+
 export type CallView = JsonObject & {
   call_id: string
   target: V2Target
@@ -59,6 +75,8 @@ export type CallView = JsonObject & {
   binding_revision: number
   contract_ref: string | null
   state: string
+  /** 确定未派发时的固定原因；没有记录或已过期时不出现。 */
+  reason?: CallRefusalReason
   delivery: string
   content_status: string
 }

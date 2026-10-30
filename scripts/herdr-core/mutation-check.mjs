@@ -37,6 +37,46 @@ const mutations = [
     expect: 'terminal_execution_disabled'
   },
   {
+    name: 'core 明确拒绝不再标成未知',
+    file: 'src/connector/herdr-core/runtime.ts',
+    from: '      if (error instanceof HerdrCoreRpcError && HERDR_CORE_NATIVE_REJECTION_KINDS.includes(error.kind)) {',
+    to: '      if (false as boolean) {',
+    test: ['test/connector/herdr-core/native-error.test.ts', '-t', 'core 明确拒绝的类别是确定未派发'],
+    expect: 'not_dispatched'
+  },
+  {
+    name: '模板名核对',
+    file: 'src/connector/herdr-core/runtime.ts',
+    from: '        await assertHerdrCoreTemplate({',
+    to: '        void assertHerdrCoreTemplate({',
+    test: ['test/connector/herdr-core/run.test.ts', '-t', '模板声明与真实模板不符时在写入前拒绝'],
+    expect: 'herdr_core_template'
+  },
+  {
+    name: 'caller/parent/on 拒绝',
+    file: 'src/connector/herdr-core/methods.ts',
+    from: "    if (HERDR_CORE_BLOCKED_PARAMS.includes(key)) {\n      fail('herdr_core_param_blocked')\n    }",
+    to: "    if (HERDR_CORE_BLOCKED_PARAMS.includes(key) && false) {\n      fail('herdr_core_param_blocked')\n    }",
+    test: ['test/connector/herdr-core/run.test.ts', '-t', 'parent/caller/on 一律拒绝'],
+    expect: 'herdr_core_param_blocked'
+  },
+  {
+    name: '本机容量上限',
+    file: 'src/connector/herdr-core/runtime.ts',
+    from: "          if (started.size >= capacity) {\n            fail('herdr_core_run_capacity')\n          }",
+    to: "          if (false as boolean) {\n            fail('herdr_core_run_capacity')\n          }",
+    test: ['test/connector/herdr-core/run.test.ts', '-t', '本机容量上限'],
+    expect: 'herdr_core_run_capacity'
+  },
+  {
+    name: '读历史受开关约束',
+    file: 'src/connector/terminal-execution.ts',
+    from: "  if (kind === 'herdr-core' && method === 'terminal.read') {\n    return typeof params.lines === 'number' && params.lines > 0\n  }",
+    to: "  if (kind === 'herdr-core' && method === 'terminal.read' && false) {\n    return typeof params.lines === 'number' && params.lines > 0\n  }",
+    test: ['test/connector/terminal-execution.test.ts', '-t', 'herdr-core 关闭开关时仍列出控制档但标成不可用'],
+    expect: 'lines'
+  },
+  {
     name: '本机开关（Gateway 登记前）',
     file: 'src/connector/herdr-core/provider.ts',
     from: "            if (requiresTerminalExecution('herdr-core', method, object(candidate.params ?? {})) && !terminalEnabled()) {\n              fail('terminal_execution_disabled')\n            }",

@@ -11,7 +11,7 @@ import { NativeRequestPreflightError } from '../preflight.js'
 import { ProviderAdapterError } from '../provider-error.js'
 import { boundedJson, fail, hash, parseJson } from '../../wire/index.js'
 import type { JsonObject } from '../../wire/types.js'
-import { HERDR_CORE_FENCE_PARAMS, HERDR_CORE_METHODS, herdrCoreControl } from './methods.js'
+import { HERDR_CORE_BLOCKED_PARAMS, HERDR_CORE_FENCE_PARAMS, HERDR_CORE_METHODS, herdrCoreControl } from './methods.js'
 
 /** 输入上限远大于 0.1.14 的 63 KB 文档，同时拒绝把任意大文件当 schema。 */
 export const HERDR_CORE_SCHEMA_INPUT_LIMIT = 1024 * 1024
@@ -264,8 +264,46 @@ function transform(input: JsonObject, state: TransformState): JsonObject {
   return out
 }
 
-/** 参数根由本仓库拼出：按名传参、只列已声明参数、根上禁止多余字段。 */
-function paramsSchema(method: JsonObject, budget: AnnotationBudget): JsonObject {
+/**
+ * 把参数 schema 里对本地组件的引用就地展开：控制端只看 describe 的 `params_schema`，
+ * 悬空 `$ref` 等于看不到允许值（例如 `if` 只能是 idle/working）。参数里不应出现递归，
+ * 出现就按契约不符拒绝，不交一份解不开的 schema。
+ */
+function inlineReferences(schema: JsonObject, components: JsonObject, visiting: readonly string[] = []): JsonObject {
+  const ref = schema.$ref
+  if (ref !== undefined) {
+    const name =
+      typeof ref === 'string' && ref.startsWith(`${SCHEMA_URI}#/$defs/`) ? ref.slice(SCHEMA_URI.length + 8) : undefined
+    if (name === undefined || visiting.includes(name) || !components[name]) {
+      fail('herdr_core_schema_ref_unsupported')
+    }
+    return inlineReferences(components[name] as JsonObject, components, [...visiting, name])
+  }
+  const out: JsonObject = {}
+  for (const [key, value] of Object.entries(schema)) {
+    if (Array.isArray(value)) {
+      out[key] = value.map(
+        /** 数组里的每一项都可能是 schema。 */ (entry) =>
+          entry && typeof entry === 'object' && !Array.isArray(entry)
+            ? inlineReferences(entry as JsonObject, components, visiting)
+            : entry
+      )
+      continue
+    }
+    if (value && typeof value === 'object') {
+      out[key] = inlineReferences(value as JsonObject, components, visiting)
+      continue
+    }
+    out[key] = value
+  }
+  return out
+}
+
+/**
+ * 参数根由本仓库拼出：按名传参、只列已声明参数、根上禁止多余字段。
+ * 被一律拒绝的参数（caller/on/parent/…）不进 schema：控制端不该看到一个调不通的可选参数。
+ */
+function paramsSchema(method: JsonObject, budget: AnnotationBudget, components: JsonObject): JsonObject {
   const list = method.params
   if (!Array.isArray(list)) {
     fail('herdr_core_schema_invalid')
@@ -279,6 +317,10 @@ function paramsSchema(method: JsonObject, budget: AnnotationBudget): JsonObject 
     const param = entry as JsonObject
     if (typeof param.name !== 'string' || !param.schema || typeof param.schema !== 'object') {
       fail('herdr_core_schema_invalid')
+    }
+    if (HERDR_CORE_BLOCKED_PARAMS.includes(param.name)) {
+      // 审核表里一律拒绝的参数不出现在控制端的参数清单里。
+      continue
     }
     if (Object.hasOwn(properties, param.name)) {
       fail('herdr_core_schema_invalid')
@@ -310,12 +352,15 @@ function paramsSchema(method: JsonObject, budget: AnnotationBudget): JsonObject 
       required.push(field)
     }
   }
-  return {
-    type: 'object',
-    properties,
-    ...(required.length ? { required } : {}),
-    additionalProperties: false
-  }
+  return inlineReferences(
+    {
+      type: 'object',
+      properties,
+      ...(required.length ? { required } : {}),
+      additionalProperties: false
+    },
+    components
+  )
 }
 
 /** 结果按方法声明的成功类型收紧；上游已证实的缺陷只按表放宽。 */
@@ -420,7 +465,7 @@ export function compileHerdrCoreContract(input: string | Uint8Array): HerdrCoreC
   const results = new Map<string, JsonObject>()
   const descriptions = new Map<string, string>()
   for (const [name, method] of methods) {
-    params.set(name, paramsSchema(method, budget))
+    params.set(name, paramsSchema(method, budget, components))
     // rpc.discover 的结果引用外部 meta schema，本仓库不解析也不冒称已审核。
     results.set(
       name,

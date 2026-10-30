@@ -107,11 +107,16 @@ test('parent/caller/on 一律拒绝，no_parent/no_notify 只接受 true', async
     for (const params of [
       { argv: ['cat'], parent: 't1' },
       { argv: ['cat'], caller: 't1' },
-      { argv: ['cat'], on: 'box' },
+      { argv: ['cat'], on: 'box' }
+    ]) {
+      // 固定在审核表里拒绝，不靠 schema 的「未知字段」兜底。
+      await assert.rejects(execute(session, 'terminal.run', params), /herdr_core_param_blocked/u)
+    }
+    for (const params of [
       { argv: ['cat'], no_parent: false },
       { argv: ['cat'], no_notify: false }
     ]) {
-      await assert.rejects(execute(session, 'terminal.run', params))
+      await assert.rejects(execute(session, 'terminal.run', params), /herdr_core_parent_unsupported/u)
     }
     assert.deepEqual(core.requests, [])
   })

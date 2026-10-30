@@ -192,6 +192,27 @@ export const HERDR_CORE_UNAVAILABLE: Readonly<Record<string, string>> = Object.f
   'terminal.attach': 'needs_terminal_emulator'
 })
 
+/**
+ * core 用 JSON-RPC 错误响应明确答复、且**在写入之前**就失败的 `data.kind`（读 0.1.14 源码核对）：
+ * - `status_mismatch` / `blocked`：`input.rs::send` 在 `type_in` 的 prepare 闭包里抛出，早于任何 Step::Write；
+ * - `finished`：`check_program` 与 `type_in` 的活终端检查，同样早于写入；
+ * - `not_found` / `machine_unknown` / `invalid_params`：目标或参数在动作之前就不可用。
+ * 其它类别（`unavailable`、`config`、`internal`…）可能发生在动作中间，仍按 `outcome_unknown` 保守处理。
+ */
+export const HERDR_CORE_NATIVE_REJECTION_KINDS: readonly string[] = Object.freeze([
+  'status_mismatch',
+  'blocked',
+  'finished',
+  'not_found',
+  'machine_unknown',
+  'invalid_params'
+])
+
+/** 固定码：core 明确拒绝（不是「结果未知」），带上 core 自己的类别。 */
+export function herdrCoreNativeRejectionCode(kind: string): string {
+  return `herdr_core_native_${kind}`
+}
+
 /** 不传即不建立可信来源：caller 无认证、on 会把请求转发给远端机器、core 会把连接登记成对端。 */
 export const HERDR_CORE_BLOCKED_PARAMS: readonly string[] = Object.freeze([
   'caller',

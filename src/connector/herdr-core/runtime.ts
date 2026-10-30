@@ -22,9 +22,12 @@ import {
   herdrCoreRequestTimeout,
   herdrCoreControl,
   herdrCoreNativeParams,
+  herdrCoreNativeRejectionCode,
   reviewHerdrCoreParams,
-  HERDR_CORE_MAX_RUN_TERMINALS
+  HERDR_CORE_MAX_RUN_TERMINALS,
+  HERDR_CORE_NATIVE_REJECTION_KINDS
 } from './methods.js'
+import { HerdrCoreRpcError } from './client.js'
 import { assertHerdrCoreTerminal, assertHerdrCoreTemplate } from './control.js'
 import { assertTerminalExecutionAllowed } from '../terminal-execution.js'
 
@@ -295,6 +298,10 @@ export function createHerdrCoreConnectorRuntime(
       }
       return Object.freeze({ binding: observedBinding, native_response: result })
     } catch (error) {
+      // core 返回了 JSON-RPC 错误响应 = 它已明确答复；对核对过的类别可以确定没有写入。
+      if (error instanceof HerdrCoreRpcError && HERDR_CORE_NATIVE_REJECTION_KINDS.includes(error.kind)) {
+        throw new ProviderAdapterError(herdrCoreNativeRejectionCode(error.kind), 'not_dispatched')
+      }
       const code =
         error instanceof ProviderAdapterError || error instanceof GatewayError
           ? error.code

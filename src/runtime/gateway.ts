@@ -400,6 +400,7 @@ export async function createProviderGatewayRuntime(options: ProviderGatewayRunti
       router,
       transport: active,
       terminalExecutionState: active.terminalExecutionState.bind(active),
+      refusalReason: active.refusalReason.bind(active),
       principal,
       targets: () => [...providers.values()].map((provider) => structuredClone(provider.target)),
       runAuthenticated: scope.runAuthenticated,

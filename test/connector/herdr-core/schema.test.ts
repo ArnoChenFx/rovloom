@@ -168,12 +168,12 @@ test('core 的方法与参数说明保留为注释，超限与控制字符拒绝
 
   const document = JSON.parse(OPENRPC.toString('utf8'))
   const method = document.methods.find((entry: { name: string }) => entry.name === 'terminal.send')
-  method.params[0].schema.description = 'x'.repeat(2048)
+  method.params.find((param: { name: string }) => param.name === 'text').schema.description = 'x'.repeat(2048)
   assert.throws(() => compileHerdrCoreContract(JSON.stringify(document)), /herdr_core_schema_text_invalid/u)
 
   const control = JSON.parse(OPENRPC.toString('utf8'))
   const withControl = control.methods.find((entry: { name: string }) => entry.name === 'terminal.send')
-  withControl.params[0].schema.description = 'bell\u0007'
+  withControl.params.find((param: { name: string }) => param.name === 'text').schema.description = 'bell\u0007'
   assert.throws(() => compileHerdrCoreContract(JSON.stringify(control)), /herdr_core_schema_text_invalid/u)
 
   const huge = JSON.parse(OPENRPC.toString('utf8'))
@@ -193,4 +193,43 @@ test('core 的方法与参数说明保留为注释，超限与控制字符拒绝
     }
   }
   assert.throws(() => compileHerdrCoreContract(JSON.stringify(huge)), /herdr_core_schema_text_too_large/u)
+})
+
+test('describe 的参数 schema 没有悬空 $ref，被拒绝的参数不出现在属性里', () => {
+  const contract = compileHerdrCoreContract(DOCUMENT)
+  const methods = contract.methods
+  /** 收集所有 $ref，任何一个都必须能在同一份输出里解析（本仓库就地展开）。 */
+  const refs = (value: unknown, found: string[] = []): string[] => {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        refs(entry, found)
+      }
+    } else if (value && typeof value === 'object') {
+      for (const [key, entry] of Object.entries(value)) {
+        if (key === '$ref' && typeof entry === 'string') {
+          found.push(entry)
+        } else {
+          refs(entry, found)
+        }
+      }
+    }
+    return found
+  }
+  for (const method of methods) {
+    const schema = contract.paramsSchema(method)
+    assert.deepEqual(refs(schema), [], `${method} has dangling $ref`)
+    const properties = (schema as { properties: Record<string, unknown> }).properties
+    for (const blocked of ['caller', 'on', 'parent', 'core', 'calls_you', 'children_of']) {
+      assert.equal(Object.hasOwn(properties, blocked), false, `${method} exposes ${blocked}`)
+    }
+  }
+  // 允许值直接可见：send 的 if、wait 的 children。
+  const send = contract.paramsSchema('terminal.send') as {
+    properties: { if: { anyOf?: { enum?: string[] }[] } }
+  }
+  assert.deepEqual(send.properties.if.anyOf?.[0]?.enum, ['idle', 'working'])
+  const wait = contract.paramsSchema('terminal.wait') as {
+    properties: { children: { anyOf?: { enum?: string[] }[] } }
+  }
+  assert.deepEqual(wait.properties.children.anyOf?.[0]?.enum, ['any', 'all'])
 })

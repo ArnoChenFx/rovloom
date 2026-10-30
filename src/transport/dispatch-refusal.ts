@@ -18,7 +18,14 @@ const HERDR_CORE_REFUSALS: readonly string[] = Object.freeze([
   // 启动前的模板核对与本地容量上限：都在写发送墓碑之前判定。
   'herdr_core_template_unavailable',
   'herdr_core_template_ambiguous',
-  'herdr_core_run_capacity'
+  'herdr_core_run_capacity',
+  // core 明确拒绝的类别：连接还在，core 已答复，没有写入。
+  'herdr_core_native_status_mismatch',
+  'herdr_core_native_blocked',
+  'herdr_core_native_finished',
+  'herdr_core_native_not_found',
+  'herdr_core_native_machine_unknown',
+  'herdr_core_native_invalid_params'
 ])
 
 export interface DispatchRefusalLedger {

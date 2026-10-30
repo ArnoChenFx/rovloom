@@ -106,6 +106,12 @@ export type DispatchRefusalCode =
   | 'herdr_core_template_unavailable'
   | 'herdr_core_template_ambiguous'
   | 'herdr_core_run_capacity'
+  | 'herdr_core_native_status_mismatch'
+  | 'herdr_core_native_blocked'
+  | 'herdr_core_native_finished'
+  | 'herdr_core_native_not_found'
+  | 'herdr_core_native_machine_unknown'
+  | 'herdr_core_native_invalid_params'
 /** 闭合集合的运行时副本；编解码与账本共用同一份，避免两处枚举漂移。 */
 export const DISPATCH_REFUSAL_CODES: readonly DispatchRefusalCode[] = Object.freeze([
   'terminal_execution_disabled',
@@ -115,7 +121,14 @@ export const DISPATCH_REFUSAL_CODES: readonly DispatchRefusalCode[] = Object.fre
   'herdr_core_connection_closed',
   'herdr_core_template_unavailable',
   'herdr_core_template_ambiguous',
-  'herdr_core_run_capacity'
+  'herdr_core_run_capacity',
+  // core 明确拒绝的固定类别（写入之前失败），带 core 自己的 data.kind。
+  'herdr_core_native_status_mismatch',
+  'herdr_core_native_blocked',
+  'herdr_core_native_finished',
+  'herdr_core_native_not_found',
+  'herdr_core_native_machine_unknown',
+  'herdr_core_native_invalid_params'
 ])
 export type TerminalExecutionState = Readonly<{ binding: ProviderBinding; enabled: boolean }>
 /** 设备最近一次上报的平台；distribution 只在 Linux 且 os-release 可读时出现。 */

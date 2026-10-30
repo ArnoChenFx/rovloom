@@ -8,7 +8,7 @@ import type { createProviderGatewayRuntime } from '../runtime/gateway.js'
 import type { Store } from '../store.js'
 import { StoreGatewayService, type StoreGatewayOptions } from './store-service.js'
 import { isToolName, parseToolArguments } from './schema.js'
-import { publicCallView } from './call-view.js'
+import { callRefusalReason, publicCallView } from './call-view.js'
 import {
   FacadeServiceError,
   NativeRequestNotDispatchedError,
@@ -27,7 +27,11 @@ export type RuntimeGateway = Awaited<ReturnType<typeof createProviderGatewayRunt
 export type RuntimeGatewayPort = Pick<
   RuntimeGateway,
   'router' | 'principal' | 'runAuthenticated' | 'admit' | 'get' | 'cancel' | 'results' | 'targets'
-> & { store: Store; terminalExecutionState?: RuntimeGateway['terminalExecutionState'] }
+> & {
+  store: Store
+  terminalExecutionState?: RuntimeGateway['terminalExecutionState']
+  refusalReason?: RuntimeGateway['refusalReason']
+}
 export type RuntimeGatewayServiceOptions = Omit<StoreGatewayOptions, 'store' | 'router' | 'targets'> & {
   runtime: RuntimeGatewayPort
 }
@@ -138,7 +142,7 @@ export class RuntimeGatewayService implements GatewayService {
     this.current(context)
     const runtime = this.options.runtime
     const call = runtime.get(callId)
-    let view = publicCallView(call)
+    let view = publicCallView(call, callRefusalReason(runtime.refusalReason?.(callId)))
     view.contract_ref = runtime.store.callContractRef(runtime.principal().id, callId)
     if (call.state === 'responded' && call.content_status === 'available') {
       try {
