@@ -41,7 +41,8 @@ const REFUSAL_REASONS: Readonly<Record<string, CallRefusalReason>> = Object.free
   herdr_core_run_capacity: 'capacity',
   herdr_core_native_name_taken: 'name_taken',
   herdr_core_native_invalid_template: 'invalid_template',
-  herdr_core_connection_closed: 'unavailable'
+  herdr_core_connection_closed: 'unavailable',
+  herdr_core_events_closed: 'unavailable'
 })
 
 /** 只投影闭合集合里的原因；未知码返回 undefined，不把内部码带到公开面。 */

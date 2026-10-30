@@ -22,13 +22,17 @@ import {
   herdrCoreRequestTimeout,
   herdrCoreControl,
   herdrCoreNativeParams,
+  HERDR_CORE_EVENTS_DEFAULT_LIMIT,
+  HERDR_CORE_EVENTS_MAX_TIMEOUT_MS,
   herdrCoreNativeRejectionCode,
   reviewHerdrCoreParams,
+  HERDR_CORE_EVENTS_POLL_METHOD,
   HERDR_CORE_MAX_RUN_TERMINALS,
   HERDR_CORE_NATIVE_REJECTION_KINDS
 } from './methods.js'
 import { HerdrCoreRpcError } from './client.js'
 import { assertHerdrCoreTerminal, assertHerdrCoreTemplate } from './control.js'
+import { createHerdrCoreEventFeed } from './feed.js'
 import { assertTerminalExecutionAllowed } from '../terminal-execution.js'
 
 /** 已验证的 herdr-core 本机来源与当前 epoch 的受保护路由。 */
@@ -138,6 +142,11 @@ export function createHerdrCoreConnectorRuntime(
    */
   const started = new Map<string, number>()
   let startedCore: string | undefined
+  /** 长轮询的唯一后台订阅；随本 epoch 关闭，重连时自己重建。 */
+  const feed = createHerdrCoreEventFeed({
+    client: () => installation.client(),
+    contract: () => installation.record().contract
+  })
   let closed = false
   let highWater = -1
 
@@ -286,7 +295,24 @@ export function createHerdrCoreConnectorRuntime(
       checkSignal(controller.signal)
       dispatched = true
       // 栅栏与 template 字段只属于 rovloom，core 不认识它们；发送前显式剥离。
-      const result = await installation.client().request(request.method, herdrCoreNativeParams(request.params), timeout)
+      // 长轮询是 rovloom 自己的观察入口：走普通 RPC，不建立 Wire 流。
+      const result: JsonObject = (
+        request.method === HERDR_CORE_EVENTS_POLL_METHOD
+          ? await feed.poll({
+              after_seq: typeof request.params.after_seq === 'number' ? request.params.after_seq : 0,
+              limit: typeof request.params.limit === 'number' ? request.params.limit : HERDR_CORE_EVENTS_DEFAULT_LIMIT,
+              timeout_ms:
+                typeof request.params.timeout_ms === 'number'
+                  ? request.params.timeout_ms
+                  : HERDR_CORE_EVENTS_MAX_TIMEOUT_MS,
+              ...(typeof request.params.address === 'string' ? { address: request.params.address } : {}),
+              ...(request.params.labels && typeof request.params.labels === 'object'
+                ? { labels: request.params.labels as Record<string, string> }
+                : {})
+            })
+          : await installation.client().request(request.method, herdrCoreNativeParams(request.params), timeout)
+      ) as JsonObject
+      // 结果形状由审核 schema（或长轮询自己的严格 schema）复验，这里只做统一投影。
       checkSignal(controller.signal)
       installation.assert()
       core.validator.validateResponse(result, context)
@@ -309,6 +335,10 @@ export function createHerdrCoreConnectorRuntime(
       if (code === 'herdr_core_connection_closed') {
         // 连接已断：丢弃当前值，下一次调用重新走完整身份核对；原调用不重放。
         installation.invalidate()
+      }
+      // 长轮询是只读观察：订阅结束或参数不符时确定没有产生任何原生副作用。
+      if (code === 'herdr_core_events_closed' || code === 'herdr_core_event_invalid') {
+        throw new ProviderAdapterError(code, 'not_dispatched')
       }
       throw new ProviderAdapterError(code, dispatched ? 'outcome_unknown' : 'not_dispatched')
     } finally {
@@ -350,6 +380,7 @@ export function createHerdrCoreConnectorRuntime(
       for (const controller of active) {
         controller.abort('closed')
       }
+      feed.close()
       execution.close()
       adapter.close()
       admission.close()

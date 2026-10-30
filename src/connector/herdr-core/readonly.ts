@@ -33,7 +33,8 @@ import type {
 } from '../../wire/types.js'
 import type { ResponseAnchor, ResponseEvidencePlan } from '../../wire/evidence.js'
 import type { ProviderBinding } from '../../wire/types.js'
-import { herdrCoreExposed, reviewHerdrCoreParams } from './methods.js'
+import { herdrCoreExposed, reviewHerdrCoreParams, HERDR_CORE_SYNTHETIC_METHODS } from './methods.js'
+import { validateEventsPoll } from './feed.js'
 import type { HerdrCoreContract } from './schema.js'
 
 /** 与共享 ContractRecord 共用来源和摘要；编译结果只来自本次实例的 rpc.discover。 */
@@ -249,11 +250,19 @@ export function createHerdrCoreAdapter(backend: HerdrCoreBackend) {
       if (!record) {
         fail('herdr_core_contract_unavailable')
       }
-      record.contract.validateParams(checked.method, checked.params)
+      // rovloom 自有方法不在 core 契约里：参数已由 reviewHerdrCoreParams 逐项收紧。
+      if (!HERDR_CORE_SYNTHETIC_METHODS.includes(checked.method)) {
+        record.contract.validateParams(checked.method, checked.params)
+      }
     },
     /** 回包只能用本次实例的审核结果 schema 复验；来源由宿主可信回调复核。 */
     validateResponse(response: JsonObject, context: NativeValidationContext) {
       const state = current(context, 'read')
+      if (HERDR_CORE_SYNTHETIC_METHODS.includes(state.method)) {
+        // rovloom 自有结果用自己的严格 schema；core 契约里没有这个方法。
+        validateEventsPoll(response)
+        return
+      }
       const record = backend.contract(state.binding.contract_ref)
       if (!record) {
         fail('herdr_core_contract_unavailable')
@@ -275,7 +284,9 @@ export function createHerdrCoreAdapter(backend: HerdrCoreBackend) {
       if (!record) {
         fail('herdr_core_contract_unavailable')
       }
-      record.contract.validateParams(checked.method, checked.params)
+      if (!HERDR_CORE_SYNTHETIC_METHODS.includes(checked.method)) {
+        record.contract.validateParams(checked.method, checked.params)
+      }
       state.permitted = true
     },
     /** 注册有界私有句柄；只有后续共享 provider/授权门禁通过才会产生原生请求。 */
@@ -337,7 +348,10 @@ export function createHerdrCoreAdapter(backend: HerdrCoreBackend) {
         fail('attempt_anchor_unavailable')
       }
       const checked = reviewedRequest(attempt.native_request)
-      record.contract.validateParams(checked.method, checked.params)
+      // rovloom 自有方法（长轮询）不在 core 契约里，参数已由 reviewHerdrCoreParams 收紧。
+      if (!HERDR_CORE_SYNTHETIC_METHODS.includes(checked.method)) {
+        record.contract.validateParams(checked.method, checked.params)
+      }
       const state: State = {
         key: stateKey,
         binding: JSON.parse(boundedJson(attempt.binding)) as AttemptBinding,

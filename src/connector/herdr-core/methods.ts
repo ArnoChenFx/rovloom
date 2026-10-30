@@ -3,7 +3,7 @@
  * 方法是否只读按参数判断，不能凭方法名或 schema 枚举开放。
  */
 import type { ProviderMethodTier } from '../../runtime/provider-port.js'
-import { fail } from '../../wire/index.js'
+import { fail, fields } from '../../wire/index.js'
 
 /** 被测版本与契约位置；升级后必须重新核对档位，不能用 schema 兼容代替行为兼容。 */
 export const HERDR_CORE_REVIEW = Object.freeze({
@@ -107,11 +107,39 @@ export const HERDR_CORE_INPUT_METHODS: readonly string[] = Object.freeze([
  */
 export const HERDR_CORE_RUN_METHODS: readonly string[] = Object.freeze(['terminal.run'])
 
+/**
+ * rovloom 自己提供的观察方法（不是 core 的方法）：`terminal.events` 是长轮询，
+ * 一次返回「当前快照 + 自水位以来至多 N 条事件」。它走普通 RPC，不建立流。
+ */
+export const HERDR_CORE_EVENTS_POLL_METHOD = 'terminal.events'
+
 export const HERDR_CORE_EXPOSED_METHODS: readonly string[] = Object.freeze([
   ...HERDR_CORE_READ_METHODS,
   ...HERDR_CORE_CONTROL_METHODS,
-  ...HERDR_CORE_RUN_METHODS
+  ...HERDR_CORE_RUN_METHODS,
+  HERDR_CORE_EVENTS_POLL_METHOD
 ])
+
+/** 由 rovloom 提供、core 没有对应方法的入口；契约里没有它们，参数与结果由本仓库审核。 */
+export const HERDR_CORE_SYNTHETIC_METHODS: readonly string[] = Object.freeze([HERDR_CORE_EVENTS_POLL_METHOD])
+
+/** 长轮询参数上限与默认值。 */
+export const HERDR_CORE_EVENTS_MAX_LIMIT = 256
+export const HERDR_CORE_EVENTS_DEFAULT_LIMIT = 64
+export const HERDR_CORE_EVENTS_MAX_TIMEOUT_MS = 30_000
+
+/** describe 用的参数 schema（core 的契约里没有这个方法，由本仓库审核）。 */
+export const HERDR_CORE_EVENTS_PARAMS_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
+  type: 'object',
+  properties: {
+    after_seq: { type: 'integer', minimum: 0 },
+    limit: { type: 'integer', minimum: 1, maximum: HERDR_CORE_EVENTS_MAX_LIMIT },
+    timeout_ms: { type: 'integer', minimum: 1, maximum: HERDR_CORE_EVENTS_MAX_TIMEOUT_MS },
+    address: { type: 'string', pattern: '^t[0-9]{1,9}$' },
+    labels: { type: 'object', additionalProperties: { type: 'string' } }
+  },
+  additionalProperties: false
+})
 
 /**
  * 控制档的终端栅栏参数：调用方必须带上它认定的 `(core_id, created_ms)`。
@@ -184,7 +212,10 @@ export const HERDR_CORE_METHOD_USAGE: Readonly<Record<string, readonly string[]>
     'With `children`, pass `terminal` explicitly: rovloom never sends `caller`. `output` is for plain programs, not agents.'
   ]),
   'terminal.send': Object.freeze(['`wait=true` requires an explicit `timeout` (≤60s). rovloom rejects `force`.']),
-  'terminal.interrupt': Object.freeze(['Sends the stop key and observes the outcome; it never escalates.'])
+  'terminal.interrupt': Object.freeze(['Sends the stop key and observes the outcome; it never escalates.']),
+  'terminal.events': Object.freeze([
+    'Long poll: returns the current terminal snapshot plus up to `limit` events after `after_seq`. `rebuilt:true` means the state was replaced (missed events or a core restart) and earlier events are gone; `truncated:true` means the local buffer overflowed. Feed `next_after_seq` back as `after_seq`; filter with `address`/`labels`.'
+  ])
 })
 
 /** 已审核但本期不开放的方法及原因；原因写在这里，避免调用面自行解释档位。 */
@@ -258,6 +289,11 @@ export function herdrCoreRequestTimeout(method: string, params: Readonly<Record<
       Math.ceil(seconds(params.timeout, HERDR_CORE_INTERRUPT_DEFAULT_SECONDS) * 1000) + 5000,
       HERDR_CORE_REQUEST_MAX_MS
     )
+  }
+  if (method === HERDR_CORE_EVENTS_POLL_METHOD) {
+    // 长轮询的本地期限 = 等待时限 + 5 秒余量；上限与其它方法共用。
+    const timeout = typeof params.timeout_ms === 'number' ? params.timeout_ms : HERDR_CORE_EVENTS_MAX_TIMEOUT_MS
+    return Math.min(timeout + 5000, HERDR_CORE_REQUEST_MAX_MS)
   }
   if (method === 'terminal.run' && params.wait === true) {
     // 启动 + 等第一轮；期限由调用方显式给出（≤60 秒），与 send wait 一致。
@@ -359,6 +395,58 @@ function reviewRunEnv(value: unknown): void {
   }
   for (const [key, entry] of entries) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) || typeof entry !== 'string' || entry.length > 4096) {
+      fail('herdr_core_param_invalid')
+    }
+  }
+}
+
+/** 长轮询参数：水位、条数、等待时限与 client 侧过滤；全部有界。 */
+function reviewEventsParams(params: Readonly<Record<string, unknown>>): void {
+  // 多余字段是协议不符，不静默忽略。
+  fields(params, [], ['after_seq', 'limit', 'timeout_ms', 'address', 'labels'])
+  const after = params.after_seq
+  if (after !== undefined) {
+    if (typeof after !== 'number' || !Number.isSafeInteger(after) || after < 0) {
+      fail('herdr_core_event_invalid')
+    }
+  }
+  const limit = params.limit
+  if (limit !== undefined) {
+    if (typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 1 || limit > HERDR_CORE_EVENTS_MAX_LIMIT) {
+      fail('herdr_core_event_invalid')
+    }
+  }
+  const timeout = params.timeout_ms
+  if (timeout !== undefined) {
+    if (
+      typeof timeout !== 'number' ||
+      !Number.isSafeInteger(timeout) ||
+      timeout < 1 ||
+      timeout > HERDR_CORE_EVENTS_MAX_TIMEOUT_MS
+    ) {
+      fail('herdr_core_event_invalid')
+    }
+  }
+  if (params.address !== undefined) {
+    if (typeof params.address !== 'string' || !/^t[0-9]{1,9}$/u.test(params.address)) {
+      fail('herdr_core_terminal_address_unsupported')
+    }
+  }
+  if (params.labels !== undefined) {
+    const labels = params.labels
+    if (!labels || typeof labels !== 'object' || Array.isArray(labels)) {
+      fail('herdr_core_param_invalid')
+    }
+    const entries = Object.entries(labels as Record<string, unknown>)
+    if (
+      entries.length > HERDR_CORE_LABELS_MAX ||
+      entries.some(
+        /** 过滤用的标签键与值都是普通文本，有界。 */ ([key, value]) =>
+          !/^[A-Za-z0-9._-]{1,64}$/u.test(key) ||
+          typeof value !== 'string' ||
+          value.length > HERDR_CORE_LABEL_MAX_LENGTH
+      )
+    ) {
       fail('herdr_core_param_invalid')
     }
   }
@@ -605,6 +693,10 @@ export function reviewHerdrCoreParams(method: string, params: Readonly<Record<st
   }
   if (method === 'terminal.run') {
     reviewRunParams(params)
+    return
+  }
+  if (method === HERDR_CORE_EVENTS_POLL_METHOD) {
+    reviewEventsParams(params)
     return
   }
   fail('herdr_core_method_unavailable')

@@ -48,8 +48,10 @@ import { HERDR_CORE_PROVIDER_DESCRIPTOR } from './descriptor.js'
 import { herdrCoreSessionName } from './identity.js'
 import {
   HERDR_CORE_BLOCKED_PARAMS,
+  HERDR_CORE_EVENTS_PARAMS_SCHEMA,
   HERDR_CORE_EXPOSED_METHODS,
   HERDR_CORE_GUIDE,
+  HERDR_CORE_SYNTHETIC_METHODS,
   HERDR_CORE_METHOD_USAGE,
   HERDR_CORE_REVIEW,
   herdrCoreTier
@@ -258,9 +260,14 @@ export function describeHerdrCoreContract(input: {
         /** 只描述本期开放的方法；参数 schema 与说明来自本次实例的审核结果。 */ (method) =>
           Object.freeze({
             method,
-            tier: herdrCoreTier(method),
-            description: input.contract.methodDescription(method),
-            params_schema: input.contract.paramsSchema(method),
+            // rovloom 自有方法不在 core 的 32 个方法表里，档位固定为观察。
+            tier: HERDR_CORE_SYNTHETIC_METHODS.includes(method) ? ('observe' as const) : herdrCoreTier(method),
+            description: HERDR_CORE_SYNTHETIC_METHODS.includes(method)
+              ? 'rovloom long poll: current snapshot plus events after a watermark (not a core method).'
+              : input.contract.methodDescription(method),
+            params_schema: HERDR_CORE_SYNTHETIC_METHODS.includes(method)
+              ? structuredClone(HERDR_CORE_EVENTS_PARAMS_SCHEMA)
+              : input.contract.paramsSchema(method),
             /** 审核表里一律拒绝的参数；它们不出现在 params_schema 里。 */
             blocked_params: HERDR_CORE_BLOCKED_PARAMS,
             ...(HERDR_CORE_METHOD_USAGE[method] ? { usage: HERDR_CORE_METHOD_USAGE[method] } : {})
@@ -321,7 +328,11 @@ function reviewedContract(source: ContractSource, contract: HerdrCoreContract): 
     fail('herdr_core_contract_unreviewed')
   }
   // 契约里的方法集合必须覆盖本期开放集合，缺项说明文档与审核表不一致。
+  // rovloom 自己提供的方法（长轮询）不在 core 契约里，参数与结果由本仓库审核。
   for (const method of HERDR_CORE_EXPOSED_METHODS) {
+    if (HERDR_CORE_SYNTHETIC_METHODS.includes(method)) {
+      continue
+    }
     if (!contract.methods.includes(method)) {
       fail('herdr_core_contract_unreviewed')
     }

@@ -152,6 +152,7 @@ test('资源工厂登记五个端口，目录暴露读取与控制档，身份�
       assert.deepEqual(resolved.methods.map((entry) => entry.method).sort(), [
         'server.status',
         'templates.list',
+        'terminal.events',
         'terminal.get',
         'terminal.interrupt',
         'terminal.keep',
@@ -180,6 +181,12 @@ test('资源工厂登记五个端口，目录暴露读取与控制档，身份�
       assert.match(String((send.guide as string[])[2]), /wait=true/u)
       // 没有专门说明的方法不补造 usage。
       assert.equal(resolved.describe('server.status').usage, undefined)
+      // rovloom 自有方法：核心契约里没有它，参数 schema 由本仓库审核，观察档不受开关约束。
+      const events = resolved.describe('terminal.events')
+      assert.equal(events.tier, 'observe')
+      assert.match(String(events.description), /rovloom long poll/u)
+      assert.ok((events.params_schema as { properties: Record<string, unknown> }).properties.after_seq)
+      assert.ok(Array.isArray(events.usage))
       // 一律拒绝的参数列在 blocked_params 里，不出现在 params_schema。
       assert.deepEqual(send.blocked_params, ['caller', 'calls_you', 'core', 'on', 'parent', 'children_of'])
       assert.equal(Object.hasOwn(params.properties, 'caller'), false)
