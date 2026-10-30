@@ -568,6 +568,17 @@ test('Release 说明按版本生成：没有该版本条目就不带升级提示
   assert(!single.includes('kernel `flock`'))
   assert(!single.includes('details.issues'))
   assert(!single.includes('never run two Gateways on the same data'))
+  // 0.9.0 只讲终端执行开关默认开启与升级影响；不沿用 0.8.2 的 Luvus 参数校验要点。
+  const switchOn = releaseBody({ tag: 'v0.9.0', version: '0.9.0', commit: 'e'.repeat(40) })
+  assert.match(switchOn, /allow_terminal_execution/u)
+  assert.match(switchOn, /now defaults to on/u)
+  assert.match(switchOn, /only the literal `false`/u)
+  assert.match(switchOn, /"allow_terminal_execution": false/u)
+  assert.match(switchOn, /already contains `allow_terminal_execution` explicitly/u)
+  assert(!switchOn.includes('single definition'))
+  assert(!switchOn.includes('162,300'))
+  assert(!switchOn.includes('luvus_operation_params_invalid'))
+  assert(!switchOn.includes('Nothing to migrate and no behaviour change is expected'))
   // 未登记的版本不继承任何旧提示，只保留固定的公共段落与契约标记。
   const future = releaseBody({ tag: 'v0.9.9', version: '0.9.9', commit: 'b'.repeat(40) })
   assert(!future.includes('Upgrade note'))
