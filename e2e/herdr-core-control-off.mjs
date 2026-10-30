@@ -1,6 +1,7 @@
 /**
- * allow_terminal_execution=false 时的真实 core 场景：控制档在目录里不可见、describe 打不开、
- * runtime_call 在 Gateway 登记前就被拒绝，而 5 个读取照常可用。
+ * allow_terminal_execution=false 时的真实 core 场景：控制档与启动类仍然列出但标成
+ * available:false（控制端要知道后端有哪些能力），runtime_call 在 Gateway 登记前被拒绝，
+ * 读取照常可用。
  * 用法：MCP_CONFIG=<quickstart 写出的 mcp.json> bun e2e/herdr-core-control-off.mjs
  */
 import assert from 'node:assert/strict'
@@ -10,14 +11,41 @@ const { client, target, tool, ok, call } = await connect()
 try {
   const discovered = await ok('runtime_discover', { target, expected_binding_revision: 1, limit: 100 })
   const methods = discovered.items.map((item) => item.method).sort()
-  // 开关关闭时目录只剩 5 个读取：控制档不可见，连方法名都不出现。
-  assert.deepEqual(methods, ['server.status', 'terminal.get', 'terminal.list', 'terminal.read', 'terminal.wait'])
+  // 开关关闭时控制档与启动类仍然列出，但标成 available:false。
+  assert.deepEqual(methods, [
+    'server.status',
+    'templates.list',
+    'terminal.get',
+    'terminal.interrupt',
+    'terminal.keep',
+    'terminal.keys',
+    'terminal.kill',
+    'terminal.label',
+    'terminal.list',
+    'terminal.put',
+    'terminal.read',
+    'terminal.rm',
+    'terminal.run',
+    'terminal.send',
+    'terminal.wait'
+  ])
+  const available = Object.fromEntries(discovered.items.map((item) => [item.method, item.available]))
+  for (const method of ['terminal.send', 'terminal.keys', 'terminal.run']) {
+    assert.equal(available[method], false, `${method}:${JSON.stringify(available)}`)
+  }
+  // terminal.read 只有 lines>0 需要开关，所以它仍可用（限制写在参数说明里）。
+  for (const method of ['server.status', 'templates.list', 'terminal.get', 'terminal.list', 'terminal.read']) {
+    assert.equal(available[method], true, method)
+  }
   const described = await tool('runtime_describe', {
     target,
     expected_binding_revision: 1,
     method: 'terminal.send'
   })
-  assert.equal(described.isError, true, JSON.stringify(described.raw))
+  // describe 仍可读（控制端要看得到 schema 与说明），但明确标成不可用。
+  assert.equal(described.isError, false, JSON.stringify(described.raw))
+  assert.equal(described.data.available, false)
+  assert.equal(described.data.terminal_execution.local_state, 'disabled')
   // 读取不受开关影响。
   const status = await call(discovered.items[0].contract_ref, 'server.status', {})
   assert.equal(status.version, '0.1.14')
@@ -39,7 +67,8 @@ try {
       ok: true,
       switch: 'off',
       methods,
-      describe_denied: true,
+      control_available: available['terminal.send'],
+      describe_available: described.data.available,
       call_denied: denied.raw.gateway_error.code
     })
   )

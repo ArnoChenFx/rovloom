@@ -13,8 +13,9 @@ export async function connect() {
   assert(process.env.MCP_CONFIG, 'MCP_CONFIG is required')
   const mcp = JSON.parse(readFileSync(process.env.MCP_CONFIG, 'utf8'))
   const target = mcp.targets[0]
-  assert.equal(target.provider_id, 'herdr-core', JSON.stringify(target))
-  const client = new Client({ name: 'herdr-core-chain', version: '1' })
+  // 默认 herdr-core；同一套延迟对照也用 PROVIDER_KIND=herdr 跑 Herdr TUI。
+  assert.equal(target.provider_id, process.env.PROVIDER_KIND ?? 'herdr-core', JSON.stringify(target))
+  const client = new Client({ name: 'herdr-chain', version: '1' })
   await client.connect(
     new StreamableHTTPClientTransport(new URL(mcp.url), {
       requestInit: { headers: { authorization: `Bearer ${mcp.token}` } }

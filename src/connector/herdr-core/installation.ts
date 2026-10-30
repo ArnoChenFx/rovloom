@@ -176,9 +176,12 @@ async function attachHerdrCore(options: {
   expected: ContractSource
   published?: HerdrCoreContractRecord
   budgetMs: number
+  beforeAttach?: () => Promise<void>
 }): Promise<HerdrCoreAttached> {
   const { endpoint, expected } = options
   const budget = Math.max(1, Math.min(options.budgetMs, HERDR_CORE_ATTACH_STEP_MS))
+  // managed 模式在这里确保 core 在跑；只让端点可连，不建立任何可信事实。
+  await options.beforeAttach?.()
   // 目录权限与套接字属主每次重连都重查；core 重建后目录可能被替换。
   inspectHerdrCoreSocket(endpoint.socket)
   const client = await openHerdrCoreClient(endpoint.socket, { timeout_ms: budget })
@@ -255,18 +258,30 @@ export class HerdrCoreInstallation implements HerdrCoreAttachment {
     config: Readonly<{ session: string; endpoint: Readonly<{ runtime_dir?: string; state_home?: string }> }>
     expected: ContractSource
     now?: () => number
+    /**
+     * 每次尝试连接之前先准备好端点（managed 模式在这里拉起 core）。
+     * 只做「让端点可连」，身份核对仍由 attachHerdrCore 完整重做。
+     */
+    beforeAttach?: () => Promise<void>
   }): Promise<HerdrCoreInstallation> {
     const endpoint = herdrCorePinnedEndpoint(input.config.endpoint, input.config.session)
     // 首次附着失败直接抛出，不建立任何可信来源。
     const first = await attachHerdrCore({
       endpoint,
       expected: input.expected,
-      budgetMs: HERDR_CORE_REATTACH_WINDOW_MS
+      budgetMs: HERDR_CORE_REATTACH_WINDOW_MS,
+      ...(input.beforeAttach ? { beforeAttach: input.beforeAttach } : {})
     })
     const supervisor = createAttachmentSupervisor<HerdrCoreAttached>({
       // 重新附着复用同一份已发布契约：文档摘要与编译身份都必须与首次一致。
       attach: (budget) =>
-        attachHerdrCore({ endpoint, expected: input.expected, published: first.record, budgetMs: budget }),
+        attachHerdrCore({
+          endpoint,
+          expected: input.expected,
+          published: first.record,
+          budgetMs: budget,
+          ...(input.beforeAttach ? { beforeAttach: input.beforeAttach } : {})
+        }),
       stale: /** 连接已关闭就是需要重新附着的唯一信号；进程事实每次写入前另核对。 */ (value) => value.client.closed(),
       now: Date.now,
       seed: first

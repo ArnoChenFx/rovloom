@@ -36,8 +36,9 @@ export type ConnectorConfig = Readonly<{
     // Luvus 专属：attach（默认）附着用户真实的 default 会话（LUVUS_HOME，默认 ~/.luvus）、不存在才自建；
     // managed 在 Connector 私有目录里拉一个隔离实例（会话名 rovloom）。
     luvus?: Readonly<{ mode?: 'attach' | 'managed'; state_root?: string }>
-    // herdr-core 专属：只附着已运行的 core；session 与 core 的套接字名一致，省略为 default。
-    herdr_core?: Readonly<{ session?: string }>
+    // herdr-core 专属：attach（默认）只附着已运行的 core；managed 由 Connector 在私有目录里拉起一个实例。
+    // session 与 core 的套接字名一致，省略为 default；config_home 只给 managed 用（模板与 config.toml）。
+    herdr_core?: Readonly<{ session?: string; mode?: 'attach' | 'managed'; config_home?: string }>
   }>
 }>
 export type RoleConfig = GatewayConfig | ConnectorConfig
@@ -74,9 +75,18 @@ export function luvusMode(config: ConnectorConfig): 'attach' | 'managed' {
   return config.native?.luvus?.mode ?? 'attach'
 }
 
-// herdr-core 只附着已运行实例；会话名同时是 Target 的一部分，省略为 default。
+// herdr-core 默认只附着已运行实例；managed 由 Connector 自己拉起（见 connector/herdr-core/managed.ts）。
 export function herdrCoreSession(config: ConnectorConfig): string {
   return config.native?.herdr_core?.session ?? 'default'
+}
+
+export function herdrCoreMode(config: ConnectorConfig): 'attach' | 'managed' {
+  return config.native?.herdr_core?.mode ?? 'attach'
+}
+
+/** managed 的模板与 config.toml 目录；省略时用 Connector 私有的空目录（不碰真实 ~/.config）。 */
+export function herdrCoreConfigHome(config: ConnectorConfig): string | undefined {
+  return config.native?.herdr_core?.config_home
 }
 
 // 省略选择时保留已有Luvus首次路径；mixed 只包含既有两份固定来源，herdr-core 需显式选择。
@@ -273,8 +283,14 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
         Object.freeze(herdr)
       }
       if (native.herdr_core !== undefined) {
-        const core = exact(native.herdr_core, [], ['session'])
-        if (core.session !== undefined && !/^[A-Za-z0-9._-]{1,64}$/.test(core.session as string)) {
+        const core = exact(native.herdr_core, [], ['session', 'mode', 'config_home'])
+        if (
+          (core.session !== undefined && !/^[A-Za-z0-9._-]{1,64}$/.test(core.session as string)) ||
+          (core.mode !== undefined && !['attach', 'managed'].includes(core.mode as string)) ||
+          (core.config_home !== undefined && !fixedPath(core.config_home, platform)) ||
+          // 只附着时没有可用的 config_home：拒绝而不是静默忽略。
+          (core.config_home !== undefined && core.mode !== 'managed')
+        ) {
           return fail()
         }
         Object.freeze(core)

@@ -192,6 +192,8 @@ def main():
     ap.add_argument('--herdr', help='官方 herdr 0.9.5 可执行文件')
     ap.add_argument('--luvus', help='官方 luvus 0.14.3 可执行文件（与 --herdr/--herdr-core 三选一；走默认的 Luvus 引导）')
     ap.add_argument('--herdr-core', dest='herdr_core', help='官方 herdr-core 0.1.14 可执行文件（附着已运行实例）')
+    ap.add_argument('--herdr-core-mode', dest='herdr_core_mode', choices=('attach', 'managed'), default='attach',
+                    help='attach（默认）附着已运行 core；managed 由 Connector 在私有目录里拉起 core')
     ap.add_argument('--herdr-core-session', default='e2e', help='herdr-core 会话名（默认 e2e）')
     ap.add_argument('--herdr-core-old', dest='herdr_core_old', help='（可选）未审核版本的 herdr-core，用于验证版本拒绝')
     ap.add_argument('--work', help='工作目录（需位于祖先不可被其它用户写入的位置；默认 ~/.rq-*）')
@@ -251,7 +253,17 @@ def main():
     env_c = {**base, 'HOME': home_c, 'PATH': f'{herdr_dir}:/usr/bin:/bin'}
     core_runtime = os.path.join(work, 'runtime')
     core_state = os.path.join(work, 'state')
+    managed_root = None
     if args.herdr_core:
+        # managed：core 由 Connector 拉起，运行目录由它按状态目录摘要计算；这里只复现同一公式给 identity 场景。
+        connector_state = os.path.join(home_c, '.local', 'share', 'rovloom', 'connector')
+        managed_root = os.path.join(connector_state, 'managed', 'herdr-core')
+        managed_run = None
+        if args.herdr_core_mode == 'managed':
+            # rovloom 在 Connector 的 XDG_RUNTIME_DIR 下按状态目录摘要建私有运行目录；
+            # Connector 的 XDG_RUNTIME_DIR 仍是沙箱运行根，identity 场景用子目录定位套接字。
+            managed_run = os.path.join(core_runtime, 'rovloom-hc-' + hashlib.sha256(connector_state.encode()).hexdigest()[:16])
+            core_state = os.path.join(managed_root, 'state')
         # core 的端点公式优先 XDG_RUNTIME_DIR；目录必须是私有的 0700。
         for d in (core_runtime, core_state):
             os.makedirs(d, mode=0o700, exist_ok=True)
@@ -274,25 +286,32 @@ def main():
         cfg = json.load(open(path))
         if args.herdr_core:
             # 会话名参与 Target 与端点；只通过受保护配置选择，不写其它凭据。
-            cfg['native'] = {'provider': 'herdr-core', 'herdr_core': {'session': args.herdr_core_session}}
+            native_core = {'session': args.herdr_core_session}
+            if args.herdr_core_mode == 'managed':
+                # Connector 自己拉起 core：不预先把 core 跑起来，也不经过 hc。
+                native_core['mode'] = 'managed'
+            cfg['native'] = {'provider': 'herdr-core', 'herdr_core': native_core}
             open(path, 'w').write(json.dumps(cfg, indent=2) + '\n'); os.chmod(path, 0o600)
-            # `hc run --bg --json` 会拉起脱离启动者的 core，并留下一个可读终端；不阻塞宿主。
-            # 终端程序必须读输入（cat），否则 send 的输入回显无从验证。
-            started = subprocess.run([os.path.join(herdr_dir, 'hc'), 'run', '--bg', '--json', '--name', 'e2e',
-                                      'sh', '-c', 'printf "rovloom-e2e\\n"; exec cat'],
-                                     env={**env_c, 'TERM': 'xterm-256color'}, cwd=home_c,
-                                     capture_output=True, text=True, timeout=30)
-            assert started.returncode == 0, f'herdr-core run failed: {started.stderr[-400:]}'
-            print('HERDR_CORE_TERMINAL', started.stdout.strip()[:400], flush=True)
-            # 第二个终端模拟「等人批准」的智能体：启动即上报 OSC 7501 blocked，并把输入记到日志。
-            blocked_log = os.path.join(work, 'blocked.log')
-            blocked = subprocess.run([os.path.join(herdr_dir, 'hc'), 'run', '--bg', '--json', '--name', 'blocked',
-                                      'python3', '-I', os.path.join(os.path.dirname(__file__), 'herdr-core-blocked.py'),
-                                      blocked_log],
-                                     env={**env_c, 'TERM': 'xterm-256color'}, cwd=home_c,
-                                     capture_output=True, text=True, timeout=30)
-            assert blocked.returncode == 0, f'herdr-core blocked terminal failed: {blocked.stderr[-400:]}'
-            print('HERDR_CORE_BLOCKED_TERMINAL', blocked.stdout.strip()[:400], flush=True)
+            if args.herdr_core_mode == 'managed':
+                print('HERDR_CORE_MANAGED_ROOT', managed_root, flush=True)
+            else:
+                # `hc run --bg --json` 会拉起脱离启动者的 core，并留下一个可读终端；不阻塞宿主。
+                # 终端程序必须读输入（cat），否则 send 的输入回显无从验证。
+                started = subprocess.run([os.path.join(herdr_dir, 'hc'), 'run', '--bg', '--json', '--name', 'e2e',
+                                          'sh', '-c', 'printf "rovloom-e2e\\n"; exec cat'],
+                                         env={**env_c, 'TERM': 'xterm-256color'}, cwd=home_c,
+                                         capture_output=True, text=True, timeout=30)
+                assert started.returncode == 0, f'herdr-core run failed: {started.stderr[-400:]}'
+                print('HERDR_CORE_TERMINAL', started.stdout.strip()[:400], flush=True)
+                # 第二个终端模拟「等人批准」的智能体：启动即上报 OSC 7501 blocked，并把输入记到日志。
+                blocked_log = os.path.join(work, 'blocked.log')
+                blocked = subprocess.run([os.path.join(herdr_dir, 'hc'), 'run', '--bg', '--json', '--name', 'blocked',
+                                          'python3', '-I', os.path.join(os.path.dirname(__file__), 'herdr-core-blocked.py'),
+                                          blocked_log],
+                                         env={**env_c, 'TERM': 'xterm-256color'}, cwd=home_c,
+                                         capture_output=True, text=True, timeout=30)
+                assert blocked.returncode == 0, f'herdr-core blocked terminal failed: {blocked.stderr[-400:]}'
+                print('HERDR_CORE_BLOCKED_TERMINAL', blocked.stdout.strip()[:400], flush=True)
         elif args.herdr and args.service:
             # LaunchDaemon 的 PATH 只有系统目录：显式列出 herdr 所在目录。
             cfg['native']['runtime_bin_dirs'] = [herdr_dir]
@@ -370,8 +389,9 @@ def main():
         print('READY', json.dumps({'mcp_url': info['url'], 'targets': info['targets'], 'config': out}), flush=True)
         status = 0
         if args.herdr_core:
-            identity_env = {**os.environ, 'HERDR_CORE_SOCKET': os.path.join(core_runtime, 'herdr-core', args.herdr_core_session + '.sock'),
-                            'HERDR_CORE_SESSION': args.herdr_core_session, 'HERDR_CORE_RUNTIME': core_runtime,
+            identity_runtime = managed_run or core_runtime
+            identity_env = {**os.environ, 'HERDR_CORE_SOCKET': os.path.join(identity_runtime, 'herdr-core', args.herdr_core_session + '.sock'),
+                            'HERDR_CORE_SESSION': args.herdr_core_session, 'HERDR_CORE_RUNTIME': identity_runtime,
                             'HERDR_CORE_PROXY_ROOT': os.path.join(work, 'identity'), 'HERDR_CORE_HOME': home_c}
             if args.herdr_core_old:
                 identity_env['HERDR_CORE_OLD_BINARY'] = args.herdr_core_old
@@ -394,6 +414,23 @@ def main():
             connector = Term('connector-control', [rov, 'connector'], env_c, home_c); terms.append(connector)
             connector.expect('provider_ready=true', timeout=90)
             print('HERDR_CORE_CONTROL_ON', 'allow_terminal_execution=true', flush=True)
+            if args.herdr_core_mode == 'managed':
+                # managed：先经 MCP 启动一个命名终端，再重启 Connector，证明 core 与终端都没被打断。
+                prepared = subprocess.run(['bun', '--no-env-file',
+                                           os.path.join(os.path.dirname(__file__), 'herdr-core-managed-prepare.mjs')],
+                                          env={**os.environ, 'MCP_CONFIG': out}, cwd=os.path.dirname(__file__),
+                                          capture_output=True, text=True, timeout=120)
+                print('HERDR_CORE_MANAGED_PREPARE', (prepared.stdout + prepared.stderr).strip()[-400:], flush=True)
+                assert prepared.returncode == 0, 'managed prepare failed'
+                core_pids = herdr_core_pids(herdr_dir, args.herdr_core_session)
+                assert core_pids, 'managed core is not running'
+                connector.stop()
+                time.sleep(2.0)
+                alive = [pid for pid in core_pids if os.path.exists(f'/proc/{pid}')]
+                assert sorted(alive) == sorted(core_pids), f'connector exit killed the managed core: {core_pids} -> {alive}'
+                connector = Term('connector-managed-restart', [rov, 'connector'], env_c, home_c); terms.append(connector)
+                connector.expect('provider_ready=true', timeout=90)
+                print('HERDR_CORE_MANAGED_RESTART', json.dumps({'core_alive': True, 'terminal': 'survivor'}), flush=True)
         if args.luvus:
             servers = luvus_servers(herdr_dir)
             print('LUVUS_SERVERS', servers, flush=True)
@@ -623,13 +660,22 @@ def main():
                         'ROVLOOM_GATEWAY_STATE': os.path.join(home_g, '.local', 'share', 'rovloom', 'gateway')}
             if args.herdr_core:
                 # 控制档场景需要同一个沙箱里的 hc 与 core 路径：计划重启与 SIGKILL 只作用于本轮私有沙箱。
-                then_env.update({'HERDR_CORE_HC': os.path.join(herdr_dir, 'hc'),
+                then_env.update({'HERDR_CORE_MODE': args.herdr_core_mode,
+                                 'HERDR_CORE_RUNTIME': managed_run or core_runtime,
+                                 'HERDR_CORE_SOCKET': os.path.join(managed_run or core_runtime, 'herdr-core', args.herdr_core_session + '.sock'),
+                                 'HERDR_CORE_MANAGED_ROOT': managed_root or '' if args.herdr_core_mode == 'managed' else '',
+                                 'HERDR_CORE_HC': os.path.join(herdr_dir, 'hc'),
                                  'HERDR_CORE_BINARY': os.path.join(herdr_dir, 'herdr-core'),
                                  'HERDR_CORE_SESSION': args.herdr_core_session,
                                  'HERDR_CORE_RUNTIME': core_runtime,
                                  'HERDR_CORE_STATE': core_state,
                                  'HERDR_CORE_HOME': home_c,
-                                 'HERDR_CORE_BLOCKED_LOG': os.path.join(work, 'blocked.log')})
+                                 'HERDR_CORE_BLOCKED_LOG': os.path.join(work, 'blocked.log'),
+                                 'HERDR_CORE_FAKEAGENT': os.path.join(os.path.dirname(__file__), 'herdr-core-fakeagent.py'),
+                                 'HERDR_CORE_FAKEAGENT_LOG': os.path.join(work, 'fakeagent.log'),
+                                 'HERDR_CORE_BLOCKED': os.path.join(os.path.dirname(__file__), 'herdr-core-blocked.py')})
+                if args.herdr_core_mode == 'managed':
+                    then_env['HERDR_CORE_MANAGED_CONFIG'] = os.path.join(managed_root, 'config')
             for attempt in range(8 if args.service else 1):
                 status = subprocess.call(shlex.split(args.then), env=then_env)
                 if status == 0:

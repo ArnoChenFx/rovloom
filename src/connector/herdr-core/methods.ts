@@ -205,7 +205,10 @@ export const HERDR_CORE_NATIVE_REJECTION_KINDS: readonly string[] = Object.freez
   'finished',
   'not_found',
   'machine_unknown',
-  'invalid_params'
+  'invalid_params',
+  // terminal.run：名字在创建终端之前就查重，模板不可用也在启动之前。
+  'name_taken',
+  'invalid_template'
 ])
 
 /** 固定码：core 明确拒绝（不是「结果未知」），带上 core 自己的类别。 */

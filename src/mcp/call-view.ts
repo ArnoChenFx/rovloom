@@ -19,6 +19,8 @@ export const CALL_REFUSAL_REASONS = [
   'template_unavailable',
   'template_ambiguous',
   'capacity',
+  'name_taken',
+  'invalid_template',
   'unavailable'
 ] as const satisfies readonly CallRefusalReason[]
 
@@ -37,6 +39,8 @@ const REFUSAL_REASONS: Readonly<Record<string, CallRefusalReason>> = Object.free
   herdr_core_template_unavailable: 'template_unavailable',
   herdr_core_template_ambiguous: 'template_ambiguous',
   herdr_core_run_capacity: 'capacity',
+  herdr_core_native_name_taken: 'name_taken',
+  herdr_core_native_invalid_template: 'invalid_template',
   herdr_core_connection_closed: 'unavailable'
 })
 

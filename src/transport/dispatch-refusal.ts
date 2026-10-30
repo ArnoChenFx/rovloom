@@ -25,7 +25,9 @@ const HERDR_CORE_REFUSALS: readonly string[] = Object.freeze([
   'herdr_core_native_finished',
   'herdr_core_native_not_found',
   'herdr_core_native_machine_unknown',
-  'herdr_core_native_invalid_params'
+  'herdr_core_native_invalid_params',
+  'herdr_core_native_name_taken',
+  'herdr_core_native_invalid_template'
 ])
 
 export interface DispatchRefusalLedger {

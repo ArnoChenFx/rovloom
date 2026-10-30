@@ -77,6 +77,14 @@ const mutations = [
     expect: 'lines'
   },
   {
+    name: 'managed 不走 hc',
+    file: 'src/connector/herdr-core/managed.ts',
+    from: "  const child = launch(binary, ['serve'], {",
+    to: "  const child = launch(binary, ['server', 'start'], {",
+    test: ['test/connector/herdr-core/managed.test.ts', '-t', 'managed 直接 exec'],
+    expect: 'serve'
+  },
+  {
     name: '本机开关（Gateway 登记前）',
     file: 'src/connector/herdr-core/provider.ts',
     from: "            if (requiresTerminalExecution('herdr-core', method, object(candidate.params ?? {})) && !terminalEnabled()) {\n              fail('terminal_execution_disabled')\n            }",

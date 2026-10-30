@@ -112,6 +112,8 @@ export type DispatchRefusalCode =
   | 'herdr_core_native_not_found'
   | 'herdr_core_native_machine_unknown'
   | 'herdr_core_native_invalid_params'
+  | 'herdr_core_native_name_taken'
+  | 'herdr_core_native_invalid_template'
 /** 闭合集合的运行时副本；编解码与账本共用同一份，避免两处枚举漂移。 */
 export const DISPATCH_REFUSAL_CODES: readonly DispatchRefusalCode[] = Object.freeze([
   'terminal_execution_disabled',
@@ -128,7 +130,9 @@ export const DISPATCH_REFUSAL_CODES: readonly DispatchRefusalCode[] = Object.fre
   'herdr_core_native_finished',
   'herdr_core_native_not_found',
   'herdr_core_native_machine_unknown',
-  'herdr_core_native_invalid_params'
+  'herdr_core_native_invalid_params',
+  'herdr_core_native_name_taken',
+  'herdr_core_native_invalid_template'
 ])
 export type TerminalExecutionState = Readonly<{ binding: ProviderBinding; enabled: boolean }>
 /** 设备最近一次上报的平台；distribution 只在 Linux 且 os-release 可读时出现。 */

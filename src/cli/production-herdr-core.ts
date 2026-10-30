@@ -6,7 +6,8 @@
 import { createHerdrCoreConnectorResources } from '../connector/herdr-core/connector.js'
 import { createHerdrCoreGatewayResources, parseHerdrCoreProviderRefConfig } from '../connector/herdr-core/provider.js'
 import { boundedJson, fields, object, parseJson } from '../wire/index.js'
-import { CliError } from './config.js'
+import { findHerdrCoreBinary, herdrCoreManagedDirs } from '../connector/herdr-core/managed.js'
+import { CliError, herdrCoreConfigHome, herdrCoreMode, herdrCoreSession } from './config.js'
 import type { ProductionCliSources, ProductionProviderReference } from './production.js'
 
 /** 只复制受保护引用；JSON 只能选择已登记 kind，不能构造契约、身份或原生连接。 */
@@ -50,11 +51,26 @@ export function createHerdrCoreProductionSources(): ProductionCliSources {
     },
     /** Connector 侧只交付附着执行端；端点、会话与摘要都在本地受保护配置里。 */
     async connector(config, references) {
+      const managed =
+        herdrCoreMode(config) === 'managed'
+          ? {
+              dirs: herdrCoreManagedDirs({
+                state_dir: config.state_dir,
+                session: herdrCoreSession(config),
+                ...(herdrCoreConfigHome(config) === undefined ? {} : { config_home: herdrCoreConfigHome(config)! })
+              }),
+              // 只把显式配置的目录交给发现逻辑；省略时它按 PATH 找。
+              binary: findHerdrCoreBinary(
+                config.native?.runtime_bin_dirs ? { runtime_bin_dirs: [...config.native.runtime_bin_dirs] } : {}
+              )
+            }
+          : undefined
       return createHerdrCoreConnectorResources({
         config: reference(references),
         now: Date.now,
         // 本机开关只来自 Connector 自己的配置；目录、Gateway 登记与最终写入共用这个观察值。
-        allow_terminal_execution: config.allow_terminal_execution === true
+        allow_terminal_execution: config.allow_terminal_execution === true,
+        ...(managed ? { managed } : {})
       })
     }
   })

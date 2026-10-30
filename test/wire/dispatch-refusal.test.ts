@@ -111,6 +111,11 @@ test(
       assert.equal(dispatchRefusal(new ProviderAdapterError(refusal, 'outcome_unknown'), 'herdr-core'), undefined)
       assert.equal(dispatchRefusal(new ProviderAdapterError(refusal), 'herdr'), undefined)
     }
+    // core 明确拒绝的类别也走同一条确定未派发的通路。
+    for (const kind of ['status_mismatch', 'blocked', 'finished', 'not_found', 'machine_unknown', 'invalid_params']) {
+      const code = `herdr_core_native_${kind}` as const
+      assert.equal(dispatchRefusal(new ProviderAdapterError(code), 'herdr-core'), code)
+    }
     // 已写出后才知道的失败不是未派发证明。
     for (const code of ['herdr_core_timeout', 'herdr_core_installation_changed', 'herdr_core_runtime_unavailable']) {
       assert.equal(dispatchRefusal(new ProviderAdapterError(code), 'herdr-core'), undefined)

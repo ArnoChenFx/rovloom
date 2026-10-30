@@ -66,6 +66,8 @@ export type CallRefusalReason =
   | 'template_unavailable'
   | 'template_ambiguous'
   | 'capacity'
+  | 'name_taken'
+  | 'invalid_template'
   | 'unavailable'
 
 export type CallView = JsonObject & {

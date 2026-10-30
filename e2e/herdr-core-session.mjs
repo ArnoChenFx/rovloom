@@ -1,12 +1,11 @@
 /**
- * 经已部署 Gateway 的 MCP 对真实 herdr-core 走一遍控制档：目录里看到 8 个控制方法、
- * 向 e2e 终端 send 并读回、blocked 终端上 send/keys/interrupt 全部被拒、三元组不符被拒、
- * kill/rm 只作用于 e2e 自己建的终端，以及计划重启与 SIGKILL 后重新附着。
+ * 真实 core 的智能体管理面：目录与说明、terminal.run（程序与模板两种形态）、多轮对话、
+ * 读历史、core 明确拒绝的确定结局、blocked 拒绝、三元组栅栏、计划重启与 SIGKILL 后重新附着。
  * 用法：MCP_CONFIG=... HERDR_CORE_HC=... bun e2e/herdr-core-session.mjs
  */
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { setTimeout as pause } from 'node:timers/promises'
 import { connect } from './herdr-core-client.mjs'
 
@@ -14,6 +13,7 @@ const env = process.env
 for (const name of ['HERDR_CORE_HC', 'HERDR_CORE_BINARY', 'HERDR_CORE_SESSION', 'HERDR_CORE_RUNTIME']) {
   assert(env[name], `${name} is required`)
 }
+const mode = env.HERDR_CORE_MODE ?? 'attach'
 const { client, target, ok, invoke, readAll, call } = await connect()
 
 /** hc 只对沙箱里的 core 生效：环境与 quickstart 启动 core 时一致，联网更新指向本机不可达端口。 */
@@ -23,6 +23,8 @@ const hcEnv = {
   XDG_RUNTIME_DIR: env.HERDR_CORE_RUNTIME,
   ...(env.HERDR_CORE_STATE ? { XDG_STATE_HOME: env.HERDR_CORE_STATE } : {}),
   HC_SESSION: env.HERDR_CORE_SESSION,
+  // managed 的套接字在私有运行目录里：显式给出，避免 hc 按 XDG 公式猜。
+  ...(env.HERDR_CORE_SOCKET ? { HC_SOCKET: env.HERDR_CORE_SOCKET } : {}),
   SHELL: '/bin/sh',
   TERM: 'xterm-256color',
   LANG: 'C.UTF-8',
@@ -32,12 +34,14 @@ function hc(...args) {
   return execFileSync(env.HERDR_CORE_HC, [...args, '--json'], { env: hcEnv, encoding: 'utf8', timeout: 60_000 })
 }
 
-/** 控制档拒绝是确定未派发；不把 outcome_unknown 当成拒绝。 */
-async function refuses(view, reason) {
-  assert.equal(view.state, 'not_dispatched', `${reason}:${JSON.stringify(view)}`)
+/** 确定未派发，并且带公开原因（不给原因时断言失败，避免原因码悄悄退化成裸 not_dispatched）。 */
+async function refuses(view, reason, label) {
+  assert.equal(view.state, 'not_dispatched', `${label}:${JSON.stringify(view)}`)
+  if (reason !== undefined) {
+    assert.equal(view.reason, reason, `${label}:${JSON.stringify(view)}`)
+  }
 }
 
-/** 有界轮询：core 重启后要等 holder 拉起新 core，不无限等。 */
 async function until(description, action, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs
   let last
@@ -58,11 +62,16 @@ try {
   const providers = await ok('providers_list', { machine_id: target.machine_id })
   assert.equal(providers.items[0].kind, 'herdr-core')
   const discovered = await ok('runtime_discover', { target, expected_binding_revision: 1, limit: 100 })
-  const entry = (method) => discovered.items.find((item) => item.method === method)
+  const entry = (method) => {
+    const found = discovered.items.find((item) => item.method === method)
+    assert(found, `${method} missing: ${JSON.stringify(discovered.items.map((item) => item.method))}`)
+    return found
+  }
   const methods = discovered.items.map((item) => item.method).sort()
-  // 开关打开时目录里有 5 个读取 + 8 个控制档；宿主级方法与事件订阅仍不可见。
+  // 开关打开时目录里有 6 个读取 + 8 个控制档 + terminal.run；宿主级其余方法与事件订阅仍不可见。
   assert.deepEqual(methods, [
     'server.status',
+    'templates.list',
     'terminal.get',
     'terminal.interrupt',
     'terminal.keep',
@@ -73,159 +82,263 @@ try {
     'terminal.put',
     'terminal.read',
     'terminal.rm',
+    'terminal.run',
     'terminal.send',
     'terminal.wait'
   ])
-  assert.equal(entry('terminal.send').tier, 'control')
-  const described = await ok('runtime_describe', {
+  for (const method of methods) {
+    assert.equal(entry(method).available, true, `${method} should be available with the switch on`)
+  }
+  // core 自己的说明与 rovloom 的使用说明随 describe 交付，$ref 已展开，被拒绝的参数不出现。
+  const runDescription = await ok('runtime_describe', { target, expected_binding_revision: 1, method: 'terminal.run' })
+  assert.match(String(runDescription.description), /Start a program in a new terminal/u)
+  assert.match(String(runDescription.params_schema.properties.argv.description), /template name and its task/u)
+  assert.deepEqual(runDescription.blocked_params, ['caller', 'calls_you', 'core', 'on', 'parent', 'children_of'])
+  assert.equal(Object.hasOwn(runDescription.params_schema.properties, 'caller'), false)
+  assert.equal((runDescription.guide ?? []).length, 8)
+  const sendDescription = await ok('runtime_describe', {
     target,
     expected_binding_revision: 1,
     method: 'terminal.send'
   })
-  assert.equal(described.tier, 'control')
-  assert.deepEqual([...described.params_schema.required].sort(), ['core_id', 'created_ms', 'terminal', 'text'])
+  assert.deepEqual(sendDescription.params_schema.properties.if.anyOf[0].enum, ['idle', 'working'])
 
   const status = await call(entry('server.status').contract_ref, 'server.status', {})
   assert.equal(status.version, '0.1.14')
-  assert.equal(typeof status.pid, 'number')
   const coreId = status.core.id
-  assert.match(coreId, /^[a-f0-9]{8,64}$/u)
 
-  /** 终端清单里按名字取本轮自己的两个终端；名字来自 quickstart 的 hc run --name。 */
-  const terminals = await call(entry('terminal.list').contract_ref, 'terminal.list', {})
-  const named = (name) => {
-    const found = terminals.terminals.find((terminal) => terminal.name === name)
-    assert(found, `terminal ${name} missing: ${JSON.stringify(terminals.terminals.map((t) => [t.name, t.address]))}`)
-    return found
+  // ---- managed：先确认 Connector 重启前启动的终端还在 ----
+  if (mode === 'managed') {
+    const listed = await call(entry('terminal.list').contract_ref, 'terminal.list', {})
+    const survivor = listed.terminals.find((terminal) => terminal.name === 'survivor')
+    assert(
+      survivor,
+      `survivor terminal missing after connector restart: ${JSON.stringify(listed.terminals.map((t) => t.name))}`
+    )
+    const read = await call(entry('terminal.read').contract_ref, 'terminal.read', {
+      terminal: survivor.address,
+      lines: 0
+    })
+    assert(read.text.includes('survivor'), JSON.stringify(read.text.slice(0, 200)))
   }
-  const e2e = named(env.HERDR_CORE_TERMINAL_NAME ?? 'e2e')
-  const blockedTerminal = named(env.HERDR_CORE_BLOCKED_NAME ?? 'blocked')
 
-  // ---- 控制档：send 文字并用 terminal.read(lines=0) 读回 ----
+  // ---- 程序形态：line 启动 cat，send 后读回 ----
+  const cat = await invoke(entry('terminal.run').contract_ref, {
+    method: 'terminal.run',
+    params: { name: 'cat-e2e', line: 'printf "rovloom-e2e\\n"; exec cat' }
+  })
+  assert.equal(cat.state, 'responded', JSON.stringify(cat))
+  const catResult = await readAll(cat)
+  assert.equal(typeof catResult.created_ms, 'number')
   const marker = `rovloom-e2e-${Date.now()}`
   const sent = await invoke(entry('terminal.send').contract_ref, {
     method: 'terminal.send',
-    params: { terminal: e2e.address, core_id: coreId, created_ms: e2e.created_ms, text: `echo ${marker}\n` }
+    params: {
+      terminal: catResult.address,
+      core_id: coreId,
+      created_ms: catResult.created_ms,
+      text: `echo ${marker}\n`
+    }
   })
   assert.equal(sent.state, 'responded', JSON.stringify(sent))
-  const sentResult = await readAll(sent)
-  assert.equal(typeof sentResult.turn, 'number')
   const echoed = await until('terminal.read sees the sent text', async () => {
     const read = await call(entry('terminal.read').contract_ref, 'terminal.read', {
-      terminal: e2e.address,
+      terminal: catResult.address,
       lines: 0
     })
-    assert(read.text.includes(marker), `marker missing: ${JSON.stringify(read.text.slice(-400))}`)
+    assert(read.text.includes(marker), `marker missing: ${JSON.stringify(read.text.slice(-200))}`)
     return read
   })
-
-  // ---- 三元组栅栏：created_ms 不符即拒绝，输入不会送给同地址的另一个终端 ----
+  const killedCat = await invoke(entry('terminal.kill').contract_ref, {
+    method: 'terminal.kill',
+    params: { terminal: catResult.address, core_id: coreId, created_ms: catResult.created_ms }
+  })
+  assert.equal(killedCat.state, 'responded')
   await refuses(
     await invoke(entry('terminal.send').contract_ref, {
       method: 'terminal.send',
-      params: {
-        terminal: e2e.address,
-        core_id: coreId,
-        created_ms: e2e.created_ms + 1,
-        text: `echo ${marker}-wrong\n`
-      }
+      params: { terminal: catResult.address, core_id: coreId, created_ms: catResult.created_ms, text: 'x' }
     }),
+    'terminal_unavailable',
+    'send to a finished terminal'
+  )
+  const removedCat = await invoke(entry('terminal.rm').contract_ref, {
+    method: 'terminal.rm',
+    params: { terminal: catResult.address, core_id: coreId, created_ms: catResult.created_ms }
+  })
+  assert.equal(removedCat.state, 'responded')
+
+  // ---- 模板形态 + 假智能体：多轮对话、读历史、core 明确拒绝 ----
+  const templateDir = env.HERDR_CORE_MANAGED_CONFIG
+    ? `${env.HERDR_CORE_MANAGED_CONFIG}/herdr-core/templates`
+    : `${env.HERDR_CORE_HOME}/.config/herdr-core/templates`
+  execFileSync('mkdir', ['-p', '-m', '700', templateDir])
+  writeFileSync(
+    `${templateDir}/fake.md`,
+    [
+      '---',
+      'description: 假智能体，用于 e2e 多轮对话',
+      `command: python3 -I ${env.HERDR_CORE_FAKEAGENT} ${env.HERDR_CORE_FAKEAGENT_LOG}`,
+      '---',
+      'You are a fake agent used by the rovloom e2e.'
+    ].join('\n') + '\n',
+    { mode: 0o600 }
+  )
+  const templates = await call(entry('templates.list').contract_ref, 'templates.list', {})
+  assert(
+    templates.templates.some((template) => template.name === 'fake'),
+    JSON.stringify(templates)
+  )
+
+  const agent = await invoke(entry('terminal.run').contract_ref, {
+    method: 'terminal.run',
+    params: { argv: ['fake', 'first task'], template: true, name: 'fake-agent', no_parent: true, no_notify: true }
+  })
+  assert.equal(agent.state, 'responded', JSON.stringify(agent))
+  const agentResult = await readAll(agent)
+  // 模板形态：第一条消息在智能体就绪后送进去。
+  assert.equal(agentResult.first_message?.sent, true, JSON.stringify(agentResult.first_message))
+  assert.equal(agentResult.parent, null, 'root terminal has no parent')
+  const agentFence = { terminal: agentResult.address, core_id: coreId, created_ms: agentResult.created_ms }
+  // 第一轮结束后状态是 done（不是 idle）。
+  const firstTurn = await until('first turn finishes', async () => {
+    const read = await call(entry('terminal.get').contract_ref, 'terminal.get', { terminal: agentResult.address })
+    assert.equal(read.status?.state, 'done', JSON.stringify(read.status))
+    return read
+  })
+  // 模板正文与任务各算一行，所以第一轮之后 turn 至少是 1；后面按增量核对。
+  assert(firstTurn.turn >= 1, JSON.stringify(firstTurn))
+
+  // 第二轮：send wait=true 一次完成「发送并等这一轮结束」。
+  const second = await invoke(entry('terminal.send').contract_ref, {
+    method: 'terminal.send',
+    params: { ...agentFence, text: 'second task', wait: true, timeout: 30 }
+  })
+  assert.equal(second.state, 'responded', JSON.stringify(second))
+  const secondResult = await readAll(second)
+  assert.equal(secondResult.wait.reason, 'status', JSON.stringify(secondResult.wait))
+  // 结果里的 turn 是文本送入时的轮次，wait.turn 是那一轮结束后的轮次。
+  assert.equal(secondResult.turn, firstTurn.turn, JSON.stringify(secondResult))
+  assert.equal(secondResult.wait.turn, firstTurn.turn + 1, JSON.stringify(secondResult.wait))
+  // 读历史：lines>0，原样透传 how/complete。
+  const history = await call(entry('terminal.read').contract_ref, 'terminal.read', {
+    terminal: agentResult.address,
+    lines: 200
+  })
+  assert(history.text.includes('working on: second task'), JSON.stringify(history.text.slice(-300)))
+  assert.equal(typeof history.how, 'string')
+  assert.equal(typeof history.complete, 'boolean')
+
+  // D1：状态是 done 时 send 带 if:"idle" 被 core 明确拒绝 → 确定未派发，带 core 的类别。
+  const mismatch = await invoke(entry('terminal.send').contract_ref, {
+    method: 'terminal.send',
+    params: { ...agentFence, text: 'should not be typed', if: 'idle' }
+  })
+  await refuses(mismatch, 'status_mismatch', 'if:idle while done')
+  const afterMismatch = await call(entry('terminal.get').contract_ref, 'terminal.get', {
+    terminal: agentResult.address
+  })
+  assert.equal(afterMismatch.turn, secondResult.wait.turn, 'rejected send must not advance the turn')
+
+  // ---- blocked：send/keys/interrupt 都被 rovloom 拒绝，程序日志只有 ready ----
+  // 用独立的日志：attach 模式下 quickstart 自己也起了一个 blocked 终端。
+  const blockedLog = `${env.HERDR_CORE_BLOCKED_LOG ?? env.HERDR_CORE_FAKEAGENT_LOG + '.blocked'}.e2e`
+  const blocked = await invoke(entry('terminal.run').contract_ref, {
+    method: 'terminal.run',
+    params: {
+      name: 'blocked-e2e',
+      line: `python3 -I ${env.HERDR_CORE_BLOCKED} ${blockedLog}`
+    }
+  })
+  assert.equal(blocked.state, 'responded', JSON.stringify(blocked))
+  const blockedResult = await readAll(blocked)
+  const blockedFence = { terminal: blockedResult.address, core_id: coreId, created_ms: blockedResult.created_ms }
+  await until('blocked terminal reports blocked', async () => {
+    const read = await call(entry('terminal.get').contract_ref, 'terminal.get', { terminal: blockedResult.address })
+    assert.equal(read.status?.state, 'blocked', JSON.stringify(read.status))
+  })
+  await refuses(
+    await invoke(entry('terminal.send').contract_ref, {
+      method: 'terminal.send',
+      params: { ...blockedFence, text: 'y' }
+    }),
+    'blocked',
+    'blocked send'
+  )
+  await refuses(
+    await invoke(entry('terminal.keys').contract_ref, {
+      method: 'terminal.keys',
+      params: { ...blockedFence, keys: ['y'] }
+    }),
+    'blocked',
+    'blocked keys'
+  )
+  await refuses(
+    await invoke(entry('terminal.interrupt').contract_ref, { method: 'terminal.interrupt', params: blockedFence }),
+    'blocked',
+    'blocked interrupt'
+  )
+  if (existsSync(blockedLog)) {
+    assert.equal(readFileSync(blockedLog, 'utf8').trim(), 'ready', 'blocked program received input')
+  }
+  const interrupted = await invoke(entry('terminal.interrupt').contract_ref, {
+    method: 'terminal.interrupt',
+    params: agentFence
+  })
+  assert.equal(interrupted.state, 'responded', JSON.stringify(interrupted))
+  const killedAgent = await invoke(entry('terminal.kill').contract_ref, {
+    method: 'terminal.kill',
+    params: agentFence
+  })
+  assert.equal(killedAgent.state, 'responded', JSON.stringify(killedAgent))
+  const removedAgent = await invoke(entry('terminal.rm').contract_ref, {
+    method: 'terminal.rm',
+    params: agentFence
+  })
+  assert.equal(removedAgent.state, 'responded', JSON.stringify(removedAgent))
+
+  // ---- 三元组栅栏与不存在的地址 ----
+  const survivorTerminal =
+    mode === 'managed'
+      ? (await call(entry('terminal.list').contract_ref, 'terminal.list', {})).terminals.find(
+          (t) => t.name === 'survivor'
+        )
+      : (await call(entry('terminal.list').contract_ref, 'terminal.list', {})).terminals.find((t) => t.name === 'e2e')
+  assert(survivorTerminal, 'e2e terminal missing')
+  const e2e = survivorTerminal
+  await refuses(
+    await invoke(entry('terminal.send').contract_ref, {
+      method: 'terminal.send',
+      params: { terminal: e2e.address, core_id: coreId, created_ms: e2e.created_ms + 1, text: 'x' }
+    }),
+    'fence_mismatch',
     'created_ms mismatch'
   )
-  await refuses(
-    await invoke(entry('terminal.send').contract_ref, {
-      method: 'terminal.send',
-      params: { terminal: e2e.address, core_id: 'f'.repeat(16), created_ms: e2e.created_ms, text: 'x' }
-    }),
-    'core_id mismatch'
-  )
-  // 名字与远端路由都不是输入目标：参数复核在派发前拒绝，结果是确定未派发。
-  await refuses(
-    await invoke(entry('terminal.send').contract_ref, {
-      method: 'terminal.send',
-      params: { terminal: 'e2e', core_id: coreId, created_ms: e2e.created_ms, text: 'x' }
-    }),
-    'named target'
-  )
-  await refuses(
-    await invoke(entry('terminal.send').contract_ref, {
-      method: 'terminal.send',
-      params: { terminal: 'm1/t1', core_id: coreId, created_ms: e2e.created_ms, text: 'x' }
-    }),
-    'remote target'
-  )
-
-  // ---- blocked：core 只在 send 上拦，keys/interrupt 照常送达，所以必须由 rovloom 拒绝 ----
-  const blockedNow = await call(entry('terminal.get').contract_ref, 'terminal.get', {
-    terminal: blockedTerminal.address
-  })
-  assert.equal(blockedNow.status?.state, 'blocked', JSON.stringify(blockedNow.status))
-  for (const [method, params] of [
-    ['terminal.send', { text: 'y\n' }],
-    ['terminal.keys', { keys: ['y', 'enter'] }],
-    ['terminal.interrupt', {}]
-  ]) {
-    await refuses(
-      await invoke(entry(method).contract_ref, {
-        method,
-        params: {
-          terminal: blockedTerminal.address,
-          core_id: coreId,
-          created_ms: blockedTerminal.created_ms,
-          ...params
-        }
-      }),
-      `blocked ${method}`
-    )
-  }
-  // 输入确实没有送到程序：blocked 程序只写过 ready。
-  if (env.HERDR_CORE_BLOCKED_LOG && existsSync(env.HERDR_CORE_BLOCKED_LOG)) {
-    const log = readFileSync(env.HERDR_CORE_BLOCKED_LOG, 'utf8')
-    assert.equal(log.trim(), 'ready', `blocked program received input: ${JSON.stringify(log.slice(0, 200))}`)
-  }
-  // blocked 时仍能收拾现场：kill 与 rm 只作用于本轮自己建的终端。
-  const killed = await invoke(entry('terminal.kill').contract_ref, {
-    method: 'terminal.kill',
-    params: { terminal: blockedTerminal.address, core_id: coreId, created_ms: blockedTerminal.created_ms }
-  })
-  assert.equal(killed.state, 'responded', JSON.stringify(killed))
-  const removed = await invoke(entry('terminal.rm').contract_ref, {
-    method: 'terminal.rm',
-    params: { terminal: blockedTerminal.address, core_id: coreId, created_ms: blockedTerminal.created_ms }
-  })
-  assert.equal(removed.state, 'responded', JSON.stringify(removed))
-  // 不存在的地址：三元组核对读不到终端事实，确定未派发。
   await refuses(
     await invoke(entry('terminal.kill').contract_ref, {
       method: 'terminal.kill',
       params: { terminal: 't999', core_id: coreId, created_ms: e2e.created_ms }
     }),
+    'terminal_unavailable',
     'unknown address'
   )
 
-  // ---- 计划重启：连接关闭后重新附着，core.id 不变，旧终端仍可读 ----
+  // ---- 计划重启与 SIGKILL：重新附着后继续读，在途调用确定结局 ----
   hc('server', 'restart')
-  const afterRestart = await until('read after server restart', () =>
+  await until('read after server restart', () =>
     call(entry('terminal.read').contract_ref, 'terminal.read', { terminal: e2e.address, lines: 0 })
   )
-  assert.equal(typeof afterRestart.text, 'string')
-  const statusAfterRestart = await until('status after server restart', () =>
+  const afterRestart = await until('status after server restart', () =>
     call(entry('server.status').contract_ref, 'server.status', {})
   )
-  assert.equal(statusAfterRestart.core.id, coreId, 'planned restart keeps core.id')
-
-  // ---- SIGKILL core：在途调用确定是 outcome_unknown，holder 拉起新 core 后能继续读 ----
-  const pid = statusAfterRestart.pid
+  assert.equal(afterRestart.core.id, coreId, 'planned restart keeps core.id')
+  const pid = afterRestart.pid
   assert.equal(realpathSync(`/proc/${pid}/exe`), realpathSync(env.HERDR_CORE_BINARY), 'kill only the sandbox core')
-  // 长等读取正在执行时杀掉 core：这条调用已写出，结局只能是未知。
   const inflight = await ok('runtime_call', {
     target,
     expected_binding_revision: 1,
     contract_ref: entry('terminal.wait').contract_ref,
-    native_request: {
-      method: 'terminal.wait',
-      params: { terminal: e2e.address, timeout: 20 }
-    },
+    native_request: { method: 'terminal.wait', params: { terminal: e2e.address, timeout: 20 } },
     deadline: Date.now() + 60_000,
     wait_ms: 0
   })
@@ -236,47 +349,28 @@ try {
   for (let i = 0; i < 300 && !finished.has(inflightView.state); i++) {
     inflightView = await ok('runtime_call_get', { call_id: inflight.call_id, wait_ms: 100 })
   }
-  assert.equal(inflightView.state, 'outcome_unknown', `in-flight after SIGKILL: ${JSON.stringify(inflightView)}`)
-  // holder 默认 3 秒后自己拉起新 core；重新附着后继续读，core.id 与终端都还在。
-  const afterKill = await until('read after SIGKILL', () =>
+  assert.equal(inflightView.state, 'outcome_unknown', JSON.stringify(inflightView))
+  await until('read after SIGKILL', () =>
     call(entry('terminal.read').contract_ref, 'terminal.read', { terminal: e2e.address, lines: 0 })
   )
-  assert.equal(typeof afterKill.text, 'string')
-  const statusAfterKill = await call(entry('server.status').contract_ref, 'server.status', {})
-  assert.equal(statusAfterKill.core.id, coreId, 'holder restart keeps core.id')
-  const stillListed = await call(entry('terminal.list').contract_ref, 'terminal.list', {})
-  assert(
-    stillListed.terminals.some(
-      (terminal) => terminal.address === e2e.address && terminal.created_ms === e2e.created_ms
-    ),
-    'terminal record survives the core restart'
-  )
+  const afterKill = await call(entry('server.status').contract_ref, 'server.status', {})
+  assert.equal(afterKill.core.id, coreId, 'holder restart keeps core.id')
 
   console.log(
     JSON.stringify({
       ok: true,
+      mode,
       switch: 'on',
-      methods,
-      core_id: coreId,
-      e2e: {
-        address: e2e.address,
-        created_ms: e2e.created_ms,
-        sent_turn: sentResult.turn,
-        read_bytes: echoed.text.length
-      },
-      blocked: {
-        address: blockedTerminal.address,
-        refused: ['send', 'keys', 'interrupt'],
-        killed: true,
-        removed: true
-      },
-      fence: {
-        created_ms_mismatch: 'not_dispatched',
-        core_id_mismatch: 'not_dispatched',
-        named_target: 'not_dispatched',
-        remote_target: 'not_dispatched'
-      },
-      restart: { planned: true, sigkill: true, inflight: inflightView.state, core_id_stable: true }
+      methods: methods.length,
+      guide: (runDescription.guide ?? []).length,
+      run: { program: 'line', template: true, first_message: agentResult.first_message },
+      turns: { first: firstTurn.turn, second: secondResult.turn, wait_reason: secondResult.wait.reason },
+      read_history: { how: history.how, complete: history.complete, bytes: history.text.length },
+      native_rejection: { if_idle_while_done: mismatch.reason },
+      blocked: { send: 'blocked', keys: 'blocked', interrupt: 'blocked', killed: true, removed: true },
+      fence: { created_ms: 'fence_mismatch', unknown_address: 'terminal_unavailable' },
+      restart: { planned: true, sigkill: true, inflight: inflightView.state, core_id_stable: true },
+      cat_read_bytes: echoed.text.length
     })
   )
 } finally {

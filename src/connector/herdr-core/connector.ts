@@ -13,6 +13,8 @@ import type { ProviderBinding, V2Target } from '../../wire/types.js'
 import { createHerdrCoreConnectorRuntime } from './runtime.js'
 import { HerdrCoreInstallation, assertHerdrCoreSessionFits } from './installation.js'
 import type { HerdrCoreAttachment } from './installation.js'
+import { ensureHerdrCoreManaged } from './managed.js'
+import type { HerdrCoreManagedDirs } from './managed.js'
 import { parseHerdrCoreProviderRefConfig } from './provider.js'
 import type { HerdrCoreProviderRefConfig } from './provider.js'
 import { pinTerminalExecution } from '../terminal-execution.js'
@@ -66,6 +68,11 @@ export async function createHerdrCoreConnectorResources(
     allow_terminal_execution?: boolean
     /** 本 Connector 同时存活的、经 terminal.run 启动的终端上限；省略用默认值。 */
     max_run_terminals?: number
+    /**
+     * managed 模式：连接前确保 core 在跑（直接 exec `<bin> serve`，不用 `hc`）。
+     * 每次尝试连接前都会调用，因此 Connector 重启后也能重新拉起并重新核对身份。
+     */
+    managed?: Readonly<{ dirs: HerdrCoreManagedDirs; binary: string }>
     open?(config: HerdrCoreProviderRefConfig): Promise<HerdrCoreAttachment>
   }>
 ): Promise<HerdrCoreConnectorResources> {
@@ -79,13 +86,19 @@ export async function createHerdrCoreConnectorResources(
   }
   assertHerdrCoreSessionFits(connector.session, connector.endpoint)
   publishedSchema(config)
+  const managed = input.managed
+  const beforeAttach = managed
+    ? /** 只保证端点可连；身份、版本与契约仍由 attachHerdrCore 完整核对。 */ () =>
+        ensureHerdrCoreManaged({ dirs: managed.dirs, binary: managed.binary })
+    : undefined
   const installation =
     input.open !== undefined
       ? await input.open(config)
       : await HerdrCoreInstallation.open({
           config: connector,
           expected: config.expected_source,
-          now: input.now
+          now: input.now,
+          ...(beforeAttach ? { beforeAttach } : {})
         })
   const reference = contractRef(config.expected_source)
   if (contractRef(installation.record().wire.source) !== reference) {

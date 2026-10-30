@@ -11,13 +11,14 @@ import {
   herdrCoreSessionLimit,
   inspectHerdrCoreSocket
 } from '../connector/herdr-core/identity.js'
+import { ensureHerdrCoreManaged, findHerdrCoreBinary, herdrCoreManagedDirs } from '../connector/herdr-core/managed.js'
 import { HERDR_CORE_REVIEW } from '../connector/herdr-core/methods.js'
 import { compileHerdrCoreContract } from '../connector/herdr-core/schema.js'
 import { parseHerdrCoreProviderRefConfig } from '../connector/herdr-core/provider.js'
 import type { HerdrCoreProviderRefConfig } from '../connector/herdr-core/provider.js'
 import { publishSchema, schemaReference } from '../connector/schema-store.js'
 import { boundedJson, fields, hash, object } from '../wire/index.js'
-import { CliError, herdrCoreSession, type ConnectorConfig } from './config.js'
+import { CliError, herdrCoreConfigHome, herdrCoreMode, herdrCoreSession, type ConnectorConfig } from './config.js'
 import { privateDirectory } from './first-config.js'
 import { readSetupJson, writeSetupJson } from './setup-files.js'
 import { setupReference, setupSessionsFor, setupTarget } from './setup-targets.js'
@@ -94,7 +95,25 @@ export async function prepareSetupHerdrCore(
     return prepared(existing, config, attempt, machine)
   }
   const session = herdrCoreSession(config)
-  const pin = endpointPin(session)
+  // managed：先由 Connector 自己拉起私有实例，再走完全相同的身份核对与契约发布。
+  const configHome = herdrCoreConfigHome(config)
+  const managed =
+    herdrCoreMode(config) === 'managed'
+      ? herdrCoreManagedDirs({
+          state_dir: config.state_dir,
+          session,
+          ...(configHome === undefined ? {} : { config_home: configHome })
+        })
+      : undefined
+  if (managed) {
+    await ensureHerdrCoreManaged({
+      dirs: managed,
+      binary: findHerdrCoreBinary(
+        config.native?.runtime_bin_dirs ? { runtime_bin_dirs: [...config.native.runtime_bin_dirs] } : {}
+      )
+    })
+  }
+  const pin = managed ? { runtime_dir: managed.run } : endpointPin(session)
   const endpoint = herdrCorePinnedEndpoint(pin, session)
   inspectHerdrCoreSocket(endpoint.socket)
   const target = setupTarget(machine, 'herdr-core', setupSessionsFor(config))
