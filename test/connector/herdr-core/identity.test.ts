@@ -1,5 +1,8 @@
 /** 核对端点公式、session 上限与终端标识三元组；不访问真实 core 或真实 HOME。 */
 import assert from 'node:assert/strict'
+import { chmodSync, mkdirSync, rmSync } from 'node:fs'
+import { createServer } from 'node:net'
+import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   herdrCoreEndpoint,
@@ -7,8 +10,10 @@ import {
   herdrCoreSessionName,
   herdrCoreTerminalIdentity,
   herdrCorePeerFacts,
-  herdrCoreProcessFacts
+  herdrCoreProcessFacts,
+  inspectHerdrCoreSocket
 } from '../../../src/connector/herdr-core/identity.js'
+import { privateHerdrTestRoot } from '../herdr/private-root.js'
 
 test('runtime dir endpoint uses the documented core layout', () => {
   const env = { XDG_RUNTIME_DIR: '/run/user/1000', HOME: '/home/dev' }
@@ -52,6 +57,24 @@ test('terminal identity needs core, created_ms and address together', () => {
     () => herdrCoreTerminalIdentity('not-hex', { address: 't1', created_ms: 1 }),
     /herdr_core_core_id_invalid/u
   )
+})
+
+test('socket directory must be private 0700 and owned by us', async () => {
+  const root = privateHerdrTestRoot('rovloom-hc-socket-')
+  const directory = join(root, 'herdr-core')
+  mkdirSync(directory, { mode: 0o700 })
+  const socket = join(directory, 'test.sock')
+  const server = createServer()
+  await new Promise<void>((resolve) => server.listen(socket, resolve))
+  try {
+    // 0700 目录通过；core 不会收紧已存在目录的权限，所以 0755 必须被拒绝。
+    assert.doesNotThrow(() => inspectHerdrCoreSocket(socket))
+    chmodSync(directory, 0o755)
+    assert.throws(() => inspectHerdrCoreSocket(socket), /herdr_core_endpoint_untrusted/u)
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('process facts refuse a pid that is not a bare `<bin> serve`', () => {

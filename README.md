@@ -16,7 +16,7 @@ port is opened on the machines that run them.
 
 - **Multi-device access.** Every device runs one Connector that dials out to a shared Gateway.
 - **Explicit targets.** Each call names a device, runtime and session; nothing is chosen implicitly.
-- **Native runtimes.** Herdr and Luvus keep their own contracts and capabilities.
+- **Native runtimes.** Herdr and Luvus keep their own contracts and capabilities. herdr-core is an opt-in, attach-only provider (Linux) with five reviewed read methods.
 - **Two authorization controls.** Tokens select visible devices; each Connector controls direct
   terminal execution. Every exposed method on a visible device is available to its token.
 - **Honest results.** A call whose outcome is uncertain after a disconnect is reported as unknown
@@ -75,7 +75,7 @@ Windows PowerShell and the Docker Gateway are covered in the [Quick Start](docs/
 The musl Linux binaries need the C++ runtime (`apk add libstdc++` on Alpine) and cannot run Luvus
 managed native processes; see [Distribution](docs/DISTRIBUTION.md).
 
-A Connector needs **Herdr** or **Luvus** installed on its machine; see
+A Connector needs **Herdr**, **Luvus**, or an already running **herdr-core** on its machine; see
 [Quick Start §2](docs/QUICK-START.md#2-prepare-the-connector-machine) for per-platform install commands.
 
 Pairing a Connector needs a real local terminal.

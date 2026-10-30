@@ -96,14 +96,14 @@ def luvus_servers(binary_dir):
 
 
 def herdr_core_pids(binary_dir, session):
-    """本轮私有目录里、指定 HC_SESSION 的 herdr-core 进程（argv 恒为 `<bin> serve`）。"""
+    """本轮私有目录里、指定 HC_SESSION 的 herdr-core（serve 与 holder）；按 exe 路径核对。"""
     found = []
     for entry in os.listdir('/proc'):
         if not entry.isdigit():
             continue
         try:
-            argv = open(f'/proc/{entry}/cmdline', 'rb').read().split(b'\0')[:-1]
-            if not argv or not argv[0].decode().startswith(binary_dir + os.sep) or argv[1:] != [b'serve']:
+            exe = os.readlink(f'/proc/{entry}/exe')
+            if not exe.startswith(binary_dir + os.sep):
                 continue
             environ = open(f'/proc/{entry}/environ', 'rb').read().split(b'\0')
             if f'HC_SESSION={session}'.encode() in environ:
@@ -113,10 +113,22 @@ def herdr_core_pids(binary_dir, session):
     return sorted(found)
 
 
-def stop_herdr_core(binary_dir, session):
-    """回收本轮 `hc run` 拉起的 core；按 exe 路径与 HC_SESSION 核对，不碰用户的其它实例。"""
+def stop_herdr_core(binary_dir, session, work):
+    """回收本轮 `hc run` 拉起的 core/holder 与终端；先核 exe 或 cwd 属于本轮私有目录。"""
     for sig, grace in ((signal.SIGTERM, 5.0), (signal.SIGKILL, 2.0)):
         pids = herdr_core_pids(binary_dir, session)
+        for entry in os.listdir('/proc'):
+            if not entry.isdigit():
+                continue
+            try:
+                cwd = os.readlink(f'/proc/{entry}/cwd')
+                if not cwd.startswith(work + os.sep) or int(entry) in pids:
+                    continue
+                environ = open(f'/proc/{entry}/environ', 'rb').read().split(b'\0')
+                if f'HC_SESSION={session}'.encode() in environ:
+                    pids.append(int(entry))
+            except (OSError, UnicodeDecodeError):
+                continue
         if not pids:
             return
         for pid in pids:
@@ -181,6 +193,7 @@ def main():
     ap.add_argument('--luvus', help='官方 luvus 0.14.3 可执行文件（与 --herdr/--herdr-core 三选一；走默认的 Luvus 引导）')
     ap.add_argument('--herdr-core', dest='herdr_core', help='官方 herdr-core 0.1.14 可执行文件（附着已运行实例）')
     ap.add_argument('--herdr-core-session', default='e2e', help='herdr-core 会话名（默认 e2e）')
+    ap.add_argument('--herdr-core-old', dest='herdr_core_old', help='（可选）未审核版本的 herdr-core，用于验证版本拒绝')
     ap.add_argument('--work', help='工作目录（需位于祖先不可被其它用户写入的位置；默认 ~/.rq-*）')
     ap.add_argument('--luvus-mode', choices=['attach', 'managed'], default='attach',
                     help='Luvus 的运行方式（默认 attach：附着用户的 default 会话，没有才自建）')
@@ -264,7 +277,8 @@ def main():
             cfg['native'] = {'provider': 'herdr-core', 'herdr_core': {'session': args.herdr_core_session}}
             open(path, 'w').write(json.dumps(cfg, indent=2) + '\n'); os.chmod(path, 0o600)
             # `hc run --bg --json` 会拉起脱离启动者的 core，并留下一个可读终端；不阻塞宿主。
-            started = subprocess.run([os.path.join(herdr_dir, 'hc'), 'run', '--bg', '--json', '--name', 'e2e', 'sleep', '300'],
+            started = subprocess.run([os.path.join(herdr_dir, 'hc'), 'run', '--bg', '--json', '--name', 'e2e',
+                                      'sh', '-c', 'printf "rovloom-e2e\\n"; exec sleep 300'],
                                      env={**env_c, 'TERM': 'xterm-256color'}, cwd=home_c,
                                      capture_output=True, text=True, timeout=30)
             assert started.returncode == 0, f'herdr-core run failed: {started.stderr[-400:]}'
@@ -345,6 +359,16 @@ def main():
         open(out, 'w').write(json.dumps(info)); os.chmod(out, 0o600)
         print('READY', json.dumps({'mcp_url': info['url'], 'targets': info['targets'], 'config': out}), flush=True)
         status = 0
+        if args.herdr_core:
+            identity_env = {**os.environ, 'HERDR_CORE_SOCKET': os.path.join(core_runtime, 'herdr-core', args.herdr_core_session + '.sock'),
+                            'HERDR_CORE_SESSION': args.herdr_core_session, 'HERDR_CORE_RUNTIME': core_runtime,
+                            'HERDR_CORE_PROXY_ROOT': os.path.join(work, 'identity'), 'HERDR_CORE_HOME': home_c}
+            if args.herdr_core_old:
+                identity_env['HERDR_CORE_OLD_BINARY'] = args.herdr_core_old
+            done = subprocess.run(['bun', '--no-env-file', os.path.join(os.path.dirname(__file__), 'herdr-core-identity.mjs')],
+                                  env=identity_env, cwd=os.path.dirname(__file__), capture_output=True, text=True, timeout=120)
+            print('HERDR_CORE_IDENTITY', (done.stdout + done.stderr).strip()[-800:], flush=True)
+            assert done.returncode == 0, 'herdr-core identity fail-closed check failed'
         if args.luvus:
             servers = luvus_servers(herdr_dir)
             print('LUVUS_SERVERS', servers, flush=True)
@@ -605,7 +629,7 @@ def main():
             print('CLEANUP servers error', error, flush=True)
         if args.herdr_core:
             try:
-                stop_herdr_core(herdr_dir, args.herdr_core_session)
+                stop_herdr_core(herdr_dir, args.herdr_core_session, home_c)
             except Exception as error:
                 print('CLEANUP core error', error, flush=True)
         if args.work is None:

@@ -196,16 +196,14 @@ export function createHerdrCoreConnectorRuntime(
         { method: request.method, params: request.params, id: observedBinding.native_request_id },
         context
       )
-      const anchor = backend.responseAnchor(observedBinding)
-      if (!anchor) {
-        throw new ProviderAdapterError('attempt_anchor_unavailable')
-      }
-      claims.claim(observedBinding, anchor.dedup_expires_at)
+      // 先复核本机来源，再写发送墓碑：来源已变化时不能把一次未发送的意图记成已发送。
       installation.assert()
+      const anchor = backend.responseAnchor(observedBinding)
+      claims.claim(observedBinding, anchor.dedup_expires_at)
       checkSignal(controller.signal)
       dispatched = true
       const result = await installation.client().request(request.method, request.params, timeout)
-      checkSignal(signal)
+      checkSignal(controller.signal)
       installation.assert()
       core.validator.validateResponse(result, context)
       return Object.freeze({ binding: observedBinding, native_response: result })

@@ -87,6 +87,33 @@ test('herdr-core 配置只接受自己的契约来源与规范绝对 schema 引�
     )
     assert.throws(() => parseHerdrCoreProviderRefConfig({ ...config, schema_ref: 'relative/schema.json' }))
     assert.throws(() => parseHerdrCoreProviderRefConfig({ ...config, extra: true }))
+    // Connector 本地事实可选；端点只能固定一个位置，且会话必须与 Target 一致。
+    const connector = {
+      session: 'work',
+      endpoint: { runtime_dir: '/run/user/1000' },
+      principal_id: 'operator_simple_pairing',
+      claims: {
+        path: '/var/lib/rovloom/claims.db',
+        mode: 'open',
+        ledger_id: 'claims_one',
+        limits: { entries: 16, bytes: 4096 }
+      }
+    }
+    const parsed = parseHerdrCoreProviderRefConfig({ ...config, connector })
+    assert.equal(parsed.connector?.session, 'work')
+    assert.throws(() => parseHerdrCoreProviderRefConfig({ ...config, connector: { ...connector, session: 'other' } }))
+    assert.throws(() =>
+      parseHerdrCoreProviderRefConfig({
+        ...config,
+        connector: { ...connector, endpoint: { runtime_dir: '/run/user/1000', state_home: '/state' } }
+      })
+    )
+    assert.throws(() =>
+      parseHerdrCoreProviderRefConfig({
+        ...config,
+        connector: { ...connector, endpoint: {} }
+      })
+    )
     assert.throws(
       () =>
         parseHerdrCoreProviderRefConfig({

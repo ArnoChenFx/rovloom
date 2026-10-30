@@ -60,12 +60,31 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 本期不开放控制档，所以“blocked 由 rovloom 自己判断并拦 keys/interrupt/force”没有可以实施的调用面：`terminal.send`/`keys`/`interrupt` 等仍不在 `HERDR_CORE_EXPOSED_METHODS`，参数复核、Wire 核心与目录三处都会拒绝。`terminal-execution` 的 herdr-core 直接输入集合从同一份审核档位表派生（当前全是 control，因此目录与执行门禁都不放开），宿主级集合保持为空。blocked 状态判定留到开放控制档时与 send 一起实现，届时必须由 rovloom 自己判断，不能信 `blocked` 闸门（spike 2：keys/interrupt/force 在 blocked 时照常送达）。
 
+## 第三阶段（同一 PR 追加）
+
+### Connector 附着执行端
+
+`src/connector/herdr-core/installation.ts` 只连接已运行的 core，不启动、停止或接管实例：
+
+- 端点由本地配置固定的 `runtime_dir` 或 `state_home` 重算，运行时不再读 `cwd` 或环境变量；目录必须是本用户 0700，套接字必须是本用户的 socket。
+- pid 取自这条连接的内核 peer（`SO_PEERCRED`），必须属于本用户并与 `server.status` 自报值一致；自报值本身不是证据。`/proc/<pid>/exe` 的 SHA-256 必须等于配对时发布的 `binary_sha256`，`argv` 恒为 `<bin> serve`，`HC_SESSION` 与本次 session 一致。每次执行前重读这些事实，不缓存旧许可。
+- 契约只来自本次连接的 `rpc.discover`，字节摘要必须等于配对时发布的 `schema_sha256`；摘要不符、版本未审核、目录权限不对、代理冒充都在读写任何结果前失败关闭。
+- 只执行 `HERDR_CORE_EXPOSED_METHODS` 的 5 个读取；`reviewHerdrCoreParams` 与审核 schema 在发送前、结果 schema 在返回前各复核一次。控制档与宿主级方法仍在目录、Wire 准入和参数三处拒绝。
+- Connector 只在本地配置里携带 `connector`（session、固定端点、principal、发送墓碑）；Gateway 侧配置没有这些本机事实。
+
+### 配对路径与 kind 白名单
+
+`PROVIDER_KINDS` 成为 Store 配对认领、管理面与 WebUI 的唯一 kind 来源。`activatePairingProviders`、`provider_enable`/`provider_disable`、WebUI 的 provider/调用视图都接受 `herdr-core`，旧 `luvus`/`herdr` 的取值、配置和迁移路径不变。`native.provider: "herdr-core"` 只表示附着本机已运行 core；`mixed` 仍是 Luvus + Herdr TUI，不能表达 `luvus + herdr-core` 或 `herdr + herdr-core`（`native.provider` 是单值或既有 `mixed`）。
+
+配对时 `prepareSetupHerdrCore` 连接一次真实 core，核对身份后把本次 `rpc.discover` 的内容寻址副本发布给两端，并建立 Connector 私有发送墓碑；`join` 与 Gateway 的 `reviewSetupManifest` 都按同一 Target/session 核对。已有用户的配置、配对、token 与调用记录不需要改动。
+
 ## 本 PR 仍未包含
 
-- **Connector 执行端口**：herdr-core 目前只交付 Gateway 侧 Wire 会话、准入与证据保留；没有附着/启动 core 的 Connector 执行路径，因此选择 herdr-core 作为 Connector provider 会明确 `backend_unavailable`，而不是给一个不执行的会话。真实 core 的只读验收仍由 `scripts/herdr-core/verify-observation.ts` 在私有沙箱里跑。
 - **输入与控制档、宿主级方法**：`send`/`keys`/`interrupt`/`put`/`kill`/`rm`/`keep`/`label` 与 12 个宿主级方法都不开放。`terminal.attach` 需要终端模拟器解释首屏 VT 字节流，本期不适用。
 - **Luvus/Herdr 的端口迁移**：两种既有 provider 仍走原工厂；把它们也迁到 `ProviderPorts` 会改动它们的会话、目录与身份路径，留给后续。
 
 ## 验证
 
-单测用假 core 覆盖 framed 握手、请求配对、错误映射、超时、EOF、参数先于原生请求、结果严格性与三元组；schema 用 0.1.14 的真实 OpenRPC 文档和 7 个真实输出样本核对。真实 core 验收脚本 `scripts/herdr-core/verify-observation.ts` 在私有沙箱里对 0.1.14 跑通：`rpc.discover` 契约身份、`server.status` 的 pid 与 `/proc/<pid>/exe` 摘要、`argv`、`HC_SESSION`，以及 `terminal.list`/`get`/`read`/`wait`；XDG 运行时目录与状态目录回退两种布局都实测。
+单测用假 core 覆盖 framed 握手、请求配对、错误映射、超时、EOF、参数先于原生请求、结果严格性与三元组；Connector 执行端覆盖 5 个读取、控制档拒绝、`/proc` 事实不符与契约摘要不符的失败关闭；配对认领覆盖 `herdr-core` 与旧 kind 不变。schema 用 0.1.14 的真实 OpenRPC 文档和 7 个真实输出样本核对。
+
+真实 core 验收脚本 `scripts/herdr-core/verify-observation.ts` 在私有沙箱里对 0.1.14 跑通：`rpc.discover` 契约身份、`server.status` 的 pid 与 `/proc/<pid>/exe` 摘要、`argv`、`HC_SESSION`，以及 `terminal.list`/`get`/`read`/`wait`；XDG 运行时目录与状态目录回退两种布局都实测。第三阶段新增 `e2e/quickstart.py --herdr-core`：真实 Gateway + Connector 配对 herdr-core、在目录看到 5 个方法、经 MCP 对沙箱 core 执行 5 个读取；同一次运行里用真实 0.1.13 core 验证版本拒绝、用同机转发代理验证 `herdr_core_peer_pid_mismatch`、用 0755 socket 目录验证 `herdr_core_endpoint_untrusted`。

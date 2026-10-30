@@ -73,13 +73,14 @@ Connector，通常为 `~/.config/rovloom/connector.json`：
 | `gateway.url` | string，必填 | 初始化前为 `""`；其余为 ≤2048 字符的 WS/WSS origin，如 `ws://192.0.2.10:9443` 或 `wss://gateway.example`。不带凭据/查询/片段/路径，可带末尾 `/`；产品固定使用 `/connector`。 |
 | Connector `allow_terminal_execution` | boolean，可选 | `false`；省略也关闭。只有字面量 `true` 开启直接终端输入及自定义启动/恢复命令。修改这一份用户文件并重启 Connector，不改变安装设置或 token 设备范围。 |
 | Connector `native` | object，可选 | 默认省略，只接受以下来源选择及安装目录字段，在首次原生初始化时应用。 |
-| `native.provider` | string enum，可选 | 省略时为 `luvus`；`herdr` 仅选 Herdr，`mixed` 各选一个。须在首次初始化前选定，之后不能更改。 |
+| `native.provider` | string enum，可选 | 省略时为 `luvus`；`herdr` 仅选 Herdr，`herdr-core` 附着本机已运行的 herdr-core，`mixed` 各选一个 Luvus 与 Herdr。`mixed` 不含 herdr-core。须在首次初始化前选定，之后不能更改。 |
 | `native.runtime_bin_dirs` | 1–16 个互不重复的规范绝对目录 string 数组（每项≤4096字符），可选 | 查找所选 `luvus`/`herdr` 程序的位置。搜索顺序：数组内目录依序，其后是 Connector 启动时 `PATH` 中可用的条目，最后是 `/usr/bin:/bin`（Windows 无此项）。不同程序可装在不同目录。不接受 shell 展开或可执行 argv。 |
 | `native.agent_bin_dirs` | 1–16 个互不重复的规范绝对目录 string 数组（每项≤4096字符），可选 | 查找 Agent 程序的目录。Agent PATH 在原生初始化时按同样顺序固化。Rovloom 不安装或认证 Agent。 |
 | `native.herdr.mode` | `"attach"`（默认）或 `"managed"`，可选 | 仅 Herdr。`attach`：连接你已在运行的 Herdr，仅在没有实例时在你自己的配置目录里启动一个，实例消失后重新附着/重建。`managed`：Connector 私有、由它拥有的隔离实例。见[Herdr：附着或隔离](#herdr附着或隔离)。 |
 | `native.luvus.mode` | `"attach"`（默认）或 `"managed"`，可选 | 仅 Luvus。`attach`：连接你自己的 `default` 会话，仅在没有运行的会话时在你自己的 `LUVUS_HOME` 里启动一个，消失后重新附着/重建。`managed`：Connector 私有的隔离实例（会话名 `rovloom`）。见[Luvus：附着或隔离](#luvus附着或隔离)。 |
 | `native.luvus.state_root` | 规范绝对目录 string，可选 | 附着模式下你的 Luvus 状态目录（默认取 Connector 环境里的 `$LUVUS_HOME`，否则 `~/.luvus`）。不存在时以 0700 创建，且必须是私有目录。 |
 | `native.herdr.config_home` | 规范绝对目录 string，可选 | 附着模式下你的 Herdr 使用的配置目录（默认 `$XDG_CONFIG_HOME`，否则 `~/.config`）。Connector 以服务运行、环境与你的终端不同时请显式设置。 |
+| `native.herdr_core.session` | 会话名（`A-Za-z0-9._-`，1–64 字符，并受 core 套接字路径上限约束），可选 | 仅 herdr-core。默认 `default`。Connector 只附着已用这个 `HC_SESSION` 运行的 core，不启动或停止 core。会话名会成为 Target 的一部分，并在配对时固定。 |
 
 Gateway 已启用的监听端口必须不同。未知字段、旧扁平字段、runtime/ref 选择、TLS/CA
 路径、schema 摘要、binary pin 和凭据值均拒绝。用户参数不含原生 root、账本、绑定或

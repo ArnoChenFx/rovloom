@@ -45,7 +45,16 @@ const errors: Record<string, ServiceErrorCode> = {
   result_context_unavailable: 'content_unavailable',
   result_retention_context_unavailable: 'content_unavailable',
   discard_forbidden: 'forbidden',
-  clock_untrusted: 'storage_degraded'
+  clock_untrusted: 'storage_degraded',
+  // herdr-core 的固定拒绝码只投影为稳定的公开码，不把原生方法表或参数规则带到 MCP。
+  herdr_core_method_unavailable: 'not_found',
+  runtime_method_unavailable: 'not_found',
+  herdr_core_param_blocked: 'native_request_invalid',
+  herdr_core_read_history_unsupported: 'native_request_invalid',
+  herdr_core_native_request_invalid: 'native_request_invalid',
+  herdr_core_timeout_invalid: 'invalid_arguments',
+  herdr_core_timeout_exceeds_limit: 'invalid_arguments',
+  herdr_core_contract_unavailable: 'contract_unavailable'
 }
 
 // 只映射受信错误类中的固定公共码，未知原生异常及code不进入MCP诊断。

@@ -87,13 +87,13 @@ try {
   assert.equal(described.tier, 'conditional')
   const status = await invoke(entry('server.status').contract_ref, { method: 'server.status', params: {} })
   assert.equal(status.state, 'responded', JSON.stringify(status))
-  const statusResult = (await readAll(status)).result
+  const statusResult = await readAll(status)
   assert.equal(statusResult.version, '0.1.14')
   assert.equal(typeof statusResult.pid, 'number')
 
   const listed = await invoke(entry('terminal.list').contract_ref, { method: 'terminal.list', params: {} })
   assert.equal(listed.state, 'responded', JSON.stringify(listed))
-  const terminals = (await readAll(listed)).result.terminals
+  const terminals = (await readAll(listed)).terminals
   assert(Array.isArray(terminals) && terminals.length >= 1, `terminal list: ${JSON.stringify(terminals)}`)
   const address = terminals[0].address
 
@@ -102,14 +102,14 @@ try {
     params: { terminal: address }
   })
   assert.equal(single.state, 'responded', JSON.stringify(single))
-  assert.equal((await readAll(single)).result.address, address)
+  assert.equal((await readAll(single)).address, address)
 
   const read = await invoke(entry('terminal.read').contract_ref, {
     method: 'terminal.read',
     params: { terminal: address, lines: 0 }
   })
   assert.equal(read.state, 'responded', JSON.stringify(read))
-  const text = (await readAll(read)).result.text
+  const text = (await readAll(read)).text
   assert.equal(typeof text, 'string')
 
   const waited = await invoke(entry('terminal.wait').contract_ref, {
@@ -117,7 +117,7 @@ try {
     params: { terminal: address, timeout: 0.2 }
   })
   assert.equal(waited.state, 'responded', JSON.stringify(waited))
-  const waitResult = (await readAll(waited)).result
+  const waitResult = await readAll(waited)
   assert.equal(waitResult.ended, false)
 
   // 控制档仍未开放：Gateway 在登记前拒绝，不会到达 core。
@@ -130,7 +130,8 @@ try {
   })
   assert.equal(denied.isError, true, JSON.stringify(denied.raw))
   const deniedCode = denied.raw?.gateway_error?.code
-  assert.equal(deniedCode, 'herdr_core_method_unavailable', JSON.stringify(denied.raw))
+  // 控制档未开放，公开码只说明方法不可用，不泄露原生方法表。
+  assert.equal(deniedCode, 'not_found', JSON.stringify(denied.raw))
 
   console.log(
     JSON.stringify({

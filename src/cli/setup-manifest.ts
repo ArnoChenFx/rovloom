@@ -4,6 +4,7 @@ import { HERDR_INPUT_LIMIT } from '../connector/herdr/compiler-protocol.js'
 import { compileHerdrSchemas } from '../connector/herdr/compiler-api.js'
 import { parseHerdrProviderRefConfig, createHerdrGatewayResources } from '../connector/herdr/provider.js'
 import { createHerdrCoreGatewayResources, parseHerdrCoreProviderRefConfig } from '../connector/herdr-core/provider.js'
+import { compileHerdrCoreContract } from '../connector/herdr-core/schema.js'
 import { createHerdrCodec } from '../connector/herdr/readonly.js'
 import { checkedRemoteLuvusConfig, createPinnedRemoteLuvus } from '../connector/luvus/host/remote-luvus.js'
 import { boundedJson, fields, hash, object } from '../wire/index.js'
@@ -208,6 +209,8 @@ export async function reviewSetupManifest(
       ) {
         throw new CliError('configuration_required')
       }
+      // 与 Herdr 一致：先编译审核根，再落盘；坏文档不会留下半发布的 schema。
+      compileHerdrCoreContract(bytes)
       const binding: ProviderBinding = {
         machine_id: machine,
         provider_id: kind,

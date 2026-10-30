@@ -364,17 +364,23 @@ export async function openHerdrCoreClient(
       if (end >= 0) {
         const line = buffer.subarray(0, end)
         buffer = buffer.subarray(end + 1)
-        const message = object(parseJson(line, HERDR_CORE_MAX_FRAME_BYTES))
-        if (message.id !== 0 || message.jsonrpc !== '2.0') {
-          fail('herdr_core_protocol_invalid')
+        try {
+          const message = object(parseJson(line, HERDR_CORE_MAX_FRAME_BYTES))
+          if (message.id !== 0 || message.jsonrpc !== '2.0') {
+            fail('herdr_core_protocol_invalid')
+          }
+          if (message.error !== undefined) {
+            throw failure(message)
+          }
+          const result = helloResult(message.result)
+          framed = true
+          handshaking = false
+          return result
+        } catch (error) {
+          // 未审核版本或形状不符时也要关闭连接，不能留下半开套接字。
+          shutdown(error)
+          throw error
         }
-        if (message.error !== undefined) {
-          throw failure(message)
-        }
-        const result = helloResult(message.result)
-        framed = true
-        handshaking = false
-        return result
       }
       if (Date.now() >= deadline) {
         shutdown(new ProviderAdapterError('herdr_core_timeout'))
