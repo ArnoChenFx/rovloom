@@ -663,6 +663,11 @@ def main():
             restarted = Term('connector-restarted', [rov, 'connector'], env_c, home_c); terms.append(restarted)
             restarted.expect('provider_ready=true', timeout=60)
             print('RECOVERED', flush=True)
+            if args.herdr_core:
+                # 强杀 Connector 一定会留下 claim 账本锁；重启后必须出现与 Luvus/Herdr 相同的接管标记。
+                recovered = 'claims_lock_recovered' in ANSI.sub(b'', restarted.log).decode('utf8', 'replace')
+                print('HERDR_CORE_CLAIMS_RECOVERED', recovered, flush=True)
+                assert recovered, 'herdr-core did not take over the claims lock after SIGKILL'
         def faults(*step):
             command = ['bun', '--no-env-file', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'luvus-faults.mjs'), *step]
             done = subprocess.run(command, env={**os.environ, 'MCP_CONFIG': out, 'LUVUS_WRITE': '{}'},
