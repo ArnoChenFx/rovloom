@@ -312,10 +312,19 @@ test('配对认领接受新增的 herdr-core kind，旧 luvus/herdr 不变', asy
       binding_revision: 1,
       enabled: true
     }
-    const activated = o.f.store.activatePairingProviders(claim.claim_id, 'b'.repeat(64), [binding])
+    // 同一次审批里同时接受新增 kind 与旧 kind，证明旧绑定形状没有被改写。
+    const luvus = {
+      machine_id: receipt.machine_id,
+      provider_id: 'luvus',
+      kind: 'luvus' as const,
+      config_ref: 'luvus_' + claim.claim_id,
+      binding_revision: 1,
+      enabled: true
+    }
+    const activated = o.f.store.activatePairingProviders(claim.claim_id, 'b'.repeat(64), [binding, luvus])
     assert.equal(activated.status, 'activated')
     assert.deepEqual(o.f.store.provider(receipt.machine_id, 'herdr-core'), binding)
-    // 旧 kind 的绑定形状不受影响。
+    assert.deepEqual(o.f.store.provider(receipt.machine_id, 'luvus'), luvus)
     assert.deepEqual(o.f.store.activatePairingProviders(claim.claim_id, 'b'.repeat(64), [binding]).status, 'activated')
     assert.throws(
       () =>
