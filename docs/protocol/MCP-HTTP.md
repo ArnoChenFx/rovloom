@@ -128,7 +128,7 @@ rovloom service --help
 - 两个角色使用同一个可执行文件和版本，每个角色只有一份用户 JSON 配置，字段、默认值和平台限制见 [配置参考](../CONFIGURATION-zh.md)。省略 `--config` 时读取 `~/.config/rovloom/gateway.json` 或 `connector.json`。
 - 配置文件缺失时，首次运行会生成默认文件（Linux 上文件权限 0600，目录 0700），已有文件不会被覆盖。`config check` 与 `config check-runtime` 只读，不创建文件。
 - 首次运行用管理页或 `--issue-code` 生成一机一码，Connector 执行 `--join` 一次完成，无需终端问答。缺少配对状态时明确拒绝，返回 `configuration_required`，不等待 stdin。
-- Connector 通过 `native.provider` 选择 `luvus`（默认）、`herdr`、`herdr-core` 或 `mixed`；`mixed` 仍只表示 Luvus + Herdr。
+- Connector 通过 `native.provider` 选择 `luvus`（默认）、`herdr`、`herdr-core` 或 `mixed`；`mixed` 在 Linux 上表示全部三种，其它平台仍是 Luvus + Herdr；只要 Luvus + Herdr 用 `luvus,herdr`。
 - `stdout` 只在 `config template` 时输出非秘密的 JSON。帮助、版本、检查结果和错误写 `stderr`。Gateway 运行期的 `stdout` 不承载 MCP 或身份材料。
 - 退出码：0 成功或正常关闭，2 参数或配置错误，3 缺少后端，1 运行或关闭失败。收到 SIGINT 或 SIGTERM 时，Gateway 关闭本地资源后退出。
 - 开机服务见 [SERVICE](../SERVICE.md)。

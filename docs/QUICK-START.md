@@ -102,8 +102,9 @@ missing, pairing stops with `configuration_required`.
 The Connector **attaches to the session you already run**, so remote calls act on your real
 workspaces and Agent logins. It starts one in your own config directory only if none is running.
 
-Luvus is the default. Before first pairing, choose Herdr explicitly (use `mixed` for both — that
-needs both installed):
+Luvus is the default. Before first pairing, choose Herdr explicitly (`mixed` uses every provider this
+platform supports — Luvus, Herdr and herdr-core on Linux, so all three must be installed and a herdr-core
+running; use `luvus,herdr` for just those two):
 
 ```sh
 rovloom config init connector --provider herdr

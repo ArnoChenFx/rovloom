@@ -110,9 +110,11 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 
 ### 与 Luvus / Herdr TUI 的组合
 
-`native.provider` 只追加两个组合取值：`"luvus,herdr-core"` 与 `"herdr,herdr-core"`。`mixed` 的含义不变（仍只表示 Luvus + Herdr TUI），三种单值（省略、`luvus`、`herdr`、`herdr-core`）的解析结果与之前逐字相同；已有配置、token、设备凭据、配对记录与旧 schema 布局继续按原样读取（#315 边界）。取值是闭合表（`NATIVE_PROVIDER_SELECTIONS`），不按分隔符猜测：`"herdr-core,luvus"`、带空格的、三项的都拒绝。
+`native.provider` 追加三个组合取值：`"luvus,herdr"`、`"luvus,herdr-core"` 与 `"herdr,herdr-core"`，并改变 `mixed` 的含义：**在 Linux 上表示全部三种**（Luvus + Herdr TUI + herdr-core），macOS/Windows 上仍是 Luvus + Herdr TUI（herdr-core 靠内核 peer 凭据，只支持 Linux，不能让 `mixed` 在其它平台的新配对里准备一个跑不起来的来源）。原来的 Luvus + Herdr TUI 组合用显式的 `luvus,herdr` 表达。三种单值（省略、`luvus`、`herdr`、`herdr-core`）的解析结果与之前逐字相同。取值是闭合表（`NATIVE_PROVIDER_SELECTIONS`），不按分隔符猜测：`"herdr-core,luvus"`、带空格的、自己拼的三项串都拒绝，三项只能写 `mixed`。
 
-装配层只做了两处最小改动：`selectedNativeProviders` 用固定映射展开组合值；`prepareMixedConnector` 不再要求必须存在 Luvus 原生资源（`herdr + herdr-core` 没有 Luvus），没有 host 但有 Luvus 的既有「provider 明确不可用」形态保持不变。`routeProductionSources` 的分组、`prepareMixedGateway` 与 Gateway 侧每设备一份引用的路由原本就是中性的，没有改。
+**老设备不被打断（#315 边界）。** Connector 每次启动都要求配置展开的来源集合与配对时的准备记录一致，否则 `configuration_required`。如果直接改 `mixed` 的含义，所有已按 Luvus + Herdr TUI 配对的真实用户升级后都会启动失败。所以启动时用 `pairedNativeProviders`：`mixed` 且准备记录恰好是 `luvus`+`herdr` 两条（旧设备）→ 继续按这两个启动，不要求重新配对、也不替用户加上从没准备过的来源；其它任何不一致（缺一条、多一条、重复、混入别的 kind）仍是 `configuration_required`。已有的配置、token、设备凭据、配对记录与旧 schema 布局继续按原样读取。新配对的 `mixed` 在 Linux 上要求三者都装好、并有一个在运行的 herdr-core（attach）或配置成 managed；没有 herdr-core 的人用 `luvus,herdr`。
+
+装配层只做了三处最小改动：`selectedNativeProviders` 用固定映射展开组合值（`mixed` 按平台）、`pairedNativeProviders` 在启动时识别旧 mixed 设备；`prepareMixedConnector` 不再要求必须存在 Luvus 原生资源（`herdr + herdr-core` 没有 Luvus），没有 host 但有 Luvus 的既有「provider 明确不可用」形态保持不变。`routeProductionSources` 的分组、`prepareMixedGateway` 与 Gateway 侧每设备一份引用的路由原本就是中性的，没有改。
 
 配对发布路径不改语义：`publish` 对同一路径的差异一律 `configuration_required`，`mergeSetupProviders` 只追加相同引用、冲突即拒绝，`publishSetupCaller` 拒绝改写同一主体的凭据。本仓库没有名为 `unionGrants` 的函数（主管指令里提到的名字在本仓库不存在），等价的「绝不回溯扩大已批准权限」语义由上面三处承担，本次没有放宽。
 

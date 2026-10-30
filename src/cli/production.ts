@@ -18,7 +18,7 @@ import type { GatewayIdentitySource } from '../mcp/management.js'
 import type { ManagementWriteHttpOptions } from '../admin/index.js'
 import { loadCredential } from '../transport/index.js'
 import { GatewayError } from '../contracts.js'
-import { CliError, selectedNativeProviders, type ConnectorConfig, type GatewayConfig } from './config.js'
+import { CliError, pairedNativeProviders, type ConnectorConfig, type GatewayConfig } from './config.js'
 import { readSetupJson, writeSetupJson } from './setup-files.js'
 import { openCallerSource } from './caller-source.js'
 import { REGISTRY_MAX_BYTES } from './token-registry.js'
@@ -523,7 +523,14 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
         ) {
           throw new CliError('configuration_required')
         }
-        const kinds = selectedNativeProviders(config)
+        // 老的 mixed 设备（Luvus + Herdr TUI）按配对时的集合核对，其余按配置选择核对。
+        const kinds = pairedNativeProviders(
+          config,
+          settings.providers.map(
+            /** 只取每条准备记录的 kind；形状不对的记录留给后面的严格解析，不在这里换错误码。 */ (entry) =>
+              entry.value && typeof entry.value === 'object' && 'kind' in entry.value ? entry.value.kind : undefined
+          )
+        )
         if (
           settings.providers.length !== kinds.length ||
           kinds.some(

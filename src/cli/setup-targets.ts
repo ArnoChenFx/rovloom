@@ -61,16 +61,23 @@ export function setupTarget(
   }
 }
 
-// 网络选择只接受程序定义的单来源或固定顺序双来源，空值、重复项和未知kind均拒绝。
+// 网络选择只接受程序定义的单来源、固定顺序双来源或三来源，空值、重复项和未知kind均拒绝。
 export function setupProviderKinds(input: unknown): readonly NativeProviderKind[] {
   if (
     !Array.isArray(input) ||
     input.some(
       /* 不能借对象的字符串转换伪装原生kind。 */ (kind) => kind !== 'luvus' && kind !== 'herdr' && kind !== 'herdr-core'
     ) ||
-    // 只接受程序定义的单一来源或固定顺序双来源；mixed 仍只表示 Luvus + Herdr TUI，
-    // 新增的两个组合值与它并列，不改变旧值含义。
-    !['luvus', 'herdr', 'herdr-core', 'luvus,herdr', 'luvus,herdr-core', 'herdr,herdr-core'].includes(input.join(','))
+    // 只接受程序定义的单一来源、固定顺序双来源或固定顺序三来源（mixed）；顺序与 selectedNativeProviders 一致。
+    ![
+      'luvus',
+      'herdr',
+      'herdr-core',
+      'luvus,herdr',
+      'luvus,herdr-core',
+      'herdr,herdr-core',
+      'luvus,herdr,herdr-core'
+    ].includes(input.join(','))
   ) {
     throw new CliError('configuration_required')
   }

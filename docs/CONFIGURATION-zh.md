@@ -15,7 +15,7 @@ rovloom config init connector --provider herdr
 rovloom config init gateway --container
 ```
 
-`--provider` 只适用于 Connector，可选 `luvus`、`herdr`、`mixed`。`--container` 只适用于 Gateway，显式将 MCP、设备和管理监听设为 `0.0.0.0`；维护的 Compose 文件仍把 MCP / 管理端口只发布到宿主回环。MCP、管理页与管理 API 均无需公网 URL 配置即可使用反向代理。不带该参数时，Gateway 保持普通默认值（MCP 与设备通道通配，管理页回环）。`--config` 只选择配置文件，默认状态路径仍属于当前用户 home。
+`--provider` 只适用于 Connector，可选 `luvus`、`herdr`、`herdr-core`、`mixed`（以及 `native.provider` 里列出的组合值）。`--container` 只适用于 Gateway，显式将 MCP、设备和管理监听设为 `0.0.0.0`；维护的 Compose 文件仍把 MCP / 管理端口只发布到宿主回环。MCP、管理页与管理 API 均无需公网 URL 配置即可使用反向代理。不带该参数时，Gateway 保持普通默认值（MCP 与设备通道通配，管理页回环）。`--config` 只选择配置文件，默认状态路径仍属于当前用户 home。
 
 初始化不启动服务、不创建设备身份、不批准 native 访问，沿用角色首次启动的独占文件发布机制。已有文件不覆盖；显式 provider / 监听请求与已有内容冲突时返回 `config_exists`。已有部署应先核对配置和配对状态，编辑后用 `config check` 校验再重启。
 
@@ -73,7 +73,7 @@ Connector，通常为 `~/.config/rovloom/connector.json`：
 | `gateway.url` | string，必填 | 初始化前为 `""`；其余为 ≤2048 字符的 WS/WSS origin，如 `ws://192.0.2.10:9443` 或 `wss://gateway.example`。不带凭据/查询/片段/路径，可带末尾 `/`；产品固定使用 `/connector`。 |
 | Connector `allow_terminal_execution` | boolean，可选 | `true`；省略也开启。只有字面量 `false` 关闭直接终端输入及自定义启动/恢复命令；只想接受严格 Agent 文本对话和读取的设备请设为 `false`。旧版本生成的文件已显式写出该值，沿用其选择；只有当初省略了该项的文件会变为开启。修改这一份用户文件并重启 Connector，不改变安装设置或 token 设备范围。 |
 | Connector `native` | object，可选 | 默认省略，只接受以下来源选择及安装目录字段，在首次原生初始化时应用。 |
-| `native.provider` | string enum，可选 | 省略时为 `luvus`；`herdr` 仅选 Herdr，`herdr-core` 使用 herdr-core（见 `native.herdr_core.mode`），`mixed` 各选一个 Luvus 与 Herdr。另接受两个组合值：`luvus,herdr-core` 与 `herdr,herdr-core`。`mixed` 不含 herdr-core。须在首次初始化前选定，之后不能更改。 |
+| `native.provider` | string enum，可选 | 省略时为 `luvus`；`herdr` 仅选 Herdr，`herdr-core` 使用 herdr-core（见 `native.herdr_core.mode`），`mixed` 选本平台支持的全部来源：Linux 上是 Luvus、Herdr 与 herdr-core，macOS/Windows 上是 Luvus 与 Herdr（herdr-core 仅 Linux）。两两组合写明：`luvus,herdr`、`luvus,herdr-core`、`herdr,herdr-core`。0.10 之前 `mixed` 只表示 Luvus + Herdr：已经按那个集合配对的设备继续只用这两个启动，不需要重新配对；新配对想要这一对就用 `luvus,herdr`。须在首次初始化前选定，之后不能更改。 |
 | `native.runtime_bin_dirs` | 1–16 个互不重复的规范绝对目录 string 数组（每项≤4096字符），可选 | 查找所选 `luvus`/`herdr` 程序的位置。搜索顺序：数组内目录依序，其后是 Connector 启动时 `PATH` 中可用的条目，最后是 `/usr/bin:/bin`（Windows 无此项）。不同程序可装在不同目录。不接受 shell 展开或可执行 argv。 |
 | `native.agent_bin_dirs` | 1–16 个互不重复的规范绝对目录 string 数组（每项≤4096字符），可选 | 查找 Agent 程序的目录。Agent PATH 在原生初始化时按同样顺序固化。Rovloom 不安装或认证 Agent。 |
 | `native.herdr.mode` | `"attach"`（默认）或 `"managed"`，可选 | 仅 Herdr。`attach`：连接你已在运行的 Herdr，仅在没有实例时在你自己的配置目录里启动一个，实例消失后重新附着/重建。`managed`：Connector 私有、由它拥有的隔离实例。见[Herdr：附着或隔离](#herdr附着或隔离)。 |

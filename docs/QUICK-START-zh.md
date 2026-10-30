@@ -93,7 +93,7 @@ Windows arm64 上 Herdr 安装脚本会退回用模拟运行 x64 构建，Luvus 
 Connector **附着到你已在运行的会话**，因此远程调用操作的是你真实的工作区和 Agent 登录；
 只有没有运行实例时，才会在你自己的配置目录里启动一个。
 
-默认使用 Luvus。首次配对前，用以下命令选择 Herdr（`mixed` 表示两个都用，需要两者都已安装）：
+默认使用 Luvus。首次配对前，用以下命令选择 Herdr（`mixed` 表示本平台支持的全部来源——Linux 上是 Luvus、Herdr 与 herdr-core，三者都要装好且有一个在运行的 herdr-core；只要前两个就用 `luvus,herdr`）：
 
 ```sh
 rovloom config init connector --provider herdr

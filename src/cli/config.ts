@@ -28,7 +28,7 @@ export type ConnectorConfig = Readonly<{
   provider_config_refs: readonly string[]
   allow_terminal_execution?: boolean
   native?: Readonly<{
-    // mixed 仍只表示既有两种 provider；新增的两个组合值只是并列取值，旧值的含义不变。
+    // mixed 在 Linux 上表示全部三种（Luvus + Herdr TUI + herdr-core），其它平台仍是前两种；只要两种时用显式的组合值。
     provider?: NativeProviderSelection
     runtime_bin_dirs?: readonly string[]
     agent_bin_dirs?: readonly string[]
@@ -46,14 +46,16 @@ export type RoleConfig = GatewayConfig | ConnectorConfig
 export type NativeProviderKind = 'luvus' | 'herdr' | 'herdr-core'
 
 /**
- * `native.provider` 的闭合取值。只追加：`mixed` 仍只表示 Luvus + Herdr TUI，
- * 新的两个组合值显式列出两种 kind，已有配置逐字按原样解析。
+ * `native.provider` 的闭合取值。`mixed` 从 0.10 起在 Linux 上表示全部三种（其它平台仍是 Luvus + Herdr TUI）；
+ * 原先的 Luvus + Herdr TUI 组合改用显式的 `luvus,herdr` 表达，已有配置逐字按原样解析
+ * （`mixed` 的老设备怎么启动见 {@link pairedNativeProviders}）。
  */
 export const NATIVE_PROVIDER_SELECTIONS = Object.freeze([
   'luvus',
   'herdr',
   'herdr-core',
   'mixed',
+  'luvus,herdr',
   'luvus,herdr-core',
   'herdr,herdr-core'
 ] as const)
@@ -61,7 +63,8 @@ export type NativeProviderSelection = (typeof NATIVE_PROVIDER_SELECTIONS)[number
 
 /** 组合值到 kind 的固定映射；单值仍按原样返回，不按分隔符猜测。 */
 const NATIVE_PROVIDER_COMBINATIONS: Readonly<Record<string, readonly NativeProviderKind[]>> = Object.freeze({
-  mixed: Object.freeze(['luvus', 'herdr'] as const),
+  mixed: Object.freeze(['luvus', 'herdr', 'herdr-core'] as const),
+  'luvus,herdr': Object.freeze(['luvus', 'herdr'] as const),
   'luvus,herdr-core': Object.freeze(['luvus', 'herdr-core'] as const),
   'herdr,herdr-core': Object.freeze(['herdr', 'herdr-core'] as const)
 })
@@ -90,13 +93,44 @@ export function herdrCoreConfigHome(config: ConnectorConfig): string | undefined
   return config.native?.herdr_core?.config_home
 }
 
-// 省略选择时保留已有Luvus首次路径；mixed 只包含既有两份固定来源，herdr-core 需显式选择。
-// 新增 kind 不改变旧值的含义：已有 mixed 配置不会因为多了第三种 provider 而改变实际选择。
-export function selectedNativeProviders(config: ConnectorConfig): readonly NativeProviderKind[] {
+/** 0.10 之前 `mixed` 只表示 Luvus + Herdr TUI；按那个集合配对的设备没有 herdr-core 的准备记录。 */
+const LEGACY_MIXED_PROVIDERS: readonly NativeProviderKind[] = Object.freeze(['luvus', 'herdr'] as const)
+
+// 省略选择时保留已有Luvus首次路径；单值只选自己，mixed 选这个平台支持的全部来源，两种用显式组合值。
+// herdr-core 只支持 Linux（靠内核 peer 凭据），所以 mixed 在 macOS/Windows 上仍是 Luvus + Herdr TUI，与 0.10 之前相同。
+// 这里只决定「新配对准备哪些来源」；已配对设备启动时按 pairedNativeProviders 核对。
+export function selectedNativeProviders(
+  config: ConnectorConfig,
+  platform: NodeJS.Platform = process.platform
+): readonly NativeProviderKind[] {
   const value: NativeProviderSelection = config.native?.provider ?? 'luvus'
+  if (value === 'mixed' && platform !== 'linux') {
+    return LEGACY_MIXED_PROVIDERS
+  }
   const combined = NATIVE_PROVIDER_COMBINATIONS[value]
   // 单值只能是 kind 本身（组合值都在表里），不按分隔符猜测。
   return combined ?? [value as NativeProviderKind]
+}
+
+/**
+ * 已配对设备启动时应该核对的来源集合。通常就是 {@link selectedNativeProviders}；唯一的例外是 `mixed`：
+ * 已有真实用户的设备按旧含义（Luvus + Herdr TUI）配对，升级后 `mixed` 多了 herdr-core，
+ * 但这些设备的准备记录里没有它——继续按旧集合启动，不要求重新配对，也不替用户加上从没准备过的来源。
+ * 准备记录恰好是旧集合才算旧设备；其它任何不一致仍然是 `configuration_required`。
+ */
+export function pairedNativeProviders(
+  config: ConnectorConfig,
+  prepared: readonly unknown[],
+  platform: NodeJS.Platform = process.platform
+): readonly NativeProviderKind[] {
+  if (
+    config.native?.provider === 'mixed' &&
+    prepared.length === LEGACY_MIXED_PROVIDERS.length &&
+    LEGACY_MIXED_PROVIDERS.every(/** 旧集合的每一种都要有且只有一条准备记录。 */ (kind) => prepared.includes(kind))
+  ) {
+    return LEGACY_MIXED_PROVIDERS
+  }
+  return selectedNativeProviders(config, platform)
 }
 
 export const CLI_ERROR_CODES = [

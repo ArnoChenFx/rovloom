@@ -69,12 +69,13 @@ test(
     assert.deepEqual(selectedNativeProviders(parseConfig(value) as import('../../src/cli/config.js').ConnectorConfig), [
       'luvus'
     ])
-    // 旧值逐字按原样解析，含义不变；新增的两个组合值只是并列取值。
+    // 三种单值逐字按原样解析；mixed 是全部三种，只要两种用显式组合值（luvus,herdr 就是 0.10 之前 mixed 的含义）。
     for (const [provider, kinds] of [
       ['luvus', ['luvus']],
       ['herdr', ['herdr']],
       ['herdr-core', ['herdr-core']],
-      ['mixed', ['luvus', 'herdr']],
+      ['mixed', ['luvus', 'herdr', 'herdr-core']],
+      ['luvus,herdr', ['luvus', 'herdr']],
       ['luvus,herdr-core', ['luvus', 'herdr-core']],
       ['herdr,herdr-core', ['herdr', 'herdr-core']]
     ] as const) {
@@ -82,7 +83,7 @@ test(
         ...value,
         native: { provider }
       }) as import('../../src/cli/config.js').ConnectorConfig
-      assert.deepEqual(selectedNativeProviders(selected), kinds)
+      assert.deepEqual(selectedNativeProviders(selected, 'linux'), kinds)
       assert.deepEqual(configDocument(selected).native, { provider })
     }
     for (const provider of [
@@ -96,7 +97,9 @@ test(
       // 顺序与分隔符是固定表，不按分隔符猜测。
       'herdr-core,luvus',
       'luvus, herdr-core',
+      // 三项只能写 mixed，不接受自己拼的三项串。
       'luvus,herdr,herdr-core',
+      'herdr,luvus',
       'luvus,luvus'
     ]) {
       assert.throws(/* 无效选择在任何配对或原生进程之前拒绝。 */ () => parseConfig({ ...value, native: { provider } }))
