@@ -2,6 +2,11 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
+import {
+  HERDR_CORE_PROVIDER_DESCRIPTOR,
+  HERDR_CORE_DESCRIPTOR_REVISION
+} from '../../src/connector/herdr-core/descriptor.js'
+import { HERDR_CORE_METHODS } from '../../src/connector/herdr-core/methods.js'
 import { HERDR_PROVIDER_DESCRIPTOR } from '../../src/connector/herdr/descriptor.js'
 import { HERDR_RESPONSE_TYPES } from '../../src/connector/herdr/methods.js'
 import { requiresTerminalExecution } from '../../src/connector/terminal-execution.js'
@@ -125,6 +130,25 @@ test('herdr descriptor is derived from the existing reviewed tables only', () =>
     cancel: 'unavailable',
     prompt_completion: 'unavailable'
   })
+})
+
+test('herdr-core registers through the same ports with its own tiers and guarantees', () => {
+  const registry = createProviderPortRegistry([
+    { ...ports('herdr'), descriptor: HERDR_PROVIDER_DESCRIPTOR },
+    { ...ports('herdr-core'), descriptor: HERDR_CORE_PROVIDER_DESCRIPTOR }
+  ])
+  assert.deepEqual(registry.kinds(), ['herdr', 'herdr-core'])
+  // 32 个方法全部登记；输入与控制档不因为「在 schema 里」就升级为观察档。
+  assert.equal(Object.keys(HERDR_CORE_METHODS).length, 32)
+  assert.equal(registry.tier('herdr-core', 'server.status'), 'observe')
+  assert.equal(registry.tier('herdr-core', 'terminal.list'), 'conditional')
+  assert.equal(registry.tier('herdr-core', 'terminal.send'), 'control')
+  assert.equal(registry.tier('herdr-core', 'machine.exec'), 'host')
+  assert.equal(registry.tier('herdr-core', 'workspace.list'), undefined)
+  // 两种 provider 的保证不能互相继承：core 只有快照重建，Herdr TUI 一项都没有。
+  assert.equal(registry.ports('herdr-core').descriptor.guarantees?.event_recovery, 'snapshot_rebuild')
+  assert.equal(registry.ports('herdr').descriptor.guarantees?.event_recovery, 'unavailable')
+  assert.equal(HERDR_CORE_DESCRIPTOR_REVISION.version, '0.1.14')
 })
 
 test('the neutral port layer itself names no provider', () => {
