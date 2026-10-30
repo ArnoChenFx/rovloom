@@ -3,7 +3,7 @@ import { readFileSync, appendFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-const suites = ['two-host', 'macos', 'windows']
+const suites = ['two-host', 'macos', 'windows', 'herdr-core']
 
 /** Classify maintained product/build inputs separately from documentation-only changes. */
 export function needsE2e(suite, files) {

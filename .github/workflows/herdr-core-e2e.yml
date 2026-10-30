@@ -1,0 +1,87 @@
+# herdr-core 的 Linux 端到端：私有 XDG 沙箱里运行官方 0.1.14 core，真实配对、5 个读取与控制档拒绝；
+# 再用 0.1.13 core、同机转发代理和 0755 socket 目录验证身份失败关闭。
+name: herdr-core e2e
+on:
+  workflow_dispatch:
+  pull_request:
+concurrency:
+  group: herdr-core-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
+  actions: read
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      - id: plan
+        run: bun --no-env-file scripts/ci/e2e-plan.mjs herdr-core
+  herdr-core:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    timeout-minutes: 25
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      - name: Frozen install
+        timeout-minutes: 5
+        run: bun --no-env-file install --frozen-lockfile --ignore-scripts
+      - name: Download official herdr-core from the release manifest
+        env:
+          CORE_DIR: ${{ runner.temp }}/core
+        run: |
+          set -eu
+          mkdir -p "$CORE_DIR/latest" "$CORE_DIR/old"
+          fetch() { # fetch <manifest-url>：只输出下载地址与清单摘要，由 sha256sum 核对。
+            curl -fsS --connect-timeout 15 --max-time 60 "$1" -o "$CORE_DIR/manifest.json"
+            python3 -c 'import json,sys; t=json.load(open(sys.argv[1]))["targets"]["linux-x86_64"]; print(t["url"]); print(t["sha256"])' "$CORE_DIR/manifest.json"
+          }
+          # 只跑审核过的 0.1.14；'latest' 会随上游发版变化，不能当固定测试输入。
+          mapfile -t latest < <(fetch https://releases.herdr.dev/core/0.1.14/manifest.json)
+          curl -fsS --connect-timeout 15 --max-time 300 "${latest[0]}" -o "$CORE_DIR/latest.tgz"
+          echo "${latest[1]}  $CORE_DIR/latest.tgz" | sha256sum --check
+          tar -xzf "$CORE_DIR/latest.tgz" -C "$CORE_DIR/latest"
+          mapfile -t old < <(fetch https://releases.herdr.dev/core/0.1.13/manifest.json)
+          curl -fsS --connect-timeout 15 --max-time 300 "${old[0]}" -o "$CORE_DIR/old.tgz"
+          echo "${old[1]}  $CORE_DIR/old.tgz" | sha256sum --check
+          tar -xzf "$CORE_DIR/old.tgz" -C "$CORE_DIR/old"
+          test "$("$CORE_DIR/latest/herdr-core" --version | awk '{print $2}')" = "0.1.14"
+      - name: Build actual standalone product
+        run: bun --no-env-file run release:build
+      - name: Pair, discover and call a real herdr-core
+        env:
+          CORE_DIR: ${{ runner.temp }}/core
+        run: |
+          python3 e2e/quickstart.py \
+            --binary dist/release/bun-linux-x64/candidate/rovloom \
+            --herdr-core "$CORE_DIR/latest/herdr-core" \
+            --herdr-core-old "$CORE_DIR/old/herdr-core" \
+            --work "${{ runner.temp }}/hc-work" \
+            --then "bun --no-env-file e2e/herdr-core-session.mjs"
+  result:
+    name: herdr-core acceptance
+    if: always()
+    needs: [changes, herdr-core]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      RESULTS: ${{ toJSON(needs) }}
+    steps:
+      - uses: actions/checkout@v7
+        continue-on-error: true
+        with:
+          persist-credentials: false
+      - name: Fail closed unless the selected acceptance ran and passed
+        run: |
+          python3 -c 'import json,os,sys; r=json.loads(os.environ["RESULTS"]); s=r["changes"]["outputs"]["run"]=="true";           sys.exit("herdr-core e2e plan failed") if r["changes"]["result"]!="success" else None;           sys.exit("herdr-core acceptance did not succeed") if s and r["herdr-core"]["result"]!="success" else None;           print("herdr-core acceptance passed" if s else "no relevant changes")'
