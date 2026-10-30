@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { discoverLuvusInstallation } from '../connector/luvus/host/native-control.js'
+import { resolveTerminalExecution } from '../connector/terminal-execution.js'
 import { initializeManagedLuvusRoot } from '../connector/luvus/host/native-root.js'
 import { MANAGED_LUVUS_CLASSIFICATION, MANAGED_LUVUS_REVISION } from '../connector/luvus/host/native-source.js'
 import type { LuvusProductionOwnerConfig, LuvusProductionUserConfig } from '../connector/luvus/host/production-luvus.js'
@@ -177,7 +178,7 @@ export async function prepareSetupNative(
       home,
       cwd: work,
       transport: 'ipc',
-      allow_terminal_execution: config.allow_terminal_execution === true,
+      allow_terminal_execution: resolveTerminalExecution(config.allow_terminal_execution),
       ...(attach ? { attach: true as const, user_home: homedir() } : {}),
       ...setupAgentDirectories(config)
     },

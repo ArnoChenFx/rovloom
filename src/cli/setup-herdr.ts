@@ -11,6 +11,7 @@ import { observedHerdrSource } from '../connector/herdr/review.js'
 import { parseHerdrProviderRefConfig } from '../connector/herdr/provider.js'
 import type { HerdrProviderRefConfig } from '../connector/herdr/provider.js'
 import { DispatchClaims } from '../connector/claims.js'
+import { resolveTerminalExecution } from '../connector/terminal-execution.js'
 import { publishSchema, schemaReference } from '../connector/schema-store.js'
 
 import { boundedJson, fields, hash, object } from '../wire/index.js'
@@ -177,7 +178,7 @@ export async function prepareSetupHerdr(
           cwd: join(root, 'w')
         }),
     temporary_home: join(root, 't'),
-    allow_terminal_execution: config.allow_terminal_execution === true,
+    allow_terminal_execution: resolveTerminalExecution(config.allow_terminal_execution),
     ...(attach ? { attach: true as const } : {}),
     ...setupAgentDirectories(config)
   }

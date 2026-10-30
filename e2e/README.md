@@ -18,9 +18,9 @@ Herdr 二进制必须是固定的 0.9.5（SHA-256 `14d9e8bc…929d`，夹具会�
 
 | 场景 | 验证 |
 |---|---|
-| `full-chain-herdr` | machines → providers → discover → describe → call → get → result_read（摘要校验）；有副作用的 `workspace.create` 用 `session.snapshot` 读回；关闭终端开关时目录隐藏 `pane.send_text` |
+| `full-chain-herdr` | machines → providers → discover → describe → call → get → result_read（摘要校验）；有副作用的 `workspace.create` 用 `session.snapshot` 读回；显式关闭终端开关（`allow_terminal_execution:false`）时目录隐藏 `pane.send_text` |
 | `idempotent-retry` | 同 `client_request_key` + 同意图返回同一 `call_id` 且原生只执行一次；同 key 不同意图 → `conflict`；无 key 不合并 |
-| `terminal-switch` | `allow_terminal_execution:false` 时 `pane.send_text` → `not_dispatched`，连接与只读调用不受影响；改配置重启后同一调用放行 |
+| `terminal-switch` | 配置省略 `allow_terminal_execution`（默认开启）时 `pane.send_text` 放行且目录可见；写入显式 `false` 重启后目录隐藏、同一调用 → `not_dispatched`，连接与只读调用不受影响 |
 | `connector-restart` | 正常停止后 native 子进程被回收；离线调用立即 `unavailable`（毫秒级，不挂起）；重启后恢复 |
 | `connector-crash` | `kill -9`：Gateway 立即判不可用；孤儿 native 仍在监听时**重启被拒（退出码 3，fail-closed）且不触碰孤儿**；native 也消失（等同掉电）后重启自动清理遗留并恢复 |
 | `attach-existing` | 用户已运行 Herdr：Connector 附着它（不再起第二个）；Connector 退出后用户的实例继续存在 |

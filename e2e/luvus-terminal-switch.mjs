@@ -1,5 +1,6 @@
 /**
- * 终端执行开关的真实链路验收：Connector 默认 `allow_terminal_execution=false` 时，
+ * 终端执行开关的真实链路验收：Connector 配置显式 `allow_terminal_execution=false`（默认已是开启，
+ * 须先在 connector.json 写入 false 并重启）时，
  * 目录必须隐藏直接输入终端的方法，精确 describe 必须拒绝，只读调用不受影响。
  * 用法：MCP_CONFIG=<quickstart.py 写出的 mcp.json> bun --no-env-file e2e/luvus-terminal-switch.mjs
  */

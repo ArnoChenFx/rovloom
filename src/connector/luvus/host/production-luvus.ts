@@ -30,7 +30,7 @@ import type { ControlledLuvusProcess } from './native-source.js'
 import type { ConnectorRuntimeOptions, RemoteLuvusRuntimeProvider, RuntimeProvider } from './runtime-types.js'
 import { checkedRemoteLuvusConfig, createPinnedRemoteLuvus } from './remote-luvus.js'
 import type { LuvusProductionRemoteConfig } from './remote-luvus.js'
-import { pinTerminalExecution } from '../../terminal-execution.js'
+import { currentTerminalExecution, pinTerminalExecution } from '../../terminal-execution.js'
 
 export type LuvusProductionReference = Readonly<{ reference: string; value: unknown }>
 export type LuvusProductionOwnerConfig = Readonly<{
@@ -499,7 +499,7 @@ export function createLuvusProductionSources() {
                 terminalExecutionState: /** 只报告原本机guard的有效值，不构造原生能力或许可。 */ () => [
                   {
                     binding: provider.binding,
-                    enabled: terminalExecution ? terminalExecution() : fixed.allow_terminal_execution === true
+                    enabled: currentTerminalExecution(terminalExecution, fixed.allow_terminal_execution)
                   }
                 ],
                 backend,

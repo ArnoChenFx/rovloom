@@ -18,7 +18,7 @@ import {
   verifyInstallation
 } from './local.js'
 import { LuvusAdapterError } from './types.js'
-import { assertTerminalExecutionAllowed } from '../terminal-execution.js'
+import { assertTerminalExecutionAllowed, currentTerminalExecution } from '../terminal-execution.js'
 import type {
   EndpointIdentity,
   LuvusLocalConfig,
@@ -317,7 +317,10 @@ export class LuvusRpcAdapter {
         assertTerminalExecutionAllowed(
           'luvus',
           request.payload.native_request,
-          this.#host.terminalExecution ? this.#host.terminalExecution() : this.#config.allow_terminal_execution
+          currentTerminalExecution(
+            this.#host.terminalExecution?.bind(this.#host),
+            this.#config.allow_terminal_execution
+          )
         )
       terminalBoundary()
       const binding: AttemptBinding = {

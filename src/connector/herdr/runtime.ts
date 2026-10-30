@@ -11,7 +11,7 @@ import { HerdrLocalError, readHerdrPeer } from './local.js'
 import { createHerdrReadonlyAdapter } from './readonly.js'
 import type { HerdrReadonlyBackend } from './readonly.js'
 import { createHerdrWireAdapter } from './wire.js'
-import { assertTerminalExecutionAllowed } from '../terminal-execution.js'
+import { assertTerminalExecutionAllowed, currentTerminalExecution } from '../terminal-execution.js'
 
 /** 实例只作用于当前认证 epoch；宿主分别提供 readiness 与关闭流程，不创建 Gateway 或新认证模型。 */
 export function createHerdrRuntime(
@@ -81,7 +81,7 @@ export function createHerdrRuntime(
           assertTerminalExecutionAllowed(
             'herdr',
             frame.payload.native_request,
-            terminalExecution ? terminalExecution() : installation.config.allow_terminal_execution
+            currentTerminalExecution(terminalExecution, installation.config.allow_terminal_execution)
           )
         } catch (cause) {
           // 保留共享开关错误码，使最终 IO 不把本机明确拒绝折叠成一般准备失败。
