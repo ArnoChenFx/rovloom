@@ -292,6 +292,41 @@ test('device deletion removes bindings, rejects old credentials and permits pair
   }
 })
 
+test('配对认领接受新增的 herdr-core kind，旧 luvus/herdr 不变', async () => {
+  const o = owned()
+  try {
+    const intent = {
+      action: 'pairing_create' as const,
+      target: { name: 'core-device', labels: [], policy_ref: 'fixture_policy' }
+    }
+    const c = await confirmed(o.f.service, intent, 0)
+    const receipt = await o.f.service.execute('pairings_create', { ...c.write, ...intent.target }, context())
+    const claim = o.f.store.startPairingClaim(receipt.machine_id, receipt.pairing_id, 'a'.repeat(64), 'ABCD1234')
+    o.f.store.approvePairingClaim(claim.claim_id, claim.user_code, 'test')
+    o.f.store.completePairingClaim(claim.claim_id)
+    const binding = {
+      machine_id: receipt.machine_id,
+      provider_id: 'herdr-core',
+      kind: 'herdr-core' as const,
+      config_ref: 'herdr-core_' + claim.claim_id,
+      binding_revision: 1,
+      enabled: true
+    }
+    const activated = o.f.store.activatePairingProviders(claim.claim_id, 'b'.repeat(64), [binding])
+    assert.equal(activated.status, 'activated')
+    assert.deepEqual(o.f.store.provider(receipt.machine_id, 'herdr-core'), binding)
+    // 旧 kind 的绑定形状不受影响。
+    assert.deepEqual(o.f.store.activatePairingProviders(claim.claim_id, 'b'.repeat(64), [binding]).status, 'activated')
+    assert.throws(
+      () =>
+        o.f.store.activatePairingProviders(claim.claim_id, 'b'.repeat(64), [{ ...binding, kind: 'unknown' as never }]),
+      /invalid_pairing_claim|invalid_provider_binding|invalid_enum/u
+    )
+  } finally {
+    o.close()
+  }
+})
+
 test('pairing deletion stops pending claims and preserves completed devices', async () => {
   const o = owned()
   try {
@@ -311,7 +346,7 @@ test('pairing deletion stops pending claims and preserves completed devices', as
           o.f.store.completePairingClaim(claim.claim_id)
         }
         if (stage === 'activated') {
-          o.f.store.activatePairingClaim(claim.claim_id, 'test-fingerprint')
+          o.f.store.activatePairingClaim(claim.claim_id, 'b'.repeat(64))
         }
       }
       assert(o.execute('pairings_list').items.some((entry: any) => entry.pairing_id === receipt.pairing_id))

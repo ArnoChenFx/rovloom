@@ -12,6 +12,7 @@ import type { Connection, ConnectorWireSession } from '../../transport/index.js'
 import type { ProviderBinding, V2Target } from '../../wire/types.js'
 import { createHerdrCoreConnectorRuntime } from './runtime.js'
 import { HerdrCoreInstallation, assertHerdrCoreSessionFits } from './installation.js'
+import type { HerdrCoreAttachment } from './installation.js'
 import { parseHerdrCoreProviderRefConfig } from './provider.js'
 import type { HerdrCoreProviderRefConfig } from './provider.js'
 
@@ -59,7 +60,7 @@ export async function createHerdrCoreConnectorResources(
   input: Readonly<{
     config: unknown
     now(): number
-    open?(config: HerdrCoreProviderRefConfig): Promise<HerdrCoreInstallation>
+    open?(config: HerdrCoreProviderRefConfig): Promise<HerdrCoreAttachment>
   }>
 ): Promise<HerdrCoreConnectorResources> {
   const config = parseHerdrCoreProviderRefConfig(input.config)

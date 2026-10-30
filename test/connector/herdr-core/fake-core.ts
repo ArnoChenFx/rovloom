@@ -24,6 +24,8 @@ export type FakeCoreOptions = Readonly<{
   delay_ms?: number
   /** 订阅后推送的事件行；每条一个 JSON 行。 */
   events?: readonly string[]
+  /** `rpc.discover` 返回的文档；省略时返回空对象。 */
+  discover?: Record<string, unknown>
 }>
 
 export type FakeCore = Readonly<{
@@ -53,8 +55,10 @@ function frame(channel: number, kind: number, payload: Buffer): Buffer {
 }
 
 /** 只处理本测试用到的参数形状；其它方法返回固定空结果。 */
-function defaultHandler(request: FakeCoreRequest): Record<string, unknown> {
+function defaultHandler(request: FakeCoreRequest, options: FakeCoreOptions): Record<string, unknown> {
   switch (request.method) {
+    case 'rpc.discover':
+      return options.discover ?? {}
     case 'server.status':
       return {
         core: { id: '0f0e0d0c0b0a0908', name: 'fake-core' },
@@ -163,7 +167,7 @@ export async function startFakeCore(options: FakeCoreOptions = {}): Promise<Fake
         const reply = () => {
           let result: Record<string, unknown>
           try {
-            result = (options.handler ?? defaultHandler)(request)
+            result = options.handler ? options.handler(request) : defaultHandler(request, options)
           } catch {
             send(0, {
               jsonrpc: '2.0',

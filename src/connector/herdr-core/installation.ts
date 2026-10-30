@@ -25,8 +25,18 @@ import type { HerdrCoreContractRecord } from './readonly.js'
 /** 来源令牌只覆盖一次实际连接与本机事实；关闭后不能迁移到新进程或新端点。 */
 const installationKey = Object.freeze({})
 
+/** 执行端只消费这组已验证事实；测试可以交付真实连接上的同形实现，生产只由 open 建立。 */
+export type HerdrCoreAttachment = Readonly<{
+  record(): HerdrCoreContractRecord
+  client(): HerdrCoreClient
+  assert(peer?: NativePeer): void
+  source(binding: AttemptBinding): boolean
+  endpoint(): HerdrCoreEndpoint
+  close(): void
+}>
+
 /** 连接、核对并编译完成前不建立可信来源；失败只留固定码。 */
-export class HerdrCoreInstallation {
+export class HerdrCoreInstallation implements HerdrCoreAttachment {
   readonly #client: HerdrCoreClient
   readonly #endpoint: HerdrCoreEndpoint
   readonly #facts: HerdrCoreProcessFacts

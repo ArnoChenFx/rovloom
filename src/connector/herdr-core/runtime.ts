@@ -14,14 +14,14 @@ import { ConnectorAttemptBook, createConnectorAdmissionBackend } from '../../run
 import type { Connection } from '../../transport/index.js'
 import { createHerdrCoreAdapter } from './readonly.js'
 import type { HerdrCoreBackend } from './readonly.js'
-import type { HerdrCoreInstallation } from './installation.js'
+import type { HerdrCoreAttachment } from './installation.js'
 import { contractRef } from '../../wire/index.js'
 import type { V2Target } from '../../wire/types.js'
 import { herdrCoreRequestTimeout, reviewHerdrCoreParams } from './methods.js'
 
 /** 已验证的 herdr-core 本机来源与当前 epoch 的受保护路由。 */
 export type HerdrCoreConnectorOptions = Readonly<{
-  installation: HerdrCoreInstallation
+  installation: HerdrCoreAttachment
   connection: Connection
   target: V2Target & { profile: 'session' }
   principal_id: string

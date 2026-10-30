@@ -6,6 +6,7 @@ import { NativeRequestPreflightError } from '../../../src/connector/preflight.js
 import { ProviderAdapterError } from '../../../src/connector/provider-error.js'
 import { openHerdrCoreClient } from '../../../src/connector/herdr-core/client.js'
 import { createHerdrCoreObservation } from '../../../src/connector/herdr-core/observation.js'
+import { HERDR_CORE_REQUEST_MAX_MS, herdrCoreRequestTimeout } from '../../../src/connector/herdr-core/methods.js'
 import { compileHerdrCoreContract } from '../../../src/connector/herdr-core/schema.js'
 import { startFakeCore } from './fake-core.js'
 
@@ -33,6 +34,14 @@ test('observation calls validate params and results and keep the terminal triple
   } finally {
     await core.close()
   }
+})
+
+test('wait 的本地期限取整并与总上限共用', () => {
+  // timeout 是秒，可以带小数：1.2345 秒 = 1234.5ms，向上取整后加 5 秒余量。
+  assert.equal(herdrCoreRequestTimeout('terminal.wait', { timeout: 1.2345 }), 6235)
+  assert.equal(herdrCoreRequestTimeout('terminal.wait', { timeout: 60 }), HERDR_CORE_REQUEST_MAX_MS)
+  // 其它读取固定 5 秒；超时只结束本地等待。
+  assert.equal(herdrCoreRequestTimeout('terminal.list', {}), 5000)
 })
 
 test('blocked parameters never reach the core', async () => {
