@@ -45,6 +45,7 @@ export const HERDR_CORE_METHODS: Readonly<Record<string, ProviderMethodTier>> = 
   'terminal.keep': 'control',
   'terminal.label': 'control',
   // D 宿主级：任意命令、任意文件、机器与 core 生命周期，不进入 MCP。
+  // 将来开 terminal.run 时必须显式 notes=false 或不设父，否则 core 会往父智能体输入里打字。
   'terminal.run': 'host',
   'machine.exec': 'host',
   'file.read': 'host',
