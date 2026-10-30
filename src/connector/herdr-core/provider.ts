@@ -6,15 +6,15 @@
 import { isAbsolute, normalize } from 'node:path'
 import { GatewayError } from '../../contracts.js'
 import type { GatewayProviderServices, GatewayProviderPort } from '../../runtime/types.js'
-import type {
-  LocalIdentityFacts,
-  LocalIdentityVerifier,
-  NativeOwner,
-  ProviderDescriptor,
-  ProviderPortRegistry,
-  ProviderSessionPort
+import {
+  createProviderPortRegistry,
+  type LocalIdentityFacts,
+  type LocalIdentityVerifier,
+  type NativeOwner,
+  type ProviderDescriptor,
+  type ProviderPortRegistry,
+  type ProviderSessionPort
 } from '../../runtime/provider-port.js'
-import { createProviderPortRegistry } from '../../runtime/provider-port.js'
 import { createProviderWireAdapter } from '../../runtime/provider-wire.js'
 import { responseRetention } from '../../runtime/response-retention.js'
 import type { Principal } from '../../router.js'
@@ -45,7 +45,7 @@ import type {
   V2Target
 } from '../../wire/types.js'
 import { HERDR_CORE_PROVIDER_DESCRIPTOR } from './descriptor.js'
-import { HERDR_CORE_EXPOSED_METHODS, HERDR_CORE_METHODS, HERDR_CORE_REVIEW, herdrCoreTier } from './methods.js'
+import { HERDR_CORE_EXPOSED_METHODS, HERDR_CORE_REVIEW, herdrCoreTier } from './methods.js'
 import { compileHerdrCoreContract } from './schema.js'
 import type { HerdrCoreContract } from './schema.js'
 import { createHerdrCoreAdapter } from './readonly.js'
@@ -462,13 +462,4 @@ export async function createHerdrCoreGatewayResources(
       }),
     release: owner.release
   })
-}
-
-/** 只供类型检查与测试引用：确认 descriptor 覆盖本期开放集合的档位。 */
-export function herdrCoreDescriptorTiers(): Readonly<Record<string, string | undefined>> {
-  return Object.freeze(
-    Object.fromEntries(
-      HERDR_CORE_EXPOSED_METHODS.map(/** 档位只从同一审核表读取。 */ (method) => [method, HERDR_CORE_METHODS[method]])
-    )
-  )
 }
