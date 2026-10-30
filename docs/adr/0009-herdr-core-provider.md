@@ -78,6 +78,22 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 配对时 `prepareSetupHerdrCore` 连接一次真实 core，核对身份后把本次 `rpc.discover` 的内容寻址副本发布给两端，并建立 Connector 私有发送墓碑；`join` 与 Gateway 的 `reviewSetupManifest` 都按同一 Target/session 核对。已有用户的配置、配对、token 与调用记录不需要改动。
 
+## 第四阶段（同一 PR 追加）
+
+### 输入与控制档
+
+开放 C 档 8 个方法：`terminal.send`、`terminal.keys`、`terminal.interrupt`、`terminal.put`、`terminal.kill`、`terminal.rm`、`terminal.keep`、`terminal.label`。D 档 12 个宿主级方法（`terminal.run`、`machine.*`、`file.*`、`doc.set`、`server.stop/restart`）仍不开放：目录、Wire 准入与参数复核三处继续拒绝，档位表本身不改。
+
+**终端三元组栅栏**。终端地址在同一 core 内永久，但只删 `terminals.json` 后地址会被复用（spike 4b-F：`core.id` 不变，新终端复用 `t1`），`(core.id, 地址)` 不唯一。控制档的每个方法都必须带 rovloom 自有的 `core_id` 与 `created_ms`（`HERDR_CORE_FENCE_PARAMS`），执行端在写入前用同一条连接读一次 `terminal.get`，要求 `client.hello.core.id === core_id`、`live.address === terminal`、`live.created_ms === created_ms`、`live.state === 'live'`，任一不符即 `herdr_core_terminal_identity_mismatch`，绝不把输入送给同地址的另一个终端。`terminal` 只接受裸本地地址 `tN`：名字会被 `label` 改写，`machine/tN` 属于远端路由。这两个字段由 `paramsSchema` 追加进参数根（必需），core 不认识它们，执行端在发送前显式剥离，不依赖 core 静默忽略未知字段。
+
+**blocked 由 rovloom 判断**。spike 3f 实测 core 只在 `send` 上拦 blocked，`keys`、`interrupt`、`force` 照常送达；官方安全文档也说 blocked 不是访问边界。所以 `send`/`keys`/`interrupt` 在写入前自己判断：`terminal.get` 的 `status.state === 'blocked'` 即 `herdr_core_terminal_blocked`。判定 fail-closed：读不到终端事实、状态字形状不符、终端已结束都拒绝。`status === null`（程序从未上报 OSC 7501）不算未知——这类程序不可能进入 blocked，core 的闸门也只认上报过的状态；否则 `cat` 一类普通程序永远不能输入，e2e 的输入回显也就无从验证。`put` 只写文件、不送输入，`kill`/`rm`/`keep`/`label` 改的是终端记录，它们只做三元组核对：blocked 时仍必须能收拾现场。
+
+**残余竞态（未消除）**。判定与写入之间终端状态仍可能变化：`send` 还有 core 自己的 blocked 闸门兜底，`keys`/`interrupt` 没有原生闸门，程序在这段窗口里转成 blocked 时输入仍会送达。判定是写入前最后一个原生请求，二者之间没有额外等待，也不跨连接、不跨实例；这只能缩小窗口，不能消除。
+
+**开关**。8 个控制档方法全部受既有的 `allow_terminal_execution` 约束（`kill`/`rm`/`keep`/`label` 不是输入，但它们是同一批审核过的控制面，默认从严一并纳入）。三处门禁共用 Connector 上报的同一个观察值：Gateway 目录（`terminal_execution_catalog`）隐藏方法、Gateway 在登记前拒绝（`bindTerminalExecution` 晚绑定 `transport.terminalExecutionState`，未上报一律当作关闭）、Connector 在原生写入前再检查。关闭时的拒绝是确定未派发：`dispatch_refused` 的固定码集合因此只追加 herdr-core 的四个执行前固定码（`herdr_core_terminal_blocked`、`_identity_mismatch`、`_unavailable`、`herdr_core_connection_closed`），写入之后才失败的调用仍按 `outcome_unknown` 走保守路径，绝不自动重放。
+
+**期限**。`send` 默认要等粘贴安静窗口（约 3 秒）并按 200 ms 间隔逐段粘贴，本地期限 20 秒；`wait=true` 是这一轮的检查点，期限由调用方显式给出且 ≤60 秒（否则会落到 core 默认的 180 秒）。`interrupt` 不传 `timeout` 时 core 自己观察 10 秒，本地期限 15 秒。所有期限共用 `HERDR_CORE_REQUEST_MAX_MS`；超时只结束本地等待，不宣称原生停止。`force=true` 一律拒绝（`herdr_core_force_unsupported`）：它绕过 core 的 blocked 闸门，而 rovloom 的判定不依赖它。
+
 ## 本 PR 仍未包含
 
 - **输入与控制档、宿主级方法**：`send`/`keys`/`interrupt`/`put`/`kill`/`rm`/`keep`/`label` 与 12 个宿主级方法都不开放。`terminal.attach` 需要终端模拟器解释首屏 VT 字节流，本期不适用。

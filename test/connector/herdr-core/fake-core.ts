@@ -26,6 +26,8 @@ export type FakeCoreOptions = Readonly<{
   events?: readonly string[]
   /** `rpc.discover` 返回的文档；省略时返回空对象。 */
   discover?: Record<string, unknown>
+  /** 覆盖默认终端事实（状态字、创建时间、地址）；控制档栅栏测试用。 */
+  terminal?: Record<string, unknown>
 }>
 
 export type FakeCore = Readonly<{
@@ -36,6 +38,8 @@ export type FakeCore = Readonly<{
   credits: readonly number[]
   /** 收到的请求方法顺序。 */
   requests: readonly string[]
+  /** 收到的完整请求（含参数）；用来核对 rovloom 自有字段没有发给 core。 */
+  calls: readonly FakeCoreRequest[]
   /** 当前连接数。 */
   connections(): number
   /** 已推送的事件行数。 */
@@ -72,9 +76,23 @@ function defaultHandler(request: FakeCoreRequest, options: FakeCoreOptions): Rec
         finished: 0
       }
     case 'terminal.list':
-      return { terminals: [terminal()], hidden_finished: 0 }
+      return { terminals: [terminal(options)], hidden_finished: 0 }
     case 'terminal.get':
-      return terminal()
+      return terminal(options)
+    case 'terminal.send':
+      return { turn: 0, started: null, status: null, wait: null }
+    case 'terminal.keys':
+      return { turn: 0, status: null }
+    case 'terminal.interrupt':
+      return { outcome: 'unknown', key: 'ctrl+c' }
+    case 'terminal.put':
+      return { path: '/tmp/rovloom-put.png', bytes: 3 }
+    case 'terminal.rm':
+      return { removed: 't1' }
+    case 'terminal.kill':
+    case 'terminal.keep':
+    case 'terminal.label':
+      return terminal(options)
     case 'terminal.read':
       return { text: 'hello\n', complete: true, how: 'screen' }
     case 'terminal.wait':
@@ -95,7 +113,7 @@ function defaultHandler(request: FakeCoreRequest, options: FakeCoreOptions): Rec
 }
 
 /** 与真实结果字段一致的终端事实，供三元组核对。 */
-function terminal(): Record<string, unknown> {
+function terminal(options: FakeCoreOptions = {}): Record<string, unknown> {
   return {
     address: 't1',
     created_ms: 1793335137041,
@@ -121,7 +139,8 @@ function terminal(): Record<string, unknown> {
     signal: null,
     state: 'live',
     status: null,
-    status_ms: null
+    status_ms: null,
+    ...options.terminal
   }
 }
 
@@ -134,6 +153,7 @@ export async function startFakeCore(options: FakeCoreOptions = {}): Promise<Fake
   const socketPath = join(root, `${session}.sock`)
   const credits: number[] = []
   const requests: string[] = []
+  const calls: FakeCoreRequest[] = []
   const sockets = new Set<Socket>()
   let pushed = 0
   const server: Server = createServer(
@@ -164,6 +184,7 @@ export async function startFakeCore(options: FakeCoreOptions = {}): Promise<Fake
       }
       const dispatch = /** 请求分发：只回帧，不回 plain 行。 */ (request: FakeCoreRequest) => {
         requests.push(request.method)
+        calls.push(request)
         const reply = () => {
           let result: Record<string, unknown>
           try {
@@ -287,6 +308,7 @@ export async function startFakeCore(options: FakeCoreOptions = {}): Promise<Fake
     directory,
     credits,
     requests,
+    calls,
     connections: /** 当前活动连接数。 */ () => sockets.size,
     pushed: /** 已推送事件行数。 */ () => pushed,
     disconnect: /** 模拟 core 消失：断开全部连接但保留套接字文件。 */ () => {

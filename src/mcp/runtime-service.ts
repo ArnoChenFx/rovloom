@@ -54,6 +54,17 @@ const errors: Record<string, ServiceErrorCode> = {
   herdr_core_native_request_invalid: 'native_request_invalid',
   herdr_core_timeout_invalid: 'invalid_arguments',
   herdr_core_timeout_exceeds_limit: 'invalid_arguments',
+  // 控制档的栅栏与参数规则同样只投影为固定公开码，不把原生方法表带到 MCP。
+  herdr_core_terminal_fence_required: 'native_request_invalid',
+  herdr_core_terminal_fence_invalid: 'native_request_invalid',
+  herdr_core_terminal_address_unsupported: 'native_request_invalid',
+  herdr_core_force_unsupported: 'native_request_invalid',
+  herdr_core_text_too_large: 'native_request_invalid',
+  herdr_core_param_invalid: 'native_request_invalid',
+  herdr_core_terminal_blocked: 'unavailable',
+  herdr_core_terminal_identity_mismatch: 'conflict',
+  herdr_core_terminal_unavailable: 'unavailable',
+  herdr_core_connection_closed: 'unavailable',
   herdr_core_contract_unavailable: 'contract_unavailable'
 }
 

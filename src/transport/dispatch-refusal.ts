@@ -1,7 +1,21 @@
 // 仅信任当前 provider 的真实本机异常类型及确定未写出语义；普通 Error 和原生回包不能生成拒绝。
 import { HerdrLocalError } from '../connector/herdr/local.js'
 import { LuvusAdapterError } from '../connector/luvus/types.js'
+import { ProviderAdapterError } from '../connector/provider-error.js'
 import type { AttemptBinding, DispatchRefusalCode, ProviderKind } from '../wire/types.js'
+
+/**
+ * herdr-core 在执行前就能确定「没有写出」的固定码：本机开关关闭、终端三元组不符、
+ * 读不到终端事实或 blocked、以及附着连接已断（重新附着在写入之前失败）。
+ * 写入之后才失败的写类调用不在这个集合里，仍按 `outcome_unknown` 走保守路径。
+ */
+const HERDR_CORE_REFUSALS: readonly string[] = Object.freeze([
+  'terminal_execution_disabled',
+  'herdr_core_terminal_blocked',
+  'herdr_core_terminal_identity_mismatch',
+  'herdr_core_terminal_unavailable',
+  'herdr_core_connection_closed'
+])
 
 export interface DispatchRefusalLedger {
   /** 仅真正提交确定拒绝时返回 true；已 unknown/终态返回 false，不得据此驱逐原结果上下文。 */
@@ -17,6 +31,15 @@ export function dispatchRefusal(error: unknown, kind: ProviderKind): DispatchRef
     error.code === 'terminal_execution_disabled'
   ) {
     return error.code
+  }
+  // herdr-core 的固定码只在本地判定为 not_dispatched 时才成立；已写出后的同类异常仍是未知结局。
+  if (
+    kind === 'herdr-core' &&
+    error instanceof ProviderAdapterError &&
+    error.outcome === 'not_dispatched' &&
+    HERDR_CORE_REFUSALS.includes(error.code)
+  ) {
+    return error.code as DispatchRefusalCode
   }
   return undefined
 }

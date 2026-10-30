@@ -11,7 +11,7 @@ import { NativeRequestPreflightError } from '../preflight.js'
 import { ProviderAdapterError } from '../provider-error.js'
 import { boundedJson, fail, hash, parseJson } from '../../wire/index.js'
 import type { JsonObject } from '../../wire/types.js'
-import { HERDR_CORE_METHODS } from './methods.js'
+import { HERDR_CORE_FENCE_PARAMS, HERDR_CORE_METHODS, herdrCoreControl } from './methods.js'
 
 /** 输入上限远大于 0.1.14 的 63 KB 文档，同时拒绝把任意大文件当 schema。 */
 export const HERDR_CORE_SCHEMA_INPUT_LIMIT = 1024 * 1024
@@ -242,6 +242,21 @@ function paramsSchema(method: JsonObject): JsonObject {
     properties[param.name] = transform(param.schema as JsonObject, { nodes: 0 })
     if (param.required === true) {
       required.push(param.name)
+    }
+  }
+  // 控制档的终端栅栏字段由 rovloom 追加：调用方必须带它认定的 (core_id, created_ms)，
+  // core 不认识这两个字段，执行端在发请求前显式剥离（不依赖 core 静默忽略未知字段）。
+  const name = method.name
+  if (typeof name === 'string' && herdrCoreControl(name)) {
+    for (const field of HERDR_CORE_FENCE_PARAMS) {
+      if (Object.hasOwn(properties, field)) {
+        fail('herdr_core_schema_invalid')
+      }
+      properties[field] =
+        field === 'core_id'
+          ? { type: 'string', pattern: '^[a-f0-9]{8,64}$' }
+          : { type: 'integer', minimum: 0, format: 'uint64' }
+      required.push(field)
     }
   }
   return {

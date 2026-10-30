@@ -17,7 +17,9 @@ import type { HerdrCoreBackend } from './readonly.js'
 import type { HerdrCoreAttachment } from './installation.js'
 import { contractRef } from '../../wire/index.js'
 import type { V2Target } from '../../wire/types.js'
-import { herdrCoreRequestTimeout, reviewHerdrCoreParams } from './methods.js'
+import { herdrCoreRequestTimeout, herdrCoreControl, reviewHerdrCoreParams } from './methods.js'
+import { assertHerdrCoreTerminal, herdrCoreControlNativeParams } from './control.js'
+import { assertTerminalExecutionAllowed } from '../terminal-execution.js'
 
 /** 已验证的 herdr-core 本机来源与当前 epoch 的受保护路由。 */
 export type HerdrCoreConnectorOptions = Readonly<{
@@ -34,6 +36,8 @@ export type HerdrCoreConnectorOptions = Readonly<{
     enabled: boolean
   }>
   now(): number
+  /** 本机直接终端输入开关；省略即关闭。目录、Gateway 登记与最终写入三处共用同一个观察值。 */
+  terminalExecution?: () => boolean
 }>
 
 /** 只允许 method/params 与 Wire 注入的原生 id；未知字段是协议不符。 */
@@ -190,6 +194,12 @@ export function createHerdrCoreConnectorRuntime(
       if (timeout < 1) {
         throw new ProviderAdapterError('herdr_core_timeout')
       }
+      // 直接输入与控制档必须显式打开本机开关；关闭时在原生写入前拒绝，结果确定未派发。
+      assertTerminalExecutionAllowed(
+        'herdr-core',
+        { method: request.method, params: request.params },
+        options.terminalExecution ? options.terminalExecution() : false
+      )
       const context = core.resolve(frame.payload.attempt)
       // 唯一发送墓碑与实际写入在同一同步边界前准备；失败不自动重放。
       core.encodeRequest(
@@ -198,11 +208,25 @@ export function createHerdrCoreConnectorRuntime(
       )
       // 先复核本机来源，再写发送墓碑：来源已变化时不能把一次未发送的意图记成已发送。
       installation.assert()
+      // 控制档在写入前自己核对终端三元组并判断 blocked：core 只在 send 上拦 blocked（spike 3f）。
+      if (herdrCoreControl(request.method)) {
+        await assertHerdrCoreTerminal({
+          client: installation.client(),
+          contract: installation.record().contract,
+          method: request.method,
+          params: request.params,
+          timeout_ms: timeout
+        })
+        installation.assert()
+      }
       const anchor = backend.responseAnchor(observedBinding)
       claims.claim(observedBinding, anchor.dedup_expires_at)
       checkSignal(controller.signal)
       dispatched = true
-      const result = await installation.client().request(request.method, request.params, timeout)
+      // 栅栏字段只属于 rovloom，core 不认识它们；发送前显式剥离，不依赖 core 静默忽略未知字段。
+      const result = await installation
+        .client()
+        .request(request.method, herdrCoreControlNativeParams(request.params), timeout)
       checkSignal(controller.signal)
       installation.assert()
       core.validator.validateResponse(result, context)
@@ -232,6 +256,10 @@ export function createHerdrCoreConnectorRuntime(
       installation.assert()
       return { providers: [{ expected: binding, local: binding, native_ready: true }] }
     },
+    /** 目录与 Gateway 共用这一个本机开关观察值；最终写入仍由 executeWire 再检查。 */
+    terminalExecutionState: () => [
+      { binding, enabled: options.terminalExecution ? options.terminalExecution() : false }
+    ],
     close: /** 只关闭本 epoch 的桥接与等待；外部 core 与共享墓碑仍归宿主所有。 */ () => {
       closed = true
       for (const controller of active) {

@@ -61,16 +61,72 @@ export const HERDR_CORE_METHODS: Readonly<Record<string, ProviderMethodTier>> = 
 })
 
 /**
- * 本期只开放不送输入、不改终端记录的普通读取；控制档仍不开放。
- * 目录、Wire 准入与观察入口都只认这个集合：Wire 桥接只做普通 RPC，不带流。
+ * 只读集合：不送输入、不改终端记录的普通读取，也是本地观察入口唯一接受的方法。
  */
-export const HERDR_CORE_EXPOSED_METHODS: readonly string[] = Object.freeze([
+export const HERDR_CORE_READ_METHODS: readonly string[] = Object.freeze([
   'server.status',
   'terminal.get',
   'terminal.list',
   'terminal.read',
   'terminal.wait'
 ])
+
+/**
+ * 控制档 8 个方法：宿主级 12 个方法（`terminal.run`、`machine.*`、`file.*`、`doc.set`、
+ * `server.stop/restart`）仍不开放，目录、Wire 准入与参数复核三处继续拒绝。
+ */
+export const HERDR_CORE_CONTROL_METHODS: readonly string[] = Object.freeze([
+  'terminal.send',
+  'terminal.keys',
+  'terminal.interrupt',
+  'terminal.put',
+  'terminal.kill',
+  'terminal.rm',
+  'terminal.keep',
+  'terminal.label'
+])
+
+/**
+ * 真正把字节送到程序的三个方法：core 只在 `send` 上拦 blocked，`keys`/`interrupt` 照常送达
+ * （spike 3f），所以 blocked 只能由 rovloom 自己判断。`put` 只写文件、不送输入。
+ */
+export const HERDR_CORE_INPUT_METHODS: readonly string[] = Object.freeze([
+  'terminal.send',
+  'terminal.keys',
+  'terminal.interrupt'
+])
+
+/**
+ * 开放集合 = 5 个读取 + 8 个控制档。目录、Wire 准入与执行入口都只认这个集合：
+ * Wire 桥接只做普通 RPC，不带流。
+ */
+export const HERDR_CORE_EXPOSED_METHODS: readonly string[] = Object.freeze([
+  ...HERDR_CORE_READ_METHODS,
+  ...HERDR_CORE_CONTROL_METHODS
+])
+
+/**
+ * 控制档的终端栅栏参数：调用方必须带上它认定的 `(core_id, created_ms)`。
+ * 终端地址在同一 core 内永久，但只删 `terminals.json` 后地址会被复用（spike 4b-F），
+ * `(core.id, 地址)` 不唯一；这三个字段与实时 `terminal.get` 不一致就拒绝，
+ * 绝不把输入送给同地址的另一个终端。
+ */
+export const HERDR_CORE_FENCE_PARAMS: readonly string[] = Object.freeze(['core_id', 'created_ms'])
+
+/** `put` 的数据是 base64 文本；上限按单帧预算收紧，超限拒绝而不是截断。 */
+export const HERDR_CORE_PUT_MAX_BASE64 = 512 * 1024
+/** `send` 的文本上限；粘贴间隔 200 ms，文本越大占用的本地期限越长。 */
+export const HERDR_CORE_SEND_MAX_BYTES = 64 * 1024
+/** `keys` 一次最多按的键数与单个键名长度。 */
+export const HERDR_CORE_KEYS_MAX = 64
+export const HERDR_CORE_KEY_MAX_LENGTH = 32
+/** `label` 一次最多写入的标签数与键值长度。 */
+export const HERDR_CORE_LABELS_MAX = 32
+export const HERDR_CORE_LABEL_MAX_LENGTH = 128
+/** `send` 在 `wait=false` 时的本地期限：粘贴安静窗口约 3 秒，加逐段粘贴余量。 */
+export const HERDR_CORE_SEND_MAX_MS = 20_000
+/** `interrupt` 不传 timeout 时 core 自己观察 10 秒；本地期限据此留余量。 */
+export const HERDR_CORE_INTERRUPT_DEFAULT_SECONDS = 10
 
 /**
  * 事件订阅不是普通 RPC：它在 framed 通道上建立持续流，只给本地订阅入口（events.ts）使用，
@@ -103,11 +159,29 @@ export const HERDR_CORE_MAX_REQUEST_BYTES = 256 * 1024
 
 /**
  * 本地请求期限：wait 的检查间隔留 5 秒余量并取整（timeout 是秒，可以带小数）；
- * 其它方法用固定 5 秒。上限与 `HERDR_CORE_REQUEST_MAX_MS` 共用，超时只结束本地等待。
+ * `send` 要等粘贴安静窗口并按 200 ms 间隔逐段粘贴，`interrupt` 默认观察 10 秒，
+ * 其余方法用固定 5 秒。上限与 `HERDR_CORE_REQUEST_MAX_MS` 共用，超时只结束本地等待，
+ * 不宣称原生停止；写类方法超时按 `outcome_unknown` 处理，绝不自动重放。
  */
 export function herdrCoreRequestTimeout(method: string, params: Readonly<Record<string, unknown>>): number {
-  const timeout = method === 'terminal.wait' && typeof params.timeout === 'number' ? params.timeout : 0
-  return Math.min(Math.ceil(timeout * 1000) + 5000, HERDR_CORE_REQUEST_MAX_MS)
+  const seconds = (value: unknown, fallback: number) =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
+  if (method === 'terminal.wait') {
+    return Math.min(Math.ceil(seconds(params.timeout, 0) * 1000) + 5000, HERDR_CORE_REQUEST_MAX_MS)
+  }
+  if (method === 'terminal.send') {
+    // `wait=true` 要等这一轮结束，期限由调用方显式给出（≤60 秒）；否则只等粘贴安静窗口。
+    return params.wait === true
+      ? Math.min(Math.ceil(seconds(params.timeout, 0) * 1000) + 5000, HERDR_CORE_REQUEST_MAX_MS)
+      : HERDR_CORE_SEND_MAX_MS
+  }
+  if (method === 'terminal.interrupt') {
+    return Math.min(
+      Math.ceil(seconds(params.timeout, HERDR_CORE_INTERRUPT_DEFAULT_SECONDS) * 1000) + 5000,
+      HERDR_CORE_REQUEST_MAX_MS
+    )
+  }
+  return 5000
 }
 
 /** 表外方法一律拒绝；档位不按前缀猜测。 */
@@ -115,9 +189,172 @@ export function herdrCoreTier(method: string): ProviderMethodTier | undefined {
   return Object.hasOwn(HERDR_CORE_METHODS, method) ? HERDR_CORE_METHODS[method] : undefined
 }
 
-/** 本期开放的普通读取；其它已审核方法返回 undefined，由调用方给出固定错误码。 */
+/** 开放集合（读取 + 控制档）；表外方法由调用方给出固定错误码。 */
 export function herdrCoreExposed(method: string): boolean {
   return HERDR_CORE_EXPOSED_METHODS.includes(method)
+}
+
+/** 只读集合：本地观察入口不接受控制档，避免绕过 blocked 与三元组核对。 */
+export function herdrCoreReadable(method: string): boolean {
+  return HERDR_CORE_READ_METHODS.includes(method)
+}
+
+/** 控制档方法与需要 blocked 判定的输入方法。 */
+export function herdrCoreControl(method: string): boolean {
+  return HERDR_CORE_CONTROL_METHODS.includes(method)
+}
+
+export function herdrCoreInput(method: string): boolean {
+  return HERDR_CORE_INPUT_METHODS.includes(method)
+}
+
+/**
+ * 去掉 rovloom 自有的栅栏参数，只把原生参数交给 core。
+ * 这些字段在审核 schema 里是必需的（调用方必须提供），但 core 不认识它们；
+ * core 对未知字段静默忽略，所以必须在发送前显式剥离，不能依赖它被忽略。
+ */
+export function herdrCoreNativeParams(params: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const native: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(params)) {
+    if (!HERDR_CORE_FENCE_PARAMS.includes(key)) {
+      native[key] = value
+    }
+  }
+  return native
+}
+
+/**
+ * 只接受本地终端地址 `t7`：名字会被 label 改写，`machine/t7` 属于远端路由，
+ * 都不做输入目标。0.1.14 的扁平终端地址恒为 `tN`。
+ */
+function reviewAddress(params: Readonly<Record<string, unknown>>): string {
+  const address = params.terminal
+  if (typeof address !== 'string' || !/^t[0-9]{1,9}$/u.test(address)) {
+    fail('herdr_core_terminal_address_unsupported')
+  }
+  return address
+}
+
+/** 栅栏字段必须齐全且形状正确；缺失与形状不符分开，便于诊断。 */
+function reviewFence(params: Readonly<Record<string, unknown>>): void {
+  if (params.core_id === undefined || params.created_ms === undefined) {
+    fail('herdr_core_terminal_fence_required')
+  }
+  const coreId = params.core_id
+  const created = params.created_ms
+  if (
+    typeof coreId !== 'string' ||
+    !/^[a-f0-9]{8,64}$/u.test(coreId) ||
+    !Number.isSafeInteger(created) ||
+    (created as number) < 0
+  ) {
+    fail('herdr_core_terminal_fence_invalid')
+  }
+}
+
+/** 文本/数组/对象的长度上限：超限拒绝，绝不截断。 */
+function reviewBounded(value: unknown, code: string, limit: number): void {
+  if (typeof value !== 'string' || Buffer.byteLength(value) > limit) {
+    fail(code)
+  }
+}
+
+/**
+ * 控制档的逐方法复核：终端地址与栅栏先于任何原生请求，再按方法收紧参数。
+ * 这里不判断 blocked（需要实时终端状态，只有执行端能做），也不改写调用方参数。
+ */
+function reviewControlParams(method: string, params: Readonly<Record<string, unknown>>): void {
+  reviewAddress(params)
+  reviewFence(params)
+  if (method === 'terminal.send') {
+    // force 会绕过 core 自己的 blocked 闸门，而 rovloom 的判定不依赖它；默认从严，不接受。
+    if (params.force === true) {
+      fail('herdr_core_force_unsupported')
+    }
+    if (typeof params.text !== 'string' || Buffer.byteLength(params.text) > HERDR_CORE_SEND_MAX_BYTES) {
+      fail('herdr_core_text_too_large')
+    }
+    if (params.wait !== undefined && typeof params.wait !== 'boolean') {
+      fail('herdr_core_param_invalid')
+    }
+    if (params.wait === true) {
+      // wait 是这一轮的检查点，期限必须由调用方显式给出，不能落到 core 默认的 180 秒。
+      const timeout = params.timeout
+      if (typeof timeout !== 'number' || !Number.isFinite(timeout) || timeout <= 0) {
+        fail('herdr_core_timeout_invalid')
+      }
+      if (timeout > HERDR_CORE_WAIT_MAX_SECONDS) {
+        fail('herdr_core_timeout_exceeds_limit')
+      }
+    } else if (params.timeout !== undefined && params.timeout !== null) {
+      fail('herdr_core_param_invalid')
+    }
+    if (params.if !== undefined && params.if !== null && params.if !== 'idle' && params.if !== 'working') {
+      fail('herdr_core_param_invalid')
+    }
+    return
+  }
+  if (method === 'terminal.keys') {
+    const keys = params.keys
+    if (
+      !Array.isArray(keys) ||
+      keys.length < 1 ||
+      keys.length > HERDR_CORE_KEYS_MAX ||
+      keys.some(
+        /** 键名是 core 自己的词汇，这里只限长度与形状。 */ (key) =>
+          typeof key !== 'string' || key.length < 1 || key.length > HERDR_CORE_KEY_MAX_LENGTH
+      )
+    ) {
+      fail('herdr_core_param_invalid')
+    }
+    return
+  }
+  if (method === 'terminal.interrupt') {
+    const timeout = params.timeout
+    if (timeout !== undefined && timeout !== null) {
+      if (typeof timeout !== 'number' || !Number.isFinite(timeout) || timeout < 0) {
+        fail('herdr_core_timeout_invalid')
+      }
+      if (timeout > HERDR_CORE_WAIT_MAX_SECONDS) {
+        fail('herdr_core_timeout_exceeds_limit')
+      }
+    }
+    return
+  }
+  if (method === 'terminal.put') {
+    reviewBounded(params.data, 'herdr_core_text_too_large', HERDR_CORE_PUT_MAX_BASE64)
+    // 文件名只用来保留后缀，不接受路径分隔符或上跳。
+    if (typeof params.name !== 'string' || !/^[A-Za-z0-9._-]{1,128}$/u.test(params.name)) {
+      fail('herdr_core_param_invalid')
+    }
+    return
+  }
+  if (method === 'terminal.keep') {
+    if (typeof params.keep !== 'boolean') {
+      fail('herdr_core_param_invalid')
+    }
+    return
+  }
+  if (method === 'terminal.label') {
+    const labels = params.labels
+    if (!labels || typeof labels !== 'object' || Array.isArray(labels)) {
+      fail('herdr_core_param_invalid')
+    }
+    const entries = Object.entries(labels as Record<string, unknown>)
+    if (
+      entries.length > HERDR_CORE_LABELS_MAX ||
+      entries.some(
+        /** 键与值都只接受有界文本；空值表示删除该标签。 */ ([key, value]) =>
+          !/^[A-Za-z0-9._-]{1,64}$/u.test(key) ||
+          typeof value !== 'string' ||
+          value.length > HERDR_CORE_LABEL_MAX_LENGTH
+      )
+    ) {
+      fail('herdr_core_param_invalid')
+    }
+    return
+  }
+  // kill/rm 只需要终端地址与栅栏，没有额外参数。
 }
 
 /**
@@ -132,6 +369,10 @@ export function reviewHerdrCoreParams(method: string, params: Readonly<Record<st
     if (HERDR_CORE_BLOCKED_PARAMS.includes(key)) {
       fail('herdr_core_param_blocked')
     }
+  }
+  if (herdrCoreControl(method)) {
+    reviewControlParams(method, params)
+    return
   }
   if (method === 'server.status' || method === 'terminal.list') {
     return

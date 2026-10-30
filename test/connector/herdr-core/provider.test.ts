@@ -127,7 +127,7 @@ test('herdr-core 配置只接受自己的契约来源与规范绝对 schema 引�
   }
 })
 
-test('资源工厂登记五个端口，目录只暴露本期方法，身份缺事实即拒绝', async () => {
+test('资源工厂登记五个端口，目录暴露读取与控制档，身份缺事实即拒绝', async () => {
   const { root, reference } = schemaFixture()
   try {
     const config = {
@@ -152,14 +152,27 @@ test('资源工厂登记五个端口，目录只暴露本期方法，身份缺�
       assert.deepEqual(resolved.methods.map((entry) => entry.method).sort(), [
         'server.status',
         'terminal.get',
+        'terminal.interrupt',
+        'terminal.keep',
+        'terminal.keys',
+        'terminal.kill',
+        'terminal.label',
         'terminal.list',
+        'terminal.put',
         'terminal.read',
+        'terminal.rm',
+        'terminal.send',
         'terminal.wait'
       ])
       assert.equal(resolved.local_provider.kind, 'herdr-core')
       assert.doesNotThrow(() => resolved.describe('terminal.read'))
-      // 控制档与宿主级方法不在目录里，即使已审核也不能被 describe 打开。
-      assert.throws(() => resolved.describe('terminal.send'), /runtime_method_unavailable/u)
+      // 控制档已开放，参数 schema 里带着 rovloom 自有的终端栅栏字段。
+      const send = resolved.describe('terminal.send')
+      const params = send.params_schema as { required: string[]; properties: Record<string, unknown> }
+      assert.deepEqual([...params.required].sort(), ['core_id', 'created_ms', 'terminal', 'text'])
+      assert.ok(params.properties.core_id)
+      // 宿主级方法与事件订阅仍不在目录里，即使已审核也不能被 describe 打开。
+      assert.throws(() => resolved.describe('terminal.run'), /runtime_method_unavailable/u)
       assert.throws(() => resolved.describe('events.subscribe'), /runtime_method_unavailable/u)
       assert.equal(resources.catalog.resolve({ ...target, session: 'other' }, { id: 'alice' }), undefined)
       // 没有本机身份事实时不能用配置冒充证据。
@@ -173,6 +186,40 @@ test('资源工厂登记五个端口，目录只暴露本期方法，身份缺�
       )
     } finally {
       await resources.release()
+    }
+    const gated = await createHerdrCoreGatewayResources({ config, now: () => 1000 })
+    try {
+      /** 登记能力只回放真正的 register；admit 的检查回调在登记前运行。 */
+      const admit = (native: { method: string; params: Record<string, unknown> }, enabled?: boolean) => {
+        if (enabled !== undefined) {
+          gated.bindTerminalExecution(() => enabled)
+        }
+        let registered = false
+        const provider = gated.providers[0]!
+        provider.admit(
+          native,
+          { contract_ref: contractRef(source) } as never,
+          /** 模拟 Router：检查通过才登记。 */ (_options, check) => {
+            check(native)
+            registered = true
+            return { created: true, call: {} } as never
+          }
+        )
+        return registered
+      }
+      const send = {
+        method: 'terminal.send',
+        params: { terminal: 't1', core_id: 'a'.repeat(16), created_ms: 1, text: 'x' }
+      }
+      // 绑定前与控制档关闭时都在登记前拒绝；读取不受影响。
+      assert.throws(() => admit(send), /terminal_execution_disabled/u)
+      assert.throws(() => admit(send, false), /terminal_execution_disabled/u)
+      assert.equal(admit(send, true), true)
+      assert.equal(admit({ method: 'server.status', params: {} }, false), true)
+      // 宿主级方法仍在登记前拒绝，与开关无关。
+      assert.throws(() => admit({ method: 'terminal.run', params: {} }, true), /herdr_core_method_unavailable/u)
+    } finally {
+      await gated.release()
     }
     const withFacts = await createHerdrCoreGatewayResources({
       config,
@@ -276,9 +323,17 @@ test('Wire 核心先复核档位与参数，再建立许可，结果用审核 sc
     assert.equal(resolved.binding.call_id, 'call-a')
     // 未建立许可前不能读取结果。
     assert.throws(() => adapter.checkResult(resolved), /dispatch_permit_unavailable/u)
-    // 控制档与历史行数在准备阶段就被拒绝，不会进入原生请求。
+    // 控制档必须先带终端栅栏，宿主级方法与历史行数在准备阶段就被拒绝，不会进入原生请求。
     assert.throws(
       () => adapter.validator.validateRequest({ method: 'terminal.send', params: { terminal: 't1' } }, resolved),
+      /herdr_core_terminal_fence_required/u
+    )
+    assert.throws(
+      () =>
+        adapter.validator.validateRequest(
+          { method: 'terminal.run', params: { terminal: 't1', argv: ['sh'] } },
+          resolved
+        ),
       /herdr_core_method_unavailable/u
     )
     assert.throws(

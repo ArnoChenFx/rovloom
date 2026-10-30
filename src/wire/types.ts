@@ -92,7 +92,25 @@ export type RequestPayload = {
   native_request: JsonObject
   validation: ValidationMode
 }
-export type DispatchRefusalCode = 'terminal_execution_disabled'
+/**
+ * Connector 能确定「没有写出」的固定拒绝码（闭合集合）。
+ * herdr-core 的控制档在执行前自己核对终端三元组与 blocked，失败时同样确定未派发；
+ * 只追加，旧值含义不变。较旧的对端不认识新码时按协议不符关闭连接，仍是失败关闭。
+ */
+export type DispatchRefusalCode =
+  | 'terminal_execution_disabled'
+  | 'herdr_core_terminal_blocked'
+  | 'herdr_core_terminal_identity_mismatch'
+  | 'herdr_core_terminal_unavailable'
+  | 'herdr_core_connection_closed'
+/** 闭合集合的运行时副本；编解码与账本共用同一份，避免两处枚举漂移。 */
+export const DISPATCH_REFUSAL_CODES: readonly DispatchRefusalCode[] = Object.freeze([
+  'terminal_execution_disabled',
+  'herdr_core_terminal_blocked',
+  'herdr_core_terminal_identity_mismatch',
+  'herdr_core_terminal_unavailable',
+  'herdr_core_connection_closed'
+])
 export type TerminalExecutionState = Readonly<{ binding: ProviderBinding; enabled: boolean }>
 /** 设备最近一次上报的平台；distribution 只在 Linux 且 os-release 可读时出现。 */
 export type DevicePlatformPayload = Readonly<{

@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import { decodeWireFrame, negotiate, validateNegotiated } from '../../src/wire/index.js'
 import { HerdrLocalError } from '../../src/connector/herdr/local.js'
 import { LuvusAdapterError } from '../../src/connector/luvus/types.js'
+import { ProviderAdapterError } from '../../src/connector/provider-error.js'
 import { dispatchRefusal } from '../../src/transport/dispatch-refusal.js'
 import { attempt, context, frame, rejects } from './helpers.js'
 
@@ -97,6 +98,22 @@ test(
       new HerdrLocalError(code)
     ]) {
       assert.equal(dispatchRefusal(error, 'luvus'), undefined)
+    }
+    // herdr-core 只接受自己执行前判定的固定码，且必须是确定未派发。
+    for (const refusal of [
+      'terminal_execution_disabled',
+      'herdr_core_terminal_blocked',
+      'herdr_core_terminal_identity_mismatch',
+      'herdr_core_terminal_unavailable',
+      'herdr_core_connection_closed'
+    ] as const) {
+      assert.equal(dispatchRefusal(new ProviderAdapterError(refusal), 'herdr-core'), refusal)
+      assert.equal(dispatchRefusal(new ProviderAdapterError(refusal, 'outcome_unknown'), 'herdr-core'), undefined)
+      assert.equal(dispatchRefusal(new ProviderAdapterError(refusal), 'herdr'), undefined)
+    }
+    // 已写出后才知道的失败不是未派发证明。
+    for (const code of ['herdr_core_timeout', 'herdr_core_installation_changed', 'herdr_core_runtime_unavailable']) {
+      assert.equal(dispatchRefusal(new ProviderAdapterError(code), 'herdr-core'), undefined)
     }
   }
 )

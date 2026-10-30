@@ -2,11 +2,16 @@
  * herdr-core 的观察档调用：先按本仓库规则复核参数，再用审核 schema 校验请求与结果，
  * 最后附上终端标识三元组。这里不发送输入、不改终端记录、不订阅事件。
  */
-import { boundedJson, object, parseJson } from '../../wire/index.js'
+import { boundedJson, fail, object, parseJson } from '../../wire/index.js'
 import type { JsonObject } from '../../wire/types.js'
 import type { HerdrCoreClient } from './client.js'
 import { herdrCoreTerminalIdentity, type HerdrCoreTerminalIdentity } from './identity.js'
-import { HERDR_CORE_MAX_REQUEST_BYTES, herdrCoreRequestTimeout, reviewHerdrCoreParams } from './methods.js'
+import {
+  HERDR_CORE_MAX_REQUEST_BYTES,
+  herdrCoreReadable,
+  herdrCoreRequestTimeout,
+  reviewHerdrCoreParams
+} from './methods.js'
 import { compileHerdrCoreContract, type HerdrCoreContract } from './schema.js'
 
 export type HerdrCoreObservationCall = Readonly<{
@@ -58,6 +63,10 @@ export function createHerdrCoreObservation(options: {
       params: JsonObject = {}
     ) => {
       const value = object(parseJson(boundedJson(params, HERDR_CORE_MAX_REQUEST_BYTES)))
+      // 观察入口只做读取：控制档必须走 Wire 执行端，那里才核对终端三元组与 blocked。
+      if (!herdrCoreReadable(method)) {
+        fail('herdr_core_method_unavailable')
+      }
       reviewHerdrCoreParams(method, value)
       const checked = contract.validateParams(method, value)
       const result = contract.validateResult(

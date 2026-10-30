@@ -116,9 +116,14 @@ test('blocked parameters are refused before any schema or native call', () => {
     () => reviewHerdrCoreParams('terminal.wait', { terminal: 't1', timeout: 0 }),
     /herdr_core_timeout_invalid/u
   )
+  // 宿主级方法仍不在开放集合里；控制档已开放，但必须先带终端三元组栅栏。
+  assert.throws(
+    () => reviewHerdrCoreParams('terminal.run', { terminal: 't1', argv: ['sh'] }),
+    /herdr_core_method_unavailable/u
+  )
   assert.throws(
     () => reviewHerdrCoreParams('terminal.send', { terminal: 't1', text: 'x' }),
-    /herdr_core_method_unavailable/u
+    /herdr_core_terminal_fence_required/u
   )
   // 本期开放集合内的读取不需要额外开关。
   assert.doesNotThrow(() => reviewHerdrCoreParams('terminal.read', { terminal: 't1', lines: 0 }))

@@ -13,7 +13,7 @@ import type {
   WireEnvelope
 } from './types.js'
 import { boundedJson, fields, object, id, uint, sha, text, oneOf, fail, parseJson, LIMITS } from './validation.js'
-import { PROVIDER_KINDS } from './types.js'
+import { DISPATCH_REFUSAL_CODES, PROVIDER_KINDS } from './types.js'
 import { validateNegotiated, validateOffer, WIRE_MAJOR } from './negotiation.js'
 import { providerFor, validateContractSource, validateProvider, validateTarget, validatorFor } from './provider.js'
 
@@ -507,7 +507,7 @@ function decode(input: string | Uint8Array, context: CodecContext, limit: number
     case 'dispatch_refused':
       capability(context, 'dispatch_refusal')
       fields(p, ['attempt', 'code'])
-      oneOf(p.code, ['terminal_execution_disabled'])
+      oneOf(p.code, DISPATCH_REFUSAL_CODES)
       anchored(frame, p, context)
       break
     case 'cancel': {
@@ -593,7 +593,7 @@ export function discardFencedWireFrame(
     case 'dispatch_refused':
       capability(context, 'dispatch_refusal')
       fields(p, ['attempt', 'code'])
-      oneOf(p.code, ['terminal_execution_disabled'])
+      oneOf(p.code, DISPATCH_REFUSAL_CODES)
       break
     case 'response':
       fields(p, ['attempt', 'native_response'])

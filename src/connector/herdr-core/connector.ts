@@ -15,6 +15,7 @@ import { HerdrCoreInstallation, assertHerdrCoreSessionFits } from './installatio
 import type { HerdrCoreAttachment } from './installation.js'
 import { parseHerdrCoreProviderRefConfig } from './provider.js'
 import type { HerdrCoreProviderRefConfig } from './provider.js'
+import { pinTerminalExecution } from '../terminal-execution.js'
 
 export const HERDR_CORE_CONNECTOR_MAX_DEADLINE_MS = 10 * 60_000
 
@@ -60,6 +61,8 @@ export async function createHerdrCoreConnectorResources(
   input: Readonly<{
     config: unknown
     now(): number
+    /** 本机直接终端输入开关；省略即关闭。控制档在目录、Gateway 登记与最终写入三处受它约束。 */
+    allow_terminal_execution?: boolean
     open?(config: HerdrCoreProviderRefConfig): Promise<HerdrCoreAttachment>
   }>
 ): Promise<HerdrCoreConnectorResources> {
@@ -87,6 +90,9 @@ export async function createHerdrCoreConnectorResources(
     fail('herdr_core_installation_changed')
   }
   const binding = provider(config)
+  // 只接受显式布尔值；省略保持关闭，字符串、数字和对象均不能隐式开启。
+  const terminalExecution = pinTerminalExecution(input.allow_terminal_execution)
+  const terminalExecutionState = /** 目录与 Gateway 读同一个本机观察值。 */ () => terminalExecution
   const book = new ConnectorAttemptBook({ maximum_deadline_ms: HERDR_CORE_CONNECTOR_MAX_DEADLINE_MS, now: input.now })
   let claims: DispatchClaims | undefined
   const sessions = new Set<ConnectorWireSession>()
@@ -146,7 +152,8 @@ export async function createHerdrCoreConnectorResources(
               target: config.target,
               principal_id: connector.principal_id,
               binding,
-              now: input.now
+              now: input.now,
+              terminalExecution: terminalExecutionState
             },
             sendClaims,
             book

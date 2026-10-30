@@ -77,6 +77,8 @@ export type HerdrCoreClient = Readonly<{
   onClose(listener: () => void): () => void
   /** 回补信用：调用方按实际消费的字节数声明。 */
   credit(channel: number, bytes: number): void
+  /** 连接是否已关闭；用于断线后重新附着，不表示原生工作已停止。 */
+  closed(): boolean
   close(): void
 }>
 
@@ -455,6 +457,7 @@ export async function openHerdrCoreClient(
     socket_path: socketPath,
     peer: /** 每次现读内核值，不缓存。 */ () => readLinuxPeer(socket),
     request,
+    closed: /** 只报告本连接的事实，不推断 core 进程状态。 */ () => closed,
     onEvent: /** 只登记观察者，不改变订阅状态。 */ (listener: (event: HerdrCoreEvent) => void) => {
       eventListeners.add(listener)
       return /** 取消只移除本观察者。 */ () => eventListeners.delete(listener)

@@ -47,6 +47,7 @@ import type {
 import { HERDR_CORE_PROVIDER_DESCRIPTOR } from './descriptor.js'
 import { herdrCoreSessionName } from './identity.js'
 import { HERDR_CORE_EXPOSED_METHODS, HERDR_CORE_REVIEW, herdrCoreTier } from './methods.js'
+import { requiresTerminalExecution } from '../terminal-execution.js'
 import { compileHerdrCoreContract } from './schema.js'
 import type { HerdrCoreContract } from './schema.js'
 import { createHerdrCoreAdapter } from './readonly.js'
@@ -108,6 +109,11 @@ export type HerdrCoreGatewayResources = Readonly<{
   /** 端口层登记结果；Gateway 运行时按 kind 从这里取会话，不再接受组内自带 session。 */
   ports: ProviderPortRegistry
   describe(): ReturnType<typeof describeHerdrCoreContract>
+  /**
+   * 绑定当前连接上报的本机开关观察值（transport.terminalExecutionState）。
+   * 绑定前一律当作关闭：控制档在 Gateway 登记前就被拒绝，不把未知当打开。
+   */
+  bindTerminalExecution(read: () => boolean | undefined): void
   release(): Promise<void>
 }>
 
@@ -308,7 +314,13 @@ function reviewedContract(source: ContractSource, contract: HerdrCoreContract): 
 
 /** Gateway 校验实际 schema 字节并保留编译快照；本机身份事实仍由附着宿主交付。 */
 export async function createHerdrCoreGatewayResources(
-  input: Readonly<{ config: unknown; now?: () => number; facts?: HerdrCoreIdentityFacts }>
+  input: Readonly<{
+    config: unknown
+    now?: () => number
+    facts?: HerdrCoreIdentityFacts
+    /** 可选：当前连接上报的本机开关；生产由 started 钩子晚绑定，缺省即关闭。 */
+    terminalExecution?: () => boolean | undefined
+  }>
 ): Promise<HerdrCoreGatewayResources> {
   const config = parseHerdrCoreProviderRefConfig(input.config)
   // 字节先按内容寻址摘要核对，再编译；分类修订与开放集合在编译后逐项核对。
@@ -331,6 +343,17 @@ export async function createHerdrCoreGatewayResources(
   const now = input.now ?? Date.now
   let closed = false
   let catalogClock = -1
+  // 晚绑定：Gateway 运行时与传输先于本次绑定建立，绑定前一律当作关闭。
+  let terminalExecution = input.terminalExecution
+
+  /** 只读取当前连接的上报值；未知（未上报/断线/被 fence）一律当作关闭。 */
+  function terminalEnabled(): boolean {
+    try {
+      return terminalExecution?.() === true
+    } catch {
+      return false
+    }
+  }
 
   /** Gateway 本机只确认配置与契约仍当前有效，不把此判断命名为远端本机测量。 */
   function assertCurrent(): void {
@@ -514,6 +537,10 @@ export async function createHerdrCoreGatewayResources(
             if (typeof method !== 'string' || !HERDR_CORE_EXPOSED_METHODS.includes(method)) {
               fail('herdr_core_method_unavailable')
             }
+            // 直接输入与控制档在本机开关关闭时连登记都不发生；目录隐藏与 Connector 最终写入另有同样门禁。
+            if (requiresTerminalExecution('herdr-core', method, object(candidate.params ?? {})) && !terminalEnabled()) {
+              fail('terminal_execution_disabled')
+            }
           })
         },
         ready: /** 仅本地契约先决条件；认证 peer 的 readiness 仍由原 transport 计算。 */ () => {
@@ -531,6 +558,13 @@ export async function createHerdrCoreGatewayResources(
         source: config.expected_source,
         contract
       }),
+    /** 只接受宿主晚绑定的同步观察口；晚绑定之前控制档一律关闭。 */
+    bindTerminalExecution(read: () => boolean | undefined): void {
+      if (typeof read !== 'function') {
+        fail('terminal_execution_state_invalid')
+      }
+      terminalExecution = read
+    },
     release: owner.release
   })
 }

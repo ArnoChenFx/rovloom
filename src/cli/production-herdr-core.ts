@@ -37,11 +37,25 @@ export function createHerdrCoreProductionSources(): ProductionCliSources {
   return Object.freeze({
     /** Gateway 侧：端口层资源交付描述、目录、Wire 会话、身份核对与释放。 */
     async gateway(_config, references) {
-      return createHerdrCoreGatewayResources({ config: reference(references) })
+      const resources = await createHerdrCoreGatewayResources({ config: reference(references) })
+      const binding = resources.providers[0]!.binding
+      return {
+        ...resources,
+        /** 运行时建立后晚绑定本机开关；绑定前控制档一律拒绝。 */
+        started(gateway) {
+          const lookup = 'terminalExecutionState' in gateway ? gateway.terminalExecutionState.bind(gateway) : undefined
+          resources.bindTerminalExecution(lookup ? () => lookup(binding) : () => false)
+        }
+      }
     },
     /** Connector 侧只交付附着执行端；端点、会话与摘要都在本地受保护配置里。 */
-    async connector(_config, references) {
-      return createHerdrCoreConnectorResources({ config: reference(references), now: Date.now })
+    async connector(config, references) {
+      return createHerdrCoreConnectorResources({
+        config: reference(references),
+        now: Date.now,
+        // 本机开关只来自 Connector 自己的配置；目录、Gateway 登记与最终写入共用这个观察值。
+        allow_terminal_execution: config.allow_terminal_execution === true
+      })
     }
   })
 }
