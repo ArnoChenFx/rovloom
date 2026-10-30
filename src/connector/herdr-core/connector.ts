@@ -141,7 +141,10 @@ export async function createHerdrCoreConnectorResources(
         if (closed) {
           fail('herdr_core_provider_closed')
         }
-        installation.assert()
+        // 会话建立只要求附着能力仍在；core 重启期间不阻止新 epoch，真实身份由写入前的 ensure/assert 核对。
+        if (installation.status().state === 'closed') {
+          fail('herdr_core_installation_closed')
+        }
         let runtime: ReturnType<typeof createHerdrCoreConnectorRuntime> | undefined
         let session: ConnectorWireSession | undefined
         try {

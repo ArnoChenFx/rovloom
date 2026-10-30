@@ -94,11 +94,20 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 **期限**。`send` 默认要等粘贴安静窗口（约 3 秒）并按 200 ms 间隔逐段粘贴，本地期限 20 秒；`wait=true` 是这一轮的检查点，期限由调用方显式给出且 ≤60 秒（否则会落到 core 默认的 180 秒）。`interrupt` 不传 `timeout` 时 core 自己观察 10 秒，本地期限 15 秒。所有期限共用 `HERDR_CORE_REQUEST_MAX_MS`；超时只结束本地等待，不宣称原生停止。`force=true` 一律拒绝（`herdr_core_force_unsupported`）：它绕过 core 的 blocked 闸门，而 rovloom 的判定不依赖它。
 
+### core 重启后的重新附着
+
+Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着对象，连接关闭后由 `ensure()` 用有退避、有上限的单飞轮重新走一遍**完整**身份核对：套接字目录 0700 与属主、内核 peer 的 pid/uid、`server.status` 自报 pid 与内核值一致、`/proc/<pid>/exe` 的 SHA-256、`argv` 恒为 `<bin> serve`、`HC_SESSION`、本次 `rpc.discover` 的摘要与编译身份、版本 0.1.14。任何一项不符仍失败关闭（`herdr_core_installation_changed` / `herdr_core_schema_unreviewed` / `herdr_core_version_unreviewed`），不因为「以前核对过」而放行。
+
+- 退避序列 0/250/500/1000/1500/2000 毫秒（合计约 5.25 秒，覆盖 holder 默认 3 秒宽限加新 core 启动），单轮总预算上限 6 秒并按调用方剩余期限再收紧；一轮失败后冷却 1 秒，期间调用直接失败，不逐请求热循环。并发调用共享同一轮，不会同时建立多条连接。
+- 重新附着只在调用路径上发生（`executeWire` 在写入前、`readiness` 只踢一次后台轮），`current()` 不会自己重连。断线时 `client()`/`assert()` 直接 `herdr_core_connection_closed`，不返回已关闭的连接。
+- `core.id` 变了就是新实例：调用方的 `core_id` 栅栏自动失效（旧三元组不会被接受），`created_ms` 也不会与旧终端相同。`core.id` 不变（计划重启、SIGKILL core 后 holder 重建）时终端记录保留，三元组仍然有效。
+- 断线时在途调用保持 `outcome_unknown`，**不重放**：附着层不保存请求，重新附着后也不重发任何调用。
+- `readiness()` 只在附着对象已关闭时报告不可用。core 正在重启时报告不可用会让 transport 永久撤回 provider（`provider_fence`），所以「可重新附着」按可用报告；单次调用仍逐次核对身份，断线期间的调用明确失败（未派发），不悬挂、不重放。这是有意的取舍：可用性判断不再等价于「此刻已连接」。
+
 ## 本 PR 仍未包含
 
 - **输入与控制档、宿主级方法**：`send`/`keys`/`interrupt`/`put`/`kill`/`rm`/`keep`/`label` 与 12 个宿主级方法都不开放。`terminal.attach` 需要终端模拟器解释首屏 VT 字节流，本期不适用。
 - **Luvus/Herdr 的端口迁移**：两种既有 provider 仍走原工厂；把它们也迁到 `ProviderPorts` 会改动它们的会话、目录与身份路径，留给后续。
-- **core 重启后的自动重连**：当前 Connector 在启动时附着一次；core 退出或被 holder 重建后，已有 framed 连接关闭，后续调用 fail-closed，需要重启 Connector 才能重新附着。`session_replaced` 与惰性重连留给后续。
 - **Gateway 侧的本地身份事实**：`LocalIdentityVerifier` 端口仍没有 Gateway 本机的 core 身份事实；本期身份核对发生在 Connector（`HerdrCoreInstallation`），Gateway 只信任已认证设备通道和发布的契约来源。
 
 ## 验证

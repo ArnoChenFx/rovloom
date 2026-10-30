@@ -84,6 +84,9 @@ async function attachment(core: Awaited<ReturnType<typeof startFakeCore>>): Prom
   return Object.freeze({
     record: () => record,
     client: () => client,
+    ensure: /** 测试来源始终可用：真实重新附着在 installation 的用例里覆盖。 */ async () => {},
+    invalidate: () => {},
+    status: () => ({ state: 'attached' as const, core_id: client.hello.core.id, attempts: 0, last_error: null }),
     assert: () => {},
     source: /** 只承认本测试的完整目标与契约摘要。 */ (binding: AttemptBinding) =>
       binding.provider_kind === 'herdr-core' &&

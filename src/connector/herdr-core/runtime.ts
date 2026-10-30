@@ -15,6 +15,7 @@ import type { Connection } from '../../transport/index.js'
 import { createHerdrCoreAdapter } from './readonly.js'
 import type { HerdrCoreBackend } from './readonly.js'
 import type { HerdrCoreAttachment } from './installation.js'
+import { HERDR_CORE_REATTACH_WINDOW_MS } from './installation.js'
 import { contractRef } from '../../wire/index.js'
 import type { V2Target } from '../../wire/types.js'
 import { herdrCoreRequestTimeout, herdrCoreControl, reviewHerdrCoreParams } from './methods.js'
@@ -190,16 +191,22 @@ export function createHerdrCoreConnectorRuntime(
       }
       seen.set(key, observedBinding.registration.deadline)
       const request = reviewedRequest(frame.payload.native_request)
-      const timeout = Math.min(remaining, herdrCoreRequestTimeout(request.method, request.params))
-      if (timeout < 1) {
-        throw new ProviderAdapterError('herdr_core_timeout')
-      }
       // 直接输入与控制档必须显式打开本机开关；关闭时在原生写入前拒绝，结果确定未派发。
       assertTerminalExecutionAllowed(
         'herdr-core',
         { method: request.method, params: request.params },
         options.terminalExecution ? options.terminalExecution() : false
       )
+      // core 退出或被 holder 重建后先重新附着：退避与上限在附着层，预算不超过调用方剩余期限。
+      await installation.ensure(Math.min(Math.max(1, remaining - 1000), HERDR_CORE_REATTACH_WINDOW_MS))
+      const left = observedBinding.registration.deadline - now()
+      if (left < 1) {
+        throw new ProviderAdapterError('herdr_core_timeout')
+      }
+      const timeout = Math.min(left, herdrCoreRequestTimeout(request.method, request.params))
+      if (timeout < 1) {
+        throw new ProviderAdapterError('herdr_core_timeout')
+      }
       const context = core.resolve(frame.payload.attempt)
       // 唯一发送墓碑与实际写入在同一同步边界前准备；失败不自动重放。
       core.encodeRequest(
@@ -236,6 +243,10 @@ export function createHerdrCoreConnectorRuntime(
         error instanceof ProviderAdapterError || error instanceof GatewayError
           ? error.code
           : ((error as { code?: string })?.code ?? 'herdr_core_runtime_unavailable')
+      if (code === 'herdr_core_connection_closed') {
+        // 连接已断：丢弃当前值，下一次调用重新走完整身份核对；原调用不重放。
+        installation.invalidate()
+      }
       throw new ProviderAdapterError(code, dispatched ? 'outcome_unknown' : 'not_dispatched')
     } finally {
       signal.removeEventListener('abort', cancel)
@@ -249,13 +260,24 @@ export function createHerdrCoreConnectorRuntime(
     nativeVersions: /** 连接上报固定来源的已实测版本；不重新探测 core。 */ () => [
       { provider_id: binding.provider_id, native_version: installation.record().wire.source.binary_version }
     ],
-    readiness: /** 只有本机附着与契约仍有效才报告该 provider 可用。 */ () => {
-      if (closed) {
-        fail('herdr_core_runtime_closed')
-      }
-      installation.assert()
-      return { providers: [{ expected: binding, local: binding, native_ready: true }] }
-    },
+    readiness:
+      /**
+       * 只在附着能力仍存在时报告可用：core 正在被 holder 重建时不能报告不可用，
+       * 否则 transport 会永久撤回 provider。真实身份仍由每次写入前的 ensure/assert 核对，
+       * 断线期间的调用明确失败（未派发），不重放、不悬挂。
+       */ () => {
+        if (closed) {
+          fail('herdr_core_runtime_closed')
+        }
+        const status = installation.status()
+        if (status.state === 'closed') {
+          fail('herdr_core_installation_closed')
+        }
+        if (status.state === 'detached') {
+          void installation.ensure(HERDR_CORE_REATTACH_WINDOW_MS).catch(/** 重新附着失败由调用路径报告。 */ () => {})
+        }
+        return { providers: [{ expected: binding, local: binding, native_ready: true }] }
+      },
     /** 目录与 Gateway 共用这一个本机开关观察值；最终写入仍由 executeWire 再检查。 */
     terminalExecutionState: () => [
       { binding, enabled: options.terminalExecution ? options.terminalExecution() : false }
