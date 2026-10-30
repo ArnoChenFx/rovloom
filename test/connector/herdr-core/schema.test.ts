@@ -72,6 +72,16 @@ test('uint8 keeps the native bound while safe integers stay accepted', () => {
   )
 })
 
+test('screen=inexact after a core crash passes through unchanged', () => {
+  const contract = compileHerdrCoreContract(DOCUMENT)
+  const sample = SAMPLES.samples.find((entry) => entry.method === 'terminal.get')!
+  const terminal = structuredClone(sample.response.result) as Record<string, unknown>
+  terminal.screen = 'inexact'
+  const validated = contract.validateResult('terminal.get', terminal)
+  // 不把 inexact 改写成 exact，也不当作完整历史。
+  assert.equal(validated.screen, 'inexact')
+})
+
 test('numbers beyond the safe integer range are refused before schema validation', () => {
   const contract = compileHerdrCoreContract(DOCUMENT)
   assert.throws(
