@@ -122,4 +122,6 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 
 单测用假 core 覆盖 framed 握手、请求配对、错误映射、超时、EOF、参数先于原生请求、结果严格性与三元组；Connector 执行端覆盖 5 个读取、控制档拒绝、`/proc` 事实不符与契约摘要不符的失败关闭；配对认领覆盖 `herdr-core` 与旧 kind 不变。schema 用 0.1.14 的真实 OpenRPC 文档和 7 个真实输出样本核对。
 
+第四阶段把验收扩到控制档：`e2e/quickstart.py --herdr-core` 在同一轮配对里先验开关关闭（目录只剩 5 个读取、`runtime_call` 在登记前以 `forbidden` 拒绝），再改本机开关重启 Connector 验控制档——13 个方法、`send` 后用 `terminal.read(lines=0)` 读回、blocked 终端上 `send`/`keys`/`interrupt` 全部 `not_dispatched` 且程序日志为空、`kill`/`rm` 作用于本轮终端、`created_ms`/`core_id`/名字/远端目标四种栅栏拒绝、`hc server restart` 与 SIGKILL core 后在途调用 `outcome_unknown` 且重新附着后继续读（`core.id` 不变、终端记录保留）。`scripts/herdr-core/mutation-check.mjs` 逐条去掉 blocked 判定、三元组核对、Connector 与 Gateway 两处开关门禁，验证对应测试变红再恢复变绿。
+
 真实 core 验收脚本 `scripts/herdr-core/verify-observation.ts` 在私有沙箱里对 0.1.14 跑通：`rpc.discover` 契约身份、`server.status` 的 pid 与 `/proc/<pid>/exe` 摘要、`argv`、`HC_SESSION`，以及 `terminal.list`/`get`/`read`/`wait`；XDG 运行时目录与状态目录回退两种布局都实测。第三阶段新增 `e2e/quickstart.py --herdr-core`：真实 Gateway + Connector 配对 herdr-core、在目录看到 5 个方法、经 MCP 对沙箱 core 执行 5 个读取；同一次运行里用真实 0.1.13 core 验证版本拒绝、用同机转发代理验证 `herdr_core_peer_pid_mismatch`、用 0755 socket 目录验证 `herdr_core_endpoint_untrusted`。
