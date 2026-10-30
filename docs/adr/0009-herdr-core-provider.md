@@ -150,12 +150,23 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 | 关闭 | `terminal.keep` | 是 | 控制 | 是 | 同上；keep 只换 shell，不重跑任务 |
 | 状态 | `terminal.label` | 是 | 控制 | 是 | 同上；≤32 个标签，键/值有界 |
 | 读取 | `terminal.attach` | 否 | 有条件 | — | 首屏是 VT 字节流，需要终端模拟器；不属于 MCP 调用面 |
-| 事件 | `events.subscribe` | 否 | 观察 | — | framed 持续流，Wire 桥接只做普通 RPC；只有本地订阅入口 |
+| 状态 | `terminal.events` | 是 | 观察 | 否 | **rovloom 自有方法（不是 core 方法）**：长轮询，返回当前快照 + 水位之后至多 `limit` 条事件；见下 |
+| 事件 | `events.subscribe` | 否 | 观察 | — | framed 持续流，Wire 桥接只做普通 RPC；由 `terminal.events` 承接 |
 | 手 | `machine.exec` | 否 | 宿主级 | — | 不在设备/凭据范围内执行命令；是否开放见 `questions.md` |
 | 手 | `file.read` / `file.write` / `file.edit` | 否 | 宿主级 | — | 远程任意文件读写；见 `questions.md` |
 | 文档 | `doc.get` / `doc.set` | 否 | 有条件/宿主级 | — | core 自己的文档，不是智能体管理 |
 | 远程 | `machine.list` / `machine.add` / `machine.connect` / `machine.rename` / `machine.rm` | 否 | 有条件/宿主级 | — | 会绕过 rovloom 的设备/凭据模型（一台设备经 `on` 摸到另一台） |
 | 生命周期 | `server.stop` / `server.restart` | 否 | 宿主级 | — | 影响整个 core 的所有终端 |
+
+### 状态变化推送：`terminal.events` 长轮询
+
+Wire 桥接只做普通 RPC，`events.subscribe` 是 framed 持续流，因此不暴露成 MCP 工具。要让控制端看到「哪个终端变成了 blocked/done」，`terminal.events` 由 Connector 自己实现：一条无过滤订阅 + 有界环形缓冲（默认 256 条），一次普通请求最多等 `timeout_ms`（≤30 秒），返回「当前终端快照（现读 `terminal.list`）+ 自 `after_seq` 以来至多 `limit` 条事件」。
+
+- `seq` 只在同一个 core 进程内有效；`after_seq` 大于当前水位（core 重启后归零）时丢弃旧水位、整份重建，返回 `rebuilt:true`，调用方必须从新水位重新开始。
+- 缓冲装不下时返回 `truncated:true` 与 `dropped` 计数，绝不静默丢事件。
+- 只用无过滤订阅（spike 4a1：按终端/标签过滤的订阅有空洞），`address`/`labels` 在 Connector 侧过滤快照与事件。
+- 观察档：不受 `allow_terminal_execution` 约束；参数（水位/条数/时限/过滤）逐项审核，多余字段拒绝；结果由本仓库的严格 schema 复验。
+- 订阅遇到 `missed`、EOF 或背压都按重建处理；Connector 重新附着后连接换了，feed 自己重建。
 
 ### 智能体兼容性
 

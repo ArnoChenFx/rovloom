@@ -157,6 +157,12 @@ Pair as usual (`rovloom connector --join …`). What the MCP client can do:
 - everything else stays closed: `machine.*`, `file.*`, `doc.set`, `server.stop/restart`,
   `terminal.attach`.
 
+To follow status changes without polling `terminal.list`, long-poll `terminal.events`: it returns the
+current snapshot plus up to `limit` events after `after_seq` (default `limit` 64, wait ≤30s). Feed the
+returned `next_after_seq` back; `rebuilt:true` means the state was replaced (missed events or a core
+restart) and older events are gone, `truncated:true` means the local buffer overflowed. It is a read:
+`allow_terminal_execution` is not needed.
+
 A template run looks like this (`argv[0]` is the template name; `template: true` makes rovloom check
 it against `templates.list` first):
 

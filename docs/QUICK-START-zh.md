@@ -143,6 +143,11 @@ tar -xzf herdr-core.tar.gz -C ~/.local/bin
 - 启动（需要 `allow_terminal_execution`）：`terminal.run`（程序或模板）与 `templates.list`；
 - 其余保持关闭：`machine.*`、`file.*`、`doc.set`、`server.stop/restart`、`terminal.attach`。
 
+要跟踪状态变化而不停 `terminal.list`，用长轮询 `terminal.events`：返回当前快照 + `after_seq`
+之后至多 `limit` 条事件（默认 64 条，最多等 30 秒）。把返回的 `next_after_seq` 带回去；
+`rebuilt:true` 表示状态被整份替换（丢过事件或 core 重启），更早的事件已经没了；`truncated:true`
+表示本地缓冲溢出。它是观察档，不需要 `allow_terminal_execution`。
+
 模板启动长这样（`argv[0]` 是模板名；`template: true` 让 rovloom 先用 `templates.list` 核对）：
 
 ```json

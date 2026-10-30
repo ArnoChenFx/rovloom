@@ -15,7 +15,7 @@ Rovloom 为 AI Agent 和 Bot 提供统一的 MCP 入口，让它们操作你所�
 
 - **多设备接入**：每台设备运行一个 Connector，主动出站连接同一个 Gateway。
 - **显式目标**：每次调用都指明设备、runtime 与 session，不做隐式选择。
-- **原生 runtime**：Herdr 与 Luvus 各自保留自己的契约与能力。herdr-core 是显式选择的 provider（Linux，core 0.1.14），把 core 自己的智能体管理面暴露出来：读取（可带历史）、输入、interrupt/kill/rm/keep/label、`terminal.run`（程序或模板）与 `templates.list`。`native.herdr_core.mode` 为 `attach`（默认，用你自己启动的 core）或 `managed`（Connector 用 `herdr-core serve` 拉起私有 core，绝不经过 `hc`）。凡是往终端输入或启动程序的调用都需要 `allow_terminal_execution`；core 级方法（`machine.*`、`file.*`、`server.stop/restart`）保持关闭。能力目录与逐方法限制见 [ADR 0009](docs/adr/0009-herdr-core-provider.md)。
+- **原生 runtime**：Herdr 与 Luvus 各自保留自己的契约与能力。herdr-core 是显式选择的 provider（Linux，core 0.1.14），把 core 自己的智能体管理面暴露出来：读取（可带历史）、输入、interrupt/kill/rm/keep/label、`terminal.run`（程序或模板）、`templates.list`，以及用于状态变化的 `terminal.events` 长轮询。`native.herdr_core.mode` 为 `attach`（默认，用你自己启动的 core）或 `managed`（Connector 用 `herdr-core serve` 拉起私有 core，绝不经过 `hc`）。凡是往终端输入或启动程序的调用都需要 `allow_terminal_execution`；core 级方法（`machine.*`、`file.*`、`server.stop/restart`）保持关闭。能力目录与逐方法限制见 [ADR 0009](docs/adr/0009-herdr-core-provider.md)。
 - **两个权限开关**：token 指定可见设备，Connector 控制直接终端执行；可见设备上的全部已暴露方法均可调用。
 - **如实的结果**：断线后结果不确定的调用会标为未知，绝不自动重发。
 - **管理页**：查看设备与 provider，重命名、断开或撤销；MCP Bearer 令牌通过 CLI 签发与轮换。
