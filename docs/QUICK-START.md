@@ -111,6 +111,65 @@ rovloom config init connector --provider herdr
 
 This creates configuration without starting the Connector or asking for an address. Existing configuration is preserved; if it selects another provider, the command returns `config_exists` so you can review it before changing it.
 
+## 2b. herdr-core (Linux only, core 0.1.14)
+
+herdr-core is a third runtime: the core's own agent-management API over a unix socket, not the Herdr
+TUI. It is Linux-only and pinned to core **0.1.14** — the handshake refuses any other version, and the
+binary digest is recorded at pairing.
+
+Install it from the official release manifest, verifying the archive yourself (never `curl | sh`):
+
+```sh
+curl -fsS https://releases.herdr.dev/core/0.1.14/manifest.json -o manifest.json
+python3 -c 'import json;t=json.load(open("manifest.json"))["targets"]["linux-x86_64"];print(t["url"]);print(t["sha256"])'
+# download the printed URL, then:
+echo "<sha256 from the manifest>  herdr-core.tar.gz" | sha256sum --check
+tar -xzf herdr-core.tar.gz -C ~/.local/bin
+```
+
+Then either start a core yourself (`HC_SESSION=default herdr-core serve`, or `hc run --bg ...`) and
+select `attach`, or let the Connector start a private one with `managed`:
+
+```json
+{
+  "native": {
+    "provider": "herdr-core",
+    "herdr_core": { "session": "default", "mode": "managed" }
+  }
+}
+```
+
+`mode: "managed"` runs `herdr-core serve` from `native.runtime_bin_dirs` (or `PATH`) with a private
+`XDG_RUNTIME_DIR`/`XDG_STATE_HOME`/`XDG_CONFIG_HOME`; rovloom never calls `hc`, never downloads or
+updates core, and leaves the core and its terminals running when the Connector exits. Templates live
+in `<config_home>/herdr-core/templates/*.md`; with `managed` the default config home is private and
+empty, so set `native.herdr_core.config_home` to a directory where you keep templates.
+
+Pair as usual (`rovloom connector --join …`). What the MCP client can do:
+
+- reads: `server.status`, `template.list`, `terminal.get`, `terminal.list`, `terminal.read`
+  (`lines` up to 1000), `terminal.wait`;
+- input and lifecycle (`allow_terminal_execution` required): `terminal.send`, `terminal.keys`,
+  `terminal.interrupt`, `terminal.put`, `terminal.kill`, `terminal.rm`, `terminal.keep`,
+  `terminal.label`;
+- start (`allow_terminal_execution` required): `terminal.run` (program or template) and
+  `templates.list`;
+- everything else stays closed: `machine.*`, `file.*`, `doc.set`, `server.stop/restart`,
+  `terminal.attach`.
+
+A template run looks like this (`argv[0]` is the template name; `template: true` makes rovloom check
+it against `templates.list` first):
+
+```json
+{ "method": "terminal.run", "params": { "argv": ["reviewer", "Review src/x.rs"] , "template": true, "name": "review" } }
+```
+
+Then talk to it in turns: `terminal.send` with `wait: true` and an explicit `timeout` (≤60s) sends
+one message and waits for that turn, and `terminal.read` with `lines` reads the reply. A turn that
+ends leaves the agent in `done`, not `idle`; `if: "idle"` is therefore not a "ready for the next
+message" condition. Core-level rejections such as `status_mismatch` are reported as
+`not_dispatched` with a `reason`, so nothing was typed.
+
 ## 3. Start and pair
 
 Pairing is one command. Start the Gateway, generate a per-device pairing code, then run the

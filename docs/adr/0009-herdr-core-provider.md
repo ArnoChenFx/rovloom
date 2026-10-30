@@ -125,3 +125,44 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 第四阶段把验收扩到控制档：`e2e/quickstart.py --herdr-core` 在同一轮配对里先验开关关闭（目录只剩 5 个读取、`runtime_call` 在登记前以 `forbidden` 拒绝），再改本机开关重启 Connector 验控制档——13 个方法、`send` 后用 `terminal.read(lines=0)` 读回、blocked 终端上 `send`/`keys`/`interrupt` 全部 `not_dispatched` 且程序日志为空、`kill`/`rm` 作用于本轮终端、`created_ms`/`core_id`/名字/远端目标四种栅栏拒绝、`hc server restart` 与 SIGKILL core 后在途调用 `outcome_unknown` 且重新附着后继续读（`core.id` 不变、终端记录保留）。`scripts/herdr-core/mutation-check.mjs` 逐条去掉 blocked 判定、三元组核对、Connector 与 Gateway 两处开关门禁，验证对应测试变红再恢复变绿。
 
 真实 core 验收脚本 `scripts/herdr-core/verify-observation.ts` 在私有沙箱里对 0.1.14 跑通：`rpc.discover` 契约身份、`server.status` 的 pid 与 `/proc/<pid>/exe` 摘要、`argv`、`HC_SESSION`，以及 `terminal.list`/`get`/`read`/`wait`；XDG 运行时目录与状态目录回退两种布局都实测。第三阶段新增 `e2e/quickstart.py --herdr-core`：真实 Gateway + Connector 配对 herdr-core、在目录看到 5 个方法、经 MCP 对沙箱 core 执行 5 个读取；同一次运行里用真实 0.1.13 core 验证版本拒绝、用同机转发代理验证 `herdr_core_peer_pid_mismatch`、用 0755 socket 目录验证 `herdr_core_endpoint_untrusted`。
+
+## 附录 A：herdr-core 能力目录（0.1.14）
+
+"开关"指 `allow_terminal_execution`。目录里的 `available` 与 `terminal_execution.local_state` 就是这一列的可机读形式；关闭时控制档与启动类仍会列出，但 `available:false`，调用在 Gateway 登记前被拒。
+
+| 分组 | 方法 | 开放 | 档位 | 开关 | 关键参数限制 |
+|---|---|---|---|---|---|
+| 握手 | `hello` | 否 | 观察 | — | 只用于 framed 握手；不给 Wire 客户端 |
+| 契约 | `rpc.discover` | 否 | 观察 | — | 只由附着层调用；契约通过 `runtime_describe` 交付 |
+| 状态 | `server.status` | 是 | 观察 | 否 | — |
+| 状态 | `terminal.get` | 是 | 观察 | 否 | 只接受本地地址 `tN` |
+| 状态 | `terminal.list` | 是 | 有条件 | 否 | 接受 core 自带的过期清理 |
+| 读取 | `terminal.read` | 是 | 有条件 | **`lines>0` 时需要** | `lines` ≤ 1000；`lines>0` 可能向全屏程序发滚轮输入 |
+| 多轮 | `terminal.wait` | 是 | 观察 | 否 | `timeout` ≤ 60 秒；`children` 必须显式给 `terminal`（rovloom 不发 `caller`）；`output` 给普通程序 |
+| 启动 | `terminal.run` | 是 | 宿主级（本阶段开放） | 是 | 模板形态要 `template:true` 并用 `templates.list` 核对；`caller`/`parent`/`on` 拒绝；`no_parent`/`no_notify` 只接受 `true`；`wait=true` 必须给 ≤60 秒 `timeout`；argv ≤64 项/32 KiB、line ≤32 KiB、env ≤64 项、name 1–32 位；本 Connector 同时最多 32 个自己启动的存活终端 |
+| 启动 | `templates.list` | 是 | 有条件 | 否 | 只列出名称/描述/命令；命令文本由机主维护 |
+| 输入 | `terminal.send` | 是 | 控制 | 是 | 必须带 `core_id`+`created_ms`；`force` 拒绝；blocked 拒绝；`wait=true` 必须给 ≤60 秒 `timeout` |
+| 输入 | `terminal.keys` | 是 | 控制 | 是 | 同上三元组栅栏；≤64 键，每个 ≤32 字符；blocked 拒绝 |
+| 输入 | `terminal.interrupt` | 是 | 控制 | 是 | 同上；`timeout` ≤60 秒；blocked 拒绝 |
+| 输入 | `terminal.put` | 是 | 控制 | 是 | 同上三元组栅栏；data ≤512 KiB base64、name 只允许后缀字符 |
+| 关闭 | `terminal.kill` | 是 | 控制 | 是 | 三元组栅栏；blocked 时仍可用 |
+| 关闭 | `terminal.rm` | 是 | 控制 | 是 | 同上；可作用于已结束终端 |
+| 关闭 | `terminal.keep` | 是 | 控制 | 是 | 同上；keep 只换 shell，不重跑任务 |
+| 状态 | `terminal.label` | 是 | 控制 | 是 | 同上；≤32 个标签，键/值有界 |
+| 读取 | `terminal.attach` | 否 | 有条件 | — | 首屏是 VT 字节流，需要终端模拟器；不属于 MCP 调用面 |
+| 事件 | `events.subscribe` | 否 | 观察 | — | framed 持续流，Wire 桥接只做普通 RPC；只有本地订阅入口 |
+| 手 | `machine.exec` | 否 | 宿主级 | — | 不在设备/凭据范围内执行命令；是否开放见 `questions.md` |
+| 手 | `file.read` / `file.write` / `file.edit` | 否 | 宿主级 | — | 远程任意文件读写；见 `questions.md` |
+| 文档 | `doc.get` / `doc.set` | 否 | 有条件/宿主级 | — | core 自己的文档，不是智能体管理 |
+| 远程 | `machine.list` / `machine.add` / `machine.connect` / `machine.rename` / `machine.rm` | 否 | 有条件/宿主级 | — | 会绕过 rovloom 的设备/凭据模型（一台设备经 `on` 摸到另一台） |
+| 生命周期 | `server.stop` / `server.restart` | 否 | 宿主级 | — | 影响整个 core 的所有终端 |
+
+### 智能体兼容性
+
+- **pi 1.4.0**：启动即报 OSC 7501（`app=pi`，`state=idle`）；主管经 MCP 用它跑过两轮上下文连续的对话与一次中断。本阶段的 e2e 用假智能体（`e2e/herdr-core-fakeagent.py`）覆盖同样的状态机，CI 不需要模型。
+- **Claude Code 2.1.312 / Codex 0.164.0**：**未验证**。空 HOME 下停在首次登录引导，没有进入主界面，因此不能据此判断它们是否上报状态；需要已登录环境与用户授权。
+- **Codex** 必须带 `--no-daemon`，否则它的命令跑在 core 之外，状态与轮次都会错。rovloom 不会替你改命令；写进模板或 README。
+
+### 交互要点（由 rovloom 撰写，随 `runtime_describe` 的 `guide` 交付）
+
+交互式运行、任务写进第一次 `terminal.run`、`first_message.sent=false` 不要盲目重发、`wait=true` 是检查点、状态来自 OSC 7501、`blocked` 交给人、`turn`/`seq` 不是完成证明、Codex 需要 `--no-daemon`、写类调用不重放。逐方法补充在 `terminal.read`/`terminal.wait`/`terminal.send`/`terminal.interrupt` 的 `usage` 里。
