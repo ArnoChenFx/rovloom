@@ -3,9 +3,12 @@
  * 但仍走原 Wire 准入、审核参数/结果与发送墓碑。身份核对本身在最后一个用例里对真实 /proc 失败关闭。
  */
 import assert from 'node:assert/strict'
-import { mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
+import { DISPATCH_CLAIMS_LOCK_FORMAT } from '../../../src/connector/claims.js'
 import { createHerdrCoreConnectorResources } from '../../../src/connector/herdr-core/connector.js'
 import { openHerdrCoreClient } from '../../../src/connector/herdr-core/client.js'
 import { herdrCorePinnedEndpoint } from '../../../src/connector/herdr-core/identity.js'
@@ -16,6 +19,7 @@ import { publishSchema, schemaReference } from '../../../src/connector/schema-st
 import { boundedJson, contractRef, hash } from '../../../src/wire/index.js'
 import type { Connection } from '../../../src/transport/index.js'
 import type { AttemptBinding, ContractSource, JsonObject, V2Target } from '../../../src/wire/types.js'
+import { currentProcessIdentity } from '../../../src/storage/process-identity.js'
 import { privateHerdrTestRoot } from '../herdr/private-root.js'
 import { startFakeCore } from './fake-core.js'
 
@@ -178,6 +182,77 @@ test('Connector 只通过已审核的 5 个读取执行原生调用', async () =
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+// 崩溃恢复依赖进程身份证据：Linux（/proc）与 macOS（libproc）有，Windows 另有 e2e。
+const unixHost = process.platform === 'linux' || process.platform === 'darwin'
+
+/** 退出后的真实子进程提供「PID 曾存在且已死」的身份。 */
+async function deadProcess() {
+  const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' })
+  const identity = currentProcessIdentity(child.pid!)
+  await once(child, 'close')
+  return identity ?? { pid: child.pid!, start: '1' }
+}
+
+test(
+  'Connector 被强杀后残留的 claim 账本锁：持有者已死则接管并正常启动，其余一律保持 fail-closed',
+  { skip: !unixHost },
+  async () => {
+    const dead = await deadProcess()
+    type Outcome = 'fresh' | 'recovered' | 'refused'
+    const attempt = async (
+      lock: string | undefined
+    ): Promise<{ outcome: Outcome; recovered: number; lockKept: boolean }> => {
+      const core = await startFakeCore({ discover: JSON.parse(OPENRPC.toString('utf8')) })
+      const { root, config } = fixture(core)
+      const lockPath = config.connector.claims.path + '.lock'
+      if (lock !== undefined) {
+        writeFileSync(lockPath, lock, { mode: 0o600 })
+      }
+      let recovered = 0
+      const attached = await attachment(core)
+      try {
+        const resources = await createHerdrCoreConnectorResources({
+          config,
+          now: Date.now,
+          open: async () => attached,
+          claims_lock_recovered: () => {
+            recovered += 1
+          }
+        })
+        // 启动成功时锁由本进程持有：释放后消失，说明确实（重新）取得了账本。
+        assert.equal(existsSync(lockPath), true)
+        await resources.release()
+        assert.equal(existsSync(lockPath), false)
+        return { outcome: recovered > 0 ? 'recovered' : 'fresh', recovered, lockKept: false }
+      } catch (error) {
+        assert.equal((error as { code?: string }).code, 'claim_storage_unavailable', String(error))
+        attached.close()
+        return { outcome: 'refused', recovered, lockKept: existsSync(lockPath) }
+      } finally {
+        await core.close()
+        rmSync(root, { recursive: true, force: true })
+      }
+    }
+    // 没有残留锁：照常启动，不报告接管。
+    assert.deepEqual(await attempt(undefined), { outcome: 'fresh', recovered: 0, lockKept: false })
+    // 持有者已死：接管并启动，恰好报告一次。
+    assert.deepEqual(await attempt(JSON.stringify({ format: DISPATCH_CLAIMS_LOCK_FORMAT, process: dead })), {
+      outcome: 'recovered',
+      recovered: 1,
+      lockKept: false
+    })
+    // 持有者还活着、空锁、坏内容、旧格式：保持拒绝，锁原样保留、不报告接管。
+    for (const lock of [
+      JSON.stringify({ format: DISPATCH_CLAIMS_LOCK_FORMAT, process: currentProcessIdentity() }),
+      '',
+      'not json',
+      JSON.stringify({ format: 'other', process: dead })
+    ]) {
+      assert.deepEqual(await attempt(lock), { outcome: 'refused', recovered: 0, lockKept: true }, lock)
+    }
+  }
+)
 
 test('宿主级方法与 blocked 参数在 Wire 与原生请求之前被拒绝', async () => {
   const core = await startFakeCore({ discover: JSON.parse(OPENRPC.toString('utf8')) })

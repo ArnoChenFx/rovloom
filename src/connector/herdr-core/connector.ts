@@ -5,6 +5,7 @@
 import { GatewayError } from '../../contracts.js'
 import { readSchema } from '../schema-store.js'
 import { DispatchClaims } from '../claims.js'
+import { recoverDispatchClaimsLock } from '../crash-recovery.js'
 import { connectorAdmissionAdapter } from '../../runtime/connector-attempts.js'
 import { ConnectorAttemptBook } from '../../runtime/connector-attempts.js'
 import { contractRef, fail } from '../../wire/index.js'
@@ -74,6 +75,8 @@ export async function createHerdrCoreConnectorResources(
      */
     managed?: Readonly<{ dirs: HerdrCoreManagedDirs; binary: string; agent_bin_dirs?: readonly string[] }>
     open?(config: HerdrCoreProviderRefConfig): Promise<HerdrCoreAttachment>
+    /** 接管了上一个已崩溃 Connector 留下的 claim 账本锁时调用一次（由 CLI 写出固定标记）。 */
+    claims_lock_recovered?(): void
   }>
 ): Promise<HerdrCoreConnectorResources> {
   const config = parseHerdrCoreProviderRefConfig(input.config)
@@ -153,6 +156,11 @@ export async function createHerdrCoreConnectorResources(
     return releasing
   }
   try {
+    // 上一个 Connector 若被强杀（SIGKILL、OOM、掉电），claim 账本锁会残留：与 Luvus、Herdr 相同的规则——
+    // 持有者进程已死才接管（账本里的派发墓碑原样保留），空锁、旧格式、活进程与坏内容一律保持 fail-closed。
+    if (recoverDispatchClaimsLock(connector.claims.path + '.lock')) {
+      input.claims_lock_recovered?.()
+    }
     claims = new DispatchClaims({ ...connector.claims, now: input.now })
     const sendClaims = claims
     return Object.freeze({

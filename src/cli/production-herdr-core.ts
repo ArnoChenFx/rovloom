@@ -72,6 +72,10 @@ export function createHerdrCoreProductionSources(): ProductionCliSources {
         now: Date.now,
         // 本机开关只来自 Connector 自己的配置；目录、Gateway 登记与最终写入共用这个观察值。
         allow_terminal_execution: resolveTerminalExecution(config.allow_terminal_execution),
+        /** 与 Herdr 附着路径相同的固定标记，e2e 与运维都按它判断崩溃后的接管。 */
+        claims_lock_recovered: () => {
+          process.stderr.write('claims_lock_recovered\n')
+        },
         ...(managed ? { managed } : {})
       })
     }
