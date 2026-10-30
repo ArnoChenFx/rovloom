@@ -7,7 +7,7 @@
 import { boundedJson, fail, object, parseJson } from '../../wire/index.js'
 import type { JsonObject } from '../../wire/types.js'
 import type { HerdrCoreClient, HerdrCoreEvent } from './client.js'
-import { HERDR_CORE_MAX_REQUEST_BYTES, reviewHerdrCoreParams } from './methods.js'
+import { HERDR_CORE_EVENT_METHOD, HERDR_CORE_MAX_REQUEST_BYTES, reviewHerdrCoreEventParams } from './methods.js'
 import type { HerdrCoreContract } from './schema.js'
 
 /** 事件与快照都带 core 进程内序号；`rebuilt` 表示这条快照替换了本订阅之前的全部状态。 */
@@ -53,8 +53,8 @@ export async function subscribeHerdrCoreEvents(options: {
     fail('herdr_core_event_invalid')
   }
   const params = object(parseJson(boundedJson({}, HERDR_CORE_MAX_REQUEST_BYTES)))
-  reviewHerdrCoreParams('events.subscribe', params)
-  const checked = contract.validateParams('events.subscribe', params)
+  reviewHerdrCoreEventParams(params)
+  const checked = contract.validateParams(HERDR_CORE_EVENT_METHOD, params)
 
   const queue: HerdrCoreEventNotice[] = []
   /** 通道号未知前先按到达顺序缓存：core 在订阅回复之后立刻推送，晚挂观察者会丢掉开头的事件。 */
@@ -166,7 +166,10 @@ export async function subscribeHerdrCoreEvents(options: {
 
   let raw: JsonObject
   try {
-    raw = contract.validateResult('events.subscribe', await client.request('events.subscribe', checked, 10_000))
+    raw = contract.validateResult(
+      HERDR_CORE_EVENT_METHOD,
+      await client.request(HERDR_CORE_EVENT_METHOD, checked, 10_000)
+    )
   } catch (error) {
     offEvent()
     offClose()

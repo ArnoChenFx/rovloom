@@ -60,15 +60,23 @@ export const HERDR_CORE_METHODS: Readonly<Record<string, ProviderMethodTier>> = 
   'server.restart': 'host'
 })
 
-/** 本期只开放不送输入、不改终端记录的普通读取与无过滤事件订阅；控制档仍不开放。 */
+/**
+ * 本期只开放不送输入、不改终端记录的普通读取；控制档仍不开放。
+ * 目录、Wire 准入与观察入口都只认这个集合：Wire 桥接只做普通 RPC，不带流。
+ */
 export const HERDR_CORE_EXPOSED_METHODS: readonly string[] = Object.freeze([
   'server.status',
   'terminal.get',
   'terminal.list',
   'terminal.read',
-  'terminal.wait',
-  'events.subscribe'
+  'terminal.wait'
 ])
+
+/**
+ * 事件订阅不是普通 RPC：它在 framed 通道上建立持续流，只给本地订阅入口（events.ts）使用，
+ * 不进目录与 Wire 准入，否则 MCP 客户端会看到一个调了也无法运转的方法。
+ */
+export const HERDR_CORE_EVENT_METHOD = 'events.subscribe'
 
 /** 已审核但本期不开放的方法及原因；原因写在这里，避免调用面自行解释档位。 */
 export const HERDR_CORE_UNAVAILABLE: Readonly<Record<string, string>> = Object.freeze({
@@ -119,14 +127,6 @@ export function reviewHerdrCoreParams(method: string, params: Readonly<Record<st
   if (method === 'server.status' || method === 'terminal.list') {
     return
   }
-  if (method === 'events.subscribe') {
-    // 按终端/子终端/标签过滤的订阅会留下空洞（spike 4a1 实测 3,5,7…），只接受无过滤订阅；
-    // 需要过滤时由调用方在快照和连续事件上自行筛选。
-    if (Object.keys(params).length) {
-      fail('herdr_core_param_blocked')
-    }
-    return
-  }
   if (method === 'terminal.read') {
     // lines>0 会让 core 自己滚动取历史：全屏程序会收到鼠标滚轮输入。
     const lines = params.lines
@@ -151,4 +151,14 @@ export function reviewHerdrCoreParams(method: string, params: Readonly<Record<st
     return
   }
   fail('herdr_core_method_unavailable')
+}
+
+/**
+ * 订阅参数：按终端/子终端/标签过滤的订阅会留下空洞（spike 4a1 实测 3,5,7…），只接受无过滤订阅；
+ * 需要过滤时由调用方在快照和连续事件上自行筛选。
+ */
+export function reviewHerdrCoreEventParams(params: Readonly<Record<string, unknown>>): void {
+  if (Object.keys(params).length) {
+    fail('herdr_core_param_blocked')
+  }
 }

@@ -107,8 +107,8 @@ test('过滤参数在发出原生请求之前被拒绝', async () => {
     // 过滤订阅会留下空洞；本期只接受无过滤订阅，且拒绝发生在任何原生请求之前。
     await assert.rejects(
       (async () => {
-        const { reviewHerdrCoreParams } = await import('../../../src/connector/herdr-core/methods.js')
-        reviewHerdrCoreParams('events.subscribe', { terminal: 't1' })
+        const { reviewHerdrCoreEventParams } = await import('../../../src/connector/herdr-core/methods.js')
+        reviewHerdrCoreEventParams({ terminal: 't1' })
       })(),
       /herdr_core_param_blocked/u
     )
@@ -141,6 +141,20 @@ test('未审核的 core 版本在握手阶段就拒绝', async () => {
   const core = await startFakeCore({ hello: { version: '0.1.15' } })
   try {
     await assert.rejects(openHerdrCoreClient(core.socket), /herdr_core_version_unreviewed/u)
+  } finally {
+    await core.close()
+  }
+})
+
+test('订阅不是普通 RPC：观察入口与 Wire 准入都拒绝，原生一次都不收到', async () => {
+  const core = await startFakeCore()
+  try {
+    const client = await openHerdrCoreClient(core.socket)
+    const methods = await import('../../../src/connector/herdr-core/methods.js')
+    assert.equal(methods.herdrCoreExposed('events.subscribe'), false)
+    assert.throws(() => methods.reviewHerdrCoreParams('events.subscribe', {}), /herdr_core_method_unavailable/u)
+    assert.deepEqual(core.requests, [])
+    client.close()
   } finally {
     await core.close()
   }

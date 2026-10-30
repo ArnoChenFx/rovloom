@@ -121,8 +121,8 @@ test('资源工厂登记五个端口，目录只暴露本期方法，身份缺�
       assert.equal(resources.ports.tier('herdr-core', 'terminal.fly'), undefined)
       const resolved = resources.catalog.resolve(target, { id: 'alice' })
       assert.ok(resolved)
+      // 订阅是 framed 通道上的持续流，Wire 桥接只做普通 RPC：目录不列、describe 不开，档位表里仍有它。
       assert.deepEqual(resolved.methods.map((entry) => entry.method).sort(), [
-        'events.subscribe',
         'server.status',
         'terminal.get',
         'terminal.list',
@@ -133,6 +133,7 @@ test('资源工厂登记五个端口，目录只暴露本期方法，身份缺�
       assert.doesNotThrow(() => resolved.describe('terminal.read'))
       // 控制档与宿主级方法不在目录里，即使已审核也不能被 describe 打开。
       assert.throws(() => resolved.describe('terminal.send'), /runtime_method_unavailable/u)
+      assert.throws(() => resolved.describe('events.subscribe'), /runtime_method_unavailable/u)
       assert.equal(resources.catalog.resolve({ ...target, session: 'other' }, { id: 'alice' }), undefined)
       // 没有本机身份事实时不能用配置冒充证据。
       assert.throws(

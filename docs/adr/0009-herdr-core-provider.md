@@ -18,7 +18,7 @@ herdr-core 与现有 Herdr TUI 适配（`herdr` 命令，65 个普通 RPC）不�
 
 ### herdr-core 的档位（0.1.14，提交 29e6d37）
 
-32 个方法分四档：A 观察 6、B 有条件 6、C 输入与控制 8、D 宿主级 12。第一阶段只开放 5 个普通读取：`server.status`、`terminal.get`、`terminal.list`、`terminal.read`（`lines` 必须为 0）、`terminal.wait`（timeout ≤ 60 秒）；第二阶段追加无过滤的 `events.subscribe`。其余方法返回固定 `herdr_core_method_unavailable`。
+32 个方法分四档：A 观察 6、B 有条件 6、C 输入与控制 8、D 宿主级 12。第一阶段只开放 5 个普通读取：`server.status`、`terminal.get`、`terminal.list`、`terminal.read`（`lines` 必须为 0）、`terminal.wait`（timeout ≤ 60 秒）；无过滤的 `events.subscribe` 只给本地订阅入口，不进目录与 Wire 准入（见下）。其余方法返回固定 `herdr_core_method_unavailable`。
 
 不传 `caller`、`on`、`core`、`calls_you`、`children_of`：`caller` 无认证且会把子终端消息标成已读，`on` 会把请求转发给远端机器，`core` 会把连接登记成对端。参数规则先于任何原生请求，错误只带固定码或公共诊断的路径与规则。
 
@@ -50,7 +50,7 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 ### 事件订阅（spike 第 7 条）
 
-`events.subscribe` 进入本期开放集合，但只接受空参数：按终端、子终端或标签过滤的订阅会留下空洞（spike 4a1 实测 3,5,7…），不能当连续流。事件只走 framed 通道，信用按实际消费字节回补（帧循环完成）。`missed` 用新快照重建，水位换成快照 `seq`，其后不超过水位的在途事件丢弃并计数；EOF 结束本地等待返回 `closed(eof)`，由调用方重新握手；慢消费者以 `closed(backpressure)` 显式结束，已收到的通知仍可取走，不静默丢中间事件。`seq` 只用于同一 core 进程内排序，重连后丢弃旧水位。
+`events.subscribe` 不是普通 RPC，不在开放集合（目录、Wire 准入与观察入口都不认它）：它在 framed 通道上建立持续流，而 Wire 桥接只做普通 RPC。本地订阅入口 `subscribeHerdrCoreEvents` 单独使用它，且只接受空参数：按终端、子终端或标签过滤的订阅会留下空洞（spike 4a1 实测 3,5,7…），不能当连续流。事件只走 framed 通道，信用按实际消费字节回补（帧循环完成）。`missed` 用新快照重建，水位换成快照 `seq`，其后不超过水位的在途事件丢弃并计数；EOF 结束本地等待返回 `closed(eof)`，由调用方重新握手；慢消费者以 `closed(backpressure)` 显式结束，已收到的通知仍可取走，不静默丢中间事件。`seq` 只用于同一 core 进程内排序，重连后丢弃旧水位。
 
 ### 版本重新分类（spike 第 9 条）
 
