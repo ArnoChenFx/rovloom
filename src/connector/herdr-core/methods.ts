@@ -60,19 +60,19 @@ export const HERDR_CORE_METHODS: Readonly<Record<string, ProviderMethodTier>> = 
   'server.restart': 'host'
 })
 
-/** 本期只开放不送输入、不改终端记录的普通读取；事件与控制档等审核后再开。 */
+/** 本期只开放不送输入、不改终端记录的普通读取与无过滤事件订阅；控制档仍不开放。 */
 export const HERDR_CORE_EXPOSED_METHODS: readonly string[] = Object.freeze([
   'server.status',
   'terminal.get',
   'terminal.list',
   'terminal.read',
-  'terminal.wait'
+  'terminal.wait',
+  'events.subscribe'
 ])
 
 /** 已审核但本期不开放的方法及原因；原因写在这里，避免调用面自行解释档位。 */
 export const HERDR_CORE_UNAVAILABLE: Readonly<Record<string, string>> = Object.freeze({
-  'terminal.attach': 'needs_terminal_emulator',
-  'events.subscribe': 'phase_two'
+  'terminal.attach': 'needs_terminal_emulator'
 })
 
 /** 不传即不建立可信来源：caller 无认证、on 会把请求转发给远端机器、core 会把连接登记成对端。 */
@@ -117,6 +117,14 @@ export function reviewHerdrCoreParams(method: string, params: Readonly<Record<st
     }
   }
   if (method === 'server.status' || method === 'terminal.list') {
+    return
+  }
+  if (method === 'events.subscribe') {
+    // 按终端/子终端/标签过滤的订阅会留下空洞（spike 4a1 实测 3,5,7…），只接受无过滤订阅；
+    // 需要过滤时由调用方在快照和连续事件上自行筛选。
+    if (Object.keys(params).length) {
+      fail('herdr_core_param_blocked')
+    }
     return
   }
   if (method === 'terminal.read') {

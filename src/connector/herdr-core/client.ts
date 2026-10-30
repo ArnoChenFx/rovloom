@@ -111,6 +111,11 @@ function helloResult(value: unknown): HerdrCoreHello {
   ) {
     fail('herdr_core_handshake_refused')
   }
+  // 每个 core 版本重新分类（spike 实测 6 天 5 个版本）：未审核的版本明确拒绝，不沿用旧档位。
+  // 单独判定，让拒绝原因与「形状不符」区分开。
+  if (result.version !== HERDR_CORE_REVIEW.version) {
+    fail('herdr_core_version_unreviewed')
+  }
   return Object.freeze({
     generation: result.generation,
     version: result.version,

@@ -151,7 +151,11 @@ export async function startFakeCore(options: FakeCoreOptions = {}): Promise<Fake
           const line = lines[pushed]!
           pushed += 1
           credit -= Buffer.byteLength(line) + 1
-          send(subscription, { jsonrpc: '2.0', method: 'event', params: JSON.parse(line) })
+          // 行可以只是 params（按 event 通知），也可以显式给出 method/params（missed、heartbeat）。
+          const body = JSON.parse(line) as Record<string, unknown>
+          const method = typeof body.method === 'string' ? body.method : 'event'
+          const params = method === 'event' && !('params' in body) ? body : body.params
+          send(subscription, { jsonrpc: '2.0', method, params })
         }
       }
       const dispatch = /** 请求分发：只回帧，不回 plain 行。 */ (request: FakeCoreRequest) => {
