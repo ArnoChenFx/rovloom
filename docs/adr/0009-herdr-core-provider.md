@@ -18,7 +18,7 @@ herdr-core 与现有 Herdr TUI 适配（`herdr` 命令，65 个普通 RPC）不�
 
 ### herdr-core 的档位（0.1.14，提交 29e6d37）
 
-32 个方法分四档：A 观察 6、B 有条件 6、C 输入与控制 8、D 宿主级 12。本 PR 只开放 5 个普通读取：`server.status`、`terminal.get`、`terminal.list`、`terminal.read`（`lines` 必须为 0）、`terminal.wait`（timeout ≤ 60 秒）。其余方法返回固定 `herdr_core_method_unavailable`。
+32 个方法分四档：A 观察 6、B 有条件 6、C 输入与控制 8、D 宿主级 12。第一阶段只开放 5 个普通读取：`server.status`、`terminal.get`、`terminal.list`、`terminal.read`（`lines` 必须为 0）、`terminal.wait`（timeout ≤ 60 秒）；第二阶段追加无过滤的 `events.subscribe`。其余方法返回固定 `herdr_core_method_unavailable`。
 
 不传 `caller`、`on`、`core`、`calls_you`、`children_of`：`caller` 无认证且会把子终端消息标成已读，`on` 会把请求转发给远端机器，`core` 会把连接登记成对端。参数规则先于任何原生请求，错误只带固定码或公共诊断的路径与规则。
 
