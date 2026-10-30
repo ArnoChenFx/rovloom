@@ -268,3 +268,80 @@ test(
     assert.equal(calls, 0)
   }
 )
+
+test('没有 Luvus 的组合（herdr + herdr-core）仍装配中性 Connector，不要求原生会话', async () => {
+  const config = configTemplate('connector')
+  if (config.role !== 'connector') {
+    assert.fail('connector required')
+  }
+  const events: string[] = []
+  const routed = routeProductionSources({
+    herdr: {
+      connector: /** 最小可识别的 provider 资源；不建立假原生会话。 */ async () => ({
+        kind: 'provider',
+        providers: [
+          {
+            binding: {
+              machine_id: 'component_machine',
+              provider_id: 'herdr',
+              kind: 'herdr',
+              config_ref: 'herdr_ref',
+              binding_revision: 1,
+              enabled: true
+            },
+            target: {
+              machine_id: 'component_machine',
+              provider_id: 'herdr',
+              profile: 'session',
+              session: 'component'
+            }
+          }
+        ],
+        session: /** 未认证不得构造来源。 */ () => {
+          throw new Error('component_native_unavailable')
+        },
+        release: /** 只记录本次已取得原owner的释放。 */ async () => {
+          events.push('herdr:release')
+        }
+      })
+    },
+    'herdr-core': {
+      connector: async () => ({
+        kind: 'provider',
+        providers: [
+          {
+            binding: {
+              machine_id: 'component_machine',
+              provider_id: 'herdr-core',
+              kind: 'herdr-core',
+              config_ref: 'core_ref',
+              binding_revision: 1,
+              enabled: true
+            },
+            target: {
+              machine_id: 'component_machine',
+              provider_id: 'herdr-core',
+              profile: 'session',
+              session: 'component'
+            }
+          }
+        ],
+        session: () => {
+          throw new Error('component_native_unavailable')
+        },
+        release: async () => {
+          events.push('herdr-core:release')
+        }
+      })
+    }
+  })
+  const mixed = await routed.connector!(config, [
+    { reference: 'herdr_ref', value: { kind: 'herdr' } },
+    { reference: 'core_ref', value: { kind: 'herdr-core' } }
+  ])
+  assert.equal(mixed.kind, 'provider')
+  // 两个来源都在同一个中性会话组里，没有伪造 Luvus 原生会话。
+  assert.throws(() => mixed.session({} as never), /component_native_unavailable/u)
+  await mixed.release()
+  assert.deepEqual(events.sort(), ['herdr-core:release', 'herdr:release'])
+})

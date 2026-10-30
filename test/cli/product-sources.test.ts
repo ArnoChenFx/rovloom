@@ -188,3 +188,60 @@ test('混合 Gateway 里 herdr-core 引用按设备分组，不会被丢掉', as
   // 每台设备各一份引用：herdr-core 只收到自己那一条，没有被混合分组吞掉。
   assert.deepEqual(coreReferences, [{ reference: 'core_one', value: { kind: 'herdr-core' } }])
 })
+
+test('herdr 与 herdr-core 组合各自成组，Connector 端两种 kind 都路由到自己的工厂', async () => {
+  const gateway = configTemplate('gateway')
+  const connector = configTemplate('connector')
+  if (gateway.role !== 'gateway' || connector.role !== 'connector') {
+    assert.fail('role template mismatch')
+  }
+  const authority = createManagementSessionAuthority({
+    principal: /** 本例从不建立身份或 cookie。 */ () => null,
+    administrator: /** 空管理来源不授予任何权限。 */ () => null
+  })
+  const calls: string[] = []
+  const stop = new Error('factory_probe_only')
+  const owners: Partial<Record<'luvus' | 'herdr' | 'herdr-core', ProductionCliSources>> = {
+    herdr: {
+      async connector(_config, refs) {
+        assert.deepEqual(refs, [{ reference: 'herdr_one', value: { kind: 'herdr' } }])
+        calls.push('herdr:connector')
+        throw stop
+      }
+    },
+    'herdr-core': {
+      async connector(_config, refs) {
+        assert.deepEqual(refs, [{ reference: 'core_one', value: { kind: 'herdr-core' } }])
+        calls.push('herdr-core:connector')
+        throw stop
+      }
+    }
+  }
+  const references: readonly ProductionProviderReference[] = [
+    { reference: 'herdr_one', value: { kind: 'herdr' } },
+    { reference: 'core_one', value: { kind: 'herdr-core' } }
+  ]
+  const routed = routeProductionSources(owners)
+  // 组合层要求两个 kind 都交付；本例第一个工厂失败即停止，顺序固定为 herdr 先。
+  await assert.rejects(() => routed.connector!(connector, references), stop)
+  assert.deepEqual(calls, ['herdr:connector'])
+  // Gateway 侧同一组引用也按设备各自成组，不需要 Luvus 原生资源。
+  const gatewayCalls: string[] = []
+  const gatewayOwners: Partial<Record<'luvus' | 'herdr' | 'herdr-core', ProductionCliSources>> = {
+    herdr: {
+      async gateway() {
+        gatewayCalls.push('herdr:gateway')
+        return { providers: [], release: async () => {} } as never
+      }
+    },
+    'herdr-core': {
+      async gateway(_config, refs) {
+        assert.deepEqual(refs, [{ reference: 'core_one', value: { kind: 'herdr-core' } }])
+        gatewayCalls.push('herdr-core:gateway')
+        throw stop
+      }
+    }
+  }
+  await assert.rejects(() => routeProductionSources(gatewayOwners).gateway!(gateway, references, authority), stop)
+  assert.deepEqual(gatewayCalls, ['herdr:gateway', 'herdr-core:gateway'])
+})

@@ -68,8 +68,9 @@ export function setupProviderKinds(input: unknown): readonly NativeProviderKind[
     input.some(
       /* 不能借对象的字符串转换伪装原生kind。 */ (kind) => kind !== 'luvus' && kind !== 'herdr' && kind !== 'herdr-core'
     ) ||
-    // 只接受程序定义的单来源或固定顺序双来源；mixed 仍只表示 Luvus + Herdr TUI。
-    !['luvus', 'herdr', 'herdr-core', 'luvus,herdr'].includes(input.join(','))
+    // 只接受程序定义的单一来源或固定顺序双来源；mixed 仍只表示 Luvus + Herdr TUI，
+    // 新增的两个组合值与它并列，不改变旧值含义。
+    !['luvus', 'herdr', 'herdr-core', 'luvus,herdr', 'luvus,herdr-core', 'herdr,herdr-core'].includes(input.join(','))
   ) {
     throw new CliError('configuration_required')
   }

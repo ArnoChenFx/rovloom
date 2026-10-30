@@ -63,21 +63,42 @@ test(
 )
 
 test(
-  '首次native选择只接受Luvus、Herdr或固定混合，省略时保留原Luvus路径',
+  '首次native选择只接受程序定义的单一来源与固定组合，省略时保留原Luvus路径',
   /* 业务选择不能变成动态模块、路径、空列表或任意provider注册接口。 */ () => {
     const value = configDocument(configTemplate('connector'))
     assert.deepEqual(selectedNativeProviders(parseConfig(value) as import('../../src/cli/config.js').ConnectorConfig), [
       'luvus'
     ])
-    for (const provider of ['luvus', 'herdr', 'mixed'] as const) {
+    // 旧值逐字按原样解析，含义不变；新增的两个组合值只是并列取值。
+    for (const [provider, kinds] of [
+      ['luvus', ['luvus']],
+      ['herdr', ['herdr']],
+      ['herdr-core', ['herdr-core']],
+      ['mixed', ['luvus', 'herdr']],
+      ['luvus,herdr-core', ['luvus', 'herdr-core']],
+      ['herdr,herdr-core', ['herdr', 'herdr-core']]
+    ] as const) {
       const selected = parseConfig({
         ...value,
         native: { provider }
       }) as import('../../src/cli/config.js').ConnectorConfig
-      assert.deepEqual(selectedNativeProviders(selected), provider === 'mixed' ? ['luvus', 'herdr'] : [provider])
+      assert.deepEqual(selectedNativeProviders(selected), kinds)
       assert.deepEqual(configDocument(selected).native, { provider })
     }
-    for (const provider of ['', 'custom', '/bin/herdr', ['luvus', 'herdr'], {}, null, 1]) {
+    for (const provider of [
+      '',
+      'custom',
+      '/bin/herdr',
+      ['luvus', 'herdr'],
+      {},
+      null,
+      1,
+      // 顺序与分隔符是固定表，不按分隔符猜测。
+      'herdr-core,luvus',
+      'luvus, herdr-core',
+      'luvus,herdr,herdr-core',
+      'luvus,luvus'
+    ]) {
       assert.throws(/* 无效选择在任何配对或原生进程之前拒绝。 */ () => parseConfig({ ...value, native: { provider } }))
     }
   }

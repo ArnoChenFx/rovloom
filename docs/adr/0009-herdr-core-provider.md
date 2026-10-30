@@ -104,6 +104,14 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 - 断线时在途调用保持 `outcome_unknown`，**不重放**：附着层不保存请求，重新附着后也不重发任何调用。
 - `readiness()` 只在附着对象已关闭时报告不可用。core 正在重启时报告不可用会让 transport 永久撤回 provider（`provider_fence`），所以「可重新附着」按可用报告；单次调用仍逐次核对身份，断线期间的调用明确失败（未派发），不悬挂、不重放。这是有意的取舍：可用性判断不再等价于「此刻已连接」。
 
+### 与 Luvus / Herdr TUI 的组合
+
+`native.provider` 只追加两个组合取值：`"luvus,herdr-core"` 与 `"herdr,herdr-core"`。`mixed` 的含义不变（仍只表示 Luvus + Herdr TUI），三种单值（省略、`luvus`、`herdr`、`herdr-core`）的解析结果与之前逐字相同；已有配置、token、设备凭据、配对记录与旧 schema 布局继续按原样读取（#315 边界）。取值是闭合表（`NATIVE_PROVIDER_SELECTIONS`），不按分隔符猜测：`"herdr-core,luvus"`、带空格的、三项的都拒绝。
+
+装配层只做了两处最小改动：`selectedNativeProviders` 用固定映射展开组合值；`prepareMixedConnector` 不再要求必须存在 Luvus 原生资源（`herdr + herdr-core` 没有 Luvus），没有 host 但有 Luvus 的既有「provider 明确不可用」形态保持不变。`routeProductionSources` 的分组、`prepareMixedGateway` 与 Gateway 侧每设备一份引用的路由原本就是中性的，没有改。
+
+配对发布路径不改语义：`publish` 对同一路径的差异一律 `configuration_required`，`mergeSetupProviders` 只追加相同引用、冲突即拒绝，`publishSetupCaller` 拒绝改写同一主体的凭据。本仓库没有名为 `unionGrants` 的函数（主管指令里提到的名字在本仓库不存在），等价的「绝不回溯扩大已批准权限」语义由上面三处承担，本次没有放宽。
+
 ## 本 PR 仍未包含
 
 - **输入与控制档、宿主级方法**：`send`/`keys`/`interrupt`/`put`/`kill`/`rm`/`keep`/`label` 与 12 个宿主级方法都不开放。`terminal.attach` 需要终端模拟器解释首屏 VT 字节流，本期不适用。

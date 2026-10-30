@@ -27,8 +27,8 @@ export type ConnectorConfig = Readonly<{
   provider_config_refs: readonly string[]
   allow_terminal_execution?: boolean
   native?: Readonly<{
-    // mixed 仍只表示既有两种 provider；herdr-core 单独选择，不改旧配置的含义。
-    provider?: 'luvus' | 'herdr' | 'herdr-core' | 'mixed'
+    // mixed 仍只表示既有两种 provider；新增的两个组合值只是并列取值，旧值的含义不变。
+    provider?: NativeProviderSelection
     runtime_bin_dirs?: readonly string[]
     agent_bin_dirs?: readonly string[]
     // Herdr 专属：attach（默认）附着用户真实会话、不存在才自建；managed 在 Connector 私有目录里拉一个隔离实例。
@@ -42,6 +42,27 @@ export type ConnectorConfig = Readonly<{
 }>
 export type RoleConfig = GatewayConfig | ConnectorConfig
 export type NativeProviderKind = 'luvus' | 'herdr' | 'herdr-core'
+
+/**
+ * `native.provider` 的闭合取值。只追加：`mixed` 仍只表示 Luvus + Herdr TUI，
+ * 新的两个组合值显式列出两种 kind，已有配置逐字按原样解析。
+ */
+export const NATIVE_PROVIDER_SELECTIONS = Object.freeze([
+  'luvus',
+  'herdr',
+  'herdr-core',
+  'mixed',
+  'luvus,herdr-core',
+  'herdr,herdr-core'
+] as const)
+export type NativeProviderSelection = (typeof NATIVE_PROVIDER_SELECTIONS)[number]
+
+/** 组合值到 kind 的固定映射；单值仍按原样返回，不按分隔符猜测。 */
+const NATIVE_PROVIDER_COMBINATIONS: Readonly<Record<string, readonly NativeProviderKind[]>> = Object.freeze({
+  mixed: Object.freeze(['luvus', 'herdr'] as const),
+  'luvus,herdr-core': Object.freeze(['luvus', 'herdr-core'] as const),
+  'herdr,herdr-core': Object.freeze(['herdr', 'herdr-core'] as const)
+})
 
 // Herdr 的运行方式：默认附着用户已在运行的实例（不存在才自建），managed 为 Connector 私有的隔离实例。
 export function herdrMode(config: ConnectorConfig): 'attach' | 'managed' {
@@ -61,7 +82,10 @@ export function herdrCoreSession(config: ConnectorConfig): string {
 // 省略选择时保留已有Luvus首次路径；mixed 只包含既有两份固定来源，herdr-core 需显式选择。
 // 新增 kind 不改变旧值的含义：已有 mixed 配置不会因为多了第三种 provider 而改变实际选择。
 export function selectedNativeProviders(config: ConnectorConfig): readonly NativeProviderKind[] {
-  return config.native?.provider === 'mixed' ? ['luvus', 'herdr'] : [config.native?.provider ?? 'luvus']
+  const value: NativeProviderSelection = config.native?.provider ?? 'luvus'
+  const combined = NATIVE_PROVIDER_COMBINATIONS[value]
+  // 单值只能是 kind 本身（组合值都在表里），不按分隔符猜测。
+  return combined ?? [value as NativeProviderKind]
 }
 
 export const CLI_ERROR_CODES = [
@@ -267,7 +291,7 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
       }
       if (
         native.provider !== undefined &&
-        !['luvus', 'herdr', 'herdr-core', 'mixed'].includes(native.provider as string)
+        !NATIVE_PROVIDER_SELECTIONS.includes(native.provider as NativeProviderSelection)
       ) {
         return fail()
       }

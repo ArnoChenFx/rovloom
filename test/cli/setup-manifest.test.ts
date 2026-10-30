@@ -116,6 +116,33 @@ test(
       assert.throws(/* 空、重复、逆序及对象均不是合法固定选择。 */ () => setupProviderKinds(value))
     }
     assert.notDeepEqual(setupTarget('synthetic_machine', 'luvus'), setupTarget('synthetic_machine', 'herdr'))
+    // 只追加：三种单值与两个新组合都按固定顺序接受，mixed 仍是 Luvus + Herdr TUI。
+    for (const [value, kinds] of [
+      [['luvus'], ['luvus']],
+      [['herdr'], ['herdr']],
+      [['herdr-core'], ['herdr-core']],
+      [
+        ['luvus', 'herdr'],
+        ['luvus', 'herdr']
+      ],
+      [
+        ['luvus', 'herdr-core'],
+        ['luvus', 'herdr-core']
+      ],
+      [
+        ['herdr', 'herdr-core'],
+        ['herdr', 'herdr-core']
+      ]
+    ] as const) {
+      assert.deepEqual(setupProviderKinds(value), kinds)
+    }
+    for (const value of [
+      ['herdr-core', 'luvus'],
+      ['luvus', 'herdr', 'herdr-core'],
+      ['herdr-core', 'herdr']
+    ]) {
+      assert.throws(() => setupProviderKinds(value))
+    }
   }
 )
 

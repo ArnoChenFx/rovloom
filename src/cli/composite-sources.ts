@@ -209,20 +209,24 @@ export async function prepareMixedConnector(
     const native = prepared.find(/** 选择原Luvus会话构建资源。 */ (resource) => resource.kind !== 'provider')
     const hosted = prepared.filter(/** 保留原中性Connector资源及其owner。 */ (resource) => resource.kind === 'provider')
     if (
-      !native ||
-      hosted.length !== prepared.length - 1 ||
+      // 组合可以没有 Luvus（例如 Herdr + herdr-core），但至少要有一个真实资源；
+      // 没有 host 但有 Luvus 是「provider 明确不可用」的既有形态，仍交给原生会话报告。
+      prepared.length === 0 ||
+      hosted.length !== prepared.length - (native ? 1 : 0) ||
       hosted.some(/** 缺真实路由覆盖不能从请求或readiness猜目标。 */ (resource) => !resource.providers?.length)
     ) {
       throw new CliError('backend_unavailable', 3)
     }
-    const luvus = createLuvusConnectorSessions(native)
-    owner.sessions.push(luvus)
-    const replaceable = [native, ...hosted].filter(
+    const luvus = native ? createLuvusConnectorSessions(native) : undefined
+    if (luvus) {
+      owner.sessions.push(luvus)
+    }
+    const replaceable = [...(native ? [native] : []), ...hosted].filter(
       /* 只聚合会后台替换实例的来源。 */ (resource) => resource.session_replaced
     )
     return {
       kind: 'provider',
-      provider_snapshot: native.provider_snapshot,
+      ...(native ? { provider_snapshot: native.provider_snapshot } : {}),
       release_timeout_ms: Math.min(
         5000,
         ...hosted.map(/** 组合只收紧原owner逻辑关闭预算。 */ (resource) => resource.release_timeout_ms ?? 5000)
@@ -232,8 +236,10 @@ export async function prepareMixedConnector(
         const parts: ProviderSessionGroup<ConnectorWireSession>[] = []
         let transferred = false
         try {
-          parts.push(luvus.group(connection))
-          owner.assertOpen()
+          if (luvus) {
+            parts.push(luvus.group(connection))
+            owner.assertOpen()
+          }
           for (const resource of hosted) {
             const session = resource.session(connection)
             parts.push({ providers: resource.providers!, session })
