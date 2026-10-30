@@ -124,8 +124,7 @@ try {
   let restart
   if (process.env.MIXED_AFTER_RESTART) {
     for (const kind of kinds) {
-      const { target, entry } = await discover(kind)
-      assert.equal(entry('server.status') !== undefined || true, true)
+      const { target } = await discover(kind)
       assert(target, kind)
     }
     // 三个来源各做一次读取，确认重启后都真的可用。
