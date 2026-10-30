@@ -68,10 +68,11 @@ try {
     return found
   }
   const methods = discovered.items.map((item) => item.method).sort()
-  // 开关打开时目录里有 6 个读取 + 8 个控制档 + terminal.run；宿主级其余方法与事件订阅仍不可见。
+  // 开关打开时目录里有 6 个读取 + 8 个控制档 + terminal.run + 长轮询；宿主级其余方法与事件订阅仍不可见。
   assert.deepEqual(methods, [
     'server.status',
     'templates.list',
+    'terminal.events',
     'terminal.get',
     'terminal.interrupt',
     'terminal.keep',
@@ -120,6 +121,36 @@ try {
       lines: 0
     })
     assert(read.text.includes('survivor'), JSON.stringify(read.text.slice(0, 200)))
+  }
+
+  // ---- 长轮询：能发现、能读、状态变化能在事件里看到 ----
+  const eventsDescription = await ok('runtime_describe', {
+    target,
+    expected_binding_revision: 1,
+    method: 'terminal.events'
+  })
+  assert.equal(eventsDescription.tier, 'observe')
+  assert.ok(eventsDescription.params_schema.properties.after_seq)
+  assert.ok(Array.isArray(eventsDescription.usage))
+  /** 轮询到出现满足条件的事件为止；返回最后一条结果。 */
+  const pollEvents = async (after, predicate, rounds = 20, timeout = 2000, extra = {}) => {
+    let cursor = after
+    let last
+    for (let index = 0; index < rounds; index++) {
+      const view = await invoke(entry('terminal.events').contract_ref, {
+        method: 'terminal.events',
+        params: { after_seq: cursor, limit: 64, timeout_ms: timeout, ...extra }
+      })
+      assert.equal(view.state, 'responded', JSON.stringify(view))
+      last = await readAll(view)
+      assert(Array.isArray(last.events) && Array.isArray(last.terminals))
+      assert(typeof last.next_after_seq === 'number')
+      cursor = last.next_after_seq
+      if (predicate(last)) {
+        return { poll: last, after: cursor }
+      }
+    }
+    assert.fail(`no matching event: ${JSON.stringify(last?.events?.slice(-5))}`)
   }
 
   // ---- 程序形态：line 启动 cat，send 后读回 ----
@@ -209,6 +240,8 @@ try {
   // 模板正文与任务各算一行，所以第一轮之后 turn 至少是 1；后面按增量核对。
   assert(firstTurn.turn >= 1, JSON.stringify(firstTurn))
 
+  // 先建立长轮询的水位（订阅快照），再看这一轮的状态变化能不能在事件里看到。
+  const baseline = (await pollEvents(0, () => true, 1)).after
   // 第二轮：send wait=true 一次完成「发送并等这一轮结束」。
   const second = await invoke(entry('terminal.send').contract_ref, {
     method: 'terminal.send',
@@ -220,6 +253,22 @@ try {
   // 结果里的 turn 是文本送入时的轮次，wait.turn 是那一轮结束后的轮次。
   assert.equal(secondResult.turn, firstTurn.turn, JSON.stringify(secondResult))
   assert.equal(secondResult.wait.turn, firstTurn.turn + 1, JSON.stringify(secondResult.wait))
+  // 状态从 working→done 在事件里可见（data.status.state，core 的 status 事件带 records/reported/status）。
+  const seen = await pollEvents(baseline, (poll) =>
+    poll.events.some((event) => event.terminal === agentResult.address && event.fact === 'status')
+  )
+  assert(
+    seen.poll.events.some((event) => ['working', 'done', 'blocked'].includes(String(event.data?.status?.state))),
+    JSON.stringify(seen.poll.events.slice(-5))
+  )
+  // 按 address 过滤：别的终端的事件不进来。
+  const filtered = await pollEvents(seen.after, (poll) => poll.terminals.length === 1, 2, 200, {
+    address: agentResult.address
+  })
+  assert.deepEqual(
+    filtered.poll.terminals.map((terminal) => terminal.address),
+    [agentResult.address]
+  )
   // 读历史：lines>0，原样透传 how/complete。
   const history = await call(entry('terminal.read').contract_ref, 'terminal.read', {
     terminal: agentResult.address,
@@ -239,6 +288,36 @@ try {
     terminal: agentResult.address
   })
   assert.equal(afterMismatch.turn, secondResult.wait.turn, 'rejected send must not advance the turn')
+
+  // ---- terminal.run wait=true：带显式 timeout，返回 output 与 wait 结果 ----
+  const waitedRun = await invoke(entry('terminal.run').contract_ref, {
+    method: 'terminal.run',
+    params: { line: 'echo run-wait-done', wait: true, timeout: 20, name: 'run-wait' }
+  })
+  assert.equal(waitedRun.state, 'responded', JSON.stringify(waitedRun))
+  const waitedResult = await readAll(waitedRun)
+  assert.equal(waitedResult.wait?.ended, true, JSON.stringify(waitedResult.wait))
+  assert.match(String(waitedResult.output ?? ''), /run-wait-done/)
+  // 结束后清理这个终端（已结束的终端用 rm，仍然走三元组栅栏）。
+  const cleanedRun = await invoke(entry('terminal.rm').contract_ref, {
+    method: 'terminal.rm',
+    params: {
+      terminal: waitedResult.address,
+      core_id: coreId,
+      created_ms: waitedResult.created_ms
+    }
+  })
+  assert.equal(cleanedRun.state, 'responded', JSON.stringify(cleanedRun))
+
+  // ---- terminal.put：往沙箱终端旁放一个文件并读回 ----
+  const put = await invoke(entry('terminal.put').contract_ref, {
+    method: 'terminal.put',
+    params: { ...agentFence, name: 'rovloom-e2e.txt', data: Buffer.from('put-from-rovloom').toString('base64') }
+  })
+  assert.equal(put.state, 'responded', JSON.stringify(put))
+  const putResult = await readAll(put)
+  assert.equal(readFileSync(String(putResult.path), 'utf8'), 'put-from-rovloom')
+  assert.equal(putResult.bytes, 16)
 
   // ---- blocked：send/keys/interrupt 都被 rovloom 拒绝，程序日志只有 ready ----
   // 用独立的日志：attach 模式下 quickstart 自己也起了一个 blocked 终端。
@@ -323,6 +402,21 @@ try {
     'unknown address'
   )
 
+  // ---- 计划重启后水位重建 ----
+  const beforeRestart = (await pollEvents(0, () => true, 1)).after
+  hc('server', 'restart')
+  const rebuilt = await until('events rebuilt after restart', async () => {
+    const view = await invoke(entry('terminal.events').contract_ref, {
+      method: 'terminal.events',
+      params: { after_seq: beforeRestart + 100, limit: 16, timeout_ms: 500 }
+    })
+    assert.equal(view.state, 'responded', JSON.stringify(view))
+    const poll = await readAll(view)
+    assert.equal(poll.rebuilt, true, JSON.stringify(poll))
+    return poll
+  })
+  assert.equal(rebuilt.rebuilt, true)
+
   // ---- 计划重启与 SIGKILL：重新附着后继续读，在途调用确定结局 ----
   hc('server', 'restart')
   await until('read after server restart', () =>
@@ -370,6 +464,9 @@ try {
       blocked: { send: 'blocked', keys: 'blocked', interrupt: 'blocked', killed: true, removed: true },
       fence: { created_ms: 'fence_mismatch', unknown_address: 'terminal_unavailable' },
       restart: { planned: true, sigkill: true, inflight: inflightView.state, core_id_stable: true },
+      events: { status_seen: true, filtered_by_address: true, rebuilt_after_restart: true },
+      run_wait: { ended: waitedResult.wait.ended, output: String(waitedResult.output ?? '').trim() },
+      put: { path: putResult.path, bytes: putResult.bytes },
       cat_read_bytes: echoed.text.length
     })
   )

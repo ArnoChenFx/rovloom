@@ -77,6 +77,22 @@ const mutations = [
     expect: 'lines'
   },
   {
+    name: '长轮询水位归零重建',
+    file: 'src/connector/herdr-core/feed.ts',
+    from: '      if (input.after_seq > watermark) {',
+    to: '      if (false as boolean) {',
+    test: ['test/connector/herdr-core/events-poll.test.ts', '-t', '水位比当前大'],
+    expect: 'rebuilt'
+  },
+  {
+    name: '长轮询截断标记',
+    file: 'src/connector/herdr-core/feed.ts',
+    from: '      truncated = true\n    }\n    ring.push(event)',
+    to: '      void 0\n    }\n    ring.push(event)',
+    test: ['test/connector/herdr-core/events-poll.test.ts', '-t', '缓冲溢出'],
+    expect: 'truncated'
+  },
+  {
     name: 'managed 不走 hc',
     file: 'src/connector/herdr-core/managed.ts',
     from: "  const child = launch(binary, ['serve'], {",

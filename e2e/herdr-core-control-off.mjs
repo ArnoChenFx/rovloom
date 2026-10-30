@@ -15,6 +15,7 @@ try {
   assert.deepEqual(methods, [
     'server.status',
     'templates.list',
+    'terminal.events',
     'terminal.get',
     'terminal.interrupt',
     'terminal.keep',
@@ -34,7 +35,14 @@ try {
     assert.equal(available[method], false, `${method}:${JSON.stringify(available)}`)
   }
   // terminal.read 只有 lines>0 需要开关，所以它仍可用（限制写在参数说明里）。
-  for (const method of ['server.status', 'templates.list', 'terminal.get', 'terminal.list', 'terminal.read']) {
+  for (const method of [
+    'server.status',
+    'templates.list',
+    'terminal.events',
+    'terminal.get',
+    'terminal.list',
+    'terminal.read'
+  ]) {
     assert.equal(available[method], true, method)
   }
   const described = await tool('runtime_describe', {
@@ -62,6 +70,29 @@ try {
   })
   assert.equal(denied.isError, true, JSON.stringify(denied.raw))
   assert.equal(denied.raw?.gateway_error?.code, 'forbidden', JSON.stringify(denied.raw))
+  // terminal.put 也受开关约束（往终端旁边写文件），关闭时同样在登记前拒绝。
+  const putDenied = await tool('runtime_call', {
+    target,
+    expected_binding_revision: 1,
+    contract_ref: discovered.items[0].contract_ref,
+    native_request: {
+      method: 'terminal.put',
+      params: { terminal: 't1', core_id: status.core.id, created_ms: 0, name: 'x.txt', data: 'YWJj' }
+    },
+    deadline: Date.now() + 30_000
+  })
+  assert.equal(putDenied.isError, true, JSON.stringify(putDenied.raw))
+  assert.equal(putDenied.raw?.gateway_error?.code, 'forbidden', JSON.stringify(putDenied.raw))
+  // 长轮询是观察档：开关关闭时也能用。
+  const events = await ok('runtime_call', {
+    target,
+    expected_binding_revision: 1,
+    contract_ref: discovered.items[0].contract_ref,
+    native_request: { method: 'terminal.events', params: { after_seq: 0, limit: 4, timeout_ms: 100 } },
+    deadline: Date.now() + 30_000,
+    wait_ms: 5000
+  })
+  assert.equal(events.state, 'responded', JSON.stringify(events))
   console.log(
     JSON.stringify({
       ok: true,
@@ -69,7 +100,9 @@ try {
       methods,
       control_available: available['terminal.send'],
       describe_available: described.data.available,
-      call_denied: denied.raw.gateway_error.code
+      call_denied: denied.raw.gateway_error.code,
+      put_denied: putDenied.raw.gateway_error.code,
+      events_available: available['terminal.events']
     })
   )
 } finally {
