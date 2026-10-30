@@ -200,8 +200,37 @@ export async function openHerdrCoreClient(
     return new HerdrCoreRpcError(value.code as number, kind)
   }
 
+  /**
+   * 一个 DATA 帧的负载是一行或多行 JSON：core 会把紧挨着发生的通知合并进同一帧
+   * （真实 core 0.1.14 实测：终端被杀时 `status` 与 `finished` 同帧、两行）。
+   * 所以逐行解析，绝不把整帧当成一个 JSON；整帧一个字节都不丢，也不静默跳过坏行。
+   */
+  function frameLines(payload: Buffer): Buffer[] {
+    const lines: Buffer[] = []
+    let start = 0
+    for (;;) {
+      const end = payload.indexOf(0x0a, start)
+      const line = payload.subarray(start, end < 0 ? payload.byteLength : end)
+      if (line.byteLength > 0) {
+        lines.push(line)
+      }
+      if (end < 0) {
+        break
+      }
+      start = end + 1
+    }
+    // 空负载没有任何可解析的消息：交给解析去拒绝，和过去一样失败关闭。
+    return lines.length > 0 ? lines : [payload]
+  }
+
   /** 控制通道上的 JSON 行：回复按 id 配对，通知交给订阅者。 */
   function control(payload: Buffer): void {
+    for (const line of frameLines(payload)) {
+      controlLine(line)
+    }
+  }
+
+  function controlLine(payload: Buffer): void {
     const message = object(parseJson(payload, HERDR_CORE_MAX_FRAME_BYTES))
     if (message.jsonrpc !== '2.0') {
       fail('herdr_core_protocol_invalid')
@@ -243,15 +272,17 @@ export async function openHerdrCoreClient(
     entry.resolve(object(message.result))
   }
 
-  /** 事件通道：每帧是一行 JSON，按字节数回补信用。 */
+  /** 事件通道：每帧是一行或多行 JSON（逐行交付），整帧消费完再按字节数回补信用。 */
   function eventChannel(channel: number, payload: Buffer): void {
-    const message = object(parseJson(payload, HERDR_CORE_MAX_FRAME_BYTES))
-    if (typeof message.method !== 'string') {
-      fail('herdr_core_protocol_invalid')
-    }
-    const event = Object.freeze({ channel, method: message.method, message })
-    for (const listener of eventListeners) {
-      listener(event)
+    for (const line of frameLines(payload)) {
+      const message = object(parseJson(line, HERDR_CORE_MAX_FRAME_BYTES))
+      if (typeof message.method !== 'string') {
+        fail('herdr_core_protocol_invalid')
+      }
+      const event = Object.freeze({ channel, method: message.method, message })
+      for (const listener of eventListeners) {
+        listener(event)
+      }
     }
     // 消费完再回补，且一次不超过 core 的窗口。
     send(channel, CREDIT, creditPayload(Math.min(payload.byteLength, HERDR_CORE_WINDOW_BYTES)))

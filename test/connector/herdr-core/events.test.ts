@@ -35,6 +35,32 @@ const missed = (seq: number) =>
   })
 const heartbeat = (seq: number) => JSON.stringify({ method: 'heartbeat', params: { seq } })
 
+test('core 把紧挨着的通知合并进同一帧时逐行交付，连接不被关闭（真实 core 实测 status+finished）', async () => {
+  // 一帧里两行 JSON：终端被杀时 core 一起发出的 status 与 finished。
+  const merged = JSON.stringify([
+    { type: 'status', terminal: 't1', data: { status: null }, seq: 1 },
+    { type: 'finished', terminal: 't1', data: { reason: 'killed' }, seq: 2 }
+  ])
+  const core = await startFakeCore({ events: [merged, event(3)] })
+  try {
+    const client = await openHerdrCoreClient(core.socket)
+    const subscription = await subscribeHerdrCoreEvents({ client, contract: CONTRACT })
+    const seen: string[] = []
+    for (let index = 0; index < 3; index++) {
+      const notice = await subscription.next()
+      seen.push(notice.kind === 'event' ? `${notice.seq}:${notice.fact}` : notice.kind)
+    }
+    assert.deepEqual(seen, ['1:status', '2:finished', '3:status'])
+    // 连接仍然可用：之后的请求不会被一个被误判为损坏的帧牵连失败。
+    assert.equal(subscription.stats().closed, false)
+    await client.request('server.status', {}, 2000)
+    subscription.close()
+    client.close()
+  } finally {
+    await core.close()
+  }
+})
+
 test('订阅先拿快照，再按 seq 递增交付事件并回补信用', async () => {
   const core = await startFakeCore({ events: [event(1), event(2, 'turn'), heartbeat(2)] })
   try {

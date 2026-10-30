@@ -22,7 +22,7 @@ export type FakeCoreOptions = Readonly<{
   hello?: Record<string, unknown>
   /** 返回结果前的人为延迟，用来测超时。 */
   delay_ms?: number
-  /** 订阅后推送的事件行；每条一个 JSON 行。 */
+  /** 订阅后推送的事件行；每条一个 JSON 行。一项若是 JSON 数组，则其中各条合并进同一个帧（真实 core 对紧挨着的通知就是这样发的）。 */
   events?: readonly string[]
   /** `rpc.discover` 返回的文档；省略时返回空对象。 */
   discover?: Record<string, unknown>
@@ -207,10 +207,18 @@ export async function startFakeCore(options: FakeCoreOptions = {}): Promise<Fake
           pushed += 1
           credit -= Buffer.byteLength(line) + 1
           // 行可以只是 params（按 event 通知），也可以显式给出 method/params（missed、heartbeat）。
-          const body = JSON.parse(line) as Record<string, unknown>
-          const method = typeof body.method === 'string' ? body.method : 'event'
-          const params = method === 'event' && !('params' in body) ? body : body.params
-          send(subscription, { jsonrpc: '2.0', method, params })
+          const parsed = JSON.parse(line) as Record<string, unknown> | Record<string, unknown>[]
+          const notice = (body: Record<string, unknown>) => {
+            const method = typeof body.method === 'string' ? body.method : 'event'
+            const params = method === 'event' && !('params' in body) ? body : body.params
+            return { jsonrpc: '2.0', method, params }
+          }
+          if (Array.isArray(parsed)) {
+            const merged = parsed.map((body) => `${JSON.stringify(notice(body))}\n`).join('')
+            socket.write(frame(subscription, DATA, Buffer.from(merged)))
+          } else {
+            send(subscription, notice(parsed))
+          }
         }
       }
       const dispatch = /** 请求分发：只回帧，不回 plain 行。 */ (request: FakeCoreRequest) => {
