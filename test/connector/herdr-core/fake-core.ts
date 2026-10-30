@@ -28,6 +28,8 @@ export type FakeCoreOptions = Readonly<{
   discover?: Record<string, unknown>
   /** 覆盖默认终端事实（状态字、创建时间、地址）；控制档栅栏测试用。 */
   terminal?: Record<string, unknown>
+  /** `templates.list` 返回的模板；`terminal.run` 的模板核对测试用。 */
+  templates?: readonly Record<string, unknown>[]
 }>
 
 export type FakeCore = Readonly<{
@@ -58,59 +60,8 @@ function frame(channel: number, kind: number, payload: Buffer): Buffer {
   return Buffer.concat([header, payload])
 }
 
-/** 只处理本测试用到的参数形状；其它方法返回固定空结果。 */
-function defaultHandler(request: FakeCoreRequest, options: FakeCoreOptions): Record<string, unknown> {
-  switch (request.method) {
-    case 'rpc.discover':
-      return options.discover ?? {}
-    case 'server.status':
-      return {
-        core: { id: '0f0e0d0c0b0a0908', name: 'fake-core' },
-        version: '0.1.14',
-        pid: process.pid,
-        uptime_ms: 42,
-        holders: [],
-        holder: null,
-        installed_by: null,
-        live: 1,
-        finished: 0
-      }
-    case 'terminal.list':
-      return { terminals: [terminal(options)], hidden_finished: 0 }
-    case 'terminal.get':
-      return terminal(options)
-    case 'terminal.send':
-      return { turn: 0, started: null, status: null, wait: null }
-    case 'terminal.keys':
-      return { turn: 0, status: null }
-    case 'terminal.interrupt':
-      return { outcome: 'unknown', key: 'ctrl+c' }
-    case 'terminal.put':
-      return { path: '/tmp/rovloom-put.png', bytes: 3 }
-    case 'terminal.rm':
-      return { removed: 't1' }
-    case 'terminal.kill':
-    case 'terminal.keep':
-    case 'terminal.label':
-      return terminal(options)
-    case 'terminal.read':
-      return { text: 'hello\n', complete: true, how: 'screen' }
-    case 'terminal.wait':
-      return {
-        terminal: 't1',
-        ended: false,
-        reason: 'timeout',
-        turn: 0,
-        children: [],
-        status: null,
-        exit_code: null,
-        signal: null,
-        from: null
-      }
-    default:
-      return {}
-  }
-}
+/** 假 core 的进程内状态：每次 terminal.run 生成一个新的地址，terminal.list 报全部。 */
+type FakeState = { runs: number }
 
 /** 与真实结果字段一致的终端事实，供三元组核对。 */
 function terminal(options: FakeCoreOptions = {}): Record<string, unknown> {
@@ -144,6 +95,85 @@ function terminal(options: FakeCoreOptions = {}): Record<string, unknown> {
   }
 }
 
+/** 第 index 个由 terminal.run 启动的终端；地址与 created_ms 逐次不同。 */
+function runTerminal(options: FakeCoreOptions, index: number): Record<string, unknown> {
+  return terminal({
+    ...options,
+    terminal: { ...options.terminal, address: 't' + index, created_ms: 1793335137041 + index }
+  })
+}
+
+/** 只处理本测试用到的参数形状；其它方法返回固定空结果。 */
+function defaultHandler(request: FakeCoreRequest, options: FakeCoreOptions, state: FakeState): Record<string, unknown> {
+  switch (request.method) {
+    case 'rpc.discover':
+      return options.discover ?? {}
+    case 'server.status':
+      return {
+        core: { id: '0f0e0d0c0b0a0908', name: 'fake-core' },
+        version: '0.1.14',
+        pid: process.pid,
+        uptime_ms: 42,
+        holders: [],
+        holder: null,
+        installed_by: null,
+        live: 1,
+        finished: 0
+      }
+    case 'terminal.list':
+      return {
+        terminals: Array.from({ length: Math.max(1, state.runs) }, (_, index) =>
+          state.runs === 0 ? terminal(options) : runTerminal(options, index + 1)
+        ),
+        hidden_finished: 0
+      }
+    case 'terminal.get':
+      return terminal(options)
+    case 'terminal.send':
+      return { turn: 0, started: null, status: null, wait: null }
+    case 'terminal.keys':
+      return { turn: 0, status: null }
+    case 'terminal.interrupt':
+      return { outcome: 'unknown', key: 'ctrl+c' }
+    case 'terminal.put':
+      return { path: '/tmp/rovloom-put.png', bytes: 3 }
+    case 'terminal.rm':
+      return { removed: 't1' }
+    case 'templates.list':
+      return { templates: options.templates ?? [] }
+    case 'terminal.run': {
+      state.runs += 1
+      return {
+        ...runTerminal(options, state.runs),
+        first_message: null,
+        output: null,
+        wait: null,
+        template: null
+      }
+    }
+    case 'terminal.kill':
+    case 'terminal.keep':
+    case 'terminal.label':
+      return terminal(options)
+    case 'terminal.read':
+      return { text: 'hello\n', complete: true, how: 'screen' }
+    case 'terminal.wait':
+      return {
+        terminal: 't1',
+        ended: false,
+        reason: 'timeout',
+        turn: 0,
+        children: [],
+        status: null,
+        exit_code: null,
+        signal: null,
+        from: null
+      }
+    default:
+      return {}
+  }
+}
+
 /** 建立假 core；返回的 socket 已可连接。 */
 export async function startFakeCore(options: FakeCoreOptions = {}): Promise<FakeCore> {
   const directory = mkdtempSync(join(tmpdir(), 'rovloom-hc-'))
@@ -154,6 +184,7 @@ export async function startFakeCore(options: FakeCoreOptions = {}): Promise<Fake
   const credits: number[] = []
   const requests: string[] = []
   const calls: FakeCoreRequest[] = []
+  const state: FakeState = { runs: 0 }
   const sockets = new Set<Socket>()
   let pushed = 0
   const server: Server = createServer(
@@ -188,7 +219,7 @@ export async function startFakeCore(options: FakeCoreOptions = {}): Promise<Fake
         const reply = () => {
           let result: Record<string, unknown>
           try {
-            result = options.handler ? options.handler(request) : defaultHandler(request, options)
+            result = options.handler ? options.handler(request) : defaultHandler(request, options, state)
           } catch {
             send(0, {
               jsonrpc: '2.0',

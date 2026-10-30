@@ -151,6 +151,7 @@ test('资源工厂登记五个端口，目录暴露读取与控制档，身份�
       // 订阅是 framed 通道上的持续流，Wire 桥接只做普通 RPC：目录不列、describe 不开，档位表里仍有它。
       assert.deepEqual(resolved.methods.map((entry) => entry.method).sort(), [
         'server.status',
+        'templates.list',
         'terminal.get',
         'terminal.interrupt',
         'terminal.keep',
@@ -161,6 +162,7 @@ test('资源工厂登记五个端口，目录暴露读取与控制档，身份�
         'terminal.put',
         'terminal.read',
         'terminal.rm',
+        'terminal.run',
         'terminal.send',
         'terminal.wait'
       ])
@@ -178,8 +180,12 @@ test('资源工厂登记五个端口，目录暴露读取与控制档，身份�
       assert.match(String((send.guide as string[])[2]), /wait=true/u)
       // 没有专门说明的方法不补造 usage。
       assert.equal(resolved.describe('server.status').usage, undefined)
-      // 宿主级方法与事件订阅仍不在目录里，即使已审核也不能被 describe 打开。
-      assert.throws(() => resolved.describe('terminal.run'), /runtime_method_unavailable/u)
+      // terminal.run 本阶段开放，模板形态由 rovloom 自有参数声明。
+      const run = resolved.describe('terminal.run')
+      assert.equal(run.tier, 'host')
+      assert.ok((run.params_schema as { properties: Record<string, unknown> }).properties.template)
+      // 其余宿主级方法与事件订阅仍不在目录里，即使已审核也不能被 describe 打开。
+      assert.throws(() => resolved.describe('machine.exec'), /runtime_method_unavailable/u)
       assert.throws(() => resolved.describe('events.subscribe'), /runtime_method_unavailable/u)
       assert.equal(resources.catalog.resolve({ ...target, session: 'other' }, { id: 'alice' }), undefined)
       // 没有本机身份事实时不能用配置冒充证据。
@@ -223,8 +229,14 @@ test('资源工厂登记五个端口，目录暴露读取与控制档，身份�
       assert.throws(() => admit(send, false), /terminal_execution_disabled/u)
       assert.equal(admit(send, true), true)
       assert.equal(admit({ method: 'server.status', params: {} }, false), true)
-      // 宿主级方法仍在登记前拒绝，与开关无关。
-      assert.throws(() => admit({ method: 'terminal.run', params: {} }, true), /herdr_core_method_unavailable/u)
+      // terminal.run 随开关走：关闭时登记前拒绝，打开时放行。
+      assert.throws(
+        () => admit({ method: 'terminal.run', params: { argv: ['cat'] } }, false),
+        /terminal_execution_disabled/u
+      )
+      assert.equal(admit({ method: 'terminal.run', params: { argv: ['cat'] } }, true), true)
+      // 其余宿主级方法仍在登记前拒绝，与开关无关。
+      assert.throws(() => admit({ method: 'machine.exec', params: {} }, true), /herdr_core_method_unavailable/u)
     } finally {
       await gated.release()
     }
@@ -336,17 +348,21 @@ test('Wire 核心先复核档位与参数，再建立许可，结果用审核 sc
       /herdr_core_terminal_fence_required/u
     )
     assert.throws(
-      () =>
-        adapter.validator.validateRequest(
-          { method: 'terminal.run', params: { terminal: 't1', argv: ['sh'] } },
-          resolved
-        ),
+      () => adapter.validator.validateRequest({ method: 'machine.exec', params: { argv: ['sh'] } }, resolved),
       /herdr_core_method_unavailable/u
     )
+    // 读历史已开放到 1000 行，超过上限仍是参数错误。
     assert.throws(
       () =>
-        adapter.validator.validateRequest({ method: 'terminal.read', params: { terminal: 't1', lines: 20 } }, resolved),
-      /herdr_core_read_history_unsupported/u
+        adapter.validator.validateRequest(
+          { method: 'terminal.read', params: { terminal: 't1', lines: 1001 } },
+          resolved
+        ),
+      /herdr_core_read_history_exceeds_limit/u
+    )
+    // 读历史已开放到 1000 行；开关门禁在执行端，不在这里。
+    assert.doesNotThrow(() =>
+      adapter.validator.validateRequest({ method: 'terminal.read', params: { terminal: 't1', lines: 20 } }, resolved)
     )
     adapter.encodeRequest(
       { id: attempt.native_request_id, method: 'terminal.read', params: { terminal: 't1', lines: 0 } },

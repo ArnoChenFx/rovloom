@@ -105,9 +105,11 @@ test('blocked parameters are refused before any schema or native call', () => {
     () => reviewHerdrCoreParams('terminal.get', { caller: 't2', terminal: 't1' }),
     /herdr_core_param_blocked/u
   )
+  // 读历史已开放（≤1000 行），超过上限仍然拒绝。
+  assert.doesNotThrow(() => reviewHerdrCoreParams('terminal.read', { terminal: 't1', lines: 5 }))
   assert.throws(
-    () => reviewHerdrCoreParams('terminal.read', { terminal: 't1', lines: 5 }),
-    /herdr_core_read_history_unsupported/u
+    () => reviewHerdrCoreParams('terminal.read', { terminal: 't1', lines: 1001 }),
+    /herdr_core_read_history_exceeds_limit/u
   )
   assert.throws(
     () => reviewHerdrCoreParams('terminal.wait', { terminal: 't1', timeout: 61 }),
@@ -117,10 +119,11 @@ test('blocked parameters are refused before any schema or native call', () => {
     () => reviewHerdrCoreParams('terminal.wait', { terminal: 't1', timeout: 0 }),
     /herdr_core_timeout_invalid/u
   )
-  // 宿主级方法仍不在开放集合里；控制档已开放，但必须先带终端三元组栅栏。
+  // 其余宿主级方法仍不在开放集合里；terminal.run 已开放，但 parent/caller 一律拒绝。
+  assert.throws(() => reviewHerdrCoreParams('machine.exec', { argv: ['sh'] }), /herdr_core_method_unavailable/u)
   assert.throws(
-    () => reviewHerdrCoreParams('terminal.run', { terminal: 't1', argv: ['sh'] }),
-    /herdr_core_method_unavailable/u
+    () => reviewHerdrCoreParams('terminal.run', { argv: ['sh'], parent: 't1' }),
+    /herdr_core_param_blocked/u
   )
   assert.throws(
     () => reviewHerdrCoreParams('terminal.send', { terminal: 't1', text: 'x' }),

@@ -18,8 +18,14 @@ import type { HerdrCoreAttachment } from './installation.js'
 import { HERDR_CORE_REATTACH_WINDOW_MS } from './installation.js'
 import { contractRef } from '../../wire/index.js'
 import type { V2Target } from '../../wire/types.js'
-import { herdrCoreRequestTimeout, herdrCoreControl, reviewHerdrCoreParams } from './methods.js'
-import { assertHerdrCoreTerminal, herdrCoreControlNativeParams } from './control.js'
+import {
+  herdrCoreRequestTimeout,
+  herdrCoreControl,
+  herdrCoreNativeParams,
+  reviewHerdrCoreParams,
+  HERDR_CORE_MAX_RUN_TERMINALS
+} from './methods.js'
+import { assertHerdrCoreTerminal, assertHerdrCoreTemplate } from './control.js'
 import { assertTerminalExecutionAllowed } from '../terminal-execution.js'
 
 /** 已验证的 herdr-core 本机来源与当前 epoch 的受保护路由。 */
@@ -39,6 +45,8 @@ export type HerdrCoreConnectorOptions = Readonly<{
   now(): number
   /** 本机直接终端输入开关；省略即关闭。目录、Gateway 登记与最终写入三处共用同一个观察值。 */
   terminalExecution?: () => boolean
+  /** 经 terminal.run 启动的终端上限；省略用默认值。 */
+  max_run_terminals?: number
 }>
 
 /** 只允许 method/params 与 Wire 注入的原生 id；未知字段是协议不符。 */
@@ -121,6 +129,12 @@ export function createHerdrCoreConnectorRuntime(
   const execution = createProviderWireAdapter(core, 'herdr_core_transport_unsupported', options.now)
   const seen = new Map<string, number>()
   const active = new Set<AbortController>()
+  /**
+   * 本 Connector 进程经 `terminal.run` 启动、仍认为存活的终端（address → created_ms）。
+   * 只是「不要无限制启动」的本地护栏，不是 core 级配额；Connector 重启后从头计数。
+   */
+  const started = new Map<string, number>()
+  let startedCore: string | undefined
   let closed = false
   let highWater = -1
 
@@ -215,6 +229,44 @@ export function createHerdrCoreConnectorRuntime(
       )
       // 先复核本机来源，再写发送墓碑：来源已变化时不能把一次未发送的意图记成已发送。
       installation.assert()
+      // 启动类：先按本地上限与模板事实核对，再写发送墓碑（失败确定未派发）。
+      if (request.method === 'terminal.run') {
+        const client = installation.client()
+        const coreId = client.hello.core.id
+        if (startedCore !== coreId) {
+          // 换了 core 实例，旧地址不再属于这台设备。
+          started.clear()
+          startedCore = coreId
+        }
+        const capacity = options.max_run_terminals ?? HERDR_CORE_MAX_RUN_TERMINALS
+        if (started.size >= capacity) {
+          // 到上限时用一次 terminal.list 回收已经不在的终端，读不到就失败关闭。
+          const listed = installation
+            .record()
+            .contract.validateResult('terminal.list', await client.request('terminal.list', {}, timeout))
+          const live = new Set(
+            (listed.terminals as JsonObject[]).map(
+              /** 三元组一致才算同一个终端。 */ (entry) => `${String(entry.address)}:${String(entry.created_ms)}`
+            )
+          )
+          for (const [address, created] of started) {
+            if (!live.has(`${address}:${created}`)) {
+              started.delete(address)
+            }
+          }
+          const capacity = options.max_run_terminals ?? HERDR_CORE_MAX_RUN_TERMINALS
+          if (started.size >= capacity) {
+            fail('herdr_core_run_capacity')
+          }
+        }
+        await assertHerdrCoreTemplate({
+          client,
+          contract: installation.record().contract,
+          params: request.params,
+          timeout_ms: timeout
+        })
+        installation.assert()
+      }
       // 控制档在写入前自己核对终端三元组并判断 blocked：core 只在 send 上拦 blocked（spike 3f）。
       if (herdrCoreControl(request.method)) {
         await assertHerdrCoreTerminal({
@@ -230,13 +282,17 @@ export function createHerdrCoreConnectorRuntime(
       claims.claim(observedBinding, anchor.dedup_expires_at)
       checkSignal(controller.signal)
       dispatched = true
-      // 栅栏字段只属于 rovloom，core 不认识它们；发送前显式剥离，不依赖 core 静默忽略未知字段。
-      const result = await installation
-        .client()
-        .request(request.method, herdrCoreControlNativeParams(request.params), timeout)
+      // 栅栏与 template 字段只属于 rovloom，core 不认识它们；发送前显式剥离。
+      const result = await installation.client().request(request.method, herdrCoreNativeParams(request.params), timeout)
       checkSignal(controller.signal)
       installation.assert()
       core.validator.validateResponse(result, context)
+      // 记录/回收本进程启动过的终端；kill/rm 成功后不再计入。
+      if (request.method === 'terminal.run') {
+        started.set(String(result.address), Number(result.created_ms))
+      } else if (request.method === 'terminal.kill' || request.method === 'terminal.rm') {
+        started.delete(String(request.params.terminal))
+      }
       return Object.freeze({ binding: observedBinding, native_response: result })
     } catch (error) {
       const code =

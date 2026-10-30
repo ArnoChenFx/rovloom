@@ -291,6 +291,13 @@ function paramsSchema(method: JsonObject, budget: AnnotationBudget): JsonObject 
   // 控制档的终端栅栏字段由 rovloom 追加：调用方必须带它认定的 (core_id, created_ms)，
   // core 不认识这两个字段，执行端在发请求前显式剥离（不依赖 core 静默忽略未知字段）。
   const name = method.name
+  if (name === 'terminal.run') {
+    // 模板形态由调用方显式声明，执行端据此用 templates.list 核对 argv[0]。
+    if (Object.hasOwn(properties, 'template')) {
+      fail('herdr_core_schema_invalid')
+    }
+    properties.template = { type: 'boolean' }
+  }
   if (typeof name === 'string' && herdrCoreControl(name)) {
     for (const field of HERDR_CORE_FENCE_PARAMS) {
       if (Object.hasOwn(properties, field)) {

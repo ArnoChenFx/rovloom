@@ -12,7 +12,7 @@
 import type { JsonObject } from '../../wire/types.js'
 import { fail } from '../../wire/index.js'
 import type { HerdrCoreClient } from './client.js'
-import { herdrCoreInput, HERDR_CORE_FENCE_PARAMS } from './methods.js'
+import { herdrCoreInput, HERDR_CORE_OWNED_PARAMS } from './methods.js'
 import type { HerdrCoreContract } from './schema.js'
 
 /** 单次终端状态读取的本地期限：它只是执行前检查，不等待原生工作。 */
@@ -39,7 +39,7 @@ export function herdrCoreFence(params: Readonly<Record<string, unknown>>): Herdr
 export function herdrCoreControlNativeParams(params: Readonly<Record<string, unknown>>): JsonObject {
   const native: JsonObject = {}
   for (const [key, value] of Object.entries(params)) {
-    if (!HERDR_CORE_FENCE_PARAMS.includes(key)) {
+    if (!HERDR_CORE_OWNED_PARAMS.includes(key)) {
       native[key] = value
     }
   }
@@ -63,6 +63,55 @@ function blocked(status: unknown): boolean {
     fail('herdr_core_terminal_unavailable')
   }
   return state === 'blocked'
+}
+
+/**
+ * 模板形态核对：`argv[0]` 是裸名字时，core 会先查模板、找不到再当 PATH 程序。
+ * 所以调用方必须声明 `template: true` 才算模板形态；声明了就必须是现存模板，
+ * 没声明但恰好与模板同名则拒绝（否则会悄悄跑模板而不是那个程序）。
+ *
+ * 核对发生在 Connector 写入前（Gateway 的登记已经发生，但结果确定未派发）：
+ * Gateway 本机没有 core 连接，做不了这次查询。
+ */
+export async function assertHerdrCoreTemplate(options: {
+  client: HerdrCoreClient
+  contract: HerdrCoreContract
+  params: Readonly<Record<string, unknown>>
+  timeout_ms: number
+}): Promise<void> {
+  const argv = options.params.argv
+  if (!Array.isArray(argv) || argv.length === 0) {
+    return
+  }
+  const first = argv[0]
+  if (typeof first !== 'string' || first.includes('/')) {
+    // 路径形态不是模板名；声明成模板就是自相矛盾。
+    if (options.params.template === true) {
+      fail('herdr_core_template_unavailable')
+    }
+    return
+  }
+  const budget = Math.min(options.timeout_ms, HERDR_CORE_FENCE_TIMEOUT_MS)
+  if (budget < 1) {
+    fail('herdr_core_timeout')
+  }
+  let names: string[]
+  try {
+    const listed = options.contract.validateResult(
+      'templates.list',
+      await options.client.request('templates.list', {}, budget)
+    )
+    names = (listed.templates as JsonObject[]).map(/** 只取名字，忽略命令文本。 */ (entry) => String(entry.name))
+  } catch {
+    fail('herdr_core_template_unavailable')
+  }
+  const exists = names.includes(first)
+  if (options.params.template === true && !exists) {
+    fail('herdr_core_template_unavailable')
+  }
+  if (options.params.template !== true && exists) {
+    fail('herdr_core_template_ambiguous')
+  }
 }
 
 /**

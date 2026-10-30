@@ -103,13 +103,19 @@ export type DispatchRefusalCode =
   | 'herdr_core_terminal_identity_mismatch'
   | 'herdr_core_terminal_unavailable'
   | 'herdr_core_connection_closed'
+  | 'herdr_core_template_unavailable'
+  | 'herdr_core_template_ambiguous'
+  | 'herdr_core_run_capacity'
 /** 闭合集合的运行时副本；编解码与账本共用同一份，避免两处枚举漂移。 */
 export const DISPATCH_REFUSAL_CODES: readonly DispatchRefusalCode[] = Object.freeze([
   'terminal_execution_disabled',
   'herdr_core_terminal_blocked',
   'herdr_core_terminal_identity_mismatch',
   'herdr_core_terminal_unavailable',
-  'herdr_core_connection_closed'
+  'herdr_core_connection_closed',
+  'herdr_core_template_unavailable',
+  'herdr_core_template_ambiguous',
+  'herdr_core_run_capacity'
 ])
 export type TerminalExecutionState = Readonly<{ binding: ProviderBinding; enabled: boolean }>
 /** 设备最近一次上报的平台；distribution 只在 Linux 且 os-release 可读时出现。 */

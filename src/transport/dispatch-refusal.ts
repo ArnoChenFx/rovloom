@@ -14,7 +14,11 @@ const HERDR_CORE_REFUSALS: readonly string[] = Object.freeze([
   'herdr_core_terminal_blocked',
   'herdr_core_terminal_identity_mismatch',
   'herdr_core_terminal_unavailable',
-  'herdr_core_connection_closed'
+  'herdr_core_connection_closed',
+  // 启动前的模板核对与本地容量上限：都在写发送墓碑之前判定。
+  'herdr_core_template_unavailable',
+  'herdr_core_template_ambiguous',
+  'herdr_core_run_capacity'
 ])
 
 export interface DispatchRefusalLedger {

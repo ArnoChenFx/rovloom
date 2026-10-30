@@ -179,7 +179,7 @@ test('Connector 只通过已审核的 5 个读取执行原生调用', async () =
   }
 })
 
-test('控制档与 read lines>0 在 Wire 与原生请求之前被拒绝', async () => {
+test('宿主级方法与 blocked 参数在 Wire 与原生请求之前被拒绝', async () => {
   const core = await startFakeCore({ discover: JSON.parse(OPENRPC.toString('utf8')) })
   const { root, config } = fixture(core)
   const attached = await attachment(core)
@@ -191,9 +191,10 @@ test('控制档与 read lines>0 在 Wire 与原生请求之前被拒绝', async 
   try {
     const session = resources.session(connection())
     for (const [method, params] of [
+      // 控制档已开放，但必须先带终端三元组栅栏；这里缺 core_id/created_ms。
       ['terminal.send', { terminal: 't1', text: 'x' }],
       ['terminal.keys', { terminal: 't1', keys: ['Enter'] }],
-      ['terminal.read', { terminal: 't1', lines: 20 }],
+      ['terminal.run', { argv: ['sh', '-c', 'id'], no_parent: false }],
       ['terminal.get', { terminal: 't1', caller: 't2' }]
     ] as const) {
       const raw = request(method, params)

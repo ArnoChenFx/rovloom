@@ -65,6 +65,7 @@ export const HERDR_CORE_METHODS: Readonly<Record<string, ProviderMethodTier>> = 
  */
 export const HERDR_CORE_READ_METHODS: readonly string[] = Object.freeze([
   'server.status',
+  'templates.list',
   'terminal.get',
   'terminal.list',
   'terminal.read',
@@ -100,9 +101,16 @@ export const HERDR_CORE_INPUT_METHODS: readonly string[] = Object.freeze([
  * 开放集合 = 5 个读取 + 8 个控制档。目录、Wire 准入与执行入口都只认这个集合：
  * Wire 桥接只做普通 RPC，不带流。
  */
+/**
+ * 启动类：`terminal.run` 是宿主级的任意程序能力，本阶段随 `allow_terminal_execution` 开放；
+ * 它不接收 `terminal`，所以不需要终端三元组栅栏，但模板形态要先用 `templates.list` 核对。
+ */
+export const HERDR_CORE_RUN_METHODS: readonly string[] = Object.freeze(['terminal.run'])
+
 export const HERDR_CORE_EXPOSED_METHODS: readonly string[] = Object.freeze([
   ...HERDR_CORE_READ_METHODS,
-  ...HERDR_CORE_CONTROL_METHODS
+  ...HERDR_CORE_CONTROL_METHODS,
+  ...HERDR_CORE_RUN_METHODS
 ])
 
 /**
@@ -112,6 +120,22 @@ export const HERDR_CORE_EXPOSED_METHODS: readonly string[] = Object.freeze([
  * 绝不把输入送给同地址的另一个终端。
  */
 export const HERDR_CORE_FENCE_PARAMS: readonly string[] = Object.freeze(['core_id', 'created_ms'])
+
+/**
+ * rovloom 自有参数：`template` 让调用方声明 `argv[0]` 是模板名（core 不认识它），
+ * 执行端据此决定是否用 `templates.list` 核对。它们与栅栏字段一样在发送前剥离。
+ */
+export const HERDR_CORE_OWNED_PARAMS: readonly string[] = Object.freeze([...HERDR_CORE_FENCE_PARAMS, 'template'])
+
+/** `terminal.run` 的参数上限：argv 条数与总字节、env 条数、路径与名称长度。 */
+export const HERDR_CORE_RUN_MAX_ARGV = 64
+export const HERDR_CORE_RUN_MAX_ARGV_BYTES = 32 * 1024
+export const HERDR_CORE_RUN_MAX_ENV = 64
+export const HERDR_CORE_RUN_MAX_LINE_BYTES = 32 * 1024
+/** `terminal.read` 的历史行数上限：单次结果仍受结果预算约束。 */
+export const HERDR_CORE_READ_MAX_LINES = 1000
+/** 由本 Connector 同时存活的、经 `terminal.run` 启动的终端上限（默认值，进配置参考）。 */
+export const HERDR_CORE_MAX_RUN_TERMINALS = 32
 
 /** `put` 的数据是 base64 文本；上限按单帧预算收紧，超限拒绝而不是截断。 */
 export const HERDR_CORE_PUT_MAX_BASE64 = 512 * 1024
@@ -127,6 +151,8 @@ export const HERDR_CORE_LABEL_MAX_LENGTH = 128
 export const HERDR_CORE_SEND_MAX_MS = 20_000
 /** `interrupt` 不传 timeout 时 core 自己观察 10 秒；本地期限据此留余量。 */
 export const HERDR_CORE_INTERRUPT_DEFAULT_SECONDS = 10
+/** `terminal.run` 不带 wait 时的本地期限：模板启动要等第一次状态报告（core 最多 30 秒）。 */
+export const HERDR_CORE_RUN_MAX_MS = 40_000
 
 /**
  * 事件订阅不是普通 RPC：它在 framed 通道上建立持续流，只给本地订阅入口（events.ts）使用，
@@ -172,6 +198,7 @@ export const HERDR_CORE_BLOCKED_PARAMS: readonly string[] = Object.freeze([
   'calls_you',
   'core',
   'on',
+  'parent',
   'children_of'
 ])
 
@@ -208,6 +235,14 @@ export function herdrCoreRequestTimeout(method: string, params: Readonly<Record<
       HERDR_CORE_REQUEST_MAX_MS
     )
   }
+  if (method === 'terminal.run' && params.wait === true) {
+    // 启动 + 等第一轮；期限由调用方显式给出（≤60 秒），与 send wait 一致。
+    return Math.min(Math.ceil(seconds(params.timeout, 0) * 1000) + 5000, HERDR_CORE_REQUEST_MAX_MS)
+  }
+  if (method === 'terminal.run') {
+    // 模板形态要等智能体第一次报状态（core 默认最多 30 秒），留出余量。
+    return HERDR_CORE_RUN_MAX_MS
+  }
   return 5000
 }
 
@@ -243,7 +278,7 @@ export function herdrCoreInput(method: string): boolean {
 export function herdrCoreNativeParams(params: Readonly<Record<string, unknown>>): Record<string, unknown> {
   const native: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(params)) {
-    if (!HERDR_CORE_FENCE_PARAMS.includes(key)) {
+    if (!HERDR_CORE_OWNED_PARAMS.includes(key)) {
       native[key] = value
     }
   }
@@ -283,6 +318,118 @@ function reviewFence(params: Readonly<Record<string, unknown>>): void {
 function reviewBounded(value: unknown, code: string, limit: number): void {
   if (typeof value !== 'string' || Buffer.byteLength(value) > limit) {
     fail(code)
+  }
+}
+
+/** `env` 键名沿用进程环境变量的形状；只校验形状，不回显值。 */
+function reviewRunEnv(value: unknown): void {
+  if (value === undefined) {
+    return
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    fail('herdr_core_param_invalid')
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length > HERDR_CORE_RUN_MAX_ENV) {
+    fail('herdr_core_param_invalid')
+  }
+  for (const [key, entry] of entries) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) || typeof entry !== 'string' || entry.length > 4096) {
+      fail('herdr_core_param_invalid')
+    }
+  }
+}
+
+/** `terminal.run` 的逐项收紧：任意程序执行，参数必须完整可核对。 */
+function reviewRunParams(params: Readonly<Record<string, unknown>>): void {
+  const argv = params.argv
+  const line = params.line
+  if (argv !== undefined && line !== undefined) {
+    fail('herdr_core_param_invalid')
+  }
+  if (argv !== undefined) {
+    if (
+      !Array.isArray(argv) ||
+      argv.length > HERDR_CORE_RUN_MAX_ARGV ||
+      argv.some(
+        /** 逐项字符串，NUL 与空串都不接受。 */ (entry) => typeof entry !== 'string' || !entry || entry.includes('\0')
+      )
+    ) {
+      fail('herdr_core_param_invalid')
+    }
+    if (Buffer.byteLength(JSON.stringify(argv)) > HERDR_CORE_RUN_MAX_ARGV_BYTES) {
+      fail('herdr_core_text_too_large')
+    }
+  }
+  if (line !== undefined) {
+    if (typeof line !== 'string' || !line || line.includes('\0')) {
+      fail('herdr_core_param_invalid')
+    }
+    if (Buffer.byteLength(line) > HERDR_CORE_RUN_MAX_LINE_BYTES) {
+      fail('herdr_core_text_too_large')
+    }
+  }
+  if (params.template !== undefined && typeof params.template !== 'boolean') {
+    fail('herdr_core_param_invalid')
+  }
+  if (params.template === true && (!Array.isArray(argv) || argv.length === 0)) {
+    fail('herdr_core_template_required')
+  }
+  if (params.cwd !== undefined && params.cwd !== null) {
+    if (
+      typeof params.cwd !== 'string' ||
+      !params.cwd.startsWith('/') ||
+      params.cwd.includes('\0') ||
+      Buffer.byteLength(params.cwd) > 4096
+    ) {
+      fail('herdr_core_param_invalid')
+    }
+  }
+  if (params.name !== undefined && params.name !== null) {
+    if (typeof params.name !== 'string' || !/^[a-z0-9._-]{1,32}$/u.test(params.name)) {
+      fail('herdr_core_param_invalid')
+    }
+  }
+  reviewRunEnv(params.env)
+  if (params.labels !== undefined) {
+    const labels = params.labels
+    if (!labels || typeof labels !== 'object' || Array.isArray(labels)) {
+      fail('herdr_core_param_invalid')
+    }
+    const entries = Object.entries(labels as Record<string, unknown>)
+    if (
+      entries.length > HERDR_CORE_LABELS_MAX ||
+      entries.some(
+        /** 标签键与值都只接受有界文本。 */ ([key, value]) =>
+          !/^[A-Za-z0-9._-]{1,64}$/u.test(key) ||
+          typeof value !== 'string' ||
+          value.length > HERDR_CORE_LABEL_MAX_LENGTH
+      )
+    ) {
+      fail('herdr_core_param_invalid')
+    }
+  }
+  for (const key of ['keep', 'rm', 'wait', 'die_with_parent', 'outlive_parent']) {
+    if (params[key] !== undefined && typeof params[key] !== 'boolean') {
+      fail('herdr_core_param_invalid')
+    }
+  }
+  // 没有父终端时 core 会往父智能体输入里打字；这两个参数只接受 true，不要求必填。
+  for (const key of ['no_parent', 'no_notify']) {
+    if (params[key] !== undefined && params[key] !== true) {
+      fail('herdr_core_parent_unsupported')
+    }
+  }
+  if (params.wait === true) {
+    const timeout = params.timeout
+    if (typeof timeout !== 'number' || !Number.isFinite(timeout) || timeout <= 0) {
+      fail('herdr_core_timeout_invalid')
+    }
+    if (timeout > HERDR_CORE_WAIT_MAX_SECONDS) {
+      fail('herdr_core_timeout_exceeds_limit')
+    }
+  } else if (params.timeout !== undefined && params.timeout !== null) {
+    fail('herdr_core_param_invalid')
   }
 }
 
@@ -405,10 +552,15 @@ export function reviewHerdrCoreParams(method: string, params: Readonly<Record<st
     return
   }
   if (method === 'terminal.read') {
-    // lines>0 会让 core 自己滚动取历史：全屏程序会收到鼠标滚轮输入。
+    // lines>0 会让 core 自己滚动取历史：全屏程序会收到鼠标滚轮输入，所以它同时受开关约束。
     const lines = params.lines
-    if (lines !== undefined && lines !== 0) {
-      fail('herdr_core_read_history_unsupported')
+    if (lines !== undefined) {
+      if (typeof lines !== 'number' || !Number.isSafeInteger(lines) || lines < 0) {
+        fail('herdr_core_param_invalid')
+      }
+      if (lines > HERDR_CORE_READ_MAX_LINES) {
+        fail('herdr_core_read_history_exceeds_limit')
+      }
     }
     return
   }
@@ -424,7 +576,11 @@ export function reviewHerdrCoreParams(method: string, params: Readonly<Record<st
     }
     return
   }
-  if (method === 'terminal.get') {
+  if (method === 'terminal.get' || method === 'templates.list') {
+    return
+  }
+  if (method === 'terminal.run') {
+    reviewRunParams(params)
     return
   }
   fail('herdr_core_method_unavailable')

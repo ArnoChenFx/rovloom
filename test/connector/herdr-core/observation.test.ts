@@ -53,9 +53,10 @@ test('blocked parameters never reach the core', async () => {
       observation.call('terminal.get', { caller: 't2', terminal: 't1' }),
       /herdr_core_param_blocked/u
     )
+    // 观察入口只做读取：控制档与启动类都不在这里，避免绕过 blocked 与三元组核对。
     await assert.rejects(
-      observation.call('terminal.read', { terminal: 't1', lines: 40 }),
-      /herdr_core_read_history_unsupported/u
+      observation.call('terminal.send', { terminal: 't1', core_id: 'a'.repeat(16), created_ms: 1, text: 'x' }),
+      /herdr_core_method_unavailable/u
     )
     await assert.rejects(
       observation.call('terminal.send', { terminal: 't1', text: 'x' }),
