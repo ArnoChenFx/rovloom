@@ -101,8 +101,12 @@ export async function assertHerdrCoreTerminal(options: {
   if (live.address !== fence.address || live.created_ms !== fence.created_ms) {
     fail('herdr_core_terminal_identity_mismatch')
   }
-  if (live.state !== 'live') {
-    fail('herdr_core_terminal_unavailable')
+  // 送输入或写文件要求终端仍在运行；kill/rm/keep/label 改的是记录，
+  // 必须能对已结束的终端使用（rm 就是用来删除已结束终端的）。
+  if (herdrCoreInput(options.method) || options.method === 'terminal.put') {
+    if (live.state !== 'live') {
+      fail('herdr_core_terminal_unavailable')
+    }
   }
   if (!herdrCoreInput(options.method)) {
     return

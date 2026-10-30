@@ -154,6 +154,9 @@ test('读不到终端事实或终端已结束时 fail-closed', async () => {
     async ({ core, session }) => {
       await refuses(execute(session, 'terminal.send', fence({ text: 'x' })), 'herdr_core_terminal_unavailable')
       assert.deepEqual(core.requests, ['terminal.get'])
+      // 已结束的终端仍能按记录收拾：rm 就是用来删除它的。
+      const removed = await execute(session, 'terminal.rm', fence({}), '2')
+      assert.equal(removed.removed, 't1')
     }
   )
   await withSession(

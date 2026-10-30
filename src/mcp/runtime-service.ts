@@ -65,7 +65,9 @@ const errors: Record<string, ServiceErrorCode> = {
   herdr_core_terminal_identity_mismatch: 'conflict',
   herdr_core_terminal_unavailable: 'unavailable',
   herdr_core_connection_closed: 'unavailable',
-  herdr_core_contract_unavailable: 'contract_unavailable'
+  herdr_core_contract_unavailable: 'contract_unavailable',
+  // 本机直接终端输入开关关闭：Gateway 在登记前拒绝，公开码只说明本机策略不允许。
+  terminal_execution_disabled: 'forbidden'
 }
 
 // 只映射受信错误类中的固定公共码，未知原生异常及code不进入MCP诊断。
