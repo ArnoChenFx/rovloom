@@ -1,11 +1,12 @@
 // 唯一入口静态链接真实provider工厂；配置只选kind，不加载任意模块、脚本或另一套角色。
 import { createLuvusProductionSources } from '../connector/luvus/host/production-luvus.js'
 import { createHerdrProductionSources } from './production-herdr.js'
+import { createHerdrCoreProductionSources } from './production-herdr-core.js'
 import { prepareMixedGateway, prepareMixedConnector, type ProductionSourceGroup } from './composite-sources.js'
 import { CliError } from './config.js'
 import type { ProductionCliSources, ProductionProviderReference } from './production.js'
 
-export type ProductionSourceRegistry = Readonly<Partial<Record<'luvus' | 'herdr', ProductionCliSources>>>
+export type ProductionSourceRegistry = Readonly<Partial<Record<'luvus' | 'herdr' | 'herdr-core', ProductionCliSources>>>
 
 // 全部引用先选择固定已实现工厂；混合组只委托runtime组合，不在CLI解释Wire或native协议。
 export function routeProductionSources(registry: ProductionSourceRegistry): ProductionCliSources {
@@ -17,7 +18,7 @@ export function routeProductionSources(registry: ProductionSourceRegistry): Prod
     if (connector && references.length === 0) {
       throw new CliError('backend_unavailable', 3)
     }
-    const kinds = new Set<'luvus' | 'herdr'>()
+    const kinds = new Set<'luvus' | 'herdr' | 'herdr-core'>()
     const names = new Set<string>()
     for (const { reference, value } of references) {
       if (names.has(reference)) {
@@ -29,7 +30,7 @@ export function routeProductionSources(registry: ProductionSourceRegistry): Prod
         typeof value !== 'object' ||
         Array.isArray(value) ||
         !('kind' in value) ||
-        (value.kind !== 'luvus' && value.kind !== 'herdr')
+        (value.kind !== 'luvus' && value.kind !== 'herdr' && value.kind !== 'herdr-core')
       ) {
         throw new CliError('invalid_config')
       }
@@ -62,7 +63,8 @@ export function routeProductionSources(registry: ProductionSourceRegistry): Prod
       return groups
     }
     const kind = [...kinds][0] ?? 'luvus'
-    const source = kind === 'luvus' ? sources.luvus : sources.herdr
+    // 三种 kind 各自有固定静态工厂；新增 kind 不改旧值的路由。
+    const source = kind === 'luvus' ? sources.luvus : kind === 'herdr' ? sources.herdr : sources['herdr-core']
     if (!source) {
       throw new CliError('backend_unavailable', 3)
     }
@@ -98,5 +100,9 @@ export function routeProductionSources(registry: ProductionSourceRegistry): Prod
 
 // 只有角色启动才导入固定模块表；未注册provider明确拒绝，不从JSON加载可执行代码。
 export function createProductSources(): ProductionCliSources {
-  return routeProductionSources({ luvus: createLuvusProductionSources(), herdr: createHerdrProductionSources() })
+  return routeProductionSources({
+    luvus: createLuvusProductionSources(),
+    herdr: createHerdrProductionSources(),
+    'herdr-core': createHerdrCoreProductionSources()
+  })
 }

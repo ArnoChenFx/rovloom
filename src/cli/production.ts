@@ -68,11 +68,21 @@ export type ProductionGatewayResources = ProductionGatewayCommon &
         providers: GatewayRuntimeOptions['providers']
         hosted: NonNullable<GatewayRuntimeOptions['hosted']>
       }
-    | {
-        kind: 'provider'
-        providers: ProviderGatewayRuntimeOptions['providers']
-        session: ProviderGatewayRuntimeOptions['session']
-      }
+    | (
+        | {
+            kind: 'provider'
+            providers: ProviderGatewayRuntimeOptions['providers']
+            session: NonNullable<ProviderGatewayRuntimeOptions['session']>
+            ports?: never
+          }
+        | {
+            kind: 'provider'
+            providers: ProviderGatewayRuntimeOptions['providers']
+            /** 端口层登记后会话按 kind 从这里取，不再使用本组自带 session。 */
+            ports: NonNullable<ProviderGatewayRuntimeOptions['ports']>
+            session?: never
+          }
+      )
   )
 export type ProductionConnectorResources =
   | Omit<RuntimeCliConnectorResources, 'transport'>
@@ -442,7 +452,11 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
           return {
             ...common,
             kind: 'provider' as const,
-            options: { ...options, providers: provider.providers, session: provider.session.bind(provider) }
+            options: {
+              ...options,
+              providers: provider.providers,
+              ...(provider.ports ? { ports: provider.ports } : { session: provider.session!.bind(provider) })
+            }
           }
         }
         return {

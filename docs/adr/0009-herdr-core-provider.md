@@ -36,12 +36,35 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 `event_recovery` 是 `snapshot_rebuild`（快照加 `missed` 重建当前状态，没有回放），`terminal_fence`、`cancel`、`prompt_completion` 都是 `unavailable`。`turn` 在 core 崩溃后会少算，`seq` 在重启和崩溃后归零，所以都不能当成本轮完成或没丢事件的证据。
 
-## 本 PR 未包含
+## 第二阶段（同一 PR 追加）
 
-- **Wire kind 与配置接线**：`validateProvider` 的 kind 联合、`NativeProviderKind`、CLI 配置与生产来源注册仍是两种 provider。加第三种要同时决定 Wire 的 kind 联合与存储迁移（#315 的边界），不在本 PR 单方面改动。
-- **ProviderSession 端口**：herdr-core 的 Wire 会话、准入账本与证据保留未实现，所以 herdr-core 还没有进入 `ProviderPorts` 注册表；端口层当前登记 Herdr TUI 一种描述。
-- **事件订阅**：framed 通道、信用回补与 `missed`/EOF 重订阅规则已在 spike 里定清（只走 framed、按字节回补、重连后丢弃旧 `seq` 水位），但本 PR 未实现 `events.subscribe`。
+### Wire kind 与配置
+
+`ProviderKind` 抽成 `PROVIDER_KINDS` 单一来源（`luvus`、`herdr`、`herdr-core`），Wire 校验器与 WebUI 共用。只追加，不改旧值：旧绑定、旧契约来源、旧调用记录与 `native.provider` 的 `mixed` 含义都不变，`mixed` 仍只表示 Luvus + Herdr TUI。herdr-core 需要显式 `native.provider: "herdr-core"`；省略与旧值解析结果与之前完全一致。契约来源新增 `herdr-core-jsonrpc` / `rpc.discover` / `live_instance` 三项并要求组合匹配，旧 provider 不能借用新协议族。
+
+旧版本程序兼容代码按 #315 的边界删除，用户数据与配置的迁移路径保留：`provider-control` 的旧布局迁移仍只枚举 `luvus`/`herdr`（herdr-core 是新增 kind，没有历史文档要搬），已有用户的配置、配对、token 与调用记录不需要改动。
+
+### 端口层成为装配入口
+
+`createHerdrCoreGatewayResources` 交付五个端口并在 `createProviderPortRegistry` 登记。Gateway 运行时新增 `ports` 来源：一组 provider 的会话来源必须二选一（原工厂 `session` 或端口层 `ports`），两者都缺或同时出现都在启动时以 `runtime_provider_session_source_invalid` 拒绝；端口层登记的组按 kind 取 `ProviderSessionPort`，不再接受组内自带会话。herdr-core 的生产来源只交付 `ports`，因此它的 Wire 会话、准入账本与证据保留真的经由端口层装配。Herdr TUI 与 Luvus 仍走原工厂，未在本期迁移（它们的 descriptor 只用于登记与档位查询）。
+
+### 事件订阅（spike 第 7 条）
+
+`events.subscribe` 进入本期开放集合，但只接受空参数：按终端、子终端或标签过滤的订阅会留下空洞（spike 4a1 实测 3,5,7…），不能当连续流。事件只走 framed 通道，信用按实际消费字节回补（帧循环完成）。`missed` 用新快照重建，水位换成快照 `seq`，其后不超过水位的在途事件丢弃并计数；EOF 结束本地等待返回 `closed(eof)`，由调用方重新握手；慢消费者以 `closed(backpressure)` 显式结束，已收到的通知仍可取走，不静默丢中间事件。`seq` 只用于同一 core 进程内排序，重连后丢弃旧水位。
+
+### 版本重新分类（spike 第 9 条）
+
+握手要求 `version` 等于审核过的 `0.1.14`，未审核版本以 `herdr_core_version_unreviewed` 拒绝，与形状不符的 `herdr_core_handshake_refused` 分开；契约来源的 `classification_revision` 固定为 `<version>@<commit>`，配置解析阶段就拒绝不属于本次审核表的来源。
+
+### 输入与控制档（spike 第 5 条）
+
+本期不开放控制档，所以“blocked 由 rovloom 自己判断并拦 keys/interrupt/force”没有可以实施的调用面：`terminal.send`/`keys`/`interrupt` 等仍不在 `HERDR_CORE_EXPOSED_METHODS`，参数复核、Wire 核心与目录三处都会拒绝。`terminal-execution` 的 herdr-core 直接输入集合从同一份审核档位表派生（当前全是 control，因此目录与执行门禁都不放开），宿主级集合保持为空。blocked 状态判定留到开放控制档时与 send 一起实现，届时必须由 rovloom 自己判断，不能信 `blocked` 闸门（spike 2：keys/interrupt/force 在 blocked 时照常送达）。
+
+## 本 PR 仍未包含
+
+- **Connector 执行端口**：herdr-core 目前只交付 Gateway 侧 Wire 会话、准入与证据保留；没有附着/启动 core 的 Connector 执行路径，因此选择 herdr-core 作为 Connector provider 会明确 `backend_unavailable`，而不是给一个不执行的会话。真实 core 的只读验收仍由 `scripts/herdr-core/verify-observation.ts` 在私有沙箱里跑。
 - **输入与控制档、宿主级方法**：`send`/`keys`/`interrupt`/`put`/`kill`/`rm`/`keep`/`label` 与 12 个宿主级方法都不开放。`terminal.attach` 需要终端模拟器解释首屏 VT 字节流，本期不适用。
+- **Luvus/Herdr 的端口迁移**：两种既有 provider 仍走原工厂；把它们也迁到 `ProviderPorts` 会改动它们的会话、目录与身份路径，留给后续。
 
 ## 验证
 

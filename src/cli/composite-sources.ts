@@ -113,9 +113,9 @@ export async function prepareMixedGateway(
       throw new CliError('backend_unavailable', 3)
     }
     const hosted: GatewayHostedProviders[] = hosts.map(
-      /** 保留完整provider条目和原session方法绑定。 */ (resource) => ({
+      /** 保留完整 provider 条目；会话来源二选一：端口层登记或原工厂方法绑定。 */ (resource) => ({
         providers: resource.providers,
-        session: resource.session.bind(resource)
+        ...(resource.ports ? { ports: resource.ports } : { session: resource.session!.bind(resource) })
       })
     )
     const routes = new Map<string, ProviderCatalogProvider | 'native'>()

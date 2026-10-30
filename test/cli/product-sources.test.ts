@@ -111,3 +111,38 @@ test(
     }
   }
 )
+
+test('herdr-core 走自己的静态工厂；本阶段没有 Connector 执行端口', async () => {
+  const gateway = configTemplate('gateway')
+  if (gateway.role !== 'gateway') {
+    assert.fail('role template mismatch')
+  }
+  const authority = createManagementSessionAuthority({
+    principal: /** 本例从不建立身份或 cookie。 */ () => null,
+    administrator: /** 空管理来源不授予任何权限。 */ () => null
+  })
+  const calls: string[] = []
+  const stop = new Error('factory_probe_only')
+  const owners: Partial<Record<'luvus' | 'herdr' | 'herdr-core', ProductionCliSources>> = {
+    'herdr-core': {
+      async gateway(_config, refs) {
+        assert.equal(this, owners['herdr-core'])
+        assert.equal(refs, selected)
+        calls.push('herdr-core:gateway')
+        throw stop
+      }
+    }
+  }
+  const selected: readonly ProductionProviderReference[] = [{ reference: 'core_one', value: { kind: 'herdr-core' } }]
+  const routed = routeProductionSources(owners)
+  await assert.rejects(
+    /** 路由只调用选中的 herdr-core 工厂一次。 */ () => routed.gateway!(gateway, selected, authority),
+    stop
+  )
+  // 没有 Connector 执行端口时明确 backend_unavailable，而不是交付一个空转会话。
+  await assert.rejects(
+    () => routed.connector!(configTemplate('connector') as never, selected),
+    /Rovloom command failed/u
+  )
+  assert.deepEqual(calls, ['herdr-core:gateway'])
+})

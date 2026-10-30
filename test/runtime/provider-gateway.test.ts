@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createProviderGatewayRuntime } from '../../src/runtime/gateway.js'
+import { createProviderPortRegistry } from '../../src/runtime/provider-port.js'
 import { responseRetention } from '../../src/runtime/response-retention.js'
 import type {
   GatewayProviderServices,
@@ -21,6 +22,8 @@ import { G } from '../connector/luvus/contract/helpers.js'
 type Gateway = Awaited<ReturnType<typeof createProviderGatewayRuntime>>
 type Stage = 'none' | 'session' | 'adapter' | 'readiness' | 'provider'
 type Settings = {
+  /** 会话改由端口层登记后装配，验证 Gateway 真的按 kind 取 ProviderSessionPort。 */
+  viaPorts?: boolean
   stage?: Stage
   ready?: boolean
   revision?: string
@@ -75,6 +78,68 @@ async function fixture(settings: Settings = {}) {
     assert.equal(state.callbackClose, runtime!.closed)
   }
 
+  /** 原会话工厂；端口层与直接装配使用同一个函数，差别只在装配入口。 */
+  function openSession(
+    connection: Parameters<NonNullable<ProviderGatewayRuntimeOptions['session']>>[0],
+    _channel: Parameters<NonNullable<ProviderGatewayRuntimeOptions['session']>>[1],
+    ports: Parameters<NonNullable<ProviderGatewayRuntimeOptions['session']>>[2]
+  ): Session {
+    state.sessionCalls++
+    services = ports
+    assert.equal(ports.store, base.store)
+    assert.equal(ports.router, runtime!.router)
+    assert.equal(connection.authenticated, true)
+    base.store.assertConnection(connection)
+    const native = createLuvusWireAdapter(
+      persistentBackend(base.store, {
+        ...base.backendServices(connection),
+        localProvider: ports.localProvider,
+        currentPrincipal: ports.currentPrincipal
+      })
+    )
+    assert.equal(Object.isFrozen(native), true)
+    natives.push(native)
+    let closed = false
+    let closeReads = 0
+    /** 回收本epoch的真实资源；访问器异常后仍可供宿主rollback使用。 */
+    function closeOwned(): void {
+      if (!closed) {
+        closed = true
+        state.sessionCloses++
+      }
+    }
+    const result: Session = {
+      /** 读取 adapter 属性也可重入关闭；真实 adapter 不能被 Proxy 绑定方法的不变式拒绝。 */
+      get adapter() {
+        if (settings.stage === 'adapter') {
+          closeFromCallback()
+        }
+        return native
+      },
+      /** 当前会话自己的政策及原生 readiness 必须与角色受保护配置同时通过。 */
+      readiness() {
+        if (settings.stage === 'readiness') {
+          closeFromCallback()
+        }
+        return {
+          providers: [{ expected: binding, local: binding, native_ready: state.ready }]
+        }
+      },
+      /** 只释放本 epoch 资源，adapter 自身仍由原 transport/channel 关闭。 */
+      get close() {
+        if (settings.close_getter_once && ++closeReads === 1) {
+          throw new Error('isolated_close_accessor_failure')
+        }
+        return closeOwned
+      }
+    }
+    settings.afterSession?.()
+    if (settings.stage === 'session') {
+      closeFromCallback()
+    }
+    return result
+  }
+
   const options: ProviderGatewayRuntimeOptions = {
     lifecycle: { store: base.store, identityHost: base.credentials },
     identities: {
@@ -115,63 +180,28 @@ async function fixture(settings: Settings = {}) {
       developmentLoopback: true,
       limits: { heartbeat_ms: 30, idle_ms: 1500, handshake_ms: 500 }
     },
-    /** 实际认证 epoch 交付冻结的原 Luvus adapter，核心仅包装当前 caller 和资源寿命。 */
-    session(connection, _channel, ports): Session {
-      state.sessionCalls++
-      services = ports
-      assert.equal(ports.store, base.store)
-      assert.equal(ports.router, runtime!.router)
-      assert.equal(connection.authenticated, true)
-      base.store.assertConnection(connection)
-      const native = createLuvusWireAdapter(
-        persistentBackend(base.store, {
-          ...base.backendServices(connection),
-          localProvider: ports.localProvider,
-          currentPrincipal: ports.currentPrincipal
-        })
-      )
-      assert.equal(Object.isFrozen(native), true)
-      natives.push(native)
-      let closed = false
-      let closeReads = 0
-      /** 回收本epoch的真实资源；访问器异常后仍可供宿主rollback使用。 */
-      function closeOwned(): void {
-        if (!closed) {
-          closed = true
-          state.sessionCloses++
+    // 会话来源二选一：端口层登记或原工厂；两者同时出现会被运行时明确拒绝。
+    ...(settings.viaPorts
+      ? {
+          ports: createProviderPortRegistry([
+            {
+              descriptor: {
+                kind: 'luvus',
+                protocol_family: 'uhp',
+                methods: { 'task.add': 'conditional' as const }
+              },
+              catalog: { resolve: () => undefined },
+              session: { session: openSession },
+              identity: {
+                verify: /** 端口层测试不核对原生身份；真实工厂仍由各自资源交付。 */ () => {
+                  throw new Error('unused')
+                }
+              },
+              owner: { release: async () => {} }
+            }
+          ])
         }
-      }
-      const result: Session = {
-        /** 读取 adapter 属性也可重入关闭；真实 adapter 不能被 Proxy 绑定方法的不变式拒绝。 */
-        get adapter() {
-          if (settings.stage === 'adapter') {
-            closeFromCallback()
-          }
-          return native
-        },
-        /** 当前会话自己的政策及原生 readiness 必须与角色受保护配置同时通过。 */
-        readiness() {
-          if (settings.stage === 'readiness') {
-            closeFromCallback()
-          }
-          return {
-            providers: [{ expected: binding, local: binding, native_ready: state.ready }]
-          }
-        },
-        /** 只释放本 epoch 资源，adapter 自身仍由原 transport/channel 关闭。 */
-        get close() {
-          if (settings.close_getter_once && ++closeReads === 1) {
-            throw new Error('isolated_close_accessor_failure')
-          }
-          return closeOwned
-        }
-      }
-      settings.afterSession?.()
-      if (settings.stage === 'session') {
-        closeFromCallback()
-      }
-      return result
-    },
+      : { session: openSession }),
     /** 先停止真实 listener 和 epoch，再由唯一长期所有者关闭原 fixture Store。 */
     async release() {
       state.releases++
@@ -505,5 +535,96 @@ for (const invalid of ['binding', 'admit', 'retainEvidence'] as const) {
 test('provider 工厂的响应保留端口拒绝零或超过 Wire 上限的预算', () => {
   for (const budget of [0, -1, LIMITS.frame_bytes + 1]) {
     assert.throws(() => responseRetention(budget))
+  }
+})
+
+test('端口层登记后 Gateway 按 kind 从 ProviderSessionPort 取会话', async () => {
+  const f = await fixture({ viaPorts: true })
+  try {
+    // 真实认证与 readiness 都通过，说明会话确实来自端口层而不是组内自带函数。
+    await f.ready()
+    assert.equal(f.state.sessionCalls, 1)
+    const admitted = await f.gateway.runAuthenticated(
+      { principal_id: 'synthetic' },
+      /** 准入仍走同一 Store 与 Router，端口层只替换会话来源。 */ () => f.gateway.admit(f.input())
+    )
+    assert.equal(admitted.created, true)
+    await until(/** 原生执行由端口交付的会话完成。 */ () => f.state.nativeCalls === 1)
+    f.resume()
+    await f.responded(admitted.call.call_id)
+  } finally {
+    await f.close()
+  }
+})
+
+test('会话来源必须二选一，多 kind 的端口组也不猜组合顺序', async () => {
+  const base = transportFixture()
+  const paired = base.pair('isolated_session_source')
+  base.gateway.stop()
+  const binding = base.store.provider(paired.machine_id, paired.target.provider_id)!
+  const provider = {
+    binding,
+    target: paired.target,
+    admit: (() => {
+      throw new Error('unused')
+    }) as never,
+    retainEvidence: responseRetention(DEFAULT_LIMITS.object_bytes),
+    ready: () => true
+  }
+  const registry = (kind: string) =>
+    createProviderPortRegistry([
+      {
+        descriptor: { kind, protocol_family: 'uhp', methods: { 'task.add': 'conditional' } },
+        catalog: { resolve: () => undefined },
+        session: {
+          session: /** 本用例在建立连接前就被拒绝，不会真的打开会话。 */ () => {
+            throw new Error('unused')
+          }
+        },
+        identity: {
+          verify: () => {
+            throw new Error('unused')
+          }
+        },
+        owner: { release: async () => {} }
+      }
+    ])
+  const options = (extra: Record<string, unknown>) =>
+    ({
+      lifecycle: { store: base.store, identityHost: base.credentials },
+      identities: {
+        principal: /** 本用例不处理请求。 */ () => null,
+        administrator: /** 本用例不创建管理员。 */ () => null
+      },
+      providers: [provider],
+      listener: { hostname: '127.0.0.1', port: 0, developmentLoopback: true },
+      release: async () => {},
+      ...extra
+    }) as never
+  try {
+    await assert.rejects(createProviderGatewayRuntime(options({})), /runtime_provider_session_source_invalid/u)
+    await assert.rejects(
+      createProviderGatewayRuntime(
+        options({
+          session: /** 同时给出原工厂与端口层。 */ () => {
+            throw new Error('unused')
+          },
+          ports: registry('luvus')
+        })
+      ),
+      /runtime_provider_session_source_invalid/u
+    )
+    await assert.rejects(
+      createProviderGatewayRuntime(
+        options({
+          // 多 kind 组需要分别组合；本层不猜顺序，直接拒绝。
+          providers: [provider, { ...provider, binding: { ...binding, provider_id: 'second', kind: 'herdr' } }],
+          ports: registry('luvus')
+        })
+      ),
+      /runtime_provider_session_source_invalid/u
+    )
+  } finally {
+    base.stop()
   }
 })

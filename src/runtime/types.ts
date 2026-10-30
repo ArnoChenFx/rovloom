@@ -13,6 +13,7 @@ import type {
   Connection
 } from '../transport/index.js'
 import type { JsonObject, ProviderBinding, V2Target } from '../wire/types.js'
+import type { ProviderPortRegistry } from './provider-port.js'
 
 export type ProviderIdentity = Readonly<{
   binding: ProviderBinding
@@ -37,19 +38,25 @@ export type GatewayProviderServices = Readonly<{
   localProvider(target: V2Target): ProviderBinding | undefined
   currentPrincipal(): string | undefined
 }>
-/** 每个 provider 交付已审会话；混合角色复用同一生命周期和调度。 */
+/**
+ * 每个 provider 交付已审会话；混合角色复用同一生命周期和调度。
+ * 会话来源二选一：原工厂的 `session`，或端口层登记的 `ports`（按 kind 取会话端口）。
+ * 两者都不给或同时给都属于装配错误，不能猜测。
+ */
 export type ProviderGatewayRuntimeOptions = Readonly<{
   lifecycle: Pick<DeviceLifecycleWiring, 'store' | 'identityHost'>
   channels?: ChannelRegistry
   identities: GatewayIdentitySource
   providers: readonly GatewayProviderPort[]
-  session(connection: Connection, channel: SocketChannel, services: GatewayProviderServices): Session
+  session?(connection: Connection, channel: SocketChannel, services: GatewayProviderServices): Session
+  /** 端口层：登记后装配按 kind 取 `ProviderSessionPort`，不再使用本组自带 session。 */
+  ports?: ProviderPortRegistry
   hosted?: readonly GatewayHostedProviders[]
   provider_snapshot_machines?: readonly string[]
   listener: Pick<GatewayOptions, 'hostname' | 'port' | 'developmentLoopback' | 'limits' | 'offer' | 'setupRequest'>
   release(): Promise<void>
 }>
-export type GatewayHostedProviders = Pick<ProviderGatewayRuntimeOptions, 'providers' | 'session'>
+export type GatewayHostedProviders = Pick<ProviderGatewayRuntimeOptions, 'providers' | 'session' | 'ports'>
 export type RuntimeAdmissionOptions = CallAdmissionOptions
 export type RuntimeCallInput = Readonly<{
   target: V2Target

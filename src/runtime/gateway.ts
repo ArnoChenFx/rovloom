@@ -11,7 +11,45 @@ import type { ProviderBinding, V2Target } from '../wire/types.js'
 import { boundedJson, fail, validateProvider, validateTarget } from '../wire/index.js'
 import { createTrustedRequestScope } from './request-scope.js'
 import { composeGatewaySessions, type ProviderSessionGroup } from './provider-sessions.js'
-import type { ProviderGatewayRuntimeOptions, RuntimeCallInput, GatewayProviderPort } from './types.js'
+import type {
+  ProviderGatewayRuntimeOptions,
+  RuntimeCallInput,
+  GatewayProviderPort,
+  GatewayHostedProviders,
+  GatewayProviderServices
+} from './types.js'
+import type { Connection, SocketChannel } from '../transport/index.js'
+
+/** 一组 provider 的会话只能有一个来源：原工厂或端口层。 */
+function sessionFactory(
+  group: ProviderGatewayRuntimeOptions | GatewayHostedProviders,
+  connection: Connection,
+  channel: SocketChannel,
+  services: GatewayProviderServices
+): Session {
+  const fromPorts = group.ports !== undefined
+  const fromFactory = typeof group.session === 'function'
+  if (fromPorts === fromFactory) {
+    // 两种来源都缺或同时出现时不能猜测；端口层登记后仍接受原工厂会让装配绕过已登记档位。
+    fail('runtime_provider_session_source_invalid')
+  }
+  if (!fromPorts) {
+    return group.session!(connection, channel, services)
+  }
+  const registry = group.ports!
+  const kinds = [
+    ...new Set(
+      group.providers.map(
+        /** 同组可能只有一种 kind；多 kind 需要分别组合，本层不猜组合顺序。 */ (entry) => entry.binding.kind
+      )
+    )
+  ]
+  if (kinds.length !== 1) {
+    fail('runtime_provider_session_source_invalid')
+  }
+  // 未登记的 kind 由注册表明确拒绝，不返回空端口。
+  return registry.ports(kinds[0]!).session.session(connection, channel, services)
+}
 
 /** provider 交付原 Wire 会话；唯一常驻宿主只管理认证、调度和生命周期。 */
 export async function createProviderGatewayRuntime(options: ProviderGatewayRuntimeOptions) {
@@ -100,6 +138,21 @@ export async function createProviderGatewayRuntime(options: ProviderGatewayRunti
     return closed
   }
   try {
+    for (const group of hosted) {
+      const fromPorts = group.ports !== undefined
+      const fromFactory = typeof group.session === 'function'
+      // 会话来源必须二选一；端口层登记后仍接受原工厂会让装配绕过已登记档位。
+      if (fromPorts === fromFactory) {
+        fail('runtime_provider_session_source_invalid')
+      }
+      if (
+        fromPorts &&
+        new Set(group.providers.map(/** 多 kind 组需要分别组合，本层不猜顺序。 */ (entry) => entry.binding.kind))
+          .size !== 1
+      ) {
+        fail('runtime_provider_session_source_invalid')
+      }
+    }
     for (const provider of configured) {
       const binding = structuredClone(provider.binding)
       validateProvider(binding)
@@ -183,7 +236,7 @@ export async function createProviderGatewayRuntime(options: ProviderGatewayRunti
           let composed = false
           try {
             for (const group of selectedHosts) {
-              const session = group.session(connection, channel, {
+              const session = sessionFactory(group, connection, channel, {
                 store,
                 router,
                 localProvider,

@@ -1,8 +1,8 @@
 /**
- * 对已运行的 herdr-core 跑一遍只读观察面，并把实证事实打印成 JSON。
+ * 对已运行的 herdr-core 跑一遍只读观察面与事件订阅，并把实证事实打印成 JSON。
  * 用法：bun scripts/herdr-core/verify-observation.ts --socket <路径> [--session <名>] [--binary-sha256 <摘要>]
- * 只调用 hello / rpc.discover / server.status / terminal.list / terminal.get / terminal.read / terminal.wait，
- * 不发送输入、不改终端记录、不拉起或停止 core。
+ * 只调用 hello / rpc.discover / server.status / terminal.list / terminal.get / terminal.read / terminal.wait
+ * 与无过滤的 events.subscribe；不发送输入、不改终端记录、不拉起或停止 core。
  */
 import { openHerdrCoreClient } from '../../src/connector/herdr-core/client.js'
 import {
@@ -11,6 +11,7 @@ import {
   type HerdrCoreTerminalIdentity
 } from '../../src/connector/herdr-core/identity.js'
 import { createHerdrCoreObservation, loadHerdrCoreContract } from '../../src/connector/herdr-core/observation.js'
+import { subscribeHerdrCoreEvents } from '../../src/connector/herdr-core/events.js'
 
 type Options = Readonly<{ socket: string; session?: string; binary_sha256?: string }>
 
@@ -66,6 +67,31 @@ try {
       identity_matches: JSON.stringify(single.terminal) === JSON.stringify(terminal)
     })
   }
+  // 事件：无过滤订阅，最多等 3 秒。空闲沙箱可能一条事件都没有，超时如实报告而不是补造。
+  const subscription = await subscribeHerdrCoreEvents({ client, contract })
+  const notices: string[] = []
+  try {
+    for (let index = 0; index < 3; index += 1) {
+      const notice = await Promise.race([
+        subscription.next(),
+        new Promise<undefined>(
+          /** 空闲时以超时结束本地等待，不假装收到事件。 */ (resolve) => setTimeout(() => resolve(undefined), 1000)
+        )
+      ])
+      if (!notice) {
+        notices.push('timeout')
+        break
+      }
+      notices.push(
+        notice.kind === 'event' ? `event:${notice.fact}@${notice.seq}` : `${notice.kind}@${notice.seq ?? '-'}`
+      )
+      if (notice.kind === 'closed') {
+        break
+      }
+    }
+  } finally {
+    subscription.close()
+  }
   console.log(
     JSON.stringify(
       {
@@ -86,6 +112,12 @@ try {
           hc_session: process_.session
         },
         terminals: terminals.length,
+        events: {
+          snapshot_seq: subscription.snapshot.seq,
+          snapshot_terminals: subscription.snapshot.terminals.length,
+          notices,
+          stats: subscription.stats()
+        },
         reads
       },
       null,
