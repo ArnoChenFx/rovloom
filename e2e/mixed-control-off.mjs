@@ -31,7 +31,13 @@ try {
         contract_ref: page.items[0].contract_ref,
         native_request:
           kind === 'herdr-core'
-            ? { method, params: method === 'terminal.run' ? { line: 'true' } : { terminal: 't1', core_id: 'a'.repeat(16), created_ms: 0, text: 'x' } }
+            ? {
+                method,
+                params:
+                  method === 'terminal.run'
+                    ? { line: 'true' }
+                    : { terminal: 't1', core_id: 'a'.repeat(16), created_ms: 0, text: 'x' }
+              }
             : { method, params: {} },
         deadline: Date.now() + 30_000
       })

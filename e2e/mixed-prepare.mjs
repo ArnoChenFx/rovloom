@@ -27,7 +27,11 @@ try {
     wait_ms: 0
   })
   assert.equal(inflight.state, 'dispatching', JSON.stringify(inflight))
-  writeFileSync(process.env.MIXED_INFLIGHT_FILE, JSON.stringify({ call_id: inflight.call_id, terminal: address, core_id: core.core.id }), { mode: 0o600 })
+  writeFileSync(
+    process.env.MIXED_INFLIGHT_FILE,
+    JSON.stringify({ call_id: inflight.call_id, terminal: address, core_id: core.core.id }),
+    { mode: 0o600 }
+  )
   console.log(
     JSON.stringify({
       ok: true,

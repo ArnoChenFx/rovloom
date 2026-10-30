@@ -18,10 +18,7 @@ try {
   assert.equal(machines.items.length, 1)
   const providers = await ok('providers_list', { machine_id: machines.items[0].machine_id })
   assert.equal(providers.items.length, 3, JSON.stringify(providers.items.map((item) => item.kind)))
-  assert.deepEqual(
-    providers.items.map((item) => item.kind).sort(),
-    [...kinds].sort()
-  )
+  assert.deepEqual(providers.items.map((item) => item.kind).sort(), [...kinds].sort())
   const discovered = {}
   for (const kind of kinds) {
     discovered[kind] = await discover(kind)
@@ -54,22 +51,30 @@ try {
   assert(Array.isArray(terminalList.terminals) && terminalList.terminals.length >= 1)
 
   // ---- 3. core 上走一轮控制（run → send → read → kill → rm） ----
-  const cat = await invoke(discovered['herdr-core'].target, discovered['herdr-core'].entry('terminal.run').contract_ref, {
-    method: 'terminal.run',
-    params: { name: 'mixed-cat', line: 'printf "mixed-e2e\\n"; exec cat' }
-  })
+  const cat = await invoke(
+    discovered['herdr-core'].target,
+    discovered['herdr-core'].entry('terminal.run').contract_ref,
+    {
+      method: 'terminal.run',
+      params: { name: 'mixed-cat', line: 'printf "mixed-e2e\\n"; exec cat' }
+    }
+  )
   assert.equal(cat.state, 'responded', JSON.stringify(cat))
   const catResult = await readAll(cat)
   const marker = `mixed-${Date.now()}`
-  const sent = await invoke(discovered['herdr-core'].target, discovered['herdr-core'].entry('terminal.send').contract_ref, {
-    method: 'terminal.send',
-    params: {
-      terminal: catResult.address,
-      core_id: status.core.id,
-      created_ms: catResult.created_ms,
-      text: `echo ${marker}\n`
+  const sent = await invoke(
+    discovered['herdr-core'].target,
+    discovered['herdr-core'].entry('terminal.send').contract_ref,
+    {
+      method: 'terminal.send',
+      params: {
+        terminal: catResult.address,
+        core_id: status.core.id,
+        created_ms: catResult.created_ms,
+        text: `echo ${marker}\n`
+      }
     }
-  })
+  )
   assert.equal(sent.state, 'responded', JSON.stringify(sent))
   const read = await call('herdr-core', 'terminal.read', { terminal: catResult.address, lines: 0 })
   assert(read.text.includes(marker), JSON.stringify(read.text.slice(-200)))

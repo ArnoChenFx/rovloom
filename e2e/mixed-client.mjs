@@ -75,7 +75,10 @@ export async function connectMixed() {
   async function call(kind, method, params) {
     const { target, entry } = await discover(kind)
     const found = entry(method)
-    assert(found, `${kind}/${method} missing: ${JSON.stringify((await discover(kind)).page.items.map((i) => i.method))}`)
+    assert(
+      found,
+      `${kind}/${method} missing: ${JSON.stringify((await discover(kind)).page.items.map((i) => i.method))}`
+    )
     const view = await invoke(target, found.contract_ref, { method, params })
     assert.equal(view.state, 'responded', `${kind}/${method}:${JSON.stringify(view)}`)
     return readAll(view)
