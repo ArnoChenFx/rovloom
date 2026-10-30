@@ -155,7 +155,8 @@ export function createHerdrCoreEventFeed(options: {
 
   /** 唤醒全部等待者。 */
   function wake(): void {
-    for (const done of [...waiters]) {
+    // 每个 done 只删除自己；遍历期间不会新增等待者，直接遍历集合是安全的。
+    for (const done of waiters) {
       done()
     }
   }

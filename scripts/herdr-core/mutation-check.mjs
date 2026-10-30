@@ -79,18 +79,66 @@ const mutations = [
   {
     name: '长轮询水位归零重建',
     file: 'src/connector/herdr-core/feed.ts',
-    from: '      if (input.after_seq > watermark) {',
-    to: '      if (false as boolean) {',
+    from: '    if (after > watermark) {',
+    to: '    if (false as boolean) {',
     test: ['test/connector/herdr-core/events-poll.test.ts', '-t', '水位比当前大'],
     expect: 'rebuilt'
   },
   {
     name: '长轮询截断标记',
     file: 'src/connector/herdr-core/feed.ts',
-    from: '      truncated = true\n    }\n    ring.push(event)',
-    to: '      void 0\n    }\n    ring.push(event)',
+    from: '      return { rebuilt: false, truncated: true, dropped: floor - after, from: floor }',
+    to: '      return { rebuilt: false, truncated: false, dropped: 0, from: floor }',
     test: ['test/connector/herdr-core/events-poll.test.ts', '-t', '缓冲溢出'],
     expect: 'truncated'
+  },
+  {
+    name: '长轮询：追平的调用方不被告知截断',
+    file: 'src/connector/herdr-core/feed.ts',
+    from: '    return { rebuilt: false, truncated: false, dropped: 0, from: after }\n  }\n',
+    to: '    return { rebuilt: false, truncated: after > 0 && floor > 0, dropped: floor, from: after }\n  }\n',
+    test: ['test/connector/herdr-core/events-poll-state.test.ts', '-t', '截断只对确实错过事件的调用方成立'],
+    expect: 'truncated'
+  },
+  {
+    name: '长轮询：订阅单飞',
+    file: 'src/connector/herdr-core/feed.ts',
+    from: '    if (subscribing) {\n      return subscribing\n    }\n',
+    to: '',
+    test: ['test/connector/herdr-core/events-poll-state.test.ts', '-t', '并发的首次轮询共用同一次订阅'],
+    expect: 'subscribes'
+  },
+  {
+    name: '长轮询：一条事件唤醒全部等待者',
+    file: 'src/connector/herdr-core/feed.ts',
+    from: '    for (const done of waiters) {\n      done()\n    }',
+    to: '    ;[...waiters].at(-1)?.()',
+    test: ['test/connector/herdr-core/events-poll-state.test.ts', '-t', '并发等待的调用方全部被同一条事件唤醒'],
+    expect: 'wake'
+  },
+  {
+    name: '长轮询：水位取读快照之前',
+    file: 'src/connector/herdr-core/feed.ts',
+    from: 'const nextAfter = matching.length > selected.length ? selected.at(-1)!.seq : horizon',
+    to: 'const nextAfter = matching.length > selected.length ? selected.at(-1)!.seq : Math.max(view.from, watermark)',
+    test: ['test/connector/herdr-core/events-poll-state.test.ts', '-t', '读快照期间到达的事件不会被'],
+    expect: 'horizon'
+  },
+  {
+    name: 'core 同帧多行通知逐行解析',
+    file: 'src/connector/herdr-core/client.ts',
+    from: '    for (const line of frameLines(payload)) {\n      const message = object(parseJson(line, HERDR_CORE_MAX_FRAME_BYTES))',
+    to: '    for (const line of [payload]) {\n      const message = object(parseJson(line, HERDR_CORE_MAX_FRAME_BYTES))',
+    test: ['test/connector/herdr-core/events.test.ts', '-t', 'core 把紧挨着的通知合并进同一帧时逐行交付'],
+    expect: 'invalid_frame_json'
+  },
+  {
+    name: 'managed 套接字就绪要真实连接探测',
+    file: 'src/connector/herdr-core/managed.ts',
+    from: 'function socketConnectable(socket: string, timeoutMs = 500): Promise<boolean> {',
+    to: 'function socketConnectable(socket: string, timeoutMs = 500): Promise<boolean> {\n  try {\n    return Promise.resolve(lstatSync(socket).isSocket())\n  } catch {\n    return Promise.resolve(false)\n  }\n}\nfunction unusedProbe(socket: string, timeoutMs = 500): Promise<boolean> {',
+    test: ['test/connector/herdr-core/managed.test.ts', '-t', '残留的陈旧套接字文件不算就绪'],
+    expect: 'stale'
   },
   {
     name: 'managed 不走 hc',
