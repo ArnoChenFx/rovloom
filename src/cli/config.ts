@@ -27,7 +27,8 @@ export type ConnectorConfig = Readonly<{
   provider_config_refs: readonly string[]
   allow_terminal_execution?: boolean
   native?: Readonly<{
-    provider?: 'luvus' | 'herdr' | 'mixed'
+    // mixed 仍只表示既有两种 provider；herdr-core 单独选择，不改旧配置的含义。
+    provider?: 'luvus' | 'herdr' | 'herdr-core' | 'mixed'
     runtime_bin_dirs?: readonly string[]
     agent_bin_dirs?: readonly string[]
     // Herdr 专属：attach（默认）附着用户真实会话、不存在才自建；managed 在 Connector 私有目录里拉一个隔离实例。
@@ -38,7 +39,7 @@ export type ConnectorConfig = Readonly<{
   }>
 }>
 export type RoleConfig = GatewayConfig | ConnectorConfig
-export type NativeProviderKind = 'luvus' | 'herdr'
+export type NativeProviderKind = 'luvus' | 'herdr' | 'herdr-core'
 
 // Herdr 的运行方式：默认附着用户已在运行的实例（不存在才自建），managed 为 Connector 私有的隔离实例。
 export function herdrMode(config: ConnectorConfig): 'attach' | 'managed' {
@@ -50,7 +51,8 @@ export function luvusMode(config: ConnectorConfig): 'attach' | 'managed' {
   return config.native?.luvus?.mode ?? 'attach'
 }
 
-// 省略选择时保留已有Luvus首次路径；混合选择只包含两份固定来源，不接受任意provider注册。
+// 省略选择时保留已有Luvus首次路径；mixed 只包含既有两份固定来源，herdr-core 需显式选择。
+// 新增 kind 不改变旧值的含义：已有 mixed 配置不会因为多了第三种 provider 而改变实际选择。
 export function selectedNativeProviders(config: ConnectorConfig): readonly NativeProviderKind[] {
   return config.native?.provider === 'mixed' ? ['luvus', 'herdr'] : [config.native?.provider ?? 'luvus']
 }
@@ -249,7 +251,10 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
         }
         Object.freeze(luvus)
       }
-      if (native.provider !== undefined && !['luvus', 'herdr', 'mixed'].includes(native.provider as string)) {
+      if (
+        native.provider !== undefined &&
+        !['luvus', 'herdr', 'herdr-core', 'mixed'].includes(native.provider as string)
+      ) {
         return fail()
       }
       for (const key of ['runtime_bin_dirs', 'agent_bin_dirs']) {

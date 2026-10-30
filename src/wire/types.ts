@@ -1,7 +1,12 @@
 // 定义独立的 Wire v2 消息、调用身份、provider 权限及原生校验接口类型。
 export type JsonObject = Record<string, unknown>
 export type Direction = 'gateway_to_connector' | 'connector_to_gateway'
-export type ProviderKind = 'luvus' | 'herdr'
+/**
+ * 已登记的 provider kind。新增只能追加：旧 kind 的绑定、契约、调用记录和配置必须继续可读，
+ * 不能借新增 kind 改写旧值或要求重新配对。
+ */
+export const PROVIDER_KINDS = Object.freeze(['luvus', 'herdr', 'herdr-core'] as const)
+export type ProviderKind = (typeof PROVIDER_KINDS)[number]
 // Wire v2 隔离类型，不扩展尚待统一迁移的公共 contracts.Target。
 export type V2Target = { machine_id: string; provider_id: string } & (
   | { profile: 'session'; session: string }
@@ -17,12 +22,13 @@ export type ProviderBinding = {
 }
 export type ContractSource = {
   provider_kind: ProviderKind
-  protocol_family: 'uhp' | 'herdr-json'
+  protocol_family: 'uhp' | 'herdr-json' | 'herdr-core-jsonrpc'
   binary_version: string
   binary_sha256: string
   schema_sha256: string
-  schema_origin: 'installed_cli'
-  schema_command: 'luvus uhp schema' | 'herdr api schema --json'
+  /** installed_cli 是安装的 CLI 自报；live_instance 是运行中的实例按契约查询给出（herdr-core 的 rpc.discover）。 */
+  schema_origin: 'installed_cli' | 'live_instance'
+  schema_command: 'luvus uhp schema' | 'herdr api schema --json' | 'rpc.discover'
   server_version: string | null
   native_protocol_version: string | null
   runtime_generation: string | null

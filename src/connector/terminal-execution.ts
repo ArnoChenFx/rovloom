@@ -1,7 +1,8 @@
 /** 统一目录预检与本机最终写入的直接终端执行开关；不替代原生授权或操作系统隔离。 */
 import { fail } from '../wire/index.js'
+import { HERDR_CORE_METHODS } from './herdr-core/methods.js'
 
-export type TerminalExecutionKind = 'luvus' | 'herdr'
+export type TerminalExecutionKind = 'luvus' | 'herdr' | 'herdr-core'
 
 const direct = Object.freeze({
   luvus: new Set([
@@ -21,7 +22,13 @@ const direct = Object.freeze({
     'task.done',
     'task.retry'
   ]),
-  herdr: new Set(['pane.send_text', 'pane.send_keys', 'pane.send_input', 'pane.link.activate'])
+  herdr: new Set(['pane.send_text', 'pane.send_keys', 'pane.send_input', 'pane.link.activate']),
+  // herdr-core 本期不开放输入与控制档；集合从同一份已审核档位表派生，不按方法名前缀猜。
+  'herdr-core': new Set(
+    Object.entries(HERDR_CORE_METHODS)
+      .filter(/** 只有审核为 control 的方法才进入直接输入集合。 */ ([, tier]) => tier === 'control')
+      .map(/** 方法名本身即审核表键。 */ ([method]) => method)
+  )
 })
 
 const launches = Object.freeze({
@@ -45,7 +52,9 @@ const launches = Object.freeze({
     'pane.split',
     'pane.report_agent',
     'pane.report_agent_session'
-  ])
+  ]),
+  // 宿主级的 terminal.run 等本来就不进目录；这里保持空集，避免把任意命令当成可启动程序。
+  'herdr-core': new Set<string>()
 })
 
 /** 仅接受显式布尔值；省略保持关闭，字符串、数字和对象均不能隐式开启。 */

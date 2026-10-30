@@ -1,4 +1,5 @@
 // 浏览器管理操作的严格边界；共享参数/DTO沿用management.ts，不携带身份或秘密。
+import type { ProviderKind } from '../wire/types.js'
 import type {
   ConfirmationView,
   ManagementArguments,
@@ -14,7 +15,7 @@ export type DeviceManagementIntent =
       action: 'provider_disable'
       machine_id: string
       provider_id: string
-      kind: 'luvus' | 'herdr'
+      kind: ProviderKind
       expected_binding_revision: number
     }
 /** 浏览器可达的确认摘要 = 设备摘要 + 配对创建/认领批准；provider_enable 与 pairing_cancel 仍不进浏览器。 */

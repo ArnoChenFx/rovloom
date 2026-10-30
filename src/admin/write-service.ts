@@ -16,6 +16,7 @@ import type {
   ManagementWrite,
   ResourceTarget
 } from '../mcp/management.js'
+import type { ProviderKind } from '../wire/types.js'
 
 export type ManagementWriteOptions = {
   store: Store
@@ -27,10 +28,7 @@ export type ManagementWriteOptions = {
   /** 当前受保护策略引用验证；仅记录申请，不授予 caller/设备/provider 权限。 */
   pairingPolicy?(policyRef: string, admin: Administrator, machine?: string): boolean
   /** 真实双端配置、重发现与重新授权证明；缺失时 provider enable 拒绝。 */
-  providerEnable?(
-    target: { machine_id: string; provider_id: string; kind: 'luvus' | 'herdr' },
-    revision: number
-  ): boolean
+  providerEnable?(target: { machine_id: string; provider_id: string; kind: ProviderKind }, revision: number): boolean
 }
 const writes = new Set([
   'history_open',

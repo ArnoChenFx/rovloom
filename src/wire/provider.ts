@@ -8,6 +8,7 @@ import type {
   V2Target
 } from './types.js'
 import { boundedJson, fail, fields, hash, id, object, oneOf, sha, text, uint } from './validation.js'
+import { PROVIDER_KINDS } from './types.js'
 import { isReviewedHerdrSource } from '../connector/herdr/review.js'
 
 // 按 host 或 session 形态严格校验完整 provider 目标。
@@ -35,7 +36,7 @@ export function validateProvider(value: unknown): asserts value is ProviderBindi
   id(b.provider_id)
   text(b.config_ref, 256)
   uint(b.binding_revision, true)
-  oneOf(b.kind, ['luvus', 'herdr'])
+  oneOf(b.kind, PROVIDER_KINDS)
   if (typeof b.enabled !== 'boolean') {
     fail('invalid_provider_binding')
   }
@@ -59,10 +60,10 @@ export function validateContractSource(value: unknown): asserts value is Contrac
     'classification_revision',
     'support_basis'
   ])
-  oneOf(c.provider_kind, ['luvus', 'herdr'])
-  oneOf(c.protocol_family, ['uhp', 'herdr-json'])
-  oneOf(c.schema_origin, ['installed_cli'])
-  oneOf(c.schema_command, ['luvus uhp schema', 'herdr api schema --json'])
+  oneOf(c.provider_kind, PROVIDER_KINDS)
+  oneOf(c.protocol_family, ['uhp', 'herdr-json', 'herdr-core-jsonrpc'])
+  oneOf(c.schema_origin, ['installed_cli', 'live_instance'])
+  oneOf(c.schema_command, ['luvus uhp schema', 'herdr api schema --json', 'rpc.discover'])
   oneOf(c.support_basis, ['live_catalog', 'schema_and_version'])
   text(c.binary_version, 128)
   sha(c.binary_sha256)
@@ -76,7 +77,12 @@ export function validateContractSource(value: unknown): asserts value is Contrac
   if (
     (c.provider_kind === 'luvus' && (c.protocol_family !== 'uhp' || c.schema_command !== 'luvus uhp schema')) ||
     (c.provider_kind === 'herdr' &&
-      (c.protocol_family !== 'herdr-json' || c.schema_command !== 'herdr api schema --json'))
+      (c.protocol_family !== 'herdr-json' || c.schema_command !== 'herdr api schema --json')) ||
+    // herdr-core 的契约只来自运行中实例的 rpc.discover，没有安装 CLI 自报的 schema。
+    (c.provider_kind === 'herdr-core' &&
+      (c.protocol_family !== 'herdr-core-jsonrpc' ||
+        c.schema_command !== 'rpc.discover' ||
+        c.schema_origin !== 'live_instance'))
   ) {
     fail('contract_provider_mismatch')
   }
@@ -105,7 +111,7 @@ export function providerFor(binding: AttemptBinding, ctx: AuthenticatedContext):
   if (b.kind !== binding.provider_kind || b.binding_revision !== binding.binding_revision) {
     fail('provider_binding_mismatch')
   }
-  if (b.kind === 'herdr' && binding.target.profile === 'host') {
+  if (b.kind !== 'luvus' && binding.target.profile === 'host') {
     fail('unsupported_profile')
   }
   const c = ctx.resolveContract?.(binding.contract_ref)

@@ -12,6 +12,7 @@ import type {
   ManagementReply,
   ManagementPermission
 } from '../mcp/management.js'
+import { PROVIDER_KINDS } from '../wire/types.js'
 import { ReadError, type TimedSnapshot } from './reader.js'
 import type { PageRoute, PageView } from './view.js'
 import type { ManagementReadOperation } from './read.js'
@@ -488,7 +489,7 @@ function callSummary(value: CallSummary): void {
   text(value.machine_id)
   text(value.provider_id)
   text(value.method, 256)
-  choice(value.provider_kind, ['luvus', 'herdr'])
+  choice(value.provider_kind, PROVIDER_KINDS)
   choice(value.state, callStateValues)
   choice(value.dispatched, [true, false])
   record(value.target, ['profile', 'session'])
