@@ -132,9 +132,9 @@ Do not reuse Luvus parameter names (for example `pane` versus `pane_id`). `agent
 
 ## The terminal-execution switch
 
-The device owner sets `allow_terminal_execution` in the Connector config. It defaults to `false`, and only the literal `true` enables it. The Connector checks it locally twice (once during discovery, once immediately before writing to the native runtime); it is the **device's final gate**, and hiding tools at the Gateway is no substitute.
+The device owner sets `allow_terminal_execution` in the Connector config. It defaults to `true` (also when omitted), and only the literal `false` disables it. The Connector checks it locally twice (once during discovery, once immediately before writing to the native runtime); it is the **device's final gate**, and hiding tools at the Gateway is no substitute.
 
-While it is off:
+While it is off (the owner set `false`):
 
 | Operation | Result |
 |---|---|

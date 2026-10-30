@@ -147,7 +147,7 @@ These are not style advice. Violating them loses data or repeats side effects.
 5. **Use the current provider contract.** For both Herdr and Luvus, tokens control visible devices and the Connector controls direct terminal execution. Every exposed method on a visible device is callable; there are no method, provider, action or policy-revision grants. Identity, original result ownership, provider availability, native parameters, binding, deadlines and idempotency still apply. Do not invent an unexposed method or resend an unknown call.
 6. **Result handles expire.** A `runtime_result_read` cursor is bound to the caller, result, page size and deadline; paging and retries never extend it. After expiry, call `runtime_call_get` again for a fresh handle (content still obeys the original deadline).
 7. **Do not manage devices over MCP.** You also cannot supply a principal, admin, `discard_response`, or a native `id` or `auth` through parameters; the schema rejects them.
-8. **Terminal input is off by default.** A device's `allow_terminal_execution` defaults to `false`. With it off, `agent.prompt` / `agent.send` must carry an explicit `strict: true`, and `agent.keys` plus custom launch arguments are refused outright. The device owner configures that switch locally; you cannot turn it on remotely.
+8. **Terminal input can be switched off per device.** A device's `allow_terminal_execution` defaults to `true`; the owner may set it to `false`. With it off, `agent.prompt` / `agent.send` must carry an explicit `strict: true`, and `agent.keys` plus custom launch arguments are refused outright. The device owner configures that switch locally; you cannot turn it on remotely.
 
 ## Error codes and what to do
 

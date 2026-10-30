@@ -1,6 +1,6 @@
 # 终端执行
 
-Connector 默认不允许远程向终端写入输入，也不允许远程指定要启动的命令。这由 Connector 配置文件中的开关控制。本文说明开关的作用范围，以及终端输入的结果语义。
+Connector 默认允许远程向终端写入输入，也允许远程指定要启动的命令。机器所有者可在 Connector 配置文件中把开关设为 `false` 关闭。本文说明开关的作用范围，以及终端输入的结果语义。
 
 ## 开关
 
@@ -8,26 +8,26 @@ Connector 默认不允许远程向终端写入输入，也不允许远程指定�
 
 ```json
 {
-  "allow_terminal_execution": false
+  "allow_terminal_execution": true
 }
 ```
 
-- 省略或 `false` 表示关闭。只有字面量 `true` 开启。字符串、数字、`null` 和对象会被拒绝。
+- 省略或 `true` 表示开启。只有字面量 `false` 关闭。字符串、数字、`null` 和对象会被拒绝，既不开启也不关闭。
 - 修改后重启 Connector。以系统服务运行时使用 `rovloom service restart --role connector`。
 - 没有命令行参数，也没有 Gateway 侧开关。修改它不影响已有的 caller 与 local 授权、配对身份和已安装的 Agent。
-- 升级和目录查询不会自动开启已有机器的远程执行。
+- 升级不改变已有的显式设置：旧版本生成的 `connector.json` 已显式写出该值，沿用其中的选择；只有当初省略了该项的用户文件，升级后按默认变为开启。想保持关闭请显式写 `false`。
 
 CLI 运行时以这份用户配置为准，覆盖 `managed/providers.json` 中安装快照里的同名值。
 因此快照仍为 `false`、用户配置为 `true` 时，目录可以报告 `enabled`；实际原生写入门禁
 使用同一份用户配置，不能只根据安装快照判断最终状态。
 新配对的安装快照记录配对时的开关值；它不会随之后修改用户配置而自动更新。
-用户配置缺少该字段仍表示关闭，不从旧快照恢复为开启。
+用户配置缺少该字段时按默认值（开启）处理，不从旧快照恢复为关闭。
 
 完整配置见 [配置参考](CONFIGURATION-zh.md)。
 
 开关由 Connector 在本机检查：先在发现阶段检查，再在实际写入原生 runtime 之前再检查一次。它是本机最终门禁，Gateway 隐藏工具不能代替它。
 
-Gateway 会收到 Connector 报告的开关状态，在开关关闭或未知时从方法目录中隐藏直接终端写入。参数敏感的方法仍然可见，例如关闭时 `agent.send` 和 `agent.prompt` 的描述要求显式 `strict:true`。详见 [通道](TRANSPORT.md#终端执行开关观察)。
+Gateway 会收到 Connector 报告的开关状态，在开关关闭或未知时从方法目录中隐藏直接终端写入。“未知”（尚未收到上报、断连或来源失效）始终按关闭处理，不受默认值影响。参数敏感的方法仍然可见，例如关闭时 `agent.send` 和 `agent.prompt` 的描述要求显式 `strict:true`。详见 [通道](TRANSPORT.md#终端执行开关观察)。
 
 ## 开关覆盖的操作
 

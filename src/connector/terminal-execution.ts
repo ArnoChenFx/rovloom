@@ -59,12 +59,25 @@ const launches = Object.freeze({
   'herdr-core': new Set<string>()
 })
 
-/** 仅接受显式布尔值；省略保持关闭，字符串、数字和对象均不能隐式开启。 */
+/** 本机配置省略该项时的默认值：开启。只有字面量 false 关闭；Gateway 尚未收到报告的“未知”不受此默认影响，仍按关闭处理。 */
+export const TERMINAL_EXECUTION_DEFAULT = true
+
+/** 把本机配置值落成最终布尔；所有读取点共用，避免各处各自解释“省略”。 */
+export function resolveTerminalExecution(value: boolean | undefined): boolean {
+  return value ?? TERMINAL_EXECUTION_DEFAULT
+}
+
+/** 读取当前有效开关：宿主接缝（每次现读）优先，否则取本地配置并解析默认值。 */
+export function currentTerminalExecution(seam: (() => boolean) | undefined, config: boolean | undefined): boolean {
+  return seam ? seam() : resolveTerminalExecution(config)
+}
+
+/** 仅接受显式布尔值；省略取默认值，字符串、数字和对象既不能隐式开启也不能隐式关闭。 */
 export function pinTerminalExecution(value: unknown): boolean {
   if (value !== undefined && typeof value !== 'boolean') {
     fail('terminal_execution_config_invalid')
   }
-  return value === true
+  return resolveTerminalExecution(value)
 }
 
 /** 判断直接或宽松终端输入及可启动程序的请求；严格 Agent 文本对话保留原生门禁。 */

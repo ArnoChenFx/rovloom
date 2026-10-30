@@ -4,6 +4,7 @@ import { canonical } from '../contracts.js'
 import { readPrivateBytes } from '../storage/files.js'
 import { parseJson } from '../json/bounds.js'
 import { binDirectories } from '../connector/local/agent-path.js'
+import { pinTerminalExecution, resolveTerminalExecution } from '../connector/terminal-execution.js'
 
 export type GatewayConfig = Readonly<{
   schema_version: 1
@@ -335,7 +336,7 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
       state_dir: data.directory,
       gateway_url: gateway.url as string,
       provider_config_refs: Object.freeze([]),
-      allow_terminal_execution: input.allow_terminal_execution === true,
+      allow_terminal_execution: pinTerminalExecution(input.allow_terminal_execution),
       ...(native ? { native } : {})
     })
   } catch {
@@ -363,7 +364,7 @@ export function configDocument(config: RoleConfig): Record<string, unknown> {
     : {
         ...common,
         gateway: { url: config.gateway_url },
-        allow_terminal_execution: config.allow_terminal_execution === true,
+        allow_terminal_execution: resolveTerminalExecution(config.allow_terminal_execution),
         ...(config.native ? { native: config.native } : {})
       }
 }
@@ -396,7 +397,7 @@ export function configTemplate(
           role,
           data: { directory: paths.join(base, role) },
           gateway: { url: '' },
-          allow_terminal_execution: false
+          allow_terminal_execution: true
         },
     platform
   )

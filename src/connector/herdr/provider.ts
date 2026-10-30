@@ -18,6 +18,7 @@ import type { Connection, ConnectorWireSession, Session, SocketChannel } from '.
 import { DispatchClaims } from '../claims.js'
 import { ProviderAdapterError } from '../provider-error.js'
 import { readSchema } from '../schema-store.js'
+import { currentTerminalExecution } from '../terminal-execution.js'
 import {
   boundedJson,
   contractRef,
@@ -720,9 +721,7 @@ export async function createHerdrConnectorResources(
             terminalExecutionState: /** 目录使用同一个本机配置源；最终写入仍由原runtime再检查。 */ () => [
               {
                 binding,
-                enabled: input.terminalExecution
-                  ? input.terminalExecution()
-                  : installed.config.allow_terminal_execution === true
+                enabled: currentTerminalExecution(input.terminalExecution, installed.config.allow_terminal_execution)
               }
             ],
             readiness: /** 只有真实本机安装与当前双端配置均有效才报告该 provider 可用。 */ () => {

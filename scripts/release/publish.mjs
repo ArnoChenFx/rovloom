@@ -79,6 +79,14 @@ const RELEASE_NOTES = Object.freeze({
     ],
     upgrade:
       'Nothing to migrate and no behaviour change is expected: pairings, tokens, ledgers and the published schemas are the same as in 0.8.1.'
+  },
+  '0.9.0': {
+    highlights: [
+      'The Connector `allow_terminal_execution` switch now defaults to on. When the key is omitted from `connector.json`, direct terminal input and caller-chosen launch commands are enabled; only the literal `false` turns them off. Strings, numbers, `null` and objects are still rejected, and `rovloom config template connector` now writes `true`.',
+      'An unknown switch state (the Gateway has not received a report, or the Connector is disconnected) is still treated as off, and so is any caller that does not pass the state explicitly. Every place that reads the switch now resolves the omitted value through one function, so the catalog the Gateway shows and the final check before a native write cannot disagree.'
+    ],
+    upgrade:
+      'A `connector.json` written by an earlier Rovloom (`config template`, first-run setup or pairing) already contains `allow_terminal_execution` explicitly, so its choice is kept and nothing changes. Only a hand-written file that omits the key turns the switch on after the upgrade; callers whose token covers that device can then type into its terminals and choose launch commands. To keep the old behaviour, add `"allow_terminal_execution": false` to that file and restart the Connector. Pairings, tokens and ledgers are unchanged.'
   }
 })
 

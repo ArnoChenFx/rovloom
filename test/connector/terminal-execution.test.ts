@@ -3,7 +3,10 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   assertTerminalExecutionAllowed,
+  TERMINAL_EXECUTION_DEFAULT,
+  currentTerminalExecution,
   pinTerminalExecution,
+  resolveTerminalExecution,
   requiresTerminalExecution,
   terminalExecutionAllowed,
   terminalExecutionCatalog
@@ -31,9 +34,27 @@ const direct = {
 } as const
 
 test(
-  'terminal execution requires a literal local boolean',
-  /** 配置不能由字符串或其它真值意外开启。 */ () => {
-    assert.equal(pinTerminalExecution(undefined), false)
+  'current terminal execution reads the seam first and otherwise resolves the config default',
+  /** 接缝每次现读且优先；无接缝时省略取默认开启，显式 false 仍关闭（目录上报与最终写入共用）。 */ () => {
+    let seam = true
+    const read = /** 模拟宿主接缝的当前值。 */ () => seam
+    assert.equal(currentTerminalExecution(read, false), true)
+    seam = false
+    assert.equal(currentTerminalExecution(read, true), false)
+    assert.equal(currentTerminalExecution(undefined, undefined), true)
+    assert.equal(currentTerminalExecution(undefined, true), true)
+    assert.equal(currentTerminalExecution(undefined, false), false)
+  }
+)
+
+test(
+  'terminal execution defaults on and accepts only a literal local boolean',
+  /** 省略取默认开启；字符串或其它真值既不能开启也不能关闭。 */ () => {
+    assert.equal(TERMINAL_EXECUTION_DEFAULT, true)
+    assert.equal(pinTerminalExecution(undefined), true)
+    assert.equal(resolveTerminalExecution(undefined), true)
+    assert.equal(resolveTerminalExecution(false), false)
+    assert.equal(resolveTerminalExecution(true), true)
     assert.equal(pinTerminalExecution(false), false)
     assert.equal(pinTerminalExecution(true), true)
     for (const value of ['true', 1, null, {}, [], Promise.resolve(true)]) {

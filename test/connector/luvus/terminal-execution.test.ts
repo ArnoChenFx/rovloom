@@ -320,13 +320,13 @@ test(
   }
 )
 
-for (const enabled of [undefined, false] as const) {
+for (const seam of ['config', 'host'] as const) {
   test(
-    `Luvus rejects terminal input before discovery and claim when local switch is ${enabled}`,
-    /** 默认及显式关闭均不能触达自建原生 listener。 */ async () => {
+    `Luvus rejects terminal input before discovery and claim when local switch is explicitly false (${seam})`,
+    /** 显式关闭（静态配置或宿主接缝）不能触达自建原生 listener。 */ async () => {
       const f = await fixture('ipc', method, params)
-      if (enabled !== undefined) {
-        f.host.terminalExecution = /** 从受保护宿主接缝返回当前关闭状态。 */ () => enabled
+      if (seam === 'host') {
+        f.host.terminalExecution = /** 从受保护宿主接缝返回当前关闭状态。 */ () => false
       }
       try {
         await assert.rejects(f.adapter.dispatch(f.input()), {
@@ -341,6 +341,39 @@ for (const enabled of [undefined, false] as const) {
     }
   )
 }
+
+test(
+  'Luvus omitted local switch defaults on while explicit false still refuses',
+  /** 配置省略取默认开启；同一请求在显式 false 下被拒，证明放行来自默认值而非夹具放宽。 */ async () => {
+    const f = await fixture('ipc', method, params)
+    const { allow_terminal_execution: _explicitOff, ...omitted } = f.config
+    const adapter = new LuvusRpcAdapter(omitted, f.host)
+    f.respond(
+      /** 合成原生 queued 仅表示输入入队，不能表示 shell 命令完成。 */ (socket) =>
+        socket.end(
+          JSON.stringify({
+            id: f.binding.native_request_id,
+            result: { type: 'terminal_backend_action', state: 'succeeded', dispatch: 'queued' }
+          }) + '\n'
+        )
+    )
+    try {
+      const result = await adapter.dispatch(f.input())
+      assert.equal(
+        result.native_response.result && (result.native_response.result as Record<string, unknown>).dispatch,
+        'queued'
+      )
+      assert.notEqual(f.received(), '')
+      await assert.rejects(f.adapter.dispatch(f.input()), {
+        code: 'terminal_execution_disabled',
+        outcome: 'not_dispatched'
+      })
+    } finally {
+      adapter.close()
+      await f.close()
+    }
+  }
+)
 
 test(
   'Luvus explicit enable preserves the native reply and never invents command completion',

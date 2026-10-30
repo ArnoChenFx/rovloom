@@ -13,7 +13,7 @@ import { backendFixture } from './helpers.js'
 import { privateHerdrTestRoot } from './private-root.js'
 
 /** 安装来源是明确的合成 fixture；真实 Wire、内核 peer、Unix IO 和 SQLite claim 保持原实现。 */
-async function fixture(method: string, enabled?: boolean, installedEnabled = enabled) {
+async function fixture(method: string, enabled?: boolean, installedEnabled = enabled, installationOnly = false) {
   const state = backendFixture()
   const root = privateHerdrTestRoot('.herdr-terminal-switch-')
   const endpoint = join(root, 'native.sock')
@@ -75,7 +75,8 @@ async function fixture(method: string, enabled?: boolean, installedEnabled = ena
     installation,
     state.backend,
     claims,
-    /** 每次边界读取当前布尔值。 */ () => local.allow_terminal_execution === true
+    // installationOnly 不传角色开关接缝，改走安装配置回退（省略即默认开启）。
+    installationOnly ? undefined : /** 每次边界读取当前布尔值。 */ () => local.allow_terminal_execution === true
   )
   const raw = JSON.stringify({
     protocol_major: 2,
@@ -117,9 +118,9 @@ async function fixture(method: string, enabled?: boolean, installedEnabled = ena
 }
 
 for (const method of ['pane.send_text', 'pane.send_input']) {
-  for (const enabled of [undefined, false] as const) {
+  for (const enabled of [false] as const) {
     test(
-      `Herdr ${method} rejects local ${enabled} before native write`,
+      `Herdr ${method} rejects explicit local ${enabled} before native write`,
       /** 实际 runtime 即使已有合法 Wire 授权也不能绕过本机关闭状态。 */ async () => {
         const f = await fixture(method, enabled)
         try {
@@ -134,6 +135,29 @@ for (const method of ['pane.send_text', 'pane.send_input']) {
       }
     )
   }
+}
+
+for (const installed of [undefined, true, false] as const) {
+  test(
+    `Herdr installation switch ${installed} without a role switch ${installed === false ? 'refuses' : 'allows'} input before native write`,
+    /** 无角色开关接缝时读安装配置：省略取默认开启，只有显式 false 在原生写入前拒绝。 */ async () => {
+      const f = await fixture('pane.send_input', undefined, installed, true)
+      try {
+        if (installed === false) {
+          await assert.rejects(f.runtime.executeWire(f.raw, new AbortController().signal), {
+            code: 'terminal_execution_disabled',
+            outcome: 'not_dispatched'
+          })
+          assert.equal(f.received(), '')
+        } else {
+          await f.runtime.executeWire(f.raw, new AbortController().signal)
+          assert.equal(JSON.parse(f.received()).params.text, 'printf synthetic')
+        }
+      } finally {
+        await f.close()
+      }
+    }
+  )
 }
 
 test(

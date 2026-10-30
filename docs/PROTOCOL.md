@@ -67,7 +67,7 @@ AI 客户端 ──MCP Streamable HTTP──▶ Gateway ──Wire v2 (WS/WSS)�
 ## 3. 原生契约（Connector ↔ Luvus / Herdr）
 
 - 契约来自本机安装的程序（Luvus `uhp schema`，Herdr `api schema --json`）。Connector 在 Worker 中用锁定版本的 Ajv 完整编译，冷编译约 0.7 秒，期限 10 秒。不设版本白名单。
-- 方法按静态表放行，表外方法一律拒绝。会输入终端或启动程序的方法还要求 `allow_terminal_execution` 开启，默认关，见 [配置参考](CONFIGURATION-zh.md)。
+- 方法按静态表放行，表外方法一律拒绝。会输入终端或启动程序的方法还要求 `allow_terminal_execution` 开启（默认开，可设为 `false` 关闭），见 [配置参考](CONFIGURATION-zh.md)。
 - Luvus 经本机 IPC（Unix socket 或 Windows 命名管道），Herdr 经其 API 管道。Linux 上附着时核对对端是已安装的同一个程序。
 - 细则：[原生契约](protocol/NATIVE-CONTRACT.md)。
 
