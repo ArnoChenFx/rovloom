@@ -5,7 +5,8 @@ import {
   assertTerminalExecutionAllowed,
   pinTerminalExecution,
   requiresTerminalExecution,
-  terminalExecutionAllowed
+  terminalExecutionAllowed,
+  terminalExecutionCatalog
 } from '../../src/connector/terminal-execution.js'
 
 const direct = {
@@ -156,3 +157,40 @@ for (const [kind, method] of [
     }
   )
 }
+
+test('herdr-core 关闭开关时仍列出控制档但标成不可用，读历史按输入处理', () => {
+  // 关闭：控制档列出但不可用，控制端能提前知道后端有哪些能力。
+  assert.deepEqual(terminalExecutionCatalog('herdr-core', 'terminal.send', false), {
+    available: false,
+    listed: true,
+    visible: false,
+    details: { local_state: 'disabled' }
+  })
+  assert.deepEqual(terminalExecutionCatalog('herdr-core', 'terminal.run', false), {
+    available: false,
+    listed: true,
+    visible: false,
+    details: { local_state: 'disabled' }
+  })
+  // 打开：同一批方法可用。
+  assert.equal(terminalExecutionCatalog('herdr-core', 'terminal.send', true).available, true)
+  assert.equal(terminalExecutionCatalog('herdr-core', 'terminal.run', true).available, true)
+  // 读取不受开关影响，但 lines>0 需要开关（缝合会向程序发滚轮输入）。
+  assert.equal(terminalExecutionCatalog('herdr-core', 'terminal.read', false).available, true)
+  assert.deepEqual(terminalExecutionCatalog('herdr-core', 'terminal.read', false).details, {
+    local_state: 'disabled',
+    request_parameters_checked: true
+  })
+  assert.equal(requiresTerminalExecution('herdr-core', 'terminal.read', { lines: 0 }), false)
+  assert.equal(requiresTerminalExecution('herdr-core', 'terminal.read', { lines: 50 }), true)
+  assert.equal(requiresTerminalExecution('herdr-core', 'terminal.read', {}), false)
+  // 观察档与有条件档不受影响。
+  assert.deepEqual(terminalExecutionCatalog('herdr-core', 'server.status', false), {
+    available: true,
+    listed: true,
+    visible: true
+  })
+  // 其它 kind 的关闭语义不变：不列出、不可用。
+  assert.equal(terminalExecutionCatalog('luvus', 'pane.run', false).listed, false)
+  assert.equal(terminalExecutionCatalog('herdr', 'pane.send_text', false).listed, false)
+})

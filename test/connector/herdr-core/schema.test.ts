@@ -7,7 +7,8 @@ import { ProviderAdapterError } from '../../../src/connector/provider-error.js'
 import { herdrCoreContractIdentity, compileHerdrCoreContract } from '../../../src/connector/herdr-core/schema.js'
 import { reviewHerdrCoreParams } from '../../../src/connector/herdr-core/methods.js'
 
-const DOCUMENT = readFileSync(new URL('../../fixtures/herdr-core/openrpc-0.1.14.json', import.meta.url))
+const OPENRPC = readFileSync(new URL('../../fixtures/herdr-core/openrpc-0.1.14.json', import.meta.url))
+const DOCUMENT = OPENRPC
 const SAMPLES = JSON.parse(
   readFileSync(new URL('../../fixtures/herdr-core/samples-0.1.14.json', import.meta.url), 'utf8')
 ) as { samples: { method: string; params: Record<string, unknown>; response: { result: unknown } }[] }
@@ -145,4 +146,48 @@ test('params diagnostics name a path and a closed rule only', () => {
     assert.ok(error instanceof NativeRequestPreflightError)
     assert.deepEqual(error.parameterDiagnostic?.issues, [{ path: '/', rule: 'invalid_value' }])
   }
+})
+
+test('core 的方法与参数说明保留为注释，超限与控制字符拒绝而不是截断', () => {
+  const contract = compileHerdrCoreContract(DOCUMENT)
+  const send = contract.paramsSchema('terminal.send') as {
+    properties: Record<string, { description?: string }>
+  }
+  // core 自己写的说明随参数 schema 交付，控制端才知道 `if`/`timeout` 的语义。
+  assert.match(send.properties.if?.description ?? '', /status is exactly this/u)
+  assert.match(contract.methodDescription('terminal.send') ?? '', /Paste text and press Enter/u)
+  // 没有说明的字段不补造；方法说明来自 core 原文。
+  const keys = contract.paramsSchema('terminal.keys') as { properties: Record<string, { description?: string }> }
+  assert.equal(keys.properties.caller?.description, undefined)
+  assert.match(contract.methodDescription('templates.list') ?? '', /Templates by name and description/u)
+  // 说明是注释，不参与校验：多给未知字段仍然拒绝。
+  assert.throws(() => contract.validateParams('terminal.send', { terminal: 't1', text: 'x', extra: 1 }))
+
+  const document = JSON.parse(OPENRPC.toString('utf8'))
+  const method = document.methods.find((entry: { name: string }) => entry.name === 'terminal.send')
+  method.params[0].schema.description = 'x'.repeat(2048)
+  assert.throws(() => compileHerdrCoreContract(JSON.stringify(document)), /herdr_core_schema_text_invalid/u)
+
+  const control = JSON.parse(OPENRPC.toString('utf8'))
+  const withControl = control.methods.find((entry: { name: string }) => entry.name === 'terminal.send')
+  withControl.params[0].schema.description = 'bell\u0007'
+  assert.throws(() => compileHerdrCoreContract(JSON.stringify(control)), /herdr_core_schema_text_invalid/u)
+
+  const huge = JSON.parse(OPENRPC.toString('utf8'))
+  for (const entry of huge.methods) {
+    for (const param of entry.params ?? []) {
+      param.schema.description = 'y'.repeat(1024)
+    }
+  }
+  for (const schema of Object.values(huge.components.schemas) as {
+    properties?: Record<string, { description?: string }>
+  }[]) {
+    for (const property of Object.values(schema.properties ?? {})) {
+      // 布尔 schema（true/false）没有属性可写，跳过。
+      if (typeof property === 'object' && property !== null) {
+        property.description = 'y'.repeat(1024)
+      }
+    }
+  }
+  assert.throws(() => compileHerdrCoreContract(JSON.stringify(huge)), /herdr_core_schema_text_too_large/u)
 })

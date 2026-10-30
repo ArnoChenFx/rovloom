@@ -171,6 +171,13 @@ test('资源工厂登记五个端口，目录暴露读取与控制档，身份�
       const params = send.params_schema as { required: string[]; properties: Record<string, unknown> }
       assert.deepEqual([...params.required].sort(), ['core_id', 'created_ms', 'terminal', 'text'])
       assert.ok(params.properties.core_id)
+      // core 自己的方法说明与 rovloom 的使用说明随 describe 交付；说明只是注释。
+      assert.match(String(send.description), /Paste text and press Enter/u)
+      assert.ok(Array.isArray(send.usage) && String(send.usage[0]).includes('wait=true'))
+      assert.equal((send.guide as string[]).length, 8)
+      assert.match(String((send.guide as string[])[2]), /wait=true/u)
+      // 没有专门说明的方法不补造 usage。
+      assert.equal(resolved.describe('server.status').usage, undefined)
       // 宿主级方法与事件订阅仍不在目录里，即使已审核也不能被 describe 打开。
       assert.throws(() => resolved.describe('terminal.run'), /runtime_method_unavailable/u)
       assert.throws(() => resolved.describe('events.subscribe'), /runtime_method_unavailable/u)

@@ -134,6 +134,33 @@ export const HERDR_CORE_INTERRUPT_DEFAULT_SECONDS = 10
  */
 export const HERDR_CORE_EVENT_METHOD = 'events.subscribe'
 
+/**
+ * 由 rovloom 自己撰写、经审核的使用说明：随 `runtime_describe` 交付给控制端。
+ * 只写用法与已知边界，不转抄 core 的 SKILL 原文，也不引入新的机器可读合同。
+ */
+export const HERDR_CORE_GUIDE: readonly string[] = Object.freeze([
+  'Run agents interactively (never one-shot flags). Put the task in the first `terminal.run` after a template name; a `send` to an agent that is still starting can be lost.',
+  '`first_message.sent=false` means the first message was NOT delivered. Read the terminal before deciding; do not resend blindly.',
+  'Multi-turn: `terminal.send` with `wait=true` and an explicit `timeout` sends and waits for that turn, then `terminal.read` with `lines` reads the reply. `reason=timeout` is a check-in, not a failure; `not_started` means the agent never went to work, so read the screen.',
+  "Status comes from the program's own OSC 7501 report. `reported=false` means it never reports, and `wait` then only ends when it exits. Do not guess status from screen text.",
+  '`blocked` needs a person (permission, question or auth): read the screen and hand it to the user. `force` is rejected and `keys` must not be used to bypass it.',
+  '`turn` and `seq` are not proof that a turn succeeded. `screen=inexact` means core crashed and older history may be missing.',
+  'Codex must run with `--no-daemon`, otherwise its commands run outside core.',
+  'Write calls are never replayed. After a disconnect the result may be `outcome_unknown`; check `terminal.list` (by `name` or labels) before retrying.'
+])
+
+/** 逐方法的使用说明；没有条目的方法不补造。 */
+export const HERDR_CORE_METHOD_USAGE: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  'terminal.read': Object.freeze([
+    '`lines=0` reads the screen only and never types into the program. `lines>0` may type scroll keys into a full-screen program (stitching, up to 15s) and needs `allow_terminal_execution`.'
+  ]),
+  'terminal.wait': Object.freeze([
+    'With `children`, pass `terminal` explicitly: rovloom never sends `caller`. `output` is for plain programs, not agents.'
+  ]),
+  'terminal.send': Object.freeze(['`wait=true` requires an explicit `timeout` (≤60s). rovloom rejects `force`.']),
+  'terminal.interrupt': Object.freeze(['Sends the stop key and observes the outcome; it never escalates.'])
+})
+
 /** 已审核但本期不开放的方法及原因；原因写在这里，避免调用面自行解释档位。 */
 export const HERDR_CORE_UNAVAILABLE: Readonly<Record<string, string>> = Object.freeze({
   'terminal.attach': 'needs_terminal_emulator'

@@ -15,8 +15,29 @@ import { HERDR_CORE_FENCE_PARAMS, HERDR_CORE_METHODS, herdrCoreControl } from '.
 
 /** 输入上限远大于 0.1.14 的 63 KB 文档，同时拒绝把任意大文件当 schema。 */
 export const HERDR_CORE_SCHEMA_INPUT_LIMIT = 1024 * 1024
+/** 单条说明的上限：core 的 OpenRPC 每条都远小于它，超限拒绝而不是截断。 */
+export const HERDR_CORE_DESCRIPTION_MAX_BYTES = 1024
+/** 整份文档里说明与默认值的总量上限；只做注释，不参与校验。 */
+export const HERDR_CORE_DESCRIPTIONS_MAX_BYTES = 256 * 1024
 const NODE_LIMIT = 200_000
 const ISSUE_LIMIT = 8
+
+/** 说明文本只做注释：换行与制表符保留，其它 C0/DEL 一律拒绝，不静默清洗。 */
+function annotation(value: unknown): string {
+  if (typeof value !== 'string' || Buffer.byteLength(value) > HERDR_CORE_DESCRIPTION_MAX_BYTES) {
+    fail('herdr_core_schema_text_invalid')
+  }
+  for (const character of value) {
+    const code = character.codePointAt(0)!
+    if ((code < 0x20 && code !== 0x0a && code !== 0x09) || code === 0x7f) {
+      fail('herdr_core_schema_text_invalid')
+    }
+  }
+  return value
+}
+
+/** 整份文档的说明预算：累计超过上限即拒绝整份契约，不按方法截断。 */
+type AnnotationBudget = { bytes: number }
 
 /** 与 Herdr 编译器同一套严格选项；本处不需要 standalone 代码生成。 */
 const AJV_OPTIONS: Options = Object.freeze({
@@ -45,6 +66,8 @@ export type HerdrCoreContract = Readonly<{
   methods: readonly string[]
   paramsSchema(method: string): JsonObject
   resultSchema(method: string): JsonObject
+  /** core 发布的方法说明；只作注释，不参与校验。 */
+  methodDescription(method: string): string | null
   /** 参数不合格抛 NativeRequestPreflightError（只含路径与规则）。 */
   validateParams(method: string, params: unknown): JsonObject
   /** 结果不合格抛 ProviderAdapterError('herdr_core_result_invalid')，不当作空成功。 */
@@ -107,7 +130,7 @@ function document(input: string | Uint8Array): JsonObject {
 /** 审核 schema 的本地基础 URI；组件按名字注册在这里。 */
 const SCHEMA_URI = 'urn:rovloom:herdr-core:schema'
 
-type TransformState = { nodes: number }
+type TransformState = { nodes: number; budget?: AnnotationBudget }
 
 /** 只把本地组件引用改写成本仓库注册的绝对引用；外部引用明确拒绝。 */
 function referenceName(ref: unknown): string {
@@ -153,8 +176,29 @@ function transform(input: JsonObject, state: TransformState): JsonObject {
   }
   const out: JsonObject = {}
   for (const [key, value] of Object.entries(input)) {
-    if (key === 'description' || key === 'title' || key === '$comment' || key === 'default' || key === 'examples') {
-      // 描述与默认值不参与判定；默认值不在这里应用，避免被误当成已生效。
+    if (key === 'description') {
+      // 说明保留下来给控制端看：它是注释，不参与校验，也不改写调用方参数。
+      out.description = annotation(value)
+      if (state.budget) {
+        state.budget.bytes += Buffer.byteLength(out.description as string)
+        if (state.budget.bytes > HERDR_CORE_DESCRIPTIONS_MAX_BYTES) {
+          fail('herdr_core_schema_text_too_large')
+        }
+      }
+      continue
+    }
+    if (key === 'default') {
+      // 默认值只作为注释交付；本仓库不应用默认值，避免被误当成已生效。
+      out.default = value
+      if (state.budget) {
+        state.budget.bytes += Buffer.byteLength(boundedJson(value, HERDR_CORE_DESCRIPTION_MAX_BYTES))
+        if (state.budget.bytes > HERDR_CORE_DESCRIPTIONS_MAX_BYTES) {
+          fail('herdr_core_schema_text_too_large')
+        }
+      }
+      continue
+    }
+    if (key === 'title' || key === '$comment' || key === 'examples') {
       continue
     }
     if (key === '$ref') {
@@ -221,7 +265,7 @@ function transform(input: JsonObject, state: TransformState): JsonObject {
 }
 
 /** 参数根由本仓库拼出：按名传参、只列已声明参数、根上禁止多余字段。 */
-function paramsSchema(method: JsonObject): JsonObject {
+function paramsSchema(method: JsonObject, budget: AnnotationBudget): JsonObject {
   const list = method.params
   if (!Array.isArray(list)) {
     fail('herdr_core_schema_invalid')
@@ -239,7 +283,7 @@ function paramsSchema(method: JsonObject): JsonObject {
     if (Object.hasOwn(properties, param.name)) {
       fail('herdr_core_schema_invalid')
     }
-    properties[param.name] = transform(param.schema as JsonObject, { nodes: 0 })
+    properties[param.name] = transform(param.schema as JsonObject, { nodes: 0, budget })
     if (param.required === true) {
       required.push(param.name)
     }
@@ -268,7 +312,13 @@ function paramsSchema(method: JsonObject): JsonObject {
 }
 
 /** 结果按方法声明的成功类型收紧；上游已证实的缺陷只按表放宽。 */
-function resultSchema(root: JsonObject, name: string, method: JsonObject, components: JsonObject): JsonObject {
+function resultSchema(
+  root: JsonObject,
+  name: string,
+  method: JsonObject,
+  components: JsonObject,
+  budget: AnnotationBudget
+): JsonObject {
   const result = method.result
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     fail('herdr_core_schema_invalid')
@@ -277,7 +327,7 @@ function resultSchema(root: JsonObject, name: string, method: JsonObject, compon
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
     fail('herdr_core_schema_invalid')
   }
-  const resolved = transform(schema as JsonObject, { nodes: 0 })
+  const resolved = transform(schema as JsonObject, { nodes: 0, budget })
   const relaxed = RESULT_REQUIRED_RELAXED[name]
   const ref = resolved.$ref
   const target = typeof ref === 'string' ? (components[ref.split('/').at(-1)!] as JsonObject | undefined) : undefined
@@ -351,19 +401,31 @@ export function compileHerdrCoreContract(input: string | Uint8Array): HerdrCoreC
       fail('herdr_core_schema_method_missing')
     }
   }
+  const budget: AnnotationBudget = { bytes: 0 }
   const components: JsonObject = {}
   for (const [name, schema] of Object.entries((root.components as JsonObject).schemas as JsonObject)) {
     if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
       fail('herdr_core_schema_invalid')
     }
-    components[name] = transform(schema as JsonObject, { nodes: 0 })
+    components[name] = transform(schema as JsonObject, { nodes: 0, budget })
   }
   const params = new Map<string, JsonObject>()
   const results = new Map<string, JsonObject>()
+  const descriptions = new Map<string, string>()
   for (const [name, method] of methods) {
-    params.set(name, paramsSchema(method))
+    params.set(name, paramsSchema(method, budget))
     // rpc.discover 的结果引用外部 meta schema，本仓库不解析也不冒称已审核。
-    results.set(name, name === 'rpc.discover' ? { type: 'object' } : resultSchema(root, name, method, components))
+    results.set(
+      name,
+      name === 'rpc.discover' ? { type: 'object' } : resultSchema(root, name, method, components, budget)
+    )
+    if (method.description !== undefined) {
+      descriptions.set(name, annotation(method.description))
+      budget.bytes += Buffer.byteLength(descriptions.get(name)!)
+      if (budget.bytes > HERDR_CORE_DESCRIPTIONS_MAX_BYTES) {
+        fail('herdr_core_schema_text_too_large')
+      }
+    }
   }
   const ajv = new Ajv2020(AJV_OPTIONS)
   try {
@@ -415,6 +477,8 @@ export function compileHerdrCoreContract(input: string | Uint8Array): HerdrCoreC
     methods: Object.freeze([...methods.keys()]),
     paramsSchema: /** 只交付已展开的副本，调用方不能改已编译校验器。 */ (method: string) =>
       structuredClone(pick(params, method)),
+    /** core 自己写的方法说明（只做注释）；没有说明时返回 null，不编造。 */
+    methodDescription: (method: string) => descriptions.get(method) ?? null,
     resultSchema: /** 同上；结果 schema 已逐层收紧。 */ (method: string) => structuredClone(pick(results, method)),
     validateParams: /** 先有界序列化再校验，避免把巨大对象交给 Ajv。 */ (method: string, input: unknown) => {
       const value = parseJson(boundedJson(input, HERDR_CORE_SCHEMA_INPUT_LIMIT))

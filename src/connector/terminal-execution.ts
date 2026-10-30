@@ -23,12 +23,14 @@ const direct = Object.freeze({
     'task.retry'
   ]),
   herdr: new Set(['pane.send_text', 'pane.send_keys', 'pane.send_input', 'pane.link.activate']),
-  // herdr-core 本期不开放输入与控制档；集合从同一份已审核档位表派生，不按方法名前缀猜。
-  'herdr-core': new Set(
-    Object.entries(HERDR_CORE_METHODS)
+  // herdr-core 的输入与控制档从同一份已审核档位表派生，不按方法名前缀猜；
+  // terminal.run 是宿主级的任意程序能力，本阶段随开关开放，启动即执行，必须受同一开关约束。
+  'herdr-core': new Set([
+    ...Object.entries(HERDR_CORE_METHODS)
       .filter(/** 只有审核为 control 的方法才进入直接输入集合。 */ ([, tier]) => tier === 'control')
-      .map(/** 方法名本身即审核表键。 */ ([method]) => method)
-  )
+      .map(/** 方法名本身即审核表键。 */ ([method]) => method),
+    'terminal.run'
+  ])
 })
 
 const launches = Object.freeze({
@@ -78,6 +80,11 @@ export function requiresTerminalExecution(
   if (kind === 'luvus' && (method === 'agent.send' || method === 'agent.prompt')) {
     return params.strict !== true
   }
+  // herdr-core 读历史会让 core 用鼠标滚轮「缝合」全屏程序（向程序发输入），所以按输入处理；
+  // lines=0 只读屏幕，不需要开关。
+  if (kind === 'herdr-core' && method === 'terminal.read') {
+    return typeof params.lines === 'number' && params.lines > 0
+  }
   // task.add 保存的 gate 会被后续 task.done 通过 shell 执行；空白 gate 不会运行。
   if (kind === 'luvus' && method === 'task.add') {
     return typeof params.gate === 'string' && params.gate.trim().length > 0
@@ -112,14 +119,28 @@ export function terminalExecutionAllowed(
   return enabled === true || !requiresTerminalExecution(kind, method, params)
 }
 
+/**
+ * 关闭开关时仍要列出并标成不可用的 kind：控制端需要知道后端有哪些能力，
+ * 而不是只看到一份「能用的」清单。调用仍会在 Gateway 登记前与 Connector 写入前被拒。
+ */
+const LISTS_WHEN_DISABLED: ReadonlySet<TerminalExecutionKind> = new Set(['herdr-core'])
+
 /** 目录保留参数敏感方法的合法变体；它只描述本地限制，不生成执行许可或改写请求。 */
 export function terminalExecutionCatalog(kind: TerminalExecutionKind, method: string, enabled: boolean | undefined) {
   const strictText = kind === 'luvus' && (method === 'agent.send' || method === 'agent.prompt')
   const parameterSensitive =
-    launches[kind].has(method) || strictText || (kind === 'luvus' && (method === 'task.add' || method === 'task.start'))
+    launches[kind].has(method) ||
+    strictText ||
+    (kind === 'luvus' && (method === 'task.add' || method === 'task.start')) ||
+    // herdr-core 的 terminal.read 只有 lines>0 需要开关，目录无法按调用参数判断。
+    (kind === 'herdr-core' && method === 'terminal.read')
   const related = direct[kind].has(method) || parameterSensitive
+  const available = terminalExecutionAllowed(kind, method, { strict: true }, enabled === true)
   return {
-    visible: terminalExecutionAllowed(kind, method, { strict: true }, enabled === true),
+    available,
+    // listed：目录里是否出现；available：现在能不能调用。
+    listed: available || (related && LISTS_WHEN_DISABLED.has(kind)),
+    visible: available,
     ...(related
       ? {
           details: {

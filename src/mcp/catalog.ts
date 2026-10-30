@@ -184,9 +184,10 @@ export function authorizedCatalog(options: AuthorizedCatalogOptions) {
     return { source, methods, describe: describe.bind(resolved) }
   }
   const { source, methods } = current()
+  // listed 包含「列出但当前不可用」的方法（herdr-core 的控制档），可见性由 available 单独给出。
   const visible = methods.filter(
     /* 不把原生目录中的其它方法作为隐式授权。 */ (method) =>
-      terminalExecutionCatalog(binding.kind, method.method as string, terminal).visible
+      terminalExecutionCatalog(binding.kind, method.method as string, terminal).listed
   )
   current()
   // 只覆盖当前授权后方法集；不将隐藏方法或动态观察期限纳入公开缓存标识。
@@ -212,6 +213,8 @@ export function authorizedCatalog(options: AuthorizedCatalogOptions) {
         return {
           ...method,
           contract_ref: source.contract_ref,
+          /** 当前这台设备上能不能用；false 时调用仍会被拒绝，但控制端能提前知道。 */
+          available: entry.available,
           ...(entry.details ? { terminal_execution: entry.details } : {})
         }
       }
@@ -239,6 +242,7 @@ export function authorizedCatalog(options: AuthorizedCatalogOptions) {
         method,
         contract_ref: source.contract_ref,
         subset_revision: subsetRevision,
+        available: entry.available,
         ...(entry.details ? { terminal_execution: entry.details } : {})
       }
     }

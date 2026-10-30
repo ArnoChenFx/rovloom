@@ -46,7 +46,13 @@ import type {
 } from '../../wire/types.js'
 import { HERDR_CORE_PROVIDER_DESCRIPTOR } from './descriptor.js'
 import { herdrCoreSessionName } from './identity.js'
-import { HERDR_CORE_EXPOSED_METHODS, HERDR_CORE_REVIEW, herdrCoreTier } from './methods.js'
+import {
+  HERDR_CORE_EXPOSED_METHODS,
+  HERDR_CORE_GUIDE,
+  HERDR_CORE_METHOD_USAGE,
+  HERDR_CORE_REVIEW,
+  herdrCoreTier
+} from './methods.js'
 import { requiresTerminalExecution } from '../terminal-execution.js'
 import { compileHerdrCoreContract } from './schema.js'
 import type { HerdrCoreContract } from './schema.js'
@@ -228,7 +234,10 @@ export function parseHerdrCoreProviderRefConfig(input: unknown): HerdrCoreProvid
   })
 }
 
-/** 公开描述只含方法与档位；不输出契约字节、原生请求或终端内容。 */
+/**
+ * 公开描述只含方法与档位、core 自己的说明与 rovloom 的使用说明；
+ * 不输出契约字节、原生请求或终端内容。
+ */
 export function describeHerdrCoreContract(input: {
   target: V2Target
   binding_revision: number
@@ -241,13 +250,17 @@ export function describeHerdrCoreContract(input: {
     source: structuredClone(input.source),
     source_basis: 'live_instance_contract' as const,
     contract_identity: input.contract.identity,
+    /** 全局使用说明（rovloom 撰写、经审核），随每次 describe 一起交付。 */
+    guide: HERDR_CORE_GUIDE,
     methods: Object.freeze(
       HERDR_CORE_EXPOSED_METHODS.map(
-        /** 只描述本期开放的方法；参数 schema 来自本次实例的审核结果。 */ (method) =>
+        /** 只描述本期开放的方法；参数 schema 与说明来自本次实例的审核结果。 */ (method) =>
           Object.freeze({
             method,
             tier: herdrCoreTier(method),
-            params_schema: input.contract.paramsSchema(method)
+            description: input.contract.methodDescription(method),
+            params_schema: input.contract.paramsSchema(method),
+            ...(HERDR_CORE_METHOD_USAGE[method] ? { usage: HERDR_CORE_METHOD_USAGE[method] } : {})
           })
       )
     )
@@ -419,7 +432,15 @@ export async function createHerdrCoreGatewayResources(
           if (!found) {
             fail('runtime_method_unavailable')
           }
-          return { method: found.method, tier: found.tier, params_schema: structuredClone(found.params_schema) }
+          return {
+            method: found.method,
+            tier: found.tier,
+            description: found.description,
+            params_schema: structuredClone(found.params_schema),
+            ...(found.usage ? { usage: found.usage } : {}),
+            /** 使用说明是全局的，逐条 describe 也带上，控制端不必先读整份目录。 */
+            guide: described.guide
+          }
         }
       })
     }
