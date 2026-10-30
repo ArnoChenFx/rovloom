@@ -6,6 +6,7 @@ import {
   herdrCoreSessionLimit,
   herdrCoreSessionName,
   herdrCoreTerminalIdentity,
+  herdrCorePeerFacts,
   herdrCoreProcessFacts
 } from '../../../src/connector/herdr-core/identity.js'
 
@@ -58,4 +59,19 @@ test('process facts refuse a pid that is not a bare `<bin> serve`', () => {
   assert.throws(() => herdrCoreProcessFacts(process.pid, 'test'), /herdr_core_peer_argv_untrusted/u)
   assert.throws(() => herdrCoreProcessFacts(0, 'test'), /herdr_core_peer_pid_invalid/u)
   assert.throws(() => herdrCoreProcessFacts(4194305, 'test'), /herdr_core_peer_pid_invalid/u)
+})
+
+test('peer facts need the kernel peer to be us and to match the advertised pid', () => {
+  const uid = process.getuid?.() ?? 0
+  const peer = { pid: process.pid, uid, gid: 0 }
+  // 自报 pid 不等于内核 peer：服务端可以随便报一个真 core 的 pid，必须在读 /proc 之前拒绝。
+  assert.throws(() => herdrCorePeerFacts(peer, process.pid + 1, 'test'), /herdr_core_peer_pid_mismatch/u)
+  assert.throws(() => herdrCorePeerFacts(peer, `${process.pid}`, 'test'), /herdr_core_peer_pid_mismatch/u)
+  // 套接字另一端不是本用户的进程。
+  assert.throws(
+    () => herdrCorePeerFacts({ ...peer, uid: uid + 1 }, process.pid, 'test'),
+    /herdr_core_peer_uid_mismatch/u
+  )
+  // 两者一致后才进入 exe/argv 核对；测试进程不是 `<bin> serve`。
+  assert.throws(() => herdrCorePeerFacts(peer, process.pid, 'test'), /herdr_core_peer_argv_untrusted/u)
 })

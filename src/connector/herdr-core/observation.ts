@@ -6,7 +6,7 @@ import { boundedJson, object, parseJson } from '../../wire/index.js'
 import type { JsonObject } from '../../wire/types.js'
 import type { HerdrCoreClient } from './client.js'
 import { herdrCoreTerminalIdentity, type HerdrCoreTerminalIdentity } from './identity.js'
-import { HERDR_CORE_MAX_REQUEST_BYTES, HERDR_CORE_WAIT_MAX_SECONDS, reviewHerdrCoreParams } from './methods.js'
+import { HERDR_CORE_MAX_REQUEST_BYTES, HERDR_CORE_REQUEST_MAX_MS, reviewHerdrCoreParams } from './methods.js'
 import { compileHerdrCoreContract, type HerdrCoreContract } from './schema.js'
 
 export type HerdrCoreObservationCall = Readonly<{
@@ -24,10 +24,10 @@ export type HerdrCoreObservation = Readonly<{
   call(method: string, params?: JsonObject): Promise<HerdrCoreObservationCall>
 }>
 
-/** 请求超时给 wait 的检查间隔留余量；超时只结束本地等待，不宣称原生停止。 */
+/** 请求期限给 wait 的检查间隔留余量，并取整成毫秒（timeout 是秒，可以带小数）；超时只结束本地等待。 */
 function requestTimeout(method: string, params: JsonObject): number {
   const timeout = method === 'terminal.wait' && typeof params.timeout === 'number' ? params.timeout : 0
-  return Math.min(Math.max(timeout * 1000 + 5000, 5000), HERDR_CORE_WAIT_MAX_SECONDS * 1000 + 5000)
+  return Math.min(Math.ceil(timeout * 1000) + 5000, HERDR_CORE_REQUEST_MAX_MS)
 }
 
 /**

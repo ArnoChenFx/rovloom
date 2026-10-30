@@ -9,11 +9,13 @@ import { setTimeout as pause } from 'node:timers/promises'
 import { ProviderAdapterError } from '../provider-error.js'
 import { boundedJson, fail, object, parseJson } from '../../wire/index.js'
 import type { JsonObject } from '../../wire/types.js'
+import { readLinuxPeer } from '../local/linux-peer.js'
+import type { NativePeer } from '../local/linux-peer.js'
 import {
   HERDR_CORE_MAX_FRAME_BYTES,
   HERDR_CORE_MAX_REQUEST_BYTES,
-  HERDR_CORE_REVIEW,
-  HERDR_CORE_WAIT_MAX_SECONDS
+  HERDR_CORE_REQUEST_MAX_MS,
+  HERDR_CORE_REVIEW
 } from './methods.js'
 
 /** 帧头 9 字节；与 core 的 wire.rs 一致。 */
@@ -67,6 +69,8 @@ type Pending = Readonly<{
 export type HerdrCoreClient = Readonly<{
   hello: HerdrCoreHello
   socket_path: string
+  /** 这条已连接套接字的内核 peer（SO_PEERCRED）；服务端自报的 pid 不是证据。非 Linux 明确拒绝。 */
+  peer(): NativePeer
   request(method: string, params: JsonObject, timeout_ms?: number): Promise<JsonObject>
   /** 只订阅帧通道上的通知；返回取消函数。 */
   onEvent(listener: (event: HerdrCoreEvent) => void): () => void
@@ -398,14 +402,18 @@ export async function openHerdrCoreClient(
   }
 
   /** 单个请求：登记 id、写帧、按 deadline 结算。 */
-  function request(method: string, params: JsonObject, timeoutMs = timeout): Promise<JsonObject> {
+  function request(
+    method: string,
+    params: JsonObject,
+    timeoutMs = Math.min(timeout, HERDR_CORE_REQUEST_MAX_MS)
+  ): Promise<JsonObject> {
     if (closed) {
       return Promise.reject(new ProviderAdapterError('herdr_core_connection_closed'))
     }
     if (pending.size >= MAX_PENDING) {
       return Promise.reject(new ProviderAdapterError('herdr_core_capacity'))
     }
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > HERDR_CORE_WAIT_MAX_SECONDS * 1000) {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > HERDR_CORE_REQUEST_MAX_MS) {
       return Promise.reject(new ProviderAdapterError('herdr_core_timeout_invalid'))
     }
     const line = boundedJson({ jsonrpc: '2.0', id: nextId, method, params }, HERDR_CORE_MAX_REQUEST_BYTES)
@@ -434,6 +442,7 @@ export async function openHerdrCoreClient(
   return Object.freeze({
     hello,
     socket_path: socketPath,
+    peer: /** 每次现读内核值，不缓存。 */ () => readLinuxPeer(socket),
     request,
     onEvent: /** 只登记观察者，不改变订阅状态。 */ (listener: (event: HerdrCoreEvent) => void) => {
       eventListeners.add(listener)

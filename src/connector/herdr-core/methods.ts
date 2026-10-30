@@ -72,7 +72,6 @@ export const HERDR_CORE_EXPOSED_METHODS: readonly string[] = Object.freeze([
 /** 已审核但本期不开放的方法及原因；原因写在这里，避免调用面自行解释档位。 */
 export const HERDR_CORE_UNAVAILABLE: Readonly<Record<string, string>> = Object.freeze({
   'terminal.attach': 'needs_terminal_emulator',
-  'terminal.list_machines': 'no_machines_configured',
   'events.subscribe': 'phase_two'
 })
 
@@ -87,6 +86,8 @@ export const HERDR_CORE_BLOCKED_PARAMS: readonly string[] = Object.freeze([
 
 /** wait 的检查间隔上限：超时只是 check-in，不能把长等当成完成证明。 */
 export const HERDR_CORE_WAIT_MAX_SECONDS = 60
+/** wait 请求的本地期限 = 检查间隔上限 + 5 秒余量；超时只结束本地等待，不宣称原生停止。 */
+export const HERDR_CORE_REQUEST_MAX_MS = (HERDR_CORE_WAIT_MAX_SECONDS + 5) * 1000
 /** 单帧上限与 core 的 MAX_PAYLOAD 一致；超过即拒绝，不静默截断。 */
 export const HERDR_CORE_MAX_FRAME_BYTES = 16 * 1024 * 1024
 /** 审核后的普通请求预算，远小于帧上限。 */

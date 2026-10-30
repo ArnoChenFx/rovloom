@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { openHerdrCoreClient } from '../../../src/connector/herdr-core/client.js'
+import { herdrCorePeerFacts } from '../../../src/connector/herdr-core/identity.js'
 import { startFakeCore } from './fake-core.js'
 
 test('framed handshake pins generation and exposes the core identity', async () => {
@@ -98,4 +99,30 @@ test('connecting to a missing socket fails without exposing the path', async () 
     assert.doesNotMatch(error.message, /nonexistent/u)
     return true
   })
+})
+
+test('the kernel peer of the connection is the listening process, not what the server advertises', async () => {
+  const core = await startFakeCore()
+  try {
+    const client = await openHerdrCoreClient(core.socket)
+    // 假 core 在本进程内监听，所以内核给出的 peer 就是本进程。
+    const peer = client.peer()
+    assert.equal(peer.pid, process.pid)
+    assert.equal(peer.uid, process.getuid?.())
+    client.close()
+  } finally {
+    await core.close()
+  }
+})
+
+test('a server that advertises another pid than the kernel peer is refused before any /proc read', async () => {
+  const core = await startFakeCore({ handler: () => ({ pid: process.pid + 1 }) })
+  try {
+    const client = await openHerdrCoreClient(core.socket)
+    const status = await client.request('server.status', {})
+    assert.throws(() => herdrCorePeerFacts(client.peer(), status.pid, 'test'), /herdr_core_peer_pid_mismatch/u)
+    client.close()
+  } finally {
+    await core.close()
+  }
 })

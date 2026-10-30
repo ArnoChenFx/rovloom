@@ -7,6 +7,7 @@ import { closeSync, lstatSync, openSync, readFileSync, readSync, realpathSync } 
 import { join } from 'node:path'
 import { fail } from '../../wire/index.js'
 import type { JsonObject } from '../../wire/types.js'
+import type { NativePeer } from '../local/linux-peer.js'
 
 /** Linux 上 Unix 套接字路径上限；macOS 更短，未在本仓库验证。 */
 export const HERDR_CORE_SOCKET_PATH_LIMIT = 107
@@ -82,7 +83,7 @@ export function herdrCoreEndpoint(
 }
 
 /** 端点必须是我们自己的套接字，目录必须是私有的；不改权限，不跟随链接。 */
-export function inspectHerdrCoreSocket(socket: string): Readonly<{ uid: number; pid_owner: number }> {
+export function inspectHerdrCoreSocket(socket: string): Readonly<{ uid: number; directory_uid: number }> {
   if (typeof socket !== 'string' || !socket.startsWith('/') || socket.includes('\0')) {
     fail('herdr_core_endpoint_unavailable')
   }
@@ -100,10 +101,10 @@ export function inspectHerdrCoreSocket(socket: string): Readonly<{ uid: number; 
   if (!socketStat.isSocket() || socketStat.uid !== process.getuid?.()) {
     fail('herdr_core_endpoint_untrusted')
   }
-  return Object.freeze({ uid: socketStat.uid, pid_owner: directoryStat.uid })
+  return Object.freeze({ uid: socketStat.uid, directory_uid: directoryStat.uid })
 }
 
-/** 读整个文件并算 SHA-256；只用于核对已安装二进制，不缓存。 */
+/** 读整个文件并算 SHA-256；传 `/proc/<pid>/exe` 时读的是正在运行的映像，不是路径上现在的文件。 */
 function digestFile(path: string): string {
   const fd = openSync(path, 'r')
   try {
@@ -191,10 +192,26 @@ export function herdrCoreProcessFacts(pid: unknown, session: string): HerdrCoreP
   return Object.freeze({
     pid: pid as number,
     exe,
-    binary_sha256: digestFile(exe),
+    // 直接读 /proc/<pid>/exe：映像被替换或删除后，按路径读到的已经不是正在运行的程序。
+    binary_sha256: digestFile(join(base, 'exe')),
     argv: Object.freeze(argv),
     session: declaredSession
   })
+}
+
+/**
+ * 真正的身份入口：pid 必须来自这条连接的内核 peer（SO_PEERCRED），且属于本用户；
+ * 服务端在 server.status 里自报的 pid 只用来与内核值互相印证，不单独成立。
+ * 否则同机另一个监听者可以报一个真 core 的 pid，让后面的 exe/argv 核对对着别的进程通过。
+ */
+export function herdrCorePeerFacts(peer: NativePeer, advertisedPid: unknown, session: string): HerdrCoreProcessFacts {
+  if (peer.uid !== process.getuid?.()) {
+    fail('herdr_core_peer_uid_mismatch')
+  }
+  if (advertisedPid !== peer.pid) {
+    fail('herdr_core_peer_pid_mismatch')
+  }
+  return herdrCoreProcessFacts(peer.pid, session)
 }
 
 /** 终端标识三元组：core 实例、创建时间与地址；只删 terminals.json 时地址会被复用。 */

@@ -6,7 +6,7 @@
  */
 import { openHerdrCoreClient } from '../../src/connector/herdr-core/client.js'
 import {
-  herdrCoreProcessFacts,
+  herdrCorePeerFacts,
   inspectHerdrCoreSocket,
   type HerdrCoreTerminalIdentity
 } from '../../src/connector/herdr-core/identity.js'
@@ -43,10 +43,9 @@ try {
   const contract = await loadHerdrCoreContract(client)
   const observation = createHerdrCoreObservation({ client, contract })
   const status = await observation.call('server.status')
-  const pid = status.result.pid
   const session = input.session ?? input.socket.slice(input.socket.lastIndexOf('/') + 1).replace(/\.sock$/u, '')
-  // 服务端自报的 pid 必须能对上 exe/argv/HC_SESSION，否则身份不成立。
-  const process_ = herdrCoreProcessFacts(pid, session)
+  // pid 取自这条连接的内核 peer；服务端自报的 pid 必须与它一致，再核对 exe/argv/HC_SESSION。
+  const process_ = herdrCorePeerFacts(client.peer(), status.result.pid, session)
   if (input.binary_sha256 && process_.binary_sha256 !== input.binary_sha256) {
     throw new Error('binary_sha256_mismatch')
   }

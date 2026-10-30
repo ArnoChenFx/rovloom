@@ -112,3 +112,19 @@ test('wait timeout is bounded by the review rule, not by the request deadline', 
     await core.close()
   }
 })
+
+test('wait accepts the whole reviewed range, including fractional seconds and the 60 s cap', async () => {
+  const core = await startFakeCore()
+  try {
+    const client = await openHerdrCoreClient(core.socket)
+    const observation = createHerdrCoreObservation({ client, contract: CONTRACT })
+    // 上限 60 秒是审核规则；请求期限要给检查间隔留余量，不能把合法值挡在客户端。
+    for (const timeout of [1.2345, 56, 59.9, 60]) {
+      const waited = await observation.call('terminal.wait', { terminal: 't1', timeout })
+      assert.equal(waited.result.ended, false, String(timeout))
+    }
+    client.close()
+  } finally {
+    await core.close()
+  }
+})
