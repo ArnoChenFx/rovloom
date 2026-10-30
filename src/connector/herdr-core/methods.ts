@@ -1,20 +1,43 @@
 /**
- * herdr-core 0.1.14 的 32 个方法档位与本期开放集合；档位来自只读 spike（out/method-tiers.json），
+ * herdr-core 0.1.14/0.1.15 的 32 个方法档位与本期开放集合；档位来自只读 spike（out/method-tiers.json），
  * 方法是否只读按参数判断，不能凭方法名或 schema 枚举开放。
  */
 import type { ProviderMethodTier } from '../../runtime/provider-port.js'
 import { fail, fields } from '../../wire/index.js'
 
-/** 被测版本与契约位置；升级后必须重新核对档位，不能用 schema 兼容代替行为兼容。 */
+/**
+ * 已审核的 core 版本与各自的上游发布提交。0.1.14 与 0.1.15 的 OpenRPC 契约除版本串和一句 `installed_by`
+ * 说明外逐字相同；0.1.15 另在 360 个候选参数上与 0.1.14 的接受/拒绝结果逐条一致、真实输出样本形状一致，
+ * 所以两者共用同一张档位表。新版本必须重新核对后再加入，不能用 schema 兼容代替行为兼容。
+ */
+export const HERDR_CORE_REVIEWED_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
+  '0.1.14': '29e6d37',
+  '0.1.15': 'd028423'
+})
+
+/** 被测契约位置；版本以 {@link HERDR_CORE_REVIEWED_VERSIONS} 为准。 */
 export const HERDR_CORE_REVIEW = Object.freeze({
-  version: '0.1.14',
-  commit: '29e6d37',
+  /** 最新一次审核的版本，只用于文案与默认值，不参与握手判定。 */
+  latest: '0.1.15',
   protocol_generation: 1,
   openrpc: '1.3.2',
   methods_total: 32,
   /** 无认证的多余字段一律忽略，所以审核只信本仓库自己的参数规则。 */
   strictness: 'rovloom_reviewed_schemas'
 })
+
+/** 该版本已审核时返回它的发布提交，否则 `undefined`；只认自有键，`constructor` 之类原型键一律不算。 */
+export function herdrCoreReviewedCommit(version: unknown): string | undefined {
+  return typeof version === 'string' && Object.hasOwn(HERDR_CORE_REVIEWED_VERSIONS, version)
+    ? HERDR_CORE_REVIEWED_VERSIONS[version]
+    : undefined
+}
+
+/** 配对时记录的分类修订：`<版本>@<提交>`；未审核版本返回 `undefined`。 */
+export function herdrCoreClassificationRevision(version: unknown): string | undefined {
+  const commit = herdrCoreReviewedCommit(version)
+  return commit === undefined ? undefined : `${version as string}@${commit}`
+}
 
 /**
  * A 观察 6、B 有条件 6、C 输入与控制 8、D 宿主级 12。
@@ -224,7 +247,7 @@ export const HERDR_CORE_UNAVAILABLE: Readonly<Record<string, string>> = Object.f
 })
 
 /**
- * core 用 JSON-RPC 错误响应明确答复、且**在写入之前**就失败的 `data.kind`（读 0.1.14 源码核对）：
+ * core 用 JSON-RPC 错误响应明确答复、且**在写入之前**就失败的 `data.kind`（读 0.1.14 源码核对；0.1.15 的净 diff 没有触及这些路径）：
  * - `status_mismatch` / `blocked`：`input.rs::send` 在 `type_in` 的 prepare 闭包里抛出，早于任何 Step::Write；
  * - `finished`：`check_program` 与 `type_in` 的活终端检查，同样早于写入；
  * - `not_found` / `machine_unknown` / `invalid_params`：目标或参数在动作之前就不可用。
@@ -347,7 +370,7 @@ export function herdrCoreNativeParams(params: Readonly<Record<string, unknown>>)
 
 /**
  * 只接受本地终端地址 `t7`：名字会被 label 改写，`machine/t7` 属于远端路由，
- * 都不做输入目标。0.1.14 的扁平终端地址恒为 `tN`。
+ * 都不做输入目标。0.1.14/0.1.15 的扁平终端地址恒为 `tN`。
  */
 function reviewAddress(params: Readonly<Record<string, unknown>>): string {
   const address = params.terminal

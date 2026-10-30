@@ -105,7 +105,8 @@ try {
   assert.deepEqual(sendDescription.params_schema.properties.if.anyOf[0].enum, ['idle', 'working'])
 
   const status = await call(entry('server.status').contract_ref, 'server.status', {})
-  assert.equal(status.version, '0.1.14')
+  assert.match(env.HERDR_CORE_EXPECT_VERSION ?? '', /^\d+\.\d+\.\d+$/u)
+  assert.equal(status.version, env.HERDR_CORE_EXPECT_VERSION)
   const coreId = status.core.id
 
   // ---- managed：先确认 Connector 重启前启动的终端还在 ----

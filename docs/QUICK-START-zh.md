@@ -101,15 +101,17 @@ rovloom config init connector --provider herdr
 
 只生成配置，不启动 Connector 或询问地址。已有配置不会覆盖；如果已选择其它 provider，命令返回 `config_exists`，请先核对再修改。
 
-## 2b. herdr-core（仅 Linux，core 0.1.14）
+## 2b. herdr-core（仅 Linux，core 0.1.14 或 0.1.15）
 
 herdr-core 是第三种 runtime：core 自己的智能体管理 API（unix socket），不是 Herdr TUI。只支持
-Linux，固定 **0.1.14** —— 握手拒绝其它版本，二进制摘要会在配对时记录。
+Linux，只接受已审核的 core 版本 **0.1.14** 与 **0.1.15** —— 其它版本（更旧或更新）在审核之前一律被握手拒绝，
+二进制摘要与契约哈希会在配对时记录。升级 core 等于换了二进制，已配对设备会失败关闭（`herdr_core_installation_changed`），
+对新 core 重新运行一次 `rovloom setup` 即可。
 
 从官方发布清单安装，自己核对压缩包（不要 `curl | sh`）：
 
 ```sh
-curl -fsS https://releases.herdr.dev/core/0.1.14/manifest.json -o manifest.json
+curl -fsS https://releases.herdr.dev/core/0.1.15/manifest.json -o manifest.json
 python3 -c 'import json;t=json.load(open("manifest.json"))["targets"]["linux-x86_64"];print(t["url"]);print(t["sha256"])'
 # 下载打印出来的地址，然后：
 echo "<清单里的 sha256>  herdr-core.tar.gz" | sha256sum --check

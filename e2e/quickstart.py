@@ -191,7 +191,7 @@ def main():
     ap.add_argument('--upgrade-from', help='先用旧 Rovloom 二进制配对并读取，再原位替换两端，验证原 token/设备凭据/结果句柄')
     ap.add_argument('--herdr', help='官方 herdr 0.9.5 可执行文件')
     ap.add_argument('--luvus', help='官方 luvus 0.14.3 可执行文件（与 --herdr/--herdr-core 三选一；走默认的 Luvus 引导）')
-    ap.add_argument('--herdr-core', dest='herdr_core', help='官方 herdr-core 0.1.14 可执行文件（附着已运行实例）')
+    ap.add_argument('--herdr-core', dest='herdr_core', help='官方 herdr-core 可执行文件（0.1.14 或 0.1.15，附着已运行实例）')
     ap.add_argument('--herdr-core-mode', dest='herdr_core_mode', choices=('attach', 'managed'), default='attach',
                     help='attach（默认）附着已运行 core；managed 由 Connector 在私有目录里拉起 core')
     ap.add_argument('--herdr-core-session', default='e2e', help='herdr-core 会话名（默认 e2e）')
@@ -246,6 +246,12 @@ def main():
     if args.herdr_core:
         # herdr-core 二进制同时承担 `hc` 客户端；symlink 只影响 argv[0]，不影响被核对的 exe。
         os.symlink('herdr-core', os.path.join(herdr_dir, 'hc'))
+        # 被测版本取自二进制自己（`hc 0.1.15`）：e2e 脚本据此核对 server.status 报的版本，
+        # 不再写死某一个版本；是否属于已审核集合由 Connector 的握手判定。
+        reported = subprocess.run([os.path.join(herdr_dir, 'herdr-core'), '--version'], capture_output=True, text=True, timeout=30)
+        assert reported.returncode == 0 and len(reported.stdout.split()) == 2, f'herdr-core --version failed: {reported.stderr[-200:]}'
+        os.environ['HERDR_CORE_EXPECT_VERSION'] = reported.stdout.split()[1]
+        print('HERDR_CORE_VERSION', os.environ['HERDR_CORE_EXPECT_VERSION'], flush=True)
     # ROVLOOM_LANG 固定英文输出，宿主 locale 不影响这些脚本的提示标记。
     base = {'LANG': 'C.UTF-8', 'TERM': 'xterm', 'ROVLOOM_LANG': 'en'}
     env_g = {**base, 'HOME': home_g, 'PATH': '/usr/bin:/bin'}

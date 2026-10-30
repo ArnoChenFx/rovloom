@@ -56,7 +56,8 @@ try {
   assert.equal(described.data.terminal_execution.local_state, 'disabled')
   // 读取不受开关影响。
   const status = await call(discovered.items[0].contract_ref, 'server.status', {})
-  assert.equal(status.version, '0.1.14')
+  assert.match(process.env.HERDR_CORE_EXPECT_VERSION ?? '', /^\d+\.\d+\.\d+$/u)
+  assert.equal(status.version, process.env.HERDR_CORE_EXPECT_VERSION)
   // 控制档在 Gateway 登记前拒绝：本机策略不允许，公开码是 forbidden。
   const denied = await tool('runtime_call', {
     target,

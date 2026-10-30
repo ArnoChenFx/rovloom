@@ -64,14 +64,14 @@ workspace 创建后的计数，不调用模型。可选的 Agent 两轮对话方
 
 ## 真实 herdr-core 链路（Linux）
 
-`--herdr-core` 只附着已运行的 core：脚本在私有 `XDG_RUNTIME_DIR` 下用 `hc run --bg --json` 拉起 0.1.14 core
-和一个打印 `rovloom-e2e` 后休眠的终端，再按 Quick Start 完成配对。`herdr-core-session.mjs` 经 MCP 验证
+`--herdr-core` 只附着已运行的 core：脚本在私有 `XDG_RUNTIME_DIR` 下用 `hc run --bg --json` 拉起 core
+（已审核的 0.1.14 或 0.1.15，版本取自二进制自己的 `--version`）和一个打印 `rovloom-e2e` 后休眠的终端，再按 Quick Start 完成配对。`herdr-core-session.mjs` 经 MCP 验证
 machines → providers（kind `herdr-core`）→ discover（恰好 5 个读取）→ describe → `server.status` /
 `terminal.list` / `terminal.get` / `terminal.read(lines=0)` / `terminal.wait`，并确认控制档被 Gateway 拒绝。
 
 ```sh
 python3 e2e/quickstart.py --binary dist/release/bun-linux-x64/candidate/rovloom \
-  --herdr-core /path/to/herdr-core-0.1.14 --work ~/.rq-core \
+  --herdr-core /path/to/herdr-core-0.1.15 --work ~/.rq-core \
   --then "bun --no-env-file e2e/herdr-core-session.mjs"
 ```
 

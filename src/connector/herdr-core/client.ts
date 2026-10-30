@@ -15,7 +15,8 @@ import {
   HERDR_CORE_MAX_FRAME_BYTES,
   HERDR_CORE_MAX_REQUEST_BYTES,
   HERDR_CORE_REQUEST_MAX_MS,
-  HERDR_CORE_REVIEW
+  HERDR_CORE_REVIEW,
+  herdrCoreReviewedCommit
 } from './methods.js'
 
 /** 帧头 9 字节；与 core 的 wire.rs 一致。 */
@@ -113,9 +114,9 @@ function helloResult(value: unknown): HerdrCoreHello {
   ) {
     fail('herdr_core_handshake_refused')
   }
-  // 每个 core 版本重新分类（spike 实测 6 天 5 个版本）：未审核的版本明确拒绝，不沿用旧档位。
+  // 每个 core 版本重新分类（spike 实测 6 天 5 个版本）：不在已审核集合里的版本明确拒绝，不沿用旧档位。
   // 单独判定，让拒绝原因与「形状不符」区分开。
-  if (result.version !== HERDR_CORE_REVIEW.version) {
+  if (herdrCoreReviewedCommit(result.version) === undefined) {
     fail('herdr_core_version_unreviewed')
   }
   return Object.freeze({

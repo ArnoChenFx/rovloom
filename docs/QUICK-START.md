@@ -111,16 +111,18 @@ rovloom config init connector --provider herdr
 
 This creates configuration without starting the Connector or asking for an address. Existing configuration is preserved; if it selects another provider, the command returns `config_exists` so you can review it before changing it.
 
-## 2b. herdr-core (Linux only, core 0.1.14)
+## 2b. herdr-core (Linux only, core 0.1.14 or 0.1.15)
 
 herdr-core is a third runtime: the core's own agent-management API over a unix socket, not the Herdr
-TUI. It is Linux-only and pinned to core **0.1.14** — the handshake refuses any other version, and the
-binary digest is recorded at pairing.
+TUI. It is Linux-only and accepts exactly the reviewed core versions, **0.1.14** and **0.1.15** — the handshake
+refuses any other version (older or newer) until it has been reviewed, and the binary digest and contract
+hash are recorded at pairing. Upgrading core replaces the binary, so a paired device fails closed
+(`herdr_core_installation_changed`) until you run `rovloom setup` again against the new core.
 
 Install it from the official release manifest, verifying the archive yourself (never `curl | sh`):
 
 ```sh
-curl -fsS https://releases.herdr.dev/core/0.1.14/manifest.json -o manifest.json
+curl -fsS https://releases.herdr.dev/core/0.1.15/manifest.json -o manifest.json
 python3 -c 'import json;t=json.load(open("manifest.json"))["targets"]["linux-x86_64"];print(t["url"]);print(t["sha256"])'
 # download the printed URL, then:
 echo "<sha256 from the manifest>  herdr-core.tar.gz" | sha256sum --check

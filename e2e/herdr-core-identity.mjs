@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { setTimeout as pause } from 'node:timers/promises'
 import { openHerdrCoreClient } from '../src/connector/herdr-core/client.js'
 import { herdrCorePeerFacts, inspectHerdrCoreSocket } from '../src/connector/herdr-core/identity.js'
+import { herdrCoreClassificationRevision } from '../src/connector/herdr-core/methods.js'
 import { compileHerdrCoreContract } from '../src/connector/herdr-core/schema.js'
 import { boundedJson, hash } from '../src/wire/index.js'
 
@@ -43,7 +44,7 @@ async function expectedSource() {
       native_protocol_version: String(client.hello.generation),
       runtime_generation: null,
       adapter_revision: 'adapter-herdr-core-1',
-      classification_revision: '0.1.14@29e6d37',
+      classification_revision: herdrCoreClassificationRevision(client.hello.version),
       support_basis: 'schema_and_version'
     }
   } finally {

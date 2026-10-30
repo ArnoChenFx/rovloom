@@ -16,7 +16,7 @@ herdr-core 与现有 Herdr TUI 适配（`herdr` 命令，65 个普通 RPC）不�
 
 本 PR 的落点是：Herdr TUI 的描述只从现有已审核表派生（`HERDR_RESPONSE_TYPES` 与终端执行表），herdr-core 的描述来自 spike 的实测档位表。Herdr TUI 的档位里只有协议探测是观察档，其余普通读取按 ADR 0004 留在有条件档——普通读取也可能改变终端状态。
 
-### herdr-core 的档位（0.1.14，提交 29e6d37）
+### herdr-core 的档位（0.1.14 提交 29e6d37、0.1.15 提交 d028423，共用同一张表）
 
 32 个方法分四档：A 观察 6、B 有条件 6、C 输入与控制 8、D 宿主级 12。第一阶段只开放 5 个普通读取：`server.status`、`terminal.get`、`terminal.list`、`terminal.read`（`lines` 必须为 0）、`terminal.wait`（timeout ≤ 60 秒）；无过滤的 `events.subscribe` 只给本地订阅入口，不进目录与 Wire 准入（见下）。其余方法返回固定 `herdr_core_method_unavailable`。
 
@@ -54,7 +54,11 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 ### 版本重新分类（spike 第 9 条）
 
-握手要求 `version` 等于审核过的 `0.1.14`，未审核版本以 `herdr_core_version_unreviewed` 拒绝，与形状不符的 `herdr_core_handshake_refused` 分开；契约来源的 `classification_revision` 固定为 `<version>@<commit>`，配置解析阶段就拒绝不属于本次审核表的来源。
+握手要求 `version` 属于已审核集合（`HERDR_CORE_REVIEWED_VERSIONS`：0.1.14、0.1.15，各配上游发布提交），其余版本——更旧、更新、带后缀、原型键——一律以 `herdr_core_version_unreviewed` 拒绝，与形状不符的 `herdr_core_handshake_refused` 分开；契约来源的 `classification_revision` 是 `<version>@<commit>`，且版本与提交必须成对，配置解析阶段就拒绝不属于审核表的来源。
+
+**0.1.15 的审核（2026-10-30）。** 结论是只改版本集合、不改档位表，依据四项：①`rpc.discover` 文档与 0.1.14 逐字相同，只差 `info.version` 与 `StatusResult.installed_by` 的一句说明（`test/connector/herdr-core/versions.test.ts` 把这两处抹平后断言相等，多出任何差异测试就变红）；②同一批 360 个候选参数在两个版本上被 core 接受或拒绝的结果逐条一致（0 条不同），58 个真实输出样本形状一致，Ajv 差分的宽松/严格清单一致；③上游 `29e6d37..d028423` 的净 diff 里，`api.rs` 只动了 `machine.add`/`machine.rename`（本期不开放），`terminal.*` 没有改动；④上游同一版本内加了又回退的「agent 回到 shell 时清除状态」（`d6c6d14`、`2451f84`、`d440864`）净改动为零，`foreground.rs` 不在净 diff 里。0.1.15 的其余改动不在我们的调用面：systemd 的关机守卫、RHEL8/NixOS 启动兼容都只在 `hc` 自动拉起（`systemd::spawn`）那条路径上，而 managed 模式直接 `execve serve`、从不走它；macOS 登录 shell、`hc update` 对包管理器安装的处理同理。
+
+配对记录二进制摘要与契约哈希，所以升级 core 等于换了二进制：已配对设备按现有语义失败关闭（`herdr_core_installation_changed` / `herdr_core_schema_unreviewed`），对新 core 重新运行 `rovloom setup` 即可。
 
 ### 输入与控制档（spike 第 5 条）
 
@@ -124,9 +128,9 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 
 第四阶段把验收扩到控制档：`e2e/quickstart.py --herdr-core` 在同一轮配对里先验开关关闭（目录只剩 5 个读取、`runtime_call` 在登记前以 `forbidden` 拒绝），再改本机开关重启 Connector 验控制档——13 个方法、`send` 后用 `terminal.read(lines=0)` 读回、blocked 终端上 `send`/`keys`/`interrupt` 全部 `not_dispatched` 且程序日志为空、`kill`/`rm` 作用于本轮终端、`created_ms`/`core_id`/名字/远端目标四种栅栏拒绝、`hc server restart` 与 SIGKILL core 后在途调用 `outcome_unknown` 且重新附着后继续读（`core.id` 不变、终端记录保留）。`scripts/herdr-core/mutation-check.mjs` 逐条去掉 blocked 判定、三元组核对、Connector 与 Gateway 两处开关门禁，验证对应测试变红再恢复变绿。
 
-真实 core 验收脚本 `scripts/herdr-core/verify-observation.ts` 在私有沙箱里对 0.1.14 跑通：`rpc.discover` 契约身份、`server.status` 的 pid 与 `/proc/<pid>/exe` 摘要、`argv`、`HC_SESSION`，以及 `terminal.list`/`get`/`read`/`wait`；XDG 运行时目录与状态目录回退两种布局都实测。第三阶段新增 `e2e/quickstart.py --herdr-core`：真实 Gateway + Connector 配对 herdr-core、在目录看到 5 个方法、经 MCP 对沙箱 core 执行 5 个读取；同一次运行里用真实 0.1.13 core 验证版本拒绝、用同机转发代理验证 `herdr_core_peer_pid_mismatch`、用 0755 socket 目录验证 `herdr_core_endpoint_untrusted`。
+真实 core 验收脚本 `scripts/herdr-core/verify-observation.ts` 在私有沙箱里对 0.1.14（0.1.15 见上文版本审核）跑通：`rpc.discover` 契约身份、`server.status` 的 pid 与 `/proc/<pid>/exe` 摘要、`argv`、`HC_SESSION`，以及 `terminal.list`/`get`/`read`/`wait`；XDG 运行时目录与状态目录回退两种布局都实测。第三阶段新增 `e2e/quickstart.py --herdr-core`：真实 Gateway + Connector 配对 herdr-core、在目录看到 5 个方法、经 MCP 对沙箱 core 执行 5 个读取；同一次运行里用真实 0.1.13 core 验证版本拒绝、用同机转发代理验证 `herdr_core_peer_pid_mismatch`、用 0755 socket 目录验证 `herdr_core_endpoint_untrusted`。
 
-## 附录 A：herdr-core 能力目录（0.1.14）
+## 附录 A：herdr-core 能力目录（0.1.14 与 0.1.15 相同）
 
 "开关"指 `allow_terminal_execution`。目录里的 `available` 与 `terminal_execution.local_state` 就是这一列的可机读形式；关闭时控制档与启动类仍会列出，但 `available:false`，调用在 Gateway 登记前被拒。
 

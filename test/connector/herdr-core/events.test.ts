@@ -164,7 +164,7 @@ test('慢消费者以背压结束订阅，不静默丢中间事件', async () =>
 })
 
 test('未审核的 core 版本在握手阶段就拒绝', async () => {
-  const core = await startFakeCore({ hello: { version: '0.1.15' } })
+  const core = await startFakeCore({ hello: { version: '0.1.16' } })
   try {
     await assert.rejects(openHerdrCoreClient(core.socket), /herdr_core_version_unreviewed/u)
   } finally {

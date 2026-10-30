@@ -148,7 +148,8 @@ test('herdr-core registers through the same ports with its own tiers and guarant
   // 两种 provider 的保证不能互相继承：core 只有快照重建，Herdr TUI 一项都没有。
   assert.equal(registry.ports('herdr-core').descriptor.guarantees?.event_recovery, 'snapshot_rebuild')
   assert.equal(registry.ports('herdr').descriptor.guarantees?.event_recovery, 'unavailable')
-  assert.equal(HERDR_CORE_DESCRIPTOR_REVISION.version, '0.1.14')
+  assert.deepEqual(HERDR_CORE_DESCRIPTOR_REVISION.versions, ['0.1.14', '0.1.15'])
+  assert.deepEqual(HERDR_CORE_DESCRIPTOR_REVISION.commits, { '0.1.14': '29e6d37', '0.1.15': 'd028423' })
 })
 
 test('the neutral port layer itself names no provider', () => {
