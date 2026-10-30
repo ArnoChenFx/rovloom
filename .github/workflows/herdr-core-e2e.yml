@@ -40,6 +40,9 @@ jobs:
       - name: Download official herdr-core from the release manifest
         env:
           CORE_DIR: ${{ runner.temp }}/core
+          # 发布清单与压缩包来自同一站点，只能挡传输损坏；摘要钉在仓库里，上游重发同版本时这里会失败。
+          CORE_0_1_14_SHA256: e9dbabdead0ce0ce3de51b6f54cc9549efedbb41b2f8448b6932ab0d1442343e
+          CORE_0_1_13_SHA256: d0dbfdd6e060832c629a6aed03687165479baceab5a5545a103490d0e4adab8c
         run: |
           set -eu
           mkdir -p "$CORE_DIR/latest" "$CORE_DIR/old"
@@ -51,10 +54,12 @@ jobs:
           mapfile -t latest < <(fetch https://releases.herdr.dev/core/0.1.14/manifest.json)
           curl -fsS --connect-timeout 15 --max-time 300 "${latest[0]}" -o "$CORE_DIR/latest.tgz"
           echo "${latest[1]}  $CORE_DIR/latest.tgz" | sha256sum --check
+          echo "$CORE_0_1_14_SHA256  $CORE_DIR/latest.tgz" | sha256sum --check
           tar -xzf "$CORE_DIR/latest.tgz" -C "$CORE_DIR/latest"
           mapfile -t old < <(fetch https://releases.herdr.dev/core/0.1.13/manifest.json)
           curl -fsS --connect-timeout 15 --max-time 300 "${old[0]}" -o "$CORE_DIR/old.tgz"
           echo "${old[1]}  $CORE_DIR/old.tgz" | sha256sum --check
+          echo "$CORE_0_1_13_SHA256  $CORE_DIR/old.tgz" | sha256sum --check
           tar -xzf "$CORE_DIR/old.tgz" -C "$CORE_DIR/old"
           test "$("$CORE_DIR/latest/herdr-core" --version | awk '{print $2}')" = "0.1.14"
       - name: Build actual standalone product
