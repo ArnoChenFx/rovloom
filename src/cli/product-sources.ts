@@ -38,20 +38,30 @@ export function routeProductionSources(registry: ProductionSourceRegistry): Prod
     }
     const isKind = /** 引用已在上面逐项核对过 kind。 */ (entry: ProductionProviderReference, kind: string) =>
       (entry.value as { kind: string }).kind === kind
-    const herdrReferences = references.filter(/** 每台设备各一份 Herdr 引用。 */ (entry) => isKind(entry, 'herdr'))
-    // Gateway 上每份 Herdr 引用是一台设备的一个独立中性会话组；Luvus 的多份引用由其注册表整体处理。
-    // Connector 只会有各 kind 一份引用，仍按 kind 分组。
-    if (kinds.size > 1 || (!connector && herdrReferences.length > 1)) {
+    /** 每台设备各一份引用；Gateway 上 Herdr 与 herdr-core 各自独立成组。 */
+    const perDevice = ['herdr', 'herdr-core'] as const
+    const deviceReferences = (kind: (typeof perDevice)[number]) =>
+      references.filter(/** 引用已在上面逐项核对过 kind。 */ (entry) => isKind(entry, kind))
+    const grouped = (kind: (typeof perDevice)[number]) => {
+      const matched = deviceReferences(kind)
+      if (!matched.length) {
+        return []
+      }
+      // Gateway 每份 Herdr/herdr-core 引用是一台设备的一个独立中性会话组；Connector 按 kind 一份。
+      return connector ? [matched] : matched.map((entry) => [entry])
+    }
+    const herdrGroups = grouped('herdr')
+    const coreGroups = grouped('herdr-core')
+    // Luvus 的多份引用由其注册表整体处理，其它 kind 按上面的设备粒度分组。
+    if (kinds.size > 1 || herdrGroups.length > 1 || coreGroups.length > 1) {
       const groups: ProductionSourceGroup[] = []
       const luvusReferences = references.filter(/** Luvus 引用整体交给其注册表。 */ (entry) => isKind(entry, 'luvus'))
-      for (const [kind, grouped] of [
+      for (const [kind, list] of [
         ['luvus', luvusReferences.length ? [luvusReferences] : []],
-        [
-          'herdr',
-          connector ? (herdrReferences.length ? [herdrReferences] : []) : herdrReferences.map((entry) => [entry])
-        ]
+        ['herdr', herdrGroups],
+        ['herdr-core', coreGroups]
       ] as const) {
-        for (const group of grouped) {
+        for (const group of list) {
           /** 先核对固定kind的实际工厂存在，再形成原引用分组。 */
           const source = sources[kind]
           if (!source || (connector ? !source.connector : !source.gateway)) {

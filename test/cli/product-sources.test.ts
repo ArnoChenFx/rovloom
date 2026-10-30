@@ -146,3 +146,42 @@ test('herdr-core 走自己的静态工厂；本阶段没有 Connector 执行端�
   )
   assert.deepEqual(calls, ['herdr-core:gateway'])
 })
+
+test('混合 Gateway 里 herdr-core 引用按设备分组，不会被丢掉', async () => {
+  const gateway = configTemplate('gateway')
+  if (gateway.role !== 'gateway') {
+    assert.fail('role template mismatch')
+  }
+  const authority = createManagementSessionAuthority({
+    principal: /** 本例从不建立身份或 cookie。 */ () => null,
+    administrator: /** 空管理来源不授予任何权限。 */ () => null
+  })
+  const stop = new Error('factory_probe_only')
+  let coreReferences: readonly ProductionProviderReference[] | undefined
+  const owners: Partial<Record<'luvus' | 'herdr' | 'herdr-core', ProductionCliSources>> = {
+    luvus: {
+      // 最小可识别的原生资源：足以让组合层继续到 herdr-core 分组。
+      async gateway() {
+        return { providers: [], release: async () => {} } as never
+      }
+    },
+    'herdr-core': {
+      async gateway(_config, refs) {
+        coreReferences = refs
+        throw stop
+      }
+    }
+  }
+  const routed = routeProductionSources(owners)
+  const references: readonly ProductionProviderReference[] = [
+    { reference: 'luvus_one', value: { kind: 'luvus' } },
+    { reference: 'core_one', value: { kind: 'herdr-core' } }
+  ]
+  await assert.rejects(
+    /** 分组顺序固定：luvus 先交付，herdr-core 再被调用并停止本例。 */ () =>
+      routed.gateway!(gateway, references, authority),
+    stop
+  )
+  // 每台设备各一份引用：herdr-core 只收到自己那一条，没有被混合分组吞掉。
+  assert.deepEqual(coreReferences, [{ reference: 'core_one', value: { kind: 'herdr-core' } }])
+})

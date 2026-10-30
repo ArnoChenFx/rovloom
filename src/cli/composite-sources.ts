@@ -21,7 +21,7 @@ import type {
 } from './production.js'
 
 export type ProductionSourceGroup = Readonly<{
-  kind: 'luvus' | 'herdr'
+  kind: 'luvus' | 'herdr' | 'herdr-core'
   source: ProductionCliSources
   references: readonly ProductionProviderReference[]
 }>
