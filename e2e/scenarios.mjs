@@ -27,6 +27,8 @@ export const scenarios = [
   {
     name: 'full-chain-herdr',
     methods: METHODS,
+    // 终端开关默认开启；本场景断言关闭时目录隐藏写终端，故显式关闭。
+    connectorSettings: { allow_terminal_execution: false },
     /** discover → describe → call → get → result_read，另有一次有副作用的写与读回。 */
     async run(stack) {
       const client = await boot(stack)
@@ -104,36 +106,39 @@ export const scenarios = [
   {
     name: 'terminal-switch',
     methods: METHODS,
-    /** 开关关闭：写终端被拒但连接与只读调用不受影响；改配置重启后同一调用被放行。 */
+    /** 配置省略即默认开启：写终端被放行且目录可见；写入显式 false 重启后目录隐藏、同一调用被拒，连接与只读调用不受影响。 */
     async run(stack) {
       const client = await boot(stack)
       await stack.invoke(client, { method: 'workspace.create', params: {} })
-      const send = { method: 'pane.send_text', params: { pane_id: 'w1:p1', text: 'e2e' } }
-      const denied = await stack.invoke(client, send)
-      assert.equal(denied.state, 'not_dispatched', `e2e_terminal_off:${JSON.stringify(denied)}`)
-      assert.equal((await stack.invoke(client, { method: 'ping', params: {} })).state, 'responded')
-      await stack.connector.stop()
-      const path = stack.f.connectorConfigPath
-      writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), allow_terminal_execution: true }))
-      stack.startConnector()
-      await stack.waitReady(client)
       const snapshot = await stack.invoke(client, { method: 'session.snapshot', params: {} })
-      let pane = (await stack.readResult(client, snapshot)).result.snapshot.panes[0]?.pane_id
-      if (!pane) {
-        await stack.invoke(client, { method: 'workspace.create', params: {} })
-        const next = await stack.invoke(client, { method: 'session.snapshot', params: {} })
-        pane = (await stack.readResult(client, next)).result.snapshot.panes[0]?.pane_id
-      }
+      const pane = (await stack.readResult(client, snapshot)).result.snapshot.panes[0]?.pane_id
       assert(pane, 'e2e_pane_missing')
-      const allowed = await stack.invoke(client, { ...send, params: { ...send.params, pane_id: pane } })
-      assert.equal(allowed.state, 'responded')
+      const send = { method: 'pane.send_text', params: { pane_id: pane, text: 'e2e' } }
+      const catalog = async () =>
+        (
+          await ok(client, 'runtime_discover', { target: stack.target, expected_binding_revision: 1, limit: 100 })
+        ).items.map((i) => i.method)
+      assert((await catalog()).includes('pane.send_text'), 'catalog shows the method while the switch defaults on')
+      const allowed = await stack.invoke(client, send)
+      assert.equal(allowed.state, 'responded', `e2e_terminal_default_on:${JSON.stringify(allowed)}`)
       const written = await stack.readResult(client, allowed)
       assert.equal(written.error, undefined, `e2e_native_error:${JSON.stringify(written)}`)
-      const names = (
-        await ok(client, 'runtime_discover', { target: stack.target, expected_binding_revision: 1, limit: 100 })
-      ).items.map((i) => i.method)
-      assert(names.includes('pane.send_text'), 'catalog shows the method once the switch is on')
-      return { switch_off: denied.state, switch_on: allowed.state, native_reply: written.result?.type }
+      await stack.connector.stop()
+      const path = stack.f.connectorConfigPath
+      writeFileSync(
+        path,
+        JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), allow_terminal_execution: false })
+      )
+      stack.startConnector()
+      await stack.waitReady(client)
+      assert(
+        !(await catalog()).includes('pane.send_text'),
+        'catalog hides the method once the switch is explicitly off'
+      )
+      const denied = await stack.invoke(client, { ...send, params: { ...send.params, pane_id: 'w1:p1' } })
+      assert.equal(denied.state, 'not_dispatched', `e2e_terminal_off:${JSON.stringify(denied)}`)
+      assert.equal((await stack.invoke(client, { method: 'ping', params: {} })).state, 'responded')
+      return { switch_default: allowed.state, switch_off: denied.state, native_reply: written.result?.type }
     }
   },
   {

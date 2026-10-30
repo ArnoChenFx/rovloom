@@ -241,7 +241,9 @@ export async function fixture(
     state_root: stateRoot,
     home,
     cwd,
-    transport
+    transport,
+    // 夹具模拟所有者显式关闭；省略即开启的默认值由专门用例覆盖。
+    allow_terminal_execution: false
   }
   const host: LuvusRpcHost = {
     backend,

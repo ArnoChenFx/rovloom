@@ -43,7 +43,7 @@ Connector，通常为 `~/.config/rovloom/connector.json`：
   "role": "connector",
   "data": {"directory": "/home/your-user/.local/share/rovloom/connector"},
   "gateway": {"url": ""},
-  "allow_terminal_execution": false
+  "allow_terminal_execution": true
 }
 ```
 
@@ -71,7 +71,7 @@ Connector，通常为 `~/.config/rovloom/connector.json`：
 | `management.hostname` | string，可选 | `127.0.0.1`，也接受 `0.0.0.0`。仅决定监听网卡，不限定反向代理域名。管理页支持 HTTP/HTTPS、保留或改写 Host 的代理，无需公网 URL 配置。登录、会话与 CSRF 校验仍生效。 |
 | Connector `gateway` | object，必填 | 仅含 `url`。 |
 | `gateway.url` | string，必填 | 初始化前为 `""`；其余为 ≤2048 字符的 WS/WSS origin，如 `ws://192.0.2.10:9443` 或 `wss://gateway.example`。不带凭据/查询/片段/路径，可带末尾 `/`；产品固定使用 `/connector`。 |
-| Connector `allow_terminal_execution` | boolean，可选 | `false`；省略也关闭。只有字面量 `true` 开启直接终端输入及自定义启动/恢复命令。修改这一份用户文件并重启 Connector，不改变安装设置或 token 设备范围。 |
+| Connector `allow_terminal_execution` | boolean，可选 | `true`；省略也开启。只有字面量 `false` 关闭直接终端输入及自定义启动/恢复命令；只想接受严格 Agent 文本对话和读取的设备请设为 `false`。旧版本生成的文件已显式写出该值，沿用其选择；只有当初省略了该项的文件会变为开启。修改这一份用户文件并重启 Connector，不改变安装设置或 token 设备范围。 |
 | Connector `native` | object，可选 | 默认省略，只接受以下来源选择及安装目录字段，在首次原生初始化时应用。 |
 | `native.provider` | string enum，可选 | 省略时为 `luvus`；`herdr` 仅选 Herdr，`mixed` 各选一个。须在首次初始化前选定，之后不能更改。 |
 | `native.runtime_bin_dirs` | 1–16 个互不重复的规范绝对目录 string 数组（每项≤4096字符），可选 | 查找所选 `luvus`/`herdr` 程序的位置。搜索顺序：数组内目录依序，其后是 Connector 启动时 `PATH` 中可用的条目，最后是 `/usr/bin:/bin`（Windows 无此项）。不同程序可装在不同目录。不接受 shell 展开或可执行 argv。 |
@@ -301,7 +301,7 @@ Connector 用户文件里显式列出目录：
 
 Agent/模型访问配置位于 runtime 的私有 HOME/XDG。managed 模式下其 HOME 为
 `<data.directory>/h`（Luvus）或 `<data.directory>/hr/h`（Herdr），不会复制普通 home 中的登录，
-因此模型访问需由机器所有者在该环境中准备。纯文本对话可保持 `allow_terminal_execution` 为 `false`。
+因此模型访问需由机器所有者在该环境中准备。纯文本对话可把 `allow_terminal_execution` 设为 `false`。
 终端开关不会沙箱化 Agent 自身工具；仅有 `ready` 不证明模型已回复。
 
 直接终端操作使用原生方法：Luvus `pane.run` 接受显式 `pane` 与 `command`，随后用

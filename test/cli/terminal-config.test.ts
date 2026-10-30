@@ -4,11 +4,11 @@ import { test } from 'node:test'
 import { configDocument, configTemplate, parseConfig } from '../../src/cli/config.js'
 
 test(
-  'Connector终端开关在各平台默认关闭，显式布尔值完整往返且不改变安装settings',
+  'Connector终端开关在各平台默认开启，显式布尔值完整往返且不改变安装settings',
   /** 模板与实际parser共用同一默认值。 */ () => {
     for (const platform of ['linux', 'darwin', 'win32'] as const) {
       const base = configDocument(configTemplate('connector', platform))
-      assert.equal(base.allow_terminal_execution, false)
+      assert.equal(base.allow_terminal_execution, true)
       const { allow_terminal_execution: _omitted, ...without } = base
       const directory = platform === 'win32' ? 'C:\\native\\bin' : '/opt/native/bin'
       for (const enabled of [undefined, false, true]) {
@@ -19,7 +19,7 @@ test(
         }
         const parsed = parseConfig(document, platform)
         assert.equal(parsed.role, 'connector')
-        assert.equal(configDocument(parsed).allow_terminal_execution, enabled === true)
+        assert.equal(configDocument(parsed).allow_terminal_execution, enabled !== false)
         assert.deepEqual(configDocument(parsed).native, document.native)
         assert.deepEqual(parseConfig(configDocument(parsed), platform), parsed)
       }
