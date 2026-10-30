@@ -10,6 +10,7 @@ import {
   assertBinding,
   boundedJson,
   LIMITS,
+  PROVIDER_KINDS,
   registeredRequestDigest,
   validateAttempt,
   validateDevicePlatform,
@@ -614,7 +615,7 @@ export class Store {
         if (
           binding.machine_id !== claim.machine_id ||
           binding.provider_id !== binding.kind ||
-          !['luvus', 'herdr'].includes(binding.kind) ||
+          !PROVIDER_KINDS.includes(binding.kind) ||
           binding.config_ref !== binding.kind + '_' + claimId ||
           binding.binding_revision !== 1 ||
           !binding.enabled ||

@@ -101,6 +101,15 @@ export const HERDR_CORE_MAX_FRAME_BYTES = 16 * 1024 * 1024
 /** 审核后的普通请求预算，远小于帧上限。 */
 export const HERDR_CORE_MAX_REQUEST_BYTES = 256 * 1024
 
+/**
+ * 本地请求期限：wait 的检查间隔留 5 秒余量并取整（timeout 是秒，可以带小数）；
+ * 其它方法用固定 5 秒。上限与 `HERDR_CORE_REQUEST_MAX_MS` 共用，超时只结束本地等待。
+ */
+export function herdrCoreRequestTimeout(method: string, params: Readonly<Record<string, unknown>>): number {
+  const timeout = method === 'terminal.wait' && typeof params.timeout === 'number' ? params.timeout : 0
+  return Math.min(Math.ceil(timeout * 1000) + 5000, HERDR_CORE_REQUEST_MAX_MS)
+}
+
 /** 表外方法一律拒绝；档位不按前缀猜测。 */
 export function herdrCoreTier(method: string): ProviderMethodTier | undefined {
   return Object.hasOwn(HERDR_CORE_METHODS, method) ? HERDR_CORE_METHODS[method] : undefined

@@ -340,7 +340,7 @@ function provider(value: ProviderSnapshot): void {
     invalid()
   }
   choice(value.enabled, [true, false])
-  choice(value.kind, ['luvus', 'herdr'])
+  choice(value.kind, PROVIDER_KINDS)
   choice(value.readiness, ['unavailable', 'unverified', 'ready'])
   observed(
     value.runtime,
@@ -537,7 +537,7 @@ function callAggregate(value: CallAggregate, pageItems: number): void {
         record(row, ['machine_id', 'provider_id', 'kind', 'count'])
         text(row.machine_id)
         text(row.provider_id)
-        choice(row.kind, ['luvus', 'herdr'])
+        choice(row.kind, PROVIDER_KINDS)
         count(row.count)
       }
     ],

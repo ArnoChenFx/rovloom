@@ -112,7 +112,7 @@ test(
   }
 )
 
-test('herdr-core 走自己的静态工厂；本阶段没有 Connector 执行端口', async () => {
+test('herdr-core 走自己的静态工厂，Connector 也路由到执行端', async () => {
   const gateway = configTemplate('gateway')
   if (gateway.role !== 'gateway') {
     assert.fail('role template mismatch')
@@ -130,6 +130,12 @@ test('herdr-core 走自己的静态工厂；本阶段没有 Connector 执行端�
         assert.equal(refs, selected)
         calls.push('herdr-core:gateway')
         throw stop
+      },
+      async connector(_config, refs) {
+        assert.equal(this, owners['herdr-core'])
+        assert.equal(refs, selected)
+        calls.push('herdr-core:connector')
+        throw stop
       }
     }
   }
@@ -139,12 +145,9 @@ test('herdr-core 走自己的静态工厂；本阶段没有 Connector 执行端�
     /** 路由只调用选中的 herdr-core 工厂一次。 */ () => routed.gateway!(gateway, selected, authority),
     stop
   )
-  // 没有 Connector 执行端口时明确 backend_unavailable，而不是交付一个空转会话。
-  await assert.rejects(
-    () => routed.connector!(configTemplate('connector') as never, selected),
-    /Rovloom command failed/u
-  )
-  assert.deepEqual(calls, ['herdr-core:gateway'])
+  // Connector 有实际执行端时只调用选中的同一静态工厂一次。
+  await assert.rejects(() => routed.connector!(configTemplate('connector') as never, selected), stop)
+  assert.deepEqual(calls, ['herdr-core:gateway', 'herdr-core:connector'])
 })
 
 test('混合 Gateway 里 herdr-core 引用按设备分组，不会被丢掉', async () => {

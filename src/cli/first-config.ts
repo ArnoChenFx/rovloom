@@ -16,7 +16,7 @@ export function privateDirectory(path: string): void {
   }
 }
 
-export type RoleInitialization = Readonly<{ provider?: 'luvus' | 'herdr' | 'mixed'; container?: true }>
+export type RoleInitialization = Readonly<{ provider?: 'luvus' | 'herdr' | 'herdr-core' | 'mixed'; container?: true }>
 
 // 容器镜像通过环境变量声明自身：首次生成的 Gateway 配置直接采用容器监听默认值，
 // 让镜像默认入口（rovloom gateway）无需额外子命令即可从宿主机端口映射访问。

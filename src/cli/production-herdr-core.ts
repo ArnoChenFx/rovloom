@@ -1,8 +1,9 @@
 /**
- * 唯一 CLI 的 herdr-core 生产来源：只交付中性端口资源（Gateway 侧 Wire 会话、准入与证据保留）。
- * 本阶段不启动或附着 core 进程，也不交付 Connector 执行端口：Connector 选择 herdr-core 会明确
- * backend_unavailable，而不是给一个不执行的会话。
+ * 唯一 CLI 的 herdr-core 生产来源：Gateway 交付中性端口资源（Wire 会话、准入与证据保留）；
+ * Connector 只附着本机已在运行的 core，按内核 peer 与 /proc 事实核对身份后执行已开放的 5 个读取。
+ * 不启动、停止或接管 core 进程。
  */
+import { createHerdrCoreConnectorResources } from '../connector/herdr-core/connector.js'
 import { createHerdrCoreGatewayResources, parseHerdrCoreProviderRefConfig } from '../connector/herdr-core/provider.js'
 import { boundedJson, fields, object, parseJson } from '../wire/index.js'
 import { CliError } from './config.js'
@@ -37,7 +38,10 @@ export function createHerdrCoreProductionSources(): ProductionCliSources {
     /** Gateway 侧：端口层资源交付描述、目录、Wire 会话、身份核对与释放。 */
     async gateway(_config, references) {
       return createHerdrCoreGatewayResources({ config: reference(references) })
+    },
+    /** Connector 侧只交付附着执行端；端点、会话与摘要都在本地受保护配置里。 */
+    async connector(_config, references) {
+      return createHerdrCoreConnectorResources({ config: reference(references), now: Date.now })
     }
-    // 故意不提供 connector：本阶段没有 herdr-core 的原生执行端口，选择它必须失败而不是空转。
   })
 }

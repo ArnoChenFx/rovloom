@@ -1,7 +1,7 @@
 // 定义账本行、独立设备身份校验接口及提交后回收通知，并投影不含内部请求与证据字段的公开调用。
 import type { CallState } from '../contracts.js'
 import type { ResponseAnchor } from '../wire/evidence.js'
-import type { ValidationMode } from '../wire/types.js'
+import type { ProviderKind, ValidationMode } from '../wire/types.js'
 import type { Retention } from './config.js'
 
 export type Machine = { machine_id: string; name: string; status: string }
@@ -40,7 +40,7 @@ export type Call = {
   machine_id: string
   provider_id: string
   binding_revision: number
-  provider_kind: 'luvus' | 'herdr'
+  provider_kind: ProviderKind
   state: CallState
   epoch: string | null
   attempt_id: string | null
@@ -84,7 +84,7 @@ export type CallWindowRow = {
   principal: string
   machine_id: string
   provider_id: string
-  provider_kind: 'luvus' | 'herdr'
+  provider_kind: ProviderKind
   method: string
   state: CallState
   target_json: string

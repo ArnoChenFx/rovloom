@@ -633,7 +633,7 @@ function callsPage(page: PageView, freshness: Freshness, route: PageRoute, filte
       'calls.byTarget',
       aggregate.by_provider.map(
         /* 目标使用 provider 实例标识与类型。 */ (row) => ({
-          label: `${row.machine_id} · ${row.kind === 'luvus' ? 'Luvus' : 'Herdr'} · ${row.provider_id}`,
+          label: `${row.machine_id} · ${row.kind === 'luvus' ? 'Luvus' : row.kind === 'herdr' ? 'Herdr' : 'Herdr Core'} · ${row.provider_id}`,
           count: row.count
         })
       ),
@@ -982,7 +982,12 @@ function providerList(page: PageView, device: DeviceSnapshot, freshness: Freshne
   for (const provider of page.providers.items) {
     const row = node('article', '', 'provider-card')
     const header = node('header', '', 'provider-heading')
-    header.append(node('h3', `${provider.kind === 'luvus' ? 'Luvus' : 'Herdr'} · ${provider.provider_id}`))
+    header.append(
+      node(
+        'h3',
+        `${provider.kind === 'luvus' ? 'Luvus' : provider.kind === 'herdr' ? 'Herdr' : 'Herdr Core'} · ${provider.provider_id}`
+      )
+    )
     const states = node('div', '', 'provider-states')
     const registryCurrent = current(provider.observed_at, freshness)
     const ready =

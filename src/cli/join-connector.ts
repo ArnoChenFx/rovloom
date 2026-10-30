@@ -22,6 +22,7 @@ import { readSetupJson, setupFileStamp, writeSetupFile, writeSetupJson } from '.
 import { runtimeReference } from './runtime-files.js'
 import { assertSetupNativePath, prepareSetupNative } from './setup-native.js'
 import { prepareSetupHerdr } from './setup-herdr.js'
+import { prepareSetupHerdrCore } from './setup-herdr-core.js'
 import { SIMPLE_SETUP_ACTOR } from './setup-targets.js'
 import { readRuntimeConfig } from './runtime-config.js'
 import { silentConsole } from './setup-console.js'
@@ -142,7 +143,7 @@ export async function joinConnector(
     }
     // 换码即换设备身份（吊销恢复），换地址即换 Gateway：码本身就是意图证明，旧状态整体退役后重新配对。
     // managed 模式的原生根必须回到空白才能重新初始化，因此退役目录而不是只删文件。
-    const prepared = ['luvus', 'herdr'] as const
+    const prepared = ['luvus', 'herdr', 'herdr-core'] as const
     const records = prepared
       .map((kind) => readSetupJson(providerSetupPath(config.state_dir, kind), 1_048_576))
       .filter((entry) => entry !== undefined)
@@ -184,7 +185,7 @@ export async function joinConnector(
   const prepared = []
   for (const kind of selectedNativeProviders(config)) {
     prepared.push(
-      await (kind === 'luvus' ? prepareSetupNative : prepareSetupHerdr)(
+      await (kind === 'luvus' ? prepareSetupNative : kind === 'herdr' ? prepareSetupHerdr : prepareSetupHerdrCore)(
         config,
         console,
         code.machine,

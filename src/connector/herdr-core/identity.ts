@@ -82,6 +82,20 @@ export function herdrCoreEndpoint(
   return Object.freeze({ socket, origin: bound.origin, session: name })
 }
 
+/** 配对时固定的端点位置：只由配置中的 runtime_dir 或 state_home 重算，运行时不再读进程环境。 */
+export function herdrCorePinnedEndpoint(
+  pin: Readonly<{ runtime_dir?: string; state_home?: string }>,
+  session: string
+): HerdrCoreEndpoint {
+  if ((pin.runtime_dir === undefined) === (pin.state_home === undefined)) {
+    fail('herdr_core_endpoint_unavailable')
+  }
+  return herdrCoreEndpoint(
+    session,
+    pin.runtime_dir !== undefined ? { XDG_RUNTIME_DIR: pin.runtime_dir } : { XDG_STATE_HOME: pin.state_home }
+  )
+}
+
 /** 端点必须是我们自己的套接字，目录必须是私有的；不改权限，不跟随链接。 */
 export function inspectHerdrCoreSocket(socket: string): Readonly<{ uid: number; directory_uid: number }> {
   if (typeof socket !== 'string' || !socket.startsWith('/') || socket.includes('\0')) {

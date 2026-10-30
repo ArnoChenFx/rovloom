@@ -36,6 +36,8 @@ export type ConnectorConfig = Readonly<{
     // Luvus 专属：attach（默认）附着用户真实的 default 会话（LUVUS_HOME，默认 ~/.luvus）、不存在才自建；
     // managed 在 Connector 私有目录里拉一个隔离实例（会话名 rovloom）。
     luvus?: Readonly<{ mode?: 'attach' | 'managed'; state_root?: string }>
+    // herdr-core 专属：只附着已运行的 core；session 与 core 的套接字名一致，省略为 default。
+    herdr_core?: Readonly<{ session?: string }>
   }>
 }>
 export type RoleConfig = GatewayConfig | ConnectorConfig
@@ -49,6 +51,11 @@ export function herdrMode(config: ConnectorConfig): 'attach' | 'managed' {
 // Luvus 的运行方式：默认附着用户已在运行的 default 会话（不存在才自建），managed 为 Connector 私有的隔离实例。
 export function luvusMode(config: ConnectorConfig): 'attach' | 'managed' {
   return config.native?.luvus?.mode ?? 'attach'
+}
+
+// herdr-core 只附着已运行实例；会话名同时是 Target 的一部分，省略为 default。
+export function herdrCoreSession(config: ConnectorConfig): string {
+  return config.native?.herdr_core?.session ?? 'default'
 }
 
 // 省略选择时保留已有Luvus首次路径；mixed 只包含既有两份固定来源，herdr-core 需显式选择。
@@ -229,7 +236,7 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
     const native =
       input.native === undefined
         ? undefined
-        : exact(input.native, [], ['provider', 'runtime_bin_dirs', 'agent_bin_dirs', 'herdr', 'luvus'])
+        : exact(input.native, [], ['provider', 'runtime_bin_dirs', 'agent_bin_dirs', 'herdr', 'luvus', 'herdr_core'])
     if (native) {
       if (native.herdr !== undefined) {
         const herdr = exact(native.herdr, [], ['mode', 'config_home'])
@@ -240,6 +247,13 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
           return fail()
         }
         Object.freeze(herdr)
+      }
+      if (native.herdr_core !== undefined) {
+        const core = exact(native.herdr_core, [], ['session'])
+        if (core.session !== undefined && !/^[A-Za-z0-9._-]{1,64}$/.test(core.session as string)) {
+          return fail()
+        }
+        Object.freeze(core)
       }
       if (native.luvus !== undefined) {
         const luvus = exact(native.luvus, [], ['mode', 'state_root'])

@@ -45,6 +45,7 @@ import type {
   V2Target
 } from '../../wire/types.js'
 import { HERDR_CORE_PROVIDER_DESCRIPTOR } from './descriptor.js'
+import { herdrCoreSessionName } from './identity.js'
 import { HERDR_CORE_EXPOSED_METHODS, HERDR_CORE_REVIEW, herdrCoreTier } from './methods.js'
 import { compileHerdrCoreContract } from './schema.js'
 import type { HerdrCoreContract } from './schema.js'
@@ -54,6 +55,22 @@ import type { HerdrCoreBackend, HerdrCoreContractRecord } from './readonly.js'
 /** 只有附着本机已有实例时才有本地身份事实；Gateway 不伪造，缺证据就拒绝。 */
 export type HerdrCoreIdentityFacts = () => LocalIdentityFacts
 
+export type HerdrCoreClaimLedgerRef = Readonly<{
+  path: string
+  mode: 'create' | 'open'
+  ledger_id: string
+  limits: Readonly<{ entries: number; bytes: number }>
+}>
+
+/** Connector 侧的附着事实：会话名、端点位置、路由主体与发送墓碑；不启动或接管 core。 */
+export type HerdrCoreConnectorConfig = Readonly<{
+  session: string
+  /** 配对时固定的端点位置；运行时不再读环境变量或 cwd 推断。 */
+  endpoint: Readonly<{ runtime_dir?: string; state_home?: string }>
+  principal_id: string
+  claims: HerdrCoreClaimLedgerRef
+}>
+
 export type HerdrCoreProviderRefConfig = Readonly<{
   version: 1
   target: V2Target & { profile: 'session' }
@@ -62,6 +79,8 @@ export type HerdrCoreProviderRefConfig = Readonly<{
   expected_source: ContractSource
   /** `rpc.discover` 原文的内容寻址快照；摘要必须等于 expected_source.schema_sha256。 */
   schema_ref: string
+  /** 只有 Connector 本地配置携带；Gateway 侧配置没有原生执行事实。 */
+  connector?: HerdrCoreConnectorConfig
 }>
 
 /** 目录视图与 herdr 的 provider 目录同形；expires_at 只是视图期限，不是原生 lease。 */
@@ -112,10 +131,60 @@ function provider(config: HerdrCoreProviderRefConfig): ProviderBinding {
   })
 }
 
+/** 账本只沿用既有 create/open 与预算字段；路径必须是规范绝对值。 */
+function claims(value: unknown): HerdrCoreClaimLedgerRef {
+  const row = object(value)
+  fields(row, ['path', 'mode', 'ledger_id', 'limits'])
+  id(row.ledger_id)
+  if (row.mode !== 'create' && row.mode !== 'open') {
+    fail('herdr_core_provider_config_invalid')
+  }
+  const limits = object(row.limits)
+  fields(limits, ['entries', 'bytes'])
+  uint(limits.entries, true)
+  uint(limits.bytes, true)
+  return Object.freeze({
+    path: path(row.path),
+    mode: row.mode,
+    ledger_id: row.ledger_id,
+    limits: Object.freeze({ entries: limits.entries, bytes: limits.bytes })
+  })
+}
+
+/** 端点位置只接受一个固定来源，且必须是规范绝对路径。 */
+function endpoint(value: unknown): HerdrCoreConnectorConfig['endpoint'] {
+  const row = object(value)
+  fields(row, [], ['runtime_dir', 'state_home'])
+  const keys = ['runtime_dir', 'state_home'].filter((key) => row[key] !== undefined)
+  if (keys.length !== 1) {
+    fail('herdr_core_provider_config_invalid')
+  }
+  return Object.freeze(
+    keys[0] === 'runtime_dir' ? { runtime_dir: path(row.runtime_dir) } : { state_home: path(row.state_home) }
+  )
+}
+
+/** Connector 本地事实只在本地配置出现；会话必须与 Target 的 session 一致。 */
+function connector(value: unknown, target: V2Target & { profile: 'session' }): HerdrCoreConnectorConfig {
+  const row = object(value)
+  fields(row, ['session', 'endpoint', 'principal_id', 'claims'])
+  const session = herdrCoreSessionName(row.session)
+  if (session !== target.session) {
+    fail('herdr_core_provider_config_invalid')
+  }
+  id(row.principal_id)
+  return Object.freeze({
+    session,
+    endpoint: endpoint(row.endpoint),
+    principal_id: row.principal_id,
+    claims: claims(row.claims)
+  })
+}
+
 /** 公开 JSON 配置解析器只校验声明；实际 schema 文件、摘要与编译结果由资源工厂另外验证。 */
 export function parseHerdrCoreProviderRefConfig(input: unknown): HerdrCoreProviderRefConfig {
   const value = object(parseJson(boundedJson(input, 65_536)))
-  fields(value, ['version', 'target', 'binding_revision', 'config_ref', 'expected_source', 'schema_ref'])
+  fields(value, ['version', 'target', 'binding_revision', 'config_ref', 'expected_source', 'schema_ref'], ['connector'])
   if (value.version !== 1) {
     fail('herdr_core_provider_config_invalid')
   }
@@ -141,13 +210,15 @@ export function parseHerdrCoreProviderRefConfig(input: unknown): HerdrCoreProvid
   ) {
     fail('herdr_core_contract_unreviewed')
   }
+  const parsedTarget = Object.freeze({ ...value.target }) as V2Target & { profile: 'session' }
   return Object.freeze({
     version: 1,
-    target: Object.freeze({ ...value.target }),
+    target: parsedTarget,
     binding_revision: value.binding_revision,
     config_ref: value.config_ref,
     expected_source: Object.freeze({ ...value.expected_source }),
-    schema_ref: path(value.schema_ref)
+    schema_ref: path(value.schema_ref),
+    ...(value.connector === undefined ? {} : { connector: connector(value.connector, parsedTarget) })
   })
 }
 

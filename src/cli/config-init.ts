@@ -24,7 +24,7 @@ export function initializeRoleConfig(args: readonly string[], environment?: Conf
         name === '--provider' &&
         provider === undefined &&
         role === 'connector' &&
-        ['luvus', 'herdr', 'mixed'].includes(value ?? '')
+        ['luvus', 'herdr', 'herdr-core', 'mixed'].includes(value ?? '')
       ) {
         provider = value as RoleInitialization['provider']
       } else {

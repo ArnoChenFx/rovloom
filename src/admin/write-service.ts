@@ -16,6 +16,7 @@ import type {
   ManagementWrite,
   ResourceTarget
 } from '../mcp/management.js'
+import { PROVIDER_KINDS } from '../wire/types.js'
 import type { ProviderKind } from '../wire/types.js'
 
 export type ManagementWriteOptions = {
@@ -223,7 +224,7 @@ function intent(value: unknown): ManagementIntent {
     object(input.target, ['machine_id', 'provider_id', 'kind'])
     identifier(input.target.machine_id)
     identifier(input.target.provider_id)
-    if (!['luvus', 'herdr'].includes(input.target.kind)) {
+    if (!PROVIDER_KINDS.includes(input.target.kind as ProviderKind)) {
       throw new ManagementServiceError('invalid_arguments')
     }
     revision(input.expected_binding_revision)
