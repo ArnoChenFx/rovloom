@@ -101,6 +101,7 @@ export async function prepareSetupHerdrCore(
   const reference = setupReference(attempt, 'herdr-core')
   const client = await openHerdrCoreClient(endpoint.socket)
   let discovered: string
+  let binaryVersion: string
   let binarySha256: string
   let serverVersion: string | null
   try {
@@ -109,6 +110,7 @@ export async function prepareSetupHerdrCore(
     const status = contract.validateResult('server.status', await client.request('server.status', {}, 10_000))
     // pid 来自这条连接的内核 peer；自报 pid 只用于与内核值互相印证。
     const facts = herdrCorePeerFacts(client.peer(), status.pid, session)
+    binaryVersion = client.hello.version
     binarySha256 = facts.binary_sha256
     serverVersion = typeof status.version === 'string' ? status.version : null
   } finally {
@@ -118,7 +120,7 @@ export async function prepareSetupHerdrCore(
     provider_kind: 'herdr-core' as const,
     protocol_family: 'herdr-core-jsonrpc' as const,
     // 版本来自本次握手与 server.status；二进制摘要来自正在运行的映像。
-    binary_version: HERDR_CORE_REVIEW.version,
+    binary_version: binaryVersion,
     binary_sha256: binarySha256,
     schema_sha256: hash(discovered),
     schema_origin: 'live_instance' as const,
