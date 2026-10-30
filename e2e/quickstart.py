@@ -277,12 +277,22 @@ def main():
             cfg['native'] = {'provider': 'herdr-core', 'herdr_core': {'session': args.herdr_core_session}}
             open(path, 'w').write(json.dumps(cfg, indent=2) + '\n'); os.chmod(path, 0o600)
             # `hc run --bg --json` 会拉起脱离启动者的 core，并留下一个可读终端；不阻塞宿主。
+            # 终端程序必须读输入（cat），否则 send 的输入回显无从验证。
             started = subprocess.run([os.path.join(herdr_dir, 'hc'), 'run', '--bg', '--json', '--name', 'e2e',
-                                      'sh', '-c', 'printf "rovloom-e2e\\n"; exec sleep 300'],
+                                      'sh', '-c', 'printf "rovloom-e2e\\n"; exec cat'],
                                      env={**env_c, 'TERM': 'xterm-256color'}, cwd=home_c,
                                      capture_output=True, text=True, timeout=30)
             assert started.returncode == 0, f'herdr-core run failed: {started.stderr[-400:]}'
             print('HERDR_CORE_TERMINAL', started.stdout.strip()[:400], flush=True)
+            # 第二个终端模拟「等人批准」的智能体：启动即上报 OSC 7501 blocked，并把输入记到日志。
+            blocked_log = os.path.join(work, 'blocked.log')
+            blocked = subprocess.run([os.path.join(herdr_dir, 'hc'), 'run', '--bg', '--json', '--name', 'blocked',
+                                      'python3', '-I', os.path.join(os.path.dirname(__file__), 'herdr-core-blocked.py'),
+                                      blocked_log],
+                                     env={**env_c, 'TERM': 'xterm-256color'}, cwd=home_c,
+                                     capture_output=True, text=True, timeout=30)
+            assert blocked.returncode == 0, f'herdr-core blocked terminal failed: {blocked.stderr[-400:]}'
+            print('HERDR_CORE_BLOCKED_TERMINAL', blocked.stdout.strip()[:400], flush=True)
         elif args.herdr and args.service:
             # LaunchDaemon 的 PATH 只有系统目录：显式列出 herdr 所在目录。
             cfg['native']['runtime_bin_dirs'] = [herdr_dir]
@@ -369,6 +379,21 @@ def main():
                                   env=identity_env, cwd=os.path.dirname(__file__), capture_output=True, text=True, timeout=120)
             print('HERDR_CORE_IDENTITY', (done.stdout + done.stderr).strip()[-800:], flush=True)
             assert done.returncode == 0, 'herdr-core identity fail-closed check failed'
+        if args.herdr_core:
+            # 开关关闭时控制档在目录、describe 与 Gateway 登记前都被拒绝；同一轮配对后翻转开关再验控制档。
+            control_env = {**os.environ, 'MCP_CONFIG': out}
+            done = subprocess.run(['bun', '--no-env-file', os.path.join(os.path.dirname(__file__), 'herdr-core-control-off.mjs')],
+                                  env=control_env, cwd=os.path.dirname(__file__), capture_output=True, text=True, timeout=120)
+            print('HERDR_CORE_CONTROL_OFF', (done.stdout + done.stderr).strip()[-800:], flush=True)
+            assert done.returncode == 0, 'herdr-core control-off check failed'
+            # 只改本机开关并重启 Connector；配对、设备凭据与已批准 provider 记录都不动。
+            connector.stop()
+            switched = json.load(open(path))
+            switched['allow_terminal_execution'] = True
+            open(path, 'w').write(json.dumps(switched, indent=2) + '\n'); os.chmod(path, 0o600)
+            connector = Term('connector-control', [rov, 'connector'], env_c, home_c); terms.append(connector)
+            connector.expect('provider_ready=true', timeout=90)
+            print('HERDR_CORE_CONTROL_ON', 'allow_terminal_execution=true', flush=True)
         if args.luvus:
             servers = luvus_servers(herdr_dir)
             print('LUVUS_SERVERS', servers, flush=True)
@@ -596,6 +621,15 @@ def main():
             then_env = {**os.environ, 'MCP_CONFIG': out,
                         'ROVLOOM_EXPECT_LEGACY_SCHEMA': '1' if args.upgrade_from else '',
                         'ROVLOOM_GATEWAY_STATE': os.path.join(home_g, '.local', 'share', 'rovloom', 'gateway')}
+            if args.herdr_core:
+                # 控制档场景需要同一个沙箱里的 hc 与 core 路径：计划重启与 SIGKILL 只作用于本轮私有沙箱。
+                then_env.update({'HERDR_CORE_HC': os.path.join(herdr_dir, 'hc'),
+                                 'HERDR_CORE_BINARY': os.path.join(herdr_dir, 'herdr-core'),
+                                 'HERDR_CORE_SESSION': args.herdr_core_session,
+                                 'HERDR_CORE_RUNTIME': core_runtime,
+                                 'HERDR_CORE_STATE': core_state,
+                                 'HERDR_CORE_HOME': home_c,
+                                 'HERDR_CORE_BLOCKED_LOG': os.path.join(work, 'blocked.log')})
             for attempt in range(8 if args.service else 1):
                 status = subprocess.call(shlex.split(args.then), env=then_env)
                 if status == 0:

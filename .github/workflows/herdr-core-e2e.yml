@@ -1,5 +1,6 @@
-# herdr-core 的 Linux 端到端：私有 XDG 沙箱里运行官方 0.1.14 core，真实配对、5 个读取与控制档拒绝；
-# 再用 0.1.13 core、同机转发代理和 0755 socket 目录验证身份失败关闭。
+# herdr-core 的 Linux 端到端：私有 XDG 沙箱里运行官方 0.1.14 core，真实配对、5 个读取，
+# 再验控制档（开关关闭时拒绝 → 打开后 send/读回/blocked/三元组/kill/rm）与计划重启、SIGKILL 后的重新附着；
+# 最后用 0.1.13 core、同机转发代理和 0755 socket 目录验证身份失败关闭。
 name: herdr-core e2e
 on:
   workflow_dispatch:
@@ -64,7 +65,7 @@ jobs:
           test "$("$CORE_DIR/latest/herdr-core" --version | awk '{print $2}')" = "0.1.14"
       - name: Build actual standalone product
         run: bun --no-env-file run release:build
-      - name: Pair, discover and call a real herdr-core
+      - name: Pair, discover, control a real herdr-core and reattach after restarts
         env:
           CORE_DIR: ${{ runner.temp }}/core
         run: |
