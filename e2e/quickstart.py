@@ -222,6 +222,7 @@ def main():
     ap.add_argument('--append-binaries', help='追加时用的二进制，KIND=PATH[,KIND=PATH]；不参与配对')
     ap.add_argument('--append-core', dest='append_core', action='store_true',
                     help='（--append 含 herdr-core）起一个私有 core 供追加使用')
+    ap.add_argument('--narrow', help='（--append 之后）把 native.provider 缩小到这个 kind 再重启 Connector：Gateway 已登记、Connector 不再启动的来源，其余来源必须照常可用')
     ap.add_argument('--append-crash', dest='append_crash', action='store_true',
                     help='（--append）成功后再删掉本机注册表里的追加条目并重启，模拟 Gateway 已登记而本机没写完的崩溃窗口')
     ap.add_argument('--then', help='就绪后执行的命令，环境变量 MCP_CONFIG 指向连接信息')
@@ -580,6 +581,16 @@ def main():
                 text = ANSI.sub(b'', connector.log).decode('utf8', 'replace')
                 append_markers += [line for line in text.splitlines() if line.startswith('native_provider_appended') or line.startswith('native_provider_append_failed')]
                 print('NATIVE_PROVIDER_APPEND_CRASH', json.dumps(append_markers), flush=True)
+            if args.narrow:
+                # Gateway 已登记 X，而 Connector 因 native.provider 缩小范围不再启动 X：其余来源必须照常可用。
+                assert args.narrow in ordered, '--narrow must be one of --append kinds'
+                connector.stop()
+                narrowed = json.load(open(path))
+                narrowed.setdefault('native', {})['provider'] = args.narrow
+                open(path, 'w').write(json.dumps(narrowed, indent=2) + '\n'); os.chmod(path, 0o600)
+                connector = Term('connector-narrow', [rov, 'connector'], env_c, home_c); terms.append(connector)
+                connector.expect('provider_ready=true', timeout=120)
+                print('NARROWED', args.narrow, flush=True)
             # 追加后 registry 与 device 凭据的字节都在 then 脚本里核对。
         status = 0
         if args.herdr_core:
@@ -886,6 +897,8 @@ def main():
                                  'APPEND_KINDS': args.append,
                                  'GATEWAY_DEVICE_URL': 'http://127.0.0.1:' + str(gateway_cfg['devices']['port']),
                                  'CONNECTOR_MANAGED': os.path.join(home_c, '.local', 'share', 'rovloom', 'connector', 'managed')})
+            if args.narrow:
+                then_env['NARROW_KIND'] = args.narrow
             if args.herdr_core:
                 # 控制档场景需要同一个沙箱里的 hc 与 core 路径：计划重启与 SIGKILL 只作用于本轮私有沙箱。
                 then_env.update({'HERDR_CORE_MODE': args.herdr_core_mode,
