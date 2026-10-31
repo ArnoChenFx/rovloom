@@ -20,12 +20,12 @@ const mutations = [
     expect: '(fail) 预检与 Wire 编码'
   },
   {
-    name: '预检吞掉逐方法复核的拒绝',
+    name: '预检不再指出被屏蔽的参数名',
     file: 'src/connector/herdr-core/preflight.ts',
-    from: '    reviewHerdrCoreParams(input.method, params)\n  } catch (error) {',
-    to: '    try {\n      reviewHerdrCoreParams(input.method, params)\n    } catch {}\n  } catch (error) {',
-    test: [PREFLIGHT, '-t', '缺参数、终端名、缺栅栏、null 栅栏都在登记前被拒'],
-    expect: '(fail) 缺参数、终端名'
+    from: "      return [{ path: key === undefined ? '/params' : '/' + key, rule: 'invalid_value' }]",
+    to: "      void key\n      return [{ path: '/params', rule: 'invalid_value' }]",
+    test: [PREFLIGHT, '-t', '拒绝的情形在登记前给出固定路径与规则'],
+    expect: '(fail) 拒绝的情形在登记前给出固定路径与规则'
   },
   {
     name: '省略 params 不再规范化',
@@ -44,12 +44,12 @@ const mutations = [
     expect: '(fail) Gateway raw 编码拒绝未写 socket'
   },
   {
-    name: '控制档终端地址规则被放宽',
-    file: 'src/connector/herdr-core/methods.ts',
-    from: "  if (typeof address !== 'string' || !/^t[0-9]{1,9}$/u.test(address)) {",
-    to: '  if (false as boolean) {',
-    test: [PREFLIGHT, '-t', '缺参数、终端名、缺栅栏、null 栅栏都在登记前被拒'],
-    expect: '(fail) 缺参数、终端名'
+    name: '终端标识的拒绝规则被改成 invalid_value',
+    file: 'src/connector/herdr-core/preflight.ts',
+    from: "      return [{ path: terminalField(params), rule: 'pattern' }]",
+    to: "      return [{ path: terminalField(params), rule: 'invalid_value' }]",
+    test: [PREFLIGHT, '-t', '拒绝的情形在登记前给出固定路径与规则'],
+    expect: '(fail) 拒绝的情形在登记前给出固定路径与规则'
   }
 ]
 
