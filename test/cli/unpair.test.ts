@@ -4,7 +4,11 @@ import { test } from 'node:test'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 import { PassThrough } from 'node:stream'
+import { DISPATCH_CLAIMS_LOCK_FORMAT } from '../../src/connector/claims.js'
+import { currentProcessIdentity } from '../../src/storage/process-identity.js'
 import { configDocument, configTemplate, parseCommand, type ConnectorConfig } from '../../src/cli/index.js'
 import { readConfig } from '../../src/cli/config.js'
 import { handleConnectorUnpair, retirePairingState } from '../../src/cli/unpair.js'
@@ -139,6 +143,80 @@ test('--join 同一 Gateway 换码：同样退役旧状态（managed 根回到�
     rmSync(w.root, { recursive: true, force: true })
   }
 })
+
+test('--join 某个 provider 没准备好：输出里点名是哪一个，而不是只有笼统的固定错误码', async () => {
+  const w = pairedWorkspace('ws://127.0.0.1:9')
+  // 只选 herdr-core：本机没有可附着的 core，准备必然失败；提示必须点名它，用户才知道该装好 core 还是改选 provider。
+  const config = { ...w.config, native: { provider: 'herdr-core' as const } } as ConnectorConfig
+  writeFileSync(w.path, JSON.stringify(configDocument(config), null, 2) + '\n', { mode: 0o600 })
+  const setup = new CliSetup()
+  const out = io()
+  try {
+    await assert.rejects(setup.prepare(config, w.path, out.value, { join: OTHER_CODE }))
+    assert.match(out.text(), /setup_failed: could not prepare herdr-core\./u)
+    // 点名那一行只含 provider 名，不带路径或异常内容（另一行「已退役到 <路径>」是既有提示）。
+    const named = out
+      .text()
+      .split('\n')
+      .find((line) => line.startsWith('setup_failed:'))!
+    assert.doesNotMatch(named, /\/|Error|at /u)
+  } finally {
+    setup.close()
+    rmSync(w.root, { recursive: true, force: true })
+  }
+})
+
+// 崩溃恢复依赖进程身份证据：Linux（/proc）与 macOS（libproc）有，Windows 另有 e2e。
+const unixHost = process.platform === 'linux' || process.platform === 'darwin'
+
+/** 退出后的真实子进程提供「PID 曾存在且已死」的身份。 */
+async function deadProcess() {
+  const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' })
+  const identity = currentProcessIdentity(child.pid!)
+  await once(child, 'close')
+  return identity ?? { pid: child.pid!, start: '1' }
+}
+
+for (const lock of [
+  'control/luvus/claims.db.lock',
+  'control/herdr/claims.db.lock',
+  'control/herdr-core/claims.db.lock'
+]) {
+  test(
+    '退役配对状态前先确认 Connector 没在运行：' + lock + ' 有活着的持有者就拒绝，持有者已死则继续',
+    { skip: !unixHost },
+    async () => {
+      const w = pairedWorkspace('ws://127.0.0.1:9')
+      try {
+        const path = join(w.root, lock)
+        mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 })
+        const config = readConfig(w.path) as ConnectorConfig
+        // 当前进程就是「仍在运行的 Connector」。
+        writeFileSync(
+          path,
+          JSON.stringify({ format: DISPATCH_CLAIMS_LOCK_FORMAT, process: currentProcessIdentity() }),
+          {
+            mode: 0o600
+          }
+        )
+        assert.throws(() => retirePairingState(config, { assertOwner() {} } as never), {
+          code: 'configuration_required'
+        })
+        // 拒绝时什么都没动。
+        assert.equal(existsSync(join(w.root, 'managed', 'device.json')), true)
+        assert.equal(retiredRoots(w.root).length, 0)
+        // 持有者已死（崩溃留下的锁）：允许所有者显式重置。
+        writeFileSync(path, JSON.stringify({ format: DISPATCH_CLAIMS_LOCK_FORMAT, process: await deadProcess() }), {
+          mode: 0o600
+        })
+        assert.ok(retirePairingState(config, { assertOwner() {} } as never))
+        assert.equal(existsSync(join(w.root, 'managed', 'device.json')), false)
+      } finally {
+        rmSync(w.root, { recursive: true, force: true })
+      }
+    }
+  )
+}
 
 test('--join 同码重复执行：已配对状态原样保留，不退役', async () => {
   const w = pairedWorkspace('ws://127.0.0.1:9')

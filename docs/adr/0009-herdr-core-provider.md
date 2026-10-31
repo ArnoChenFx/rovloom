@@ -58,7 +58,7 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 兼容性由这几道失败关闭的门共同判定，而不是版本号：①`rpc.discover` 的文档必须能编译，且本仓库档位表里的每个方法都在文档里（缺项 `herdr_core_schema_method_missing`）；新版本多出来的方法被忽略，不进目录，保持不可用；②参数规则由本仓库自己的 schema 收紧，结果逐层严格——新版本给已审核方法的结果加了字段，该方法会以 `herdr_core_result_invalid` 失败，而不是原样放行，出现时再调整；③配对时钉住二进制摘要与契约哈希。
 
-**已知的两个版本。** 0.1.14 与 0.1.15 各有真实文档与真实输出样本夹具（`test/fixtures/herdr-core/`），CI 的真实 core 端到端对两者各跑一遍。0.1.15 与 0.1.14 的 `rpc.discover` 文档逐字相同，只差 `info.version` 与 `StatusResult.installed_by` 的一句说明；同一批 360 个候选参数 core 接受/拒绝结果 0 条不同；上游 `29e6d37..d028423` 的净 diff 没有触及 `terminal.*`，systemd 关机守卫只在 `hc` 自动拉起路径上，managed 直接 `execve serve` 不经过它。
+**已知的两个版本。** 0.1.14 与 0.1.15 各有真实文档与真实输出样本夹具（`test/fixtures/herdr-core/`），CI 的真实 core 端到端只跑上游当前发布的最新版，不钉具体版本（这两个夹具留给单测）。0.1.15 与 0.1.14 的 `rpc.discover` 文档逐字相同，只差 `info.version` 与 `StatusResult.installed_by` 的一句说明；同一批 360 个候选参数 core 接受/拒绝结果 0 条不同；上游 `29e6d37..d028423` 的净 diff 没有触及 `terminal.*`，systemd 关机守卫只在 `hc` 自动拉起路径上，managed 直接 `execve serve` 不经过它。
 
 配对记录二进制摘要与契约哈希，所以升级 core 等于换了二进制：已配对设备按现有语义失败关闭（`herdr_core_installation_changed` / `herdr_core_schema_unreviewed`），用新的配对码重新配对即可（`rovloom connector --join …` 把这台机器作为新设备对新 core 重新配对；这与 Herdr TUI 换了二进制后的处理一致）。
 
@@ -114,9 +114,9 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 
 `native.provider` 追加三个组合取值：`"luvus,herdr"`、`"luvus,herdr-core"` 与 `"herdr,herdr-core"`，并改变 `mixed` 的含义：**在 Linux 上表示全部三种**（Luvus + Herdr TUI + herdr-core），macOS/Windows 上仍是 Luvus + Herdr TUI（herdr-core 靠内核 peer 凭据，只支持 Linux，不能让 `mixed` 在其它平台的新配对里准备一个跑不起来的来源）。原来的 Luvus + Herdr TUI 组合用显式的 `luvus,herdr` 表达。三种单值（省略、`luvus`、`herdr`、`herdr-core`）的解析结果与之前逐字相同。取值是闭合表（`NATIVE_PROVIDER_SELECTIONS`），不按分隔符猜测：`"herdr-core,luvus"`、带空格的、自己拼的三项串都拒绝，三项只能写 `mixed`。
 
-**老设备不被打断（#315 边界）。** Connector 每次启动都要求配置展开的来源集合与配对时的准备记录一致，否则 `configuration_required`。如果直接改 `mixed` 的含义，所有已按 Luvus + Herdr TUI 配对的真实用户升级后都会启动失败。所以启动时用 `pairedNativeProviders`：`mixed` 且准备记录恰好是 `luvus`+`herdr` 两条（旧设备）→ 继续按这两个启动，不要求重新配对、也不替用户加上从没准备过的来源；其它任何不一致（缺一条、多一条、重复、混入别的 kind）仍是 `configuration_required`。已有的配置、token、设备凭据、配对记录与旧 schema 布局继续按原样读取。新配对的 `mixed` 在 Linux 上要求三者都装好、并有一个在运行的 herdr-core（attach）或配置成 managed；没有 herdr-core 的人用 `luvus,herdr`。
+**已配对设备启动不再核对 `native`（#315 边界与用户反馈）。** 早先 Connector 每次启动都把配对时记下的整段 `native` 与当前配置逐字比较，不同即 `configuration_required`：省略与显式写默认值算不同、改一个不影响实例的字段也算，报错还不说是哪一项；`mixed` 的含义改变时还要靠 `pairedNativeProviders` 给旧设备开特例。这条比较并不是安全门——每个来源实际连哪个实例、用哪个二进制，配对时已固化进受保护的本地配置（`providers.json` 与准备记录），启动并不靠 `native` 选实例。现在：配对记录决定有哪些来源，`native.provider` 只是对它们的筛选（`src/cli/native-selection.ts`）；没选中的不启动，选了但从未配对的来源提示 `native_provider_not_paired` 后跳过（`mixed` 是「本平台全部」，不算点名）；固化字段（实例、二进制与目录）改了只打印 `native_settings_kept: <字段名>` 并沿用配对值；herdr-core 的 `session` / `mode` / `config_home` 同样沿用配对值（managed 按它们推导套接字，用新值会拉起另一个 core，而配对钉住的是原来那个）。仍然拒绝的只有：Gateway URL 与配对时不同（设备凭据不得发往另一个 origin）、配对记录自身不完整或被改动、以及没有任何可启动的已配对来源。旧版 `mixed` 设备（只有 `luvus`+`herdr` 两条准备记录）因此无需特例也照旧启动；已有的配置、token、设备凭据、配对记录与旧 schema 布局继续按原样读取。新配对的 `mixed` 在 Linux 上要求三者都装好、并有一个在运行的 herdr-core（attach）或配置成 managed；没有 herdr-core 的人用 `luvus,herdr`。join 的续传只在准备记录里的 native 设置与现在相同时成立，设置变了就退役重来。
 
-装配层只做了三处最小改动：`selectedNativeProviders` 用固定映射展开组合值（`mixed` 按平台）、`pairedNativeProviders` 在启动时识别旧 mixed 设备；`prepareMixedConnector` 不再要求必须存在 Luvus 原生资源（`herdr + herdr-core` 没有 Luvus），没有 host 但有 Luvus 的既有「provider 明确不可用」形态保持不变。`routeProductionSources` 的分组、`prepareMixedGateway` 与 Gateway 侧每设备一份引用的路由原本就是中性的，没有改。
+装配层只做了几处最小改动：`selectedNativeProviders` 用固定映射展开组合值（`mixed` 按平台），启动时用 `selectNativeProviders` 筛选已配对来源；`prepareMixedConnector` 不再要求必须存在 Luvus 原生资源（`herdr + herdr-core` 没有 Luvus），没有 host 但有 Luvus 的既有「provider 明确不可用」形态保持不变。`routeProductionSources` 的分组、`prepareMixedGateway` 与 Gateway 侧每设备一份引用的路由原本就是中性的，没有改。
 
 配对发布路径不改语义：`publish` 对同一路径的差异一律 `configuration_required`，`mergeSetupProviders` 只追加相同引用、冲突即拒绝，`publishSetupCaller` 拒绝改写同一主体的凭据。本仓库没有名为 `unionGrants` 的函数（主管指令里提到的名字在本仓库不存在），等价的「绝不回溯扩大已批准权限」语义由上面三处承担，本次没有放宽。
 

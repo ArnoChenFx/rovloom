@@ -154,7 +154,13 @@ export async function joinConnector(
       records.length > 0 &&
       records.every((entry) => {
         const row = object(entry)
-        return row.phase === 'prepared' && row.machine_id === code.machine && row.attempt_id === code.attempt
+        return (
+          row.phase === 'prepared' &&
+          row.machine_id === code.machine &&
+          row.attempt_id === code.attempt &&
+          // 半完成的准备记录固化了当时的 native 设置；设置后来改过就不续传，退役重来（配置文件本来就是给用户改的）。
+          boundedJson(row.settings) === boundedJson(config.native ?? {})
+        )
       })
     if (!resume) {
       const retired = retirePairingState(config, console)
@@ -184,15 +190,22 @@ export async function joinConnector(
   const authorization = { principal_id: SIMPLE_SETUP_ACTOR }
   const prepared = []
   for (const kind of selectedNativeProviders(config)) {
-    prepared.push(
-      await (kind === 'luvus' ? prepareSetupNative : kind === 'herdr' ? prepareSetupHerdr : prepareSetupHerdrCore)(
-        config,
-        console,
-        code.machine,
-        code.attempt,
-        authorization
+    try {
+      prepared.push(
+        await (kind === 'luvus' ? prepareSetupNative : kind === 'herdr' ? prepareSetupHerdr : prepareSetupHerdrCore)(
+          config,
+          console,
+          code.machine,
+          code.attempt,
+          authorization
+        )
       )
-    )
+    } catch (error) {
+      // 固定错误码不带来源信息；多 provider（含 mixed）时用户必须知道是哪一个没准备好，才能装好它或改选 provider。
+      // 只输出 provider 名，不输出异常内容、路径或任何配置。
+      console.show(formatMessage(cliMessages(io.language)['setup.join.providerFailed'], { kind }))
+      throw error
+    }
   }
   const installations = prepared.map(
     /* 每份清单只包含原生来源和公开schema，不包含Connector的本地路径或凭据。 */ (native) => ({

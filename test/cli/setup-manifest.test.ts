@@ -247,7 +247,7 @@ test(
 )
 
 test(
-  'Herdr和混合已初始化配置的地址、选择和目录变化在任何工厂调用或秘密发送之前拒绝',
+  'Herdr和混合已初始化配置：Gateway 地址变化与选了未配对的来源在任何工厂调用之前拒绝，native 其余改动不拦启动',
   /* 固定来源只会抛合成失败；基线越过同一前置检查也不能伪装native启动成功。 */ async () => {
     for (const provider of ['herdr', 'mixed'] as const) {
       const root = privateHerdrTestRoot('.setup-origin-')
@@ -298,30 +298,53 @@ test(
       }
       const original = new Error('synthetic_native_failure')
       let calls = 0
+      const handed: string[][] = []
       const runtime = createProductionCliRuntime({
-        connector: /* 计数器只能标记误越过门禁，绝不建立native或网络成功替身。 */ async () => {
+        connector: /* 计数器只能标记误越过门禁，绝不建立native或网络成功替身。 */ async (_config, entries) => {
           calls++
+          handed.push(entries.map(/* 只记交给工厂的 kind。 */ (entry) => (entry.value as { kind: string }).kind))
           throw original
         }
       })
       const before = readFileSync(join(managed, 'device.json'))
       try {
-        for (const changed of [
+        // 设备凭据不得发往另一个地址；只选了从未配对的来源时没有可启动的东西。两者都在工厂之前拒绝。
+        const refused = [
           { ...config, gateway_url: 'ws://127.0.0.1:1' },
-          { ...config, native: { ...config.native, runtime_bin_dirs: ['/other/bin'] } },
-          { ...config, native: { provider: 'luvus' as const } }
-        ]) {
+          ...(provider === 'herdr' ? [{ ...config, native: { provider: 'luvus' as const } }] : [])
+        ]
+        for (const changed of refused) {
           await assert.rejects(/* 坏业务配置不应先启动child或发送身份。 */ () => runtime.connector!(changed), {
             code: 'configuration_required'
           })
         }
         assert.equal(calls, 0)
         assert.deepEqual(readFileSync(join(managed, 'device.json')), before)
-        await assert.rejects(
-          /* 控制组证明原配置能越过前置检查，但仍只有负向工厂。 */ () => runtime.connector!(config),
-          /* 原错误对象保留，不被诊断或取消替换。 */ (error) => error === original
-        )
-        assert.equal(calls, 1)
+        // native 其余改动（目录、省略与显式写法、对已配对来源的筛选）按当前配置启动，不要求与配对时逐字相同。
+        const started = [
+          config,
+          { ...config, native: { ...config.native, runtime_bin_dirs: ['/other/bin'] } },
+          { ...config, native: undefined },
+          ...(provider === 'mixed'
+            ? [
+                { ...config, native: { provider: 'luvus' as const } },
+                { ...config, native: { provider: 'herdr' as const } },
+                { ...config, native: { provider: 'luvus,herdr' as const } }
+              ]
+            : [])
+        ]
+        for (const [index, accepted] of started.entries()) {
+          await assert.rejects(
+            /* 控制组证明能越过前置检查，但仍只有负向工厂。 */ () => runtime.connector!(accepted),
+            /* 原错误对象保留，不被诊断或取消替换。 */ (error) => error === original
+          )
+          assert.equal(calls, index + 1)
+        }
+        // 工厂只收到「配对过且被选中」的来源：省略 provider 或与配对相同是全部，缩小范围只剩被选中的。
+        assert.deepEqual(handed.slice(0, 3), [kinds, kinds, kinds])
+        if (provider === 'mixed') {
+          assert.deepEqual(handed.slice(3), [['luvus'], ['herdr'], ['luvus', 'herdr']])
+        }
       } finally {
         rmSync(root, { recursive: true, force: true })
       }
