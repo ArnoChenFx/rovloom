@@ -154,7 +154,13 @@ export async function joinConnector(
       records.length > 0 &&
       records.every((entry) => {
         const row = object(entry)
-        return row.phase === 'prepared' && row.machine_id === code.machine && row.attempt_id === code.attempt
+        return (
+          row.phase === 'prepared' &&
+          row.machine_id === code.machine &&
+          row.attempt_id === code.attempt &&
+          // 半完成的准备记录固化了当时的 native 设置；设置后来改过就不续传，退役重来（配置文件本来就是给用户改的）。
+          boundedJson(row.settings) === boundedJson(config.native ?? {})
+        )
       })
     if (!resume) {
       const retired = retirePairingState(config, console)

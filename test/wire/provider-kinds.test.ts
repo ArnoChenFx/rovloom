@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { PROVIDER_KINDS, validateContractSource, validateProvider } from '../../src/wire/index.js'
 import type { ContractSource, ProviderBinding } from '../../src/wire/types.js'
-import { configDocument, pairedNativeProviders, parseConfig, selectedNativeProviders } from '../../src/cli/config.js'
+import { configDocument, parseConfig, selectedNativeProviders } from '../../src/cli/config.js'
 import type { ConnectorConfig } from '../../src/cli/config.js'
 
 const binding = (kind: string): ProviderBinding => ({
@@ -113,46 +113,12 @@ test('旧配置的单值选择保持原义；mixed 是三种，只要两种用 l
   // herdr-core 只支持 Linux：mixed 在 macOS/Windows 上与 0.10 之前完全相同，新配对不会被迫准备一个跑不起来的来源。
   for (const platform of ['darwin', 'win32'] as const) {
     assert.deepEqual(selectedNativeProviders(parse({ provider: 'mixed' }), platform), ['luvus', 'herdr'])
-    assert.deepEqual(pairedNativeProviders(parse({ provider: 'mixed' }), ['luvus', 'herdr'], platform), [
-      'luvus',
-      'herdr'
-    ])
   }
   // 显式选择不随平台改写：写了 herdr-core 就是要它，不被悄悄去掉。
   assert.deepEqual(selectedNativeProviders(parse({ provider: 'herdr-core' }), 'darwin'), ['herdr-core'])
   assert.deepEqual(selectedNativeProviders(parse({ provider: 'luvus,herdr' })), ['luvus', 'herdr'])
   assert.deepEqual(selectedNativeProviders(parse({ provider: 'herdr-core' })), ['herdr-core'])
   assert.throws(() => parse({ provider: 'herdr-core-2' }))
-})
-
-test('已配对设备启动时的来源集合：旧 mixed（Luvus + Herdr TUI）继续按旧集合，其余按配置选择', () => {
-  const parse = (native?: unknown) => parseConfig(connector(native), 'linux') as ConnectorConfig
-  const mixed = parse({ provider: 'mixed' })
-  const paired = (prepared: readonly unknown[]) => pairedNativeProviders(mixed, prepared, 'linux')
-  // 0.10 之前按 mixed 配对的设备只有 luvus + herdr 两条准备记录（与顺序无关）：照旧启动，不要求重新配对。
-  assert.deepEqual(paired(['luvus', 'herdr']), ['luvus', 'herdr'])
-  assert.deepEqual(paired(['herdr', 'luvus']), ['luvus', 'herdr'])
-  // 新配对的 mixed 三条都有：按三种核对。
-  assert.deepEqual(paired(['luvus', 'herdr', 'herdr-core']), ['luvus', 'herdr', 'herdr-core'])
-  // 其余任何不一致都不当旧设备：缺一条、多一条、重复、混入别的 kind、未知值，仍按配置选择（随后在启动里判 configuration_required）。
-  for (const prepared of [
-    [],
-    ['luvus'],
-    ['herdr'],
-    ['luvus', 'luvus'],
-    ['luvus', 'herdr', 'herdr'],
-    ['luvus', 'herdr-core'],
-    ['herdr', 'herdr-core'],
-    ['luvus', 'herdr', 'x'],
-    ['luvus', undefined]
-  ]) {
-    assert.deepEqual(paired(prepared), ['luvus', 'herdr', 'herdr-core'], JSON.stringify(prepared))
-  }
-  // 只有 mixed 有旧含义：显式写两种或单值的配置，准备记录不一致就是不一致。
-  assert.deepEqual(pairedNativeProviders(parse({ provider: 'luvus,herdr' }), ['luvus', 'herdr']), ['luvus', 'herdr'])
-  assert.deepEqual(pairedNativeProviders(parse({ provider: 'luvus,herdr' }), ['luvus']), ['luvus', 'herdr'])
-  assert.deepEqual(pairedNativeProviders(parse({ provider: 'herdr' }), ['luvus', 'herdr']), ['herdr'])
-  assert.deepEqual(pairedNativeProviders(parse(), ['luvus', 'herdr']), ['luvus'])
 })
 
 test('herdr-core 配置写出后仍能被同一解析器读回', () => {

@@ -48,7 +48,7 @@ export type NativeProviderKind = 'luvus' | 'herdr' | 'herdr-core'
 /**
  * `native.provider` 的闭合取值。`mixed` 从 0.10 起在 Linux 上表示全部三种（其它平台仍是 Luvus + Herdr TUI）；
  * 原先的 Luvus + Herdr TUI 组合改用显式的 `luvus,herdr` 表达，已有配置逐字按原样解析
- * （`mixed` 的老设备怎么启动见 {@link pairedNativeProviders}）。
+ * （已配对设备启动时 `native.provider` 只是对已配对来源的筛选，见 native-selection.ts）。
  */
 export const NATIVE_PROVIDER_SELECTIONS = Object.freeze([
   'luvus',
@@ -93,12 +93,12 @@ export function herdrCoreConfigHome(config: ConnectorConfig): string | undefined
   return config.native?.herdr_core?.config_home
 }
 
-/** 0.10 之前 `mixed` 只表示 Luvus + Herdr TUI；按那个集合配对的设备没有 herdr-core 的准备记录。 */
+/** macOS/Windows 上 `mixed` 仍只表示 Luvus + Herdr TUI（herdr-core 只支持 Linux）。 */
 const LEGACY_MIXED_PROVIDERS: readonly NativeProviderKind[] = Object.freeze(['luvus', 'herdr'] as const)
 
 // 省略选择时保留已有Luvus首次路径；单值只选自己，mixed 选这个平台支持的全部来源，两种用显式组合值。
 // herdr-core 只支持 Linux（靠内核 peer 凭据），所以 mixed 在 macOS/Windows 上仍是 Luvus + Herdr TUI，与 0.10 之前相同。
-// 这里只决定「新配对准备哪些来源」；已配对设备启动时按 pairedNativeProviders 核对。
+// 这里只决定「新配对准备哪些来源」；已配对设备启动时只把它当筛选（native-selection.ts），不再要求与配对时一致。
 export function selectedNativeProviders(
   config: ConnectorConfig,
   platform: NodeJS.Platform = process.platform
@@ -110,27 +110,6 @@ export function selectedNativeProviders(
   const combined = NATIVE_PROVIDER_COMBINATIONS[value]
   // 单值只能是 kind 本身（组合值都在表里），不按分隔符猜测。
   return combined ?? [value as NativeProviderKind]
-}
-
-/**
- * 已配对设备启动时应该核对的来源集合。通常就是 {@link selectedNativeProviders}；唯一的例外是 `mixed`：
- * 已有真实用户的设备按旧含义（Luvus + Herdr TUI）配对，升级后 `mixed` 多了 herdr-core，
- * 但这些设备的准备记录里没有它——继续按旧集合启动，不要求重新配对，也不替用户加上从没准备过的来源。
- * 准备记录恰好是旧集合才算旧设备；其它任何不一致仍然是 `configuration_required`。
- */
-export function pairedNativeProviders(
-  config: ConnectorConfig,
-  prepared: readonly unknown[],
-  platform: NodeJS.Platform = process.platform
-): readonly NativeProviderKind[] {
-  if (
-    config.native?.provider === 'mixed' &&
-    prepared.length === LEGACY_MIXED_PROVIDERS.length &&
-    LEGACY_MIXED_PROVIDERS.every(/** 旧集合的每一种都要有且只有一条准备记录。 */ (kind) => prepared.includes(kind))
-  ) {
-    return LEGACY_MIXED_PROVIDERS
-  }
-  return selectedNativeProviders(config, platform)
 }
 
 export const CLI_ERROR_CODES = [
