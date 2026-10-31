@@ -105,6 +105,9 @@ test('缺参数、终端名、缺栅栏、null 栅栏都在登记前被拒，且
       path: '/terminal',
       rule: 'pattern'
     },
+    // 完全没有 terminal 是缺字段，不是格式问题：用户实际踩到的就是这种被误判成别的原因的情形。
+    { method: 'terminal.kill', params: { core_id: 'abcdef01', created_ms: 5 }, path: '/terminal', rule: 'required' },
+    { method: 'terminal.keys', params: {}, path: '/terminal', rule: 'required' },
     { method: 'terminal.kill', params: { terminal: 't1' }, path: '/core_id', rule: 'required' },
     { method: 'terminal.kill', params: { terminal: 't1', core_id: 'abcdef01' }, path: '/created_ms', rule: 'required' },
     {
