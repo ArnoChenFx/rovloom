@@ -97,6 +97,7 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 - 执行端在写入前用同一条连接读一次 `terminal.get`（接受名字或地址），把名字**解析成地址**：真正发给 core 的 `terminal`/`parent` 是这次读到的地址，不是调用方给的名字。这样「读与写之间名字被改指」的窗口与地址形态一样大（残余风险见 `control.ts` 文件头）。给了 `parent_created_ms` 才比对父终端的化身。
 - 这两个字段由 `paramsSchema` 追加进参数根（不再必填），core 不认识它们，执行端在发送前显式剥离，不依赖 core 静默忽略未知字段。
 - `server.stop` / `server.restart` 的 `core_id` **仍然必填**：不可撤销，且 core 没有对应的 id 参数，错打一个实例的后果太重。
+- **Gateway 与 Connector 请一起升级**。新 Gateway 搭旧 Connector（本改动之前的构建）时，省略 `core_id`/`created_ms` 或用名字的控制调用会被旧 Connector 的参数复核拒绝；这两个码（`herdr_core_terminal_fence_required`、`herdr_core_terminal_address_unsupported`）不在 `DispatchRefusalCode` 闭合集合里，旧 Connector 只能按连接故障上报：该调用是 `outcome_unknown`（实际没有写入 core），设备断开并在约 1 秒内自动重连，其它调用恢复正常。带完整栅栏的裸地址调用不受影响。旧 Gateway 搭新 Connector 则由旧 Gateway 的预检确定拒绝（`native_request_invalid`），不断线。要彻底消除这个断线需要在 Wire 里加能力协商，这里没做。
 
 **blocked 由 rovloom 判断**。spike 3f 实测 core 只在 `send` 上拦 blocked，`keys`、`interrupt`、`force` 照常送达；官方安全文档也说 blocked 不是访问边界。所以 `send`/`keys`/`interrupt` 在写入前自己判断：`terminal.get` 的 `status.state === 'blocked'` 即 `herdr_core_terminal_blocked`。判定 fail-closed：读不到终端事实、状态字形状不符、终端已结束都拒绝。`status === null`（程序从未上报 OSC 7501）不算未知——这类程序不可能进入 blocked，core 的闸门也只认上报过的状态；否则 `cat` 一类普通程序永远不能输入，e2e 的输入回显也就无从验证。`put` 只写文件、不送输入，`kill`/`rm`/`keep`/`label` 改的是终端记录，它们只做三元组核对：blocked 时仍必须能收拾现场。
 
