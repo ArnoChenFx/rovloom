@@ -68,9 +68,17 @@ try {
     return found
   }
   const methods = discovered.items.map((item) => item.method).sort()
-  // 开关打开时目录里有 6 个读取 + 8 个控制档 + terminal.run + 长轮询；宿主级其余方法与事件订阅仍不可见。
+  // 开关打开时目录里有 6 个读取 + 8 个控制档 + terminal.run + 8 个宿主级 + 长轮询共 24 个；事件订阅与 machine.* 不在其中（见 blocked_methods）。
   assert.deepEqual(methods, [
+    'doc.get',
+    'doc.set',
+    'file.edit',
+    'file.read',
+    'file.write',
+    'machine.exec',
+    'server.restart',
     'server.status',
+    'server.stop',
     'templates.list',
     'terminal.events',
     'terminal.get',
@@ -94,9 +102,16 @@ try {
   const runDescription = await ok('runtime_describe', { target, expected_binding_revision: 1, method: 'terminal.run' })
   assert.match(String(runDescription.description), /Start a program in a new terminal/u)
   assert.match(String(runDescription.params_schema.properties.argv.description), /template name and its task/u)
-  assert.deepEqual(runDescription.blocked_params, ['caller', 'calls_you', 'core', 'on', 'parent', 'children_of'])
+  assert.deepEqual(runDescription.blocked_params, [
+    'caller',
+    'calls_you',
+    'core',
+    'on',
+    'die_with_parent',
+    'children_of'
+  ])
   assert.equal(Object.hasOwn(runDescription.params_schema.properties, 'caller'), false)
-  assert.equal((runDescription.guide ?? []).length, 8)
+  assert.equal((runDescription.guide ?? []).length, 9)
   const sendDescription = await ok('runtime_describe', {
     target,
     expected_binding_revision: 1,
