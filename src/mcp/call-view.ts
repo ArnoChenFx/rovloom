@@ -48,7 +48,26 @@ const REFUSAL_REASONS: Readonly<Record<string, CallRefusalReason>> = Object.free
   herdr_core_native_name_taken: 'name_taken',
   herdr_core_native_invalid_template: 'invalid_template',
   herdr_core_connection_closed: 'unavailable',
-  herdr_core_events_closed: 'unavailable'
+  herdr_core_events_closed: 'unavailable',
+  // 编码阶段仍被拒时（例如网关与连接器版本不一致），预检码同样要能到调用视图，
+  // 不能再是裸 not_dispatched；表外码仍按 unavailable 处理。
+  herdr_core_native_request_invalid: 'invalid_params',
+  herdr_core_param_invalid: 'invalid_params',
+  herdr_core_param_blocked: 'invalid_params',
+  herdr_core_terminal_address_unsupported: 'invalid_params',
+  herdr_core_terminal_fence_required: 'fence_mismatch',
+  herdr_core_terminal_fence_invalid: 'fence_mismatch',
+  herdr_core_core_id_invalid: 'invalid_params',
+  herdr_core_timeout_invalid: 'invalid_params',
+  herdr_core_timeout_exceeds_limit: 'invalid_params',
+  herdr_core_text_too_large: 'invalid_params',
+  herdr_core_read_history_exceeds_limit: 'invalid_params',
+  herdr_core_read_history_unsupported: 'invalid_params',
+  herdr_core_force_unsupported: 'invalid_params',
+  herdr_core_parent_unsupported: 'invalid_params',
+  herdr_core_template_required: 'invalid_params',
+  herdr_core_event_invalid: 'invalid_params',
+  herdr_core_native_failed: 'unavailable'
 })
 
 /** 只投影闭合集合里的原因；未知码返回 undefined，不把内部码带到公开面。 */

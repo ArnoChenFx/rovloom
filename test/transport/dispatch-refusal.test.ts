@@ -54,6 +54,10 @@ test(
         )
         f.gateway.dispatch(denied.call_id)
         assert.equal(f.store.call(f.principal.id, denied.call_id).state, 'not_dispatched')
+        // 编码阶段被本机拒绝的码必须能出现在调用视图的原因里（Connector 没有上报帧）。
+        const refusedCode = f.store.gatewayDispatchRefusal(denied.call_id)
+        assert.equal(typeof refusedCode, 'string')
+        assert.equal(f.gateway.refusalReason(denied.call_id), refusedCode)
         assert.equal(f.gateway.resolveOriginalRead(denied.call_id), undefined)
         assert.equal(f.gateway.status().connections, 1)
         assert.equal(client.status().connection_epoch, epoch)

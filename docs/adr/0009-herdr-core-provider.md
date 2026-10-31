@@ -155,13 +155,13 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 | 握手 | `hello` | 否 | 观察 | — | 只用于 framed 握手；不给 Wire 客户端 |
 | 契约 | `rpc.discover` | 否 | 观察 | — | 只由附着层调用；契约通过 `runtime_describe` 交付 |
 | 状态 | `server.status` | 是 | 观察 | 否 | — |
-| 状态 | `terminal.get` | 是 | 观察 | 否 | 只接受本地地址 `tN` |
+| 状态 | `terminal.get` | 是 | 观察 | 否 | `terminal` 接受裸地址、名字与 `machine/tN`（core 自己解析）；状态来自程序自己的 OSC 7501 上报，可能比屏幕晚几百毫秒到数秒，别把一次读取当终局 |
 | 状态 | `terminal.list` | 是 | 有条件 | 否 | 接受 core 自带的过期清理 |
 | 读取 | `terminal.read` | 是 | 有条件 | **`lines>0` 时需要** | `lines` ≤ 1000；`lines>0` 可能向全屏程序发滚轮输入 |
-| 多轮 | `terminal.wait` | 是 | 观察 | 否 | `timeout` ≤ 60 秒；`children` 必须显式给 `terminal`（rovloom 不发 `caller`）；`output` 给普通程序 |
-| 启动 | `terminal.run` | 是 | 宿主级 | 是 | 模板形态要 `template:true` 并用 `templates.list` 核对；`caller`/`on` 拒绝；`parent` 只接受 `tN` 且必须带 `parent_created_ms`（父必须 live、created_ms 一致），与 `no_parent` 互斥；`no_notify` 只接受 `true`；`wait=true` 必须给 ≤60 秒 `timeout`；argv ≤64 项/32 KiB、line ≤32 KiB、env ≤64 项、name 1–32 位；本 Connector 同时最多 32 个自己启动的存活终端 |
+| 多轮 | `terminal.wait` | 是 | 观察 | 否 | `timeout` ≤ 60 秒；`children` 必须显式给 `terminal`（rovloom 不发 `caller`）；`output` 给普通程序。同步视图常是 `connector_accepted`/`possibly_dispatched` 且没有结果句柄，用 `runtime_call_get {call_id, wait_ms}` 等到 `responded` 再 `runtime_result_read` |
+| 启动 | `terminal.run` | 是 | 宿主级 | 是 | 模板形态要 `template:true` 并用 `templates.list` 核对；`caller`/`on` 拒绝；`parent` 只接受 `tN` 且必须带 `parent_created_ms`（父必须 live、created_ms 一致），与 `no_parent` 互斥；`no_notify` 只接受 `true`；`wait=true` 必须给 ≤60 秒 `timeout`；argv ≤64 项/32 KiB、line ≤32 KiB、env ≤64 项、name 1–32 位；本 Connector 同时最多 32 个自己启动的存活终端。`rm:true` 的终端退出即被删，`wait:true` 会返回空 `output` 与 `wait.exit_code:null`（要输出就别 `rm`，读完再 `terminal.rm`） |
 | 启动 | `templates.list` | 是 | 有条件 | 否 | 只列出名称/描述/命令；命令文本由机主维护 |
-| 输入 | `terminal.send` | 是 | 控制 | 是 | 必须带 `core_id`+`created_ms`；`force` 拒绝；blocked 拒绝；`wait=true` 必须给 ≤60 秒 `timeout` |
+| 输入 | `terminal.send` | 是 | 控制 | 是 | 必须带裸地址 `tN` + `core_id`+`created_ms`；`force` 拒绝；blocked 拒绝；`wait=true` 必须给 ≤60 秒 `timeout`。回复里的 `status`/`turn` 是**发送时**的快照，`turn` 数的是已完成轮次；要这一轮的结果用 `wait=true` 或之后 `terminal.get`/`terminal.events` |
 | 输入 | `terminal.keys` | 是 | 控制 | 是 | 同上三元组栅栏；≤64 键，每个 ≤32 字符；blocked 拒绝 |
 | 输入 | `terminal.interrupt` | 是 | 控制 | 是 | 同上；`timeout` ≤60 秒；blocked 拒绝 |
 | 输入 | `terminal.put` | 是 | 控制 | 是 | 同上三元组栅栏；data ≤512 KiB base64、name 只允许后缀字符 |
@@ -202,4 +202,4 @@ Wire 桥接只做普通 RPC，`events.subscribe` 是 framed 持续流，因此�
 
 ### 交互要点（由 rovloom 撰写，随 `runtime_describe` 的 `guide` 交付）
 
-交互式运行、任务写进第一次 `terminal.run`、`first_message.sent=false` 不要盲目重发、`wait=true` 是检查点、状态来自 OSC 7501、`blocked` 交给人、`turn`/`seq` 不是完成证明、Codex 需要 `--no-daemon`、写类调用不重放。逐方法补充在 `terminal.read`/`terminal.wait`/`terminal.send`/`terminal.interrupt` 的 `usage` 里。
+交互式运行、任务写进第一次 `terminal.run`、`first_message.sent=false` 不要盲目重发、`wait=true` 是检查点、状态来自 OSC 7501、`blocked` 交给人、`turn`/`seq` 不是完成证明、Codex 需要 `--no-daemon`、写类调用不重放；档位只是目录标签（真正的边界是 `allow_terminal_execution`）；等待类调用的同步视图没有结果句柄，要用 `runtime_call_get` 继续等；`terminal.send`/`keys` 的 `status`/`turn` 是发送时快照；`terminal.run` 的 `rm:true` 会删掉要读的输出；`hidden_finished` 计的是已结束但没删的终端。逐方法补充在 `terminal.read`/`terminal.wait`/`terminal.send`/`terminal.keys`/`terminal.interrupt`/`terminal.run`/`terminal.events` 的 `usage` 里。

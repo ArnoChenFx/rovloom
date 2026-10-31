@@ -164,7 +164,11 @@ export async function createProviderGatewayRuntime(options: ProviderGatewayRunti
       ) {
         fail('provider_binding_mismatch')
       }
-      if (typeof provider.admit !== 'function' || typeof provider.retainEvidence !== 'function') {
+      if (
+        typeof provider.admit !== 'function' ||
+        typeof provider.retainEvidence !== 'function' ||
+        (provider.normalizeRequest !== undefined && typeof provider.normalizeRequest !== 'function')
+      ) {
         fail('runtime_provider_invalid')
       }
       const name = key(binding)
@@ -176,6 +180,7 @@ export async function createProviderGatewayRuntime(options: ProviderGatewayRunti
         target: Object.freeze(structuredClone(provider.target)),
         ready: provider.ready.bind(provider),
         admit: provider.admit.bind(provider),
+        ...(provider.normalizeRequest ? { normalizeRequest: provider.normalizeRequest.bind(provider) } : {}),
         retainEvidence: provider.retainEvidence.bind(provider)
       })
     }
@@ -416,11 +421,14 @@ export async function createProviderGatewayRuntime(options: ProviderGatewayRunti
         const providerKey = key(input.target)
         const configured = providers.get(providerKey)!
         principal()
+        // 等价规范化只由 provider 端口给出，中立宿主不猜任何 provider 的参数形状；
+        // 规范化后的请求同时用于去重键、存档与 Wire 帧，省略与显式空对象因此是同一个请求。
+        const request = configured.normalizeRequest?.(input.native_request) ?? input.native_request
         const admitted = configured.admit(
-          input.native_request,
+          request,
           input.options,
           /** 登记能力固定本次 caller/目标/请求，仍由 Router 在 Store 事务内分配真实原生 ID。 */
-          (admission, check) => router.admit(principal(), input.target, input.native_request, admission, check)
+          (admission, check) => router.admit(principal(), input.target, request, admission, check)
         )
         if (admitted.created) {
           try {

@@ -22,7 +22,13 @@ test('每个内部拒绝码都映射到闭合集合里的原因，未知码不�
     ['herdr_core_native_name_taken', 'name_taken'],
     ['herdr_core_native_conflict', 'conflict'],
     ['herdr_core_native_invalid_template', 'invalid_template'],
-    ['herdr_core_connection_closed', 'unavailable']
+    ['herdr_core_connection_closed', 'unavailable'],
+    // 登记前预检与编码阶段的参数拒绝都要有原因，不能只剩 not_dispatched。
+    ['herdr_core_param_blocked', 'invalid_params'],
+    ['herdr_core_terminal_address_unsupported', 'invalid_params'],
+    ['herdr_core_terminal_fence_required', 'fence_mismatch'],
+    ['herdr_core_core_id_required', 'invalid_params'],
+    ['herdr_core_text_too_large', 'invalid_params']
   ]
   for (const [code, reason] of cases) {
     assert.equal(callRefusalReason(code), reason, code)

@@ -29,9 +29,12 @@ herdr-core 的输入/启动/宿主级能力共用同一个开关：`terminal.sen
 `terminal.interrupt`、`terminal.put`、`terminal.kill`、`terminal.rm`、`terminal.keep`、
 `terminal.label`、`terminal.run`、`machine.exec`、`file.read`、`file.write`、`file.edit`、
 `doc.get`、`doc.set`、`server.restart`、`server.stop`，以及带 `lines>0` 的 `terminal.read`。
-没有第二个开关：这些能力都不超过 `terminal.run`（它已经能在本机执行任意程序）。目录里关闭时
-仍然列出它们，但 `available:false`；调用在 Gateway 登记前被拒（`forbidden`），在 Connector
-写入前再核对一次（`not_dispatched` + `terminal_execution_disabled`）。
+没有第二个开关：这些能力都不超过 `terminal.run`（它已经能在本机执行任意程序）。档位
+（`observe`/`control`/`host`）只是目录里的标签，不是第二道开关：`control` 档的 `terminal.send`
+确实能在 shell 里执行任意命令，所以它和 `host` 档受同一个开关管；开关一关全部关闭，不存在
+“控制档绕过宿主档”的路径。目录里关闭时仍然列出它们，但 `available:false`；调用在 Gateway
+登记前被拒（`forbidden`），在 Connector 写入前再核对一次（`not_dispatched` +
+`terminal_execution_disabled`）。
 
 开关由 Connector 在本机检查：先在发现阶段检查，再在实际写入原生 runtime 之前再检查一次。它是本机最终门禁，Gateway 隐藏工具不能代替它。
 

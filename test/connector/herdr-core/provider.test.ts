@@ -186,7 +186,7 @@ test('资源工厂登记五个端口，目录暴露读取与控制档，身份�
       // core 自己的方法说明与 rovloom 的使用说明随 describe 交付；说明只是注释。
       assert.match(String(send.description), /Paste text and press Enter/u)
       assert.ok(Array.isArray(send.usage) && String(send.usage[0]).includes('wait=true'))
-      assert.equal((send.guide as string[]).length, 9)
+      assert.equal((send.guide as string[]).length, 13)
       assert.match(String((send.guide as string[])[2]), /wait=true/u)
       // 不开放的 core 方法也随 describe 交付固定原因，控制端能发现边界。
       assert.equal((send.blocked_methods as Record<string, string>)['machine.list'], 'bypasses_per_device_token_scope')

@@ -58,6 +58,12 @@ test('Gateway 未写出拒绝单独记为 gateway 审计，不能覆盖 accepted
     assert.equal(rows.length, 1)
     assert.equal(rows[0]!.actor, 'gateway')
     assert.equal(JSON.parse(String(rows[0]!.details)).code, 'raw_contract_not_authorized')
+    // 编码阶段被本机拒绝的码要能回到调用视图（而不是只剩 not_dispatched）；非固定码不外泄。
+    const refused = store.createCall('alice', device.target, { method: 'ping' }, options({ timeoutMs: 1000 }))
+    const refusedBinding = store.dispatch('alice', refused.call_id, device.epoch)
+    assert.equal(store.gatewayDispatchRefusal(refused.call_id), undefined)
+    assert.equal(store.commitGatewayDispatchRefusal(refusedBinding, 'herdr_core_param_blocked'), true)
+    assert.equal(store.gatewayDispatchRefusal(refused.call_id), 'herdr_core_param_blocked')
   }))
 
 test('Gateway 拒绝证据提交失败时不发布确定未派发或伪造审计', () =>
