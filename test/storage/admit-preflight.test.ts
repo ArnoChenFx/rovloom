@@ -83,8 +83,9 @@ test('预检拒绝不产生调用记录，只留固定码审计', () =>
     const machine_id = db.prepare('SELECT machine_id FROM machines').get()!.machine_id as string
     const target = { machine_id, provider_id: 'core', profile: 'session' as const, session: 'work' }
     const requests: { method: string; params?: unknown }[] = [
-      { method: 'terminal.kill', params: { terminal: 'build', core_id: 'abcdef01', created_ms: 5 } },
-      { method: 'terminal.kill', params: { terminal: 't1' } },
+      // 名字与省略栅栏现在是允许的；这些仍是登记前拒绝的固定情形。
+      { method: 'terminal.kill', params: { terminal: 'machine/t1' } },
+      { method: 'terminal.kill', params: { terminal: 't1', created_ms: null } },
       { method: 'server.stop', params: {} }
     ]
     for (const request of requests) {
