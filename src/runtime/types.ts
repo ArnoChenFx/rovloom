@@ -30,6 +30,11 @@ export type RegisterProviderCall = (
 export type GatewayProviderPort = ProviderIdentity &
   Readonly<{
     admit(request: NativeRequest, options: CallAdmissionOptions, register: RegisterProviderCall): CallAdmission
+    /**
+     * 登记前把请求规范成该 provider 认定的同一个请求；省略返回值表示原样登记。
+     * 只做协议形状上的等价规范化（如省略参数等同空对象），不改授权、不猜默认值。
+     */
+    normalizeRequest?(request: NativeRequest): NativeRequest
     retainEvidence(plan: ResponseEvidencePlan): ResponseEvidencePlan
   }>
 export type GatewayProviderServices = Readonly<{

@@ -58,6 +58,8 @@ import {
   herdrCoreTier
 } from './methods.js'
 import { requiresTerminalExecution } from '../terminal-execution.js'
+import { describeHerdrCoreParams } from './overlay.js'
+import { preflightHerdrCoreRequest } from './preflight.js'
 import { compileHerdrCoreContract } from './schema.js'
 import type { HerdrCoreContract } from './schema.js'
 import { createHerdrCoreAdapter } from './readonly.js'
@@ -267,7 +269,7 @@ export function describeHerdrCoreContract(input: {
               : input.contract.methodDescription(method),
             params_schema: HERDR_CORE_SYNTHETIC_METHODS.includes(method)
               ? structuredClone(HERDR_CORE_EVENTS_PARAMS_SCHEMA)
-              : input.contract.paramsSchema(method),
+              : describeHerdrCoreParams(input.contract, method),
             /** 审核表里一律拒绝的参数；它们不出现在 params_schema 里。 */
             blocked_params: HERDR_CORE_BLOCKED_PARAMS,
             ...(HERDR_CORE_METHOD_USAGE[method] ? { usage: HERDR_CORE_METHOD_USAGE[method] } : {})
@@ -564,6 +566,13 @@ export async function createHerdrCoreGatewayResources(
         binding,
         target: config.target,
         retainEvidence: responseRetention(65_536),
+        /**
+         * herdr-core 的方法参数都是对象：省略 `params` 与显式 `{}` 是同一个请求。
+         * 在登记前规范化，存档的请求、去重键与 Wire 帧因此完全一致；其它形状原样交给预检。
+         */
+        normalizeRequest(request) {
+          return request.params === undefined ? Object.freeze({ ...request, params: {} }) : request
+        },
         admit(request, admission, register) {
           return register(admission, (candidate) => {
             if (admission.contract_ref !== reference) {
@@ -579,6 +588,9 @@ export async function createHerdrCoreGatewayResources(
             if (requiresTerminalExecution('herdr-core', method, object(candidate.params ?? {})) && !terminalEnabled()) {
               fail('terminal_execution_disabled')
             }
+            // 与 Wire 编码完全相同的参数审核放在登记前：被拒的调用不产生记录，控制端直接拿到固定路径与规则。
+            // 编码阶段仍是最后一道防线（例如网关与连接器版本不一致时），那里的码由调用视图的 reason 交付。
+            preflightHerdrCoreRequest({ contract, method, params: candidate.params })
           })
         },
         ready: /** 仅本地契约先决条件；认证 peer 的 readiness 仍由原 transport 计算。 */ () => {
