@@ -18,7 +18,9 @@ import type { GatewayIdentitySource } from '../mcp/management.js'
 import type { ManagementWriteHttpOptions } from '../admin/index.js'
 import { loadCredential } from '../transport/index.js'
 import { GatewayError } from '../contracts.js'
-import { CliError, pairedNativeProviders, type ConnectorConfig, type GatewayConfig } from './config.js'
+import { CliError, type ConnectorConfig, type GatewayConfig, type NativeProviderKind } from './config.js'
+import { cliMessages, formatMessage, resolveCliLanguage } from './messages.js'
+import { changedPairedSettings, pinHerdrCoreInstance, selectNativeProviders } from './native-selection.js'
 import { readSetupJson, writeSetupJson } from './setup-files.js'
 import { openCallerSource } from './caller-source.js'
 import { REGISTRY_MAX_BYTES } from './token-registry.js'
@@ -510,11 +512,14 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
             ('mode' in entry.value.native && entry.value.native.mode === 'user'))
       )
       const pairing = readSetupJson(runtimeReference(config.state_dir, 'pairing'))
+      // 配对记录决定有哪些来源；`native.provider` 只决定本次启动其中哪几个，不再要求当前 native 与配对时逐字相同。
+      let providers = settings.providers
+      let live = config
       if (isolated || pairing !== undefined) {
         const paired = object(pairing)
         fields(paired, ['schema_version', 'attempt_id', 'machine_id', 'gateway_url', 'phase'])
         const device = credential()
-        // 已保管的设备secret不得因修改业务URL发送给另一origin；安装设置变更也不能静默忽略或重建root。
+        // 已保管的设备secret不得因修改业务URL发送给另一origin；这是凭据安全，与 native 设置无关。
         if (
           paired.schema_version !== 1 ||
           paired.phase !== 'configured' ||
@@ -523,27 +528,30 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
         ) {
           throw new CliError('configuration_required')
         }
-        // 老的 mixed 设备（Luvus + Herdr TUI）按配对时的集合核对，其余按配置选择核对。
-        const kinds = pairedNativeProviders(
-          config,
-          settings.providers.map(
-            /** 只取每条准备记录的 kind；形状不对的记录留给后面的严格解析，不在这里换错误码。 */ (entry) =>
-              entry.value && typeof entry.value === 'object' && 'kind' in entry.value ? entry.value.kind : undefined
-          )
-        )
+        const kindOf = /** 形状不对的登记留给下面的严格解析，不在这里换错误码。 */ (entry: { value: unknown }) =>
+          entry.value && typeof entry.value === 'object' && 'kind' in entry.value ? entry.value.kind : undefined
+        const pairedKinds = settings.providers.map(kindOf)
         if (
-          settings.providers.length !== kinds.length ||
-          kinds.some(
-            /* 选择变化应先给明确待配置错误，不读取另一种来源的不存在journal。 */ (kind) =>
-              !settings.providers.some(
-                /* 每个kind恰有原准备条目；重复或缺失不得按相同总数通过。 */ (entry) =>
-                  object(entry.value).kind === kind
-              )
-          )
+          pairedKinds.some(
+            /* 只认固定 kind；未知值不能借筛选混过去。 */ (kind) =>
+              kind !== 'luvus' && kind !== 'herdr' && kind !== 'herdr-core'
+          ) ||
+          new Set(pairedKinds).size !== pairedKinds.length
         ) {
           throw new CliError('configuration_required')
         }
-        for (const kind of kinds) {
+        const messages = cliMessages(resolveCliLanguage(process.env))
+        const selection = selectNativeProviders(config, pairedKinds as NativeProviderKind[])
+        if (selection.unpaired.length) {
+          process.stderr.write(
+            formatMessage(messages['run.nativeProviderNotPaired'], { kinds: selection.unpaired.join(', ') })
+          )
+        }
+        if (selection.active.length === 0) {
+          throw new CliError('configuration_required')
+        }
+        const changed = new Set<string>()
+        for (const kind of selection.active) {
           const prepared = object(readRuntimeJson(providerSetupPath(config.state_dir, kind), 1_048_576))
           fields(prepared, [
             'schema_version',
@@ -564,18 +572,29 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
             prepared.phase !== 'prepared' ||
             prepared.attempt_id !== paired.attempt_id ||
             prepared.machine_id !== paired.machine_id ||
-            boundedJson(prepared.settings) !== boundedJson(config.native ?? {}) ||
             !entry ||
             object(entry.value).kind !== kind ||
             boundedJson(entry.value, 1_048_576) !== boundedJson(prepared.local, 1_048_576)
           ) {
             throw new CliError('configuration_required')
           }
+          for (const field of changedPairedSettings(kind, prepared.settings, config)) {
+            changed.add(field)
+          }
+          if (kind === 'herdr-core') {
+            live = pinHerdrCoreInstance(live, prepared.settings)
+          }
         }
+        if (changed.size) {
+          process.stderr.write(formatMessage(messages['run.nativeSettingsKept'], { fields: [...changed].join(', ') }))
+        }
+        providers = settings.providers.filter(
+          /** 只交给被选中的已配对来源。 */ (entry) => selection.active.includes(kindOf(entry) as NativeProviderKind)
+        )
       }
       let resource: ProductionConnectorResources
       try {
-        resource = await sources.connector(isolated ? { ...config, state_dir: control } : config, settings.providers)
+        resource = await sources.connector(isolated ? { ...live, state_dir: control } : live, providers)
       } catch (error) {
         try {
           setup?.nativeFailed(error)

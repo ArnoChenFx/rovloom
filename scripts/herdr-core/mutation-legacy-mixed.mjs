@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * 变异检查（老 mixed 设备）：把 `pairedNativeProviders` 的旧集合分支改成不生效，
+ * 变异检查（老 mixed 设备）：把 `selectNativeProviders` 改回「要求选择集合与配对集合完全相同」的旧行为，
  * 任务 C 的升级 e2e 必须失败；恢复后必须通过。变异后一定要还原（写回原内容，不用 git checkout）。
  *
  * 用法：bun --no-env-file scripts/herdr-core/mutation-legacy-mixed.mjs \
@@ -15,9 +15,9 @@ if (!oldBinary || !candidate || !luvus || !herdr || !work || !logs) {
   process.exit(2)
 }
 const ROOT = new URL('../..', import.meta.url).pathname
-const CONFIG = ROOT + 'src/cli/config.ts'
-const from = "    config.native?.provider === 'mixed' &&"
-const to = "    false && config.native?.provider === 'mixed' &&"
+const CONFIG = ROOT + 'src/cli/native-selection.ts'
+const from = 'active: paired.filter('
+const to = 'active: selected.length !== paired.length ? [] : paired.filter('
 
 /** 构建候选产物并跑一次升级 e2e；返回 {status, tail}。 */
 function runScenario(label, workDir) {
@@ -52,7 +52,7 @@ function runScenario(label, workDir) {
 
 const original = readFileSync(CONFIG, 'utf8')
 if (!original.includes(from)) {
-  console.error('SKIP 变异锚点不存在（config.ts 已变化）')
+  console.error('SKIP 变异锚点不存在（native-selection.ts 已变化）')
   process.exit(1)
 }
 let failed = 0

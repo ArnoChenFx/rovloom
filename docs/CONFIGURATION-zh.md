@@ -72,8 +72,8 @@ Connector，通常为 `~/.config/rovloom/connector.json`：
 | Connector `gateway` | object，必填 | 仅含 `url`。 |
 | `gateway.url` | string，必填 | 初始化前为 `""`；其余为 ≤2048 字符的 WS/WSS origin，如 `ws://192.0.2.10:9443` 或 `wss://gateway.example`。不带凭据/查询/片段/路径，可带末尾 `/`；产品固定使用 `/connector`。 |
 | Connector `allow_terminal_execution` | boolean，可选 | `true`；省略也开启。只有字面量 `false` 关闭直接终端输入及自定义启动/恢复命令；只想接受严格 Agent 文本对话和读取的设备请设为 `false`。旧版本生成的文件已显式写出该值，沿用其选择；只有当初省略了该项的文件会变为开启。修改这一份用户文件并重启 Connector，不改变安装设置或 token 设备范围。 |
-| Connector `native` | object，可选 | 默认省略，只接受以下来源选择及安装目录字段，在首次原生初始化时应用。 |
-| `native.provider` | string enum，可选 | 省略时为 `luvus`；`herdr` 仅选 Herdr，`herdr-core` 使用 herdr-core（见 `native.herdr_core.mode`），`mixed` 选本平台支持的全部来源：Linux 上是 Luvus、Herdr 与 herdr-core，macOS/Windows 上是 Luvus 与 Herdr（herdr-core 仅 Linux）。两两组合写明：`luvus,herdr`、`luvus,herdr-core`、`herdr,herdr-core`。0.10 之前 `mixed` 只表示 Luvus + Herdr：已经按那个集合配对的设备继续只用这两个启动，不需要重新配对；新配对想要这一对就用 `luvus,herdr`。须在首次初始化前选定，之后不能更改。 |
+| Connector `native` | object，可选 | 默认省略，只接受以下来源选择及安装目录字段。配对时记录设备绑定的原生实例与可执行文件，之后的修改在每次启动时读取（见表后说明）。 |
+| `native.provider` | string enum，可选 | 省略时为 `luvus`；`herdr` 仅选 Herdr，`herdr-core` 使用 herdr-core（见 `native.herdr_core.mode`），`mixed` 选本平台支持的全部来源：Linux 上是 Luvus、Herdr 与 herdr-core，macOS/Windows 上是 Luvus 与 Herdr（herdr-core 仅 Linux）。两两组合写明：`luvus,herdr`、`luvus,herdr-core`、`herdr,herdr-core`。0.10 之前 `mixed` 只表示 Luvus + Herdr；新配对想要这一对就用 `luvus,herdr`。加入命令会准备本字段选中的全部来源；配对之后它只是对「已配对来源」的筛选，可随时修改后重启：没选中的不启动；选了但从未配对的来源会被跳过并提示 `native_provider_not_paired`，用新码重新执行加入命令才能加入。0.10 之前按 `mixed` 配对的设备继续只用 Luvus + Herdr 启动，不需要重新配对。 |
 | `native.runtime_bin_dirs` | 1–16 个互不重复的规范绝对目录 string 数组（每项≤4096字符），可选 | 查找所选 `luvus`/`herdr` 程序的位置。搜索顺序：数组内目录依序，其后是 Connector 启动时 `PATH` 中可用的条目，最后是 `/usr/bin:/bin`（Windows 无此项）。不同程序可装在不同目录。不接受 shell 展开或可执行 argv。 |
 | `native.agent_bin_dirs` | 1–16 个互不重复的规范绝对目录 string 数组（每项≤4096字符），可选 | 查找 Agent 程序的目录。Agent PATH 在原生初始化时按同样顺序固化。Rovloom 不安装或认证 Agent。 |
 | `native.herdr.mode` | `"attach"`（默认）或 `"managed"`，可选 | 仅 Herdr。`attach`：连接你已在运行的 Herdr，仅在没有实例时在你自己的配置目录里启动一个，实例消失后重新附着/重建。`managed`：Connector 私有、由它拥有的隔离实例。见[Herdr：附着或隔离](#herdr附着或隔离)。 |
@@ -89,8 +89,13 @@ herdr-core 不限制版本号和协议代次：能不能用由它自己发布的
 
 Gateway 已启用的监听端口必须不同。未知字段、旧扁平字段、runtime/ref 选择、TLS/CA
 路径、schema 摘要、binary pin 和凭据值均拒绝。用户参数不含原生 root、账本、绑定或
-身份摘要。原生初始化后，更改原生安装设置或 Connector 的 Gateway URL 都会被拒绝，
-已保存的设备凭据不会发往另一个 origin。
+身份摘要。配对之后 Connector 的 Gateway URL 必须与配对时一致，已保存的设备凭据
+不会发往另一个 origin。`native` 不再与配对时逐字比较，启动直接用当前文件。决定设备
+绑定哪个原生实例与可执行文件的设置（`native.luvus.mode` / `state_root`、
+`native.herdr.mode` / `config_home`、`native.herdr_core.session` / `mode` /
+`config_home`，以及 Luvus、Herdr 的 `runtime_bin_dirs` / `agent_bin_dirs`）取自配对时：
+改了其中某项，启动会打印 `native_settings_kept: <字段名>` 并继续使用配对时的值，
+用新码重新执行加入命令后才应用新值。省略某项与显式写默认值等价。
 
 路径为规范绝对路径，不相对 JSON 文件解析，不展开 `~` 或环境变量。默认角色文件始终
 按进程用户 home 选择，Windows 也如此。`--config` 接受绝对文件路径，仅覆盖该文件位置；
