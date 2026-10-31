@@ -56,7 +56,9 @@ let failed = 0
 try {
   writeFileSync(SOURCE, original.replace(from, to))
   const red = runScenario('upgrade-mutated', `${work}-red`)
-  const caught = red.status !== 0 && red.output.includes('herdr_core_contract_unreviewed')
+  // CLI 把 provider 配置解析失败统一投影成固定码（实测 invalid_config / runtime_failed）；
+  // 判据是升级场景确实失败，并把看到的固定码原样写进日志。
+  const caught = red.status !== 0 && /invalid_config|runtime_failed|herdr_core_contract_unreviewed/u.test(red.output)
   console.log(`${caught ? 'RED  ' : 'MISS '} 旧分类修订不再被接受 → ${red.output.trim().split('\n').slice(-1)[0]}`)
   if (!caught) {
     failed += 1

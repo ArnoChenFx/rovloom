@@ -251,7 +251,8 @@ The script performs `initialize` → `notifications/initialized` → call → `D
 
 ### Authorization model and upgrades
 
-Herdr, Luvus and mixed installations use the same two authorization controls: token device visibility and Connector `allow_terminal_execution`. No caller/local/gateway policy snapshots, per-method lists, action grants, raw grants or policy revision agreement are required. The current backend still defines which native methods it implements and exposes; discovery does not promise every method in the native schema is implemented.
+Herdr, Luvus and mixed installations use the same two authorization controls: token device visibility and Connector `allow_terminal_execution`. For herdr-core the same switch also covers host capabilities (`machine.exec`, `file.*`, `doc.*`, `server.restart/stop`, `terminal.run` with `parent`); there is no second switch.
+ No caller/local/gateway policy snapshots, per-method lists, action grants, raw grants or policy revision agreement are required. The current backend still defines which native methods it implements and exposes; discovery does not promise every method in the native schema is implemented.
 
 Upgrade and restart both roles while preserving tokens and pairing credentials; re-pairing is unnecessary. Legacy ordinary tokens keep their existing device boundary through migration to `device_scope`; new registry writes use version 2. Restore complete matching pre-upgrade config/data backups when rolling back to an older release.
 

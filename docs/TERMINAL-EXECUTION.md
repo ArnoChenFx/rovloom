@@ -25,6 +25,14 @@ CLI 运行时以这份用户配置为准，覆盖 `managed/providers.json` 中�
 
 完整配置见 [配置参考](CONFIGURATION-zh.md)。
 
+herdr-core 的输入/启动/宿主级能力共用同一个开关：`terminal.send`、`terminal.keys`、
+`terminal.interrupt`、`terminal.put`、`terminal.kill`、`terminal.rm`、`terminal.keep`、
+`terminal.label`、`terminal.run`、`machine.exec`、`file.read`、`file.write`、`file.edit`、
+`doc.get`、`doc.set`、`server.restart`、`server.stop`，以及带 `lines>0` 的 `terminal.read`。
+没有第二个开关：这些能力都不超过 `terminal.run`（它已经能在本机执行任意程序）。目录里关闭时
+仍然列出它们，但 `available:false`；调用在 Gateway 登记前被拒（`forbidden`），在 Connector
+写入前再核对一次（`not_dispatched` + `terminal_execution_disabled`）。
+
 开关由 Connector 在本机检查：先在发现阶段检查，再在实际写入原生 runtime 之前再检查一次。它是本机最终门禁，Gateway 隐藏工具不能代替它。
 
 Gateway 会收到 Connector 报告的开关状态，在开关关闭或未知时从方法目录中隐藏直接终端写入。“未知”（尚未收到上报、断连或来源失效）始终按关闭处理，不受默认值影响。参数敏感的方法仍然可见，例如关闭时 `agent.send` 和 `agent.prompt` 的描述要求显式 `strict:true`。详见 [通道](TRANSPORT.md#终端执行开关观察)。

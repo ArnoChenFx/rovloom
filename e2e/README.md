@@ -66,13 +66,21 @@ workspace 创建后的计数，不调用模型。可选的 Agent 两轮对话方
 
 `--herdr-core` 只附着已运行的 core：脚本在私有 `XDG_RUNTIME_DIR` 下用 `hc run --bg --json` 拉起 core
 （版本取自二进制自己的 `--version`；CI 固定测 0.1.14 与 0.1.15）和一个打印 `rovloom-e2e` 后休眠的终端，再按 Quick Start 完成配对。`herdr-core-session.mjs` 经 MCP 验证
-machines → providers（kind `herdr-core`）→ discover（恰好 5 个读取）→ describe → `server.status` /
+machines → providers（kind `herdr-core`）→ discover（24 个方法：读取、控制、宿主级与 `terminal.events`）→ describe → `server.status` /
 `terminal.list` / `terminal.get` / `terminal.read(lines=0)` / `terminal.wait`，并确认控制档被 Gateway 拒绝。
 
 ```sh
 python3 e2e/quickstart.py --binary dist/release/bun-linux-x64/candidate/rovloom \
   --herdr-core /path/to/herdr-core-0.1.15 --work ~/.rq-core \
   --then "bun --no-env-file e2e/herdr-core-session.mjs"
+# 宿主级能力（machine.exec / file.* / doc.* / server.* / parent 编排 / 开关关闭）：
+python3 e2e/quickstart.py --binary dist/release/bun-linux-x64/candidate/rovloom \
+  --herdr-core /path/to/herdr-core-0.1.15 --work ~/.rq-host \
+  --then "bun --no-env-file e2e/herdr-core-host.mjs"
+# 老设备升级（v0.10.0 配对 → 候选原位替换，不重新配对）：
+python3 e2e/quickstart.py --binary dist/release/bun-linux-x64/candidate/rovloom \
+  --upgrade-from /path/to/rovloom-0.10.0-linux-x64 --herdr-core /path/to/herdr-core-0.1.15 \
+  --work ~/.rq-upgrade --then "bun --no-env-file e2e/herdr-core-host.mjs"
 ```
 
 同一次运行还会验证两处身份失败关闭：同机转发代理 `herdr_core_peer_pid_mismatch`、0755 socket 目录

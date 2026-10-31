@@ -13,7 +13,14 @@ try {
   const methods = discovered.items.map((item) => item.method).sort()
   // 脚本要同时对旧版本（0.10.0，16 个方法）与新版本（24 个方法）成立：
   // 读取必须在；列出来的每个受控方法都必须是 available:false。
-  for (const method of ['server.status', 'templates.list', 'terminal.events', 'terminal.get', 'terminal.list', 'terminal.read']) {
+  for (const method of [
+    'server.status',
+    'templates.list',
+    'terminal.events',
+    'terminal.get',
+    'terminal.list',
+    'terminal.read'
+  ]) {
     assert(methods.includes(method), `${method} missing: ${JSON.stringify(methods)}`)
   }
   const available = Object.fromEntries(discovered.items.map((item) => [item.method, item.available]))
@@ -21,12 +28,28 @@ try {
     assert.equal(available[method], false, `${method}:${JSON.stringify(available)}`)
   }
   // 新版本的宿主级方法同样不可用；旧版本里没有它们就不要求。
-  for (const method of ['machine.exec', 'file.read', 'file.write', 'file.edit', 'doc.get', 'doc.set', 'server.restart', 'server.stop']) {
+  for (const method of [
+    'machine.exec',
+    'file.read',
+    'file.write',
+    'file.edit',
+    'doc.get',
+    'doc.set',
+    'server.restart',
+    'server.stop'
+  ]) {
     if (methods.includes(method)) {
       assert.equal(available[method], false, `${method}:${JSON.stringify(available)}`)
     }
   }
-  for (const method of ['server.status', 'templates.list', 'terminal.events', 'terminal.get', 'terminal.list', 'terminal.read']) {
+  for (const method of [
+    'server.status',
+    'templates.list',
+    'terminal.events',
+    'terminal.get',
+    'terminal.list',
+    'terminal.read'
+  ]) {
     assert.equal(available[method], true, method)
   }
   const described = await tool('runtime_describe', {

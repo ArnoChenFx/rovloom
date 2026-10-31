@@ -162,8 +162,13 @@ Pair as usual (`rovloom connector --join …`). What the MCP client can do:
   `terminal.label`;
 - start (`allow_terminal_execution` required): `terminal.run` (program or template) and
   `templates.list`;
-- everything else stays closed: `machine.*`, `file.*`, `doc.set`, `server.stop/restart`,
-  `terminal.attach`.
+- host capabilities (`allow_terminal_execution` required): `machine.exec`, `file.read`,
+  `file.write`, `file.edit`, `doc.get`, `doc.set`, `server.restart`, `server.stop` (the last two
+  need `core_id` from `server.status`); `terminal.run` with `parent` + `parent_created_ms` builds
+  multi-agent trees for `terminal.wait {children}`;
+- still closed, listed by `runtime_describe` with a reason: `machine.list/add/connect/rename/rm`
+  (they would bypass the per-device scope of a token) and the raw streams `terminal.attach` /
+  `events.subscribe`.
 
 To follow status changes without polling `terminal.list`, long-poll `terminal.events`: it returns the
 current snapshot plus up to `limit` events after `after_seq` (default `limit` 64, wait ≤30s). Feed the

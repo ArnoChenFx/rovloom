@@ -120,11 +120,13 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 
 配对发布路径不改语义：`publish` 对同一路径的差异一律 `configuration_required`，`mergeSetupProviders` 只追加相同引用、冲突即拒绝，`publishSetupCaller` 拒绝改写同一主体的凭据。本仓库没有名为 `unionGrants` 的函数（主管指令里提到的名字在本仓库不存在），等价的「绝不回溯扩大已批准权限」语义由上面三处承担，本次没有放宽。
 
-## 本 PR 仍未包含
+## 仍未包含（第五阶段之后）
 
-- **输入与控制档、宿主级方法**：`send`/`keys`/`interrupt`/`put`/`kill`/`rm`/`keep`/`label` 与 12 个宿主级方法都不开放。`terminal.attach` 需要终端模拟器解释首屏 VT 字节流，本期不适用。
+- **`machine.*` 与 `on`**：core 自己的机器表与远端路由永远不开放——一个 token 会因此摸到别的设备，绕过 rovloom 按设备限定范围。多机本来就是每台机器各自一个 Connector。
+- **原始流**：`terminal.attach`（首屏 VT 字节流）与 `events.subscribe`（framed 持续流）不进 MCP；读屏幕/历史用 `terminal.read`，状态变化用 `terminal.events` 长轮询。
+- **无认证身份字段**：`caller`、`calls_you`、`core` 一律拒绝。
 - **Luvus/Herdr 的端口迁移**：两种既有 provider 仍走原工厂；把它们也迁到 `ProviderPorts` 会改动它们的会话、目录与身份路径，留给后续。
-- **Gateway 侧的本地身份事实**：`LocalIdentityVerifier` 端口仍没有 Gateway 本机的 core 身份事实；本期身份核对发生在 Connector（`HerdrCoreInstallation`），Gateway 只信任已认证设备通道和发布的契约来源。
+- **Gateway 侧的本地身份事实**：`LocalIdentityVerifier` 端口仍没有 Gateway 本机的 core 身份事实；身份核对发生在 Connector（`HerdrCoreInstallation`），Gateway 只信任已认证设备通道和发布的契约来源。
 
 ## 验证
 
@@ -135,6 +137,10 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 真实 core 验收脚本 `scripts/herdr-core/verify-observation.ts` 在私有沙箱里对 0.1.14（0.1.15 见上文）跑通：`rpc.discover` 契约身份、`server.status` 的 pid 与 `/proc/<pid>/exe` 摘要、`argv`、`HC_SESSION`，以及 `terminal.list`/`get`/`read`/`wait`；XDG 运行时目录与状态目录回退两种布局都实测。第三阶段新增 `e2e/quickstart.py --herdr-core`：真实 Gateway + Connector 配对 herdr-core、在目录看到 5 个方法、经 MCP 对沙箱 core 执行 5 个读取；同一次运行里用同机转发代理验证 `herdr_core_peer_pid_mismatch`、用 0755 socket 目录验证 `herdr_core_endpoint_untrusted`。
 
 ## 附录 A：herdr-core 能力目录（0.1.14 与 0.1.15 相同）
+
+**没有第二个开关。** 早期设想给 `machine.exec` / `file.*` 单独的 `allow_machine_exec`，**已作废**：这些能力都不超过 `terminal.run`（后者已经能在本机执行任意程序），再引入第三个开关要新增 Wire 能力协商、并改掉文档里「两个权限开关」的说法，代价大于收益。8 个宿主级方法全部与输入/启动类共用 `allow_terminal_execution`：目录里照旧「列出但 `available:false`」，Gateway 登记前 `forbidden`，Connector 最终写入前 `not_dispatched` + `terminal_execution_disabled`。
+
+32 个 core 方法里开放 23 个（6 读取 + 8 控制 + 9 宿主级含 `terminal.run`），不开放 9 个：`hello`、`rpc.discover`（协议自身）、`events.subscribe`、`terminal.attach`（流），以及 `machine.list/add/connect/rename/rm`（绕过设备范围）。再加上 rovloom 自有的 `terminal.events`，目录里共 24 个方法。
 
 "开关"指 `allow_terminal_execution`。目录里的 `available` 与 `terminal_execution.local_state` 就是这一列的可机读形式；关闭时控制档与启动类仍会列出，但 `available:false`，调用在 Gateway 登记前被拒。
 
@@ -147,7 +153,7 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 | 状态 | `terminal.list` | 是 | 有条件 | 否 | 接受 core 自带的过期清理 |
 | 读取 | `terminal.read` | 是 | 有条件 | **`lines>0` 时需要** | `lines` ≤ 1000；`lines>0` 可能向全屏程序发滚轮输入 |
 | 多轮 | `terminal.wait` | 是 | 观察 | 否 | `timeout` ≤ 60 秒；`children` 必须显式给 `terminal`（rovloom 不发 `caller`）；`output` 给普通程序 |
-| 启动 | `terminal.run` | 是 | 宿主级（本阶段开放） | 是 | 模板形态要 `template:true` 并用 `templates.list` 核对；`caller`/`parent`/`on` 拒绝；`no_parent`/`no_notify` 只接受 `true`；`wait=true` 必须给 ≤60 秒 `timeout`；argv ≤64 项/32 KiB、line ≤32 KiB、env ≤64 项、name 1–32 位；本 Connector 同时最多 32 个自己启动的存活终端 |
+| 启动 | `terminal.run` | 是 | 宿主级 | 是 | 模板形态要 `template:true` 并用 `templates.list` 核对；`caller`/`on` 拒绝；`parent` 只接受 `tN` 且必须带 `parent_created_ms`（父必须 live、created_ms 一致），与 `no_parent` 互斥；`no_notify` 只接受 `true`；`wait=true` 必须给 ≤60 秒 `timeout`；argv ≤64 项/32 KiB、line ≤32 KiB、env ≤64 项、name 1–32 位；本 Connector 同时最多 32 个自己启动的存活终端 |
 | 启动 | `templates.list` | 是 | 有条件 | 否 | 只列出名称/描述/命令；命令文本由机主维护 |
 | 输入 | `terminal.send` | 是 | 控制 | 是 | 必须带 `core_id`+`created_ms`；`force` 拒绝；blocked 拒绝；`wait=true` 必须给 ≤60 秒 `timeout` |
 | 输入 | `terminal.keys` | 是 | 控制 | 是 | 同上三元组栅栏；≤64 键，每个 ≤32 字符；blocked 拒绝 |
@@ -160,11 +166,14 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 | 读取 | `terminal.attach` | 否 | 有条件 | — | 首屏是 VT 字节流，需要终端模拟器；不属于 MCP 调用面 |
 | 状态 | `terminal.events` | 是 | 观察 | 否 | **rovloom 自有方法（不是 core 方法）**：长轮询，返回当前快照 + 水位之后至多 `limit` 条事件；见下 |
 | 事件 | `events.subscribe` | 否 | 观察 | — | framed 持续流，Wire 桥接只做普通 RPC；由 `terminal.events` 承接 |
-| 手 | `machine.exec` | 否 | 宿主级 | — | 不在设备/凭据范围内执行命令；是否开放见 `questions.md` |
-| 手 | `file.read` / `file.write` / `file.edit` | 否 | 宿主级 | — | 远程任意文件读写；见 `questions.md` |
-| 文档 | `doc.get` / `doc.set` | 否 | 有条件/宿主级 | — | core 自己的文档，不是智能体管理 |
-| 远程 | `machine.list` / `machine.add` / `machine.connect` / `machine.rename` / `machine.rm` | 否 | 有条件/宿主级 | — | 会绕过 rovloom 的设备/凭据模型（一台设备经 `on` 摸到另一台） |
-| 生命周期 | `server.stop` / `server.restart` | 否 | 宿主级 | — | 影响整个 core 的所有终端 |
+| 手 | `machine.exec` | 是 | 宿主级 | 是 | `argv` 与 `line` 恰好一个；`timeout` 必填且 ≤60 秒（本地请求上限 65 秒）；`cwd` 绝对路径；`env` ≤64 项；`input` base64 ≤256 KiB；`on` 拒绝；`truncated` 原样透传 |
+| 手 | `file.read` | 是 | 宿主级 | 是 | `path` 绝对路径、不接受 `cwd`；`offset`/`limit` 非负整数。结果受 1 MiB 响应帧上限约束，超出的文件读不到整段，需自己分页 |
+| 手 | `file.write` | 是 | 宿主级 | 是 | `path` 绝对路径、不接受 `cwd`；`data` base64 ≤256 KiB；core 整份替换写入 |
+| 手 | `file.edit` | 是 | 宿主级 | 是 | `path` 绝对路径、不接受 `cwd`；`edits` 1–64 条、合计 ≤64 KiB；每个 `old` 恰好出现一次，全成或全不成 |
+| 文档 | `doc.get` | 是 | 有条件 | 是 | `name` 1–32 位小写字母/数字/`-_.`（沿用 core 的终端名规则） |
+| 文档 | `doc.set` | 是 | 宿主级 | 是 | 同上名字规则；`value` 序列化 ≤200 KiB（core 允许 1 MiB）；`version` 必填（CAS，不符返回 `conflict`） |
+| 远程 | `machine.list` / `machine.add` / `machine.connect` / `machine.rename` / `machine.rm` | 否 | 有条件/宿主级 | — | 绕过 rovloom 的设备/凭据模型（一台设备经 `on` 摸到另一台）；`runtime_describe` 的 `blocked_methods` 带固定原因 |
+| 生命周期 | `server.stop` / `server.restart` | 是 | 宿主级 | 是 | 只有一个 rovloom 自有的 `core_id`（必填，必须等于当前连接；不符 `fence_mismatch`，不转发给 core）。`stop` 在 attach 模式下让 provider 不可用直到有人拉起 core，managed 模式下下一次调用重新拉起；`restart` 之后自动重新附着 |
 
 ### 状态变化推送：`terminal.events` 长轮询
 
