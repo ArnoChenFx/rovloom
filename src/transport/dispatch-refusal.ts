@@ -26,6 +26,8 @@ const HERDR_CORE_REFUSALS: readonly string[] = Object.freeze([
   'herdr_core_native_not_found',
   'herdr_core_native_machine_unknown',
   'herdr_core_native_invalid_params',
+  'herdr_core_core_identity_mismatch',
+  'herdr_core_core_id_required',
   'herdr_core_events_closed',
   'herdr_core_event_invalid',
   'herdr_core_native_name_taken',

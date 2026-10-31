@@ -21,6 +21,7 @@ import type { V2Target } from '../../wire/types.js'
 import {
   herdrCoreRequestTimeout,
   herdrCoreControl,
+  HERDR_CORE_CORE_FENCE_METHODS,
   herdrCoreNativeParams,
   HERDR_CORE_EVENTS_DEFAULT_LIMIT,
   HERDR_CORE_EVENTS_MAX_TIMEOUT_MS,
@@ -31,7 +32,12 @@ import {
   HERDR_CORE_NATIVE_REJECTION_KINDS
 } from './methods.js'
 import { HerdrCoreRpcError } from './client.js'
-import { assertHerdrCoreTerminal, assertHerdrCoreTemplate } from './control.js'
+import {
+  assertHerdrCoreCoreFence,
+  assertHerdrCoreParent,
+  assertHerdrCoreTerminal,
+  assertHerdrCoreTemplate
+} from './control.js'
 import { createHerdrCoreEventFeed } from './feed.js'
 import { assertTerminalExecutionAllowed } from '../terminal-execution.js'
 
@@ -241,8 +247,19 @@ export function createHerdrCoreConnectorRuntime(
       )
       // 先复核本机来源，再写发送墓碑：来源已变化时不能把一次未发送的意图记成已发送。
       installation.assert()
-      // 启动类：先按本地上限与模板事实核对，再写发送墓碑（失败确定未派发）。
+      // core 生命周期：core_id 必须等于这条连接的 core，绝不把 stop/restart 打到错的实例。
+      if (HERDR_CORE_CORE_FENCE_METHODS.includes(request.method)) {
+        assertHerdrCoreCoreFence(installation.client(), request.params.core_id)
+        installation.assert()
+      }
+      // 启动类：先按本地上限、父终端与模板事实核对，再写发送墓碑（失败确定未派发）。
       if (request.method === 'terminal.run') {
+        await assertHerdrCoreParent({
+          client: installation.client(),
+          contract: installation.record().contract,
+          params: request.params,
+          timeout_ms: timeout
+        })
         const client = installation.client()
         const coreId = client.hello.core.id
         if (startedCore !== coreId) {

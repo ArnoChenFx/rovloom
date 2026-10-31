@@ -35,6 +35,8 @@ const REFUSAL_REASONS: Readonly<Record<string, CallRefusalReason>> = Object.free
   herdr_core_native_machine_unknown: 'machine_unknown',
   herdr_core_native_invalid_params: 'invalid_params',
   herdr_core_terminal_identity_mismatch: 'fence_mismatch',
+  herdr_core_core_identity_mismatch: 'fence_mismatch',
+  herdr_core_core_id_required: 'invalid_params',
   herdr_core_terminal_unavailable: 'terminal_unavailable',
   herdr_core_template_unavailable: 'template_unavailable',
   herdr_core_template_ambiguous: 'template_ambiguous',
