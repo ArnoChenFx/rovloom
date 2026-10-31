@@ -18,8 +18,10 @@ import { hash } from '../../src/wire/index.js'
 import { configTemplate } from '../../src/cli/config.js'
 import type { GatewayConfig } from '../../src/cli/config.js'
 import { randomUUID } from 'node:crypto'
+import { HERDR_CORE_CLASSIFICATION_REVISION } from '../../src/connector/herdr-core/methods.js'
 
 const HERDR_SCHEMA = readFileSync(new URL('../fixtures/herdr/0.9.5/schema.json', import.meta.url), 'utf8')
+const CORE_SCHEMA = readFileSync(new URL('../fixtures/herdr-core/openrpc-0.1.15.json', import.meta.url), 'utf8')
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'rovloom-append-'))
@@ -35,11 +37,19 @@ function fixture() {
     }
   })
   const config = { ...configTemplate('gateway'), state_dir: root } as GatewayConfig
-  const pairing = new SimplePairingHttp(state, config, () => {})
+  let reloads = 0
+  const pairing = new SimplePairingHttp(state, config, () => {
+    reloads++
+  })
   return {
     root,
     state,
     http: pairing,
+    /** setImmediate 里触发的 reload 次数（调用前先让出一轮事件循环）。 */
+    async reloads() {
+      await new Promise((resolve) => setImmediate(resolve))
+      return reloads
+    },
     /** 注册一台 pending 设备并直接签发凭据（不经过 /pairing，测试只用追加端点）。 */
     device() {
       const issued = pairing.codes.create()
@@ -79,6 +89,39 @@ function manifest(machine: string, attempt: string) {
           server_version: 'synthetic-future',
           binary_sha256: 'f'.repeat(64),
           schema_sha256: hash(HERDR_SCHEMA)
+        }
+      }
+    }
+  }
+}
+
+/** 一份真实的 herdr-core 审核清单（契约取自 0.1.15 的真实文档）；不启动 core。 */
+function coreManifest(machine: string, attempt: string) {
+  const reference = setupReference(attempt, 'herdr-core')
+  return {
+    reference,
+    value: {
+      kind: 'herdr-core',
+      schema_bundle: CORE_SCHEMA,
+      config: {
+        version: 1,
+        target: setupTarget(machine, 'herdr-core', { herdr_core: 'default' }),
+        binding_revision: 1,
+        config_ref: reference,
+        expected_source: {
+          provider_kind: 'herdr-core',
+          protocol_family: 'herdr-core-jsonrpc',
+          binary_version: '0.1.15',
+          binary_sha256: 'e'.repeat(64),
+          schema_sha256: hash(CORE_SCHEMA),
+          schema_origin: 'live_instance',
+          schema_command: 'rpc.discover',
+          server_version: '0.1.15',
+          native_protocol_version: '1',
+          runtime_generation: null,
+          adapter_revision: 'adapter-herdr-core-1',
+          classification_revision: HERDR_CORE_CLASSIFICATION_REVISION,
+          support_basis: 'schema_and_version'
         }
       }
     }
@@ -216,6 +259,123 @@ test('失败限速：60 秒内 20 次失败后返回固定码', async () => {
     assert.equal(((await limited.json()) as { error: string }).error, 'provider_append_busy')
     // 限速是全局的：即使凭据正确也先被限速拒绝。
     assert.equal((await f.http.handle(append({ ...device, installation }))!).status, 429)
+  } finally {
+    await f.close()
+  }
+})
+
+test('注册表里已有 Herdr 形状的条目时，另一台设备仍能追加（条目的 target 在 config 下，不是顶层）', async () => {
+  const f = fixture()
+  try {
+    const first = f.device()
+    const second = f.device()
+    assert.equal(
+      (await f.http.handle(append({ ...first, installation: manifest(first.machine_id, randomUUID()) }))!).status,
+      200
+    )
+    // 修复前这里是 409 invalid_frame：同 kind 检查对每个注册表条目取顶层 target，Herdr 条目没有。
+    const response = await f.http.handle(
+      append({ ...second, installation: manifest(second.machine_id, randomUUID()) })
+    )!
+    assert.equal(response.status, 200, JSON.stringify(await response.clone().json()))
+    assert.equal(providers(f).length, 2)
+    assert.ok(f.state.store.provider(first.machine_id, 'herdr'))
+    assert.ok(f.state.store.provider(second.machine_id, 'herdr'))
+  } finally {
+    await f.close()
+  }
+})
+
+test('一次请求追加多个来源：一次审核、一次登记、只 reload 一次；重放幂等且不再 reload', async () => {
+  const f = fixture()
+  try {
+    const device = f.device()
+    const attempt = randomUUID()
+    const installation = {
+      installations: [manifest(device.machine_id, attempt), coreManifest(device.machine_id, attempt)]
+    }
+    const response = await f.http.handle(append({ ...device, installation }))!
+    assert.equal(response.status, 200, JSON.stringify(await response.clone().json()))
+    const body = (await response.json()) as { providers: string[]; replayed?: boolean }
+    assert.deepEqual(body.providers, [setupReference(attempt, 'herdr'), setupReference(attempt, 'herdr-core')])
+    assert.equal(body.replayed, undefined)
+    assert.equal(providers(f).length, 2)
+    assert.ok(f.state.store.provider(device.machine_id, 'herdr'))
+    assert.ok(f.state.store.provider(device.machine_id, 'herdr-core'))
+    assert.equal(await f.reloads(), 1)
+    // 同一批重放：幂等，不再登记、不再 reload。
+    const replay = await f.http.handle(append({ ...device, installation }))!
+    assert.equal(replay.status, 200)
+    assert.equal(((await replay.json()) as { replayed?: boolean }).replayed, true)
+    assert.equal(providers(f).length, 2)
+    assert.equal(await f.reloads(), 1)
+  } finally {
+    await f.close()
+  }
+})
+
+test('批量里有一条冲突就整批拒绝：其余条目也不登记', async () => {
+  const f = fixture()
+  try {
+    const device = f.device()
+    const first = randomUUID()
+    assert.equal(
+      (await f.http.handle(append({ ...device, installation: manifest(device.machine_id, first) }))!).status,
+      200
+    )
+    const attempt = randomUUID()
+    // herdr 已经以另一个引用存在；herdr-core 是新的——整批必须被拒，herdr-core 也不能留下。
+    const response = await f.http.handle(
+      append({
+        ...device,
+        installation: {
+          installations: [manifest(device.machine_id, attempt), coreManifest(device.machine_id, attempt)]
+        }
+      })
+    )!
+    assert.equal(response.status, 409)
+    assert.equal(((await response.json()) as { error: string }).error, 'provider_append_conflict')
+    assert.equal(providers(f).length, 1)
+    assert.equal(f.state.store.provider(device.machine_id, 'herdr-core'), undefined)
+    // 一批里的 attempt 不一致同样拒绝。
+    const mixed = await f.http.handle(
+      append({
+        ...device,
+        installation: {
+          installations: [manifest(device.machine_id, randomUUID()), coreManifest(device.machine_id, randomUUID())]
+        }
+      })
+    )!
+    assert.equal(mixed.status, 409)
+    assert.equal(providers(f).length, 1)
+  } finally {
+    await f.close()
+  }
+})
+
+test('崩溃半成品收敛：注册表已写、Store 没登记时，同引用重试成功而不是永远冲突', async () => {
+  const f = fixture()
+  try {
+    const device = f.device()
+    const installation = manifest(device.machine_id, randomUUID())
+    const store = f.state.store as unknown as { defineProvider: (binding: unknown) => unknown }
+    const original = store.defineProvider.bind(store)
+    // 注册表合并之后、defineProvider 之前“崩溃”。
+    store.defineProvider = () => {
+      throw new Error('simulated crash')
+    }
+    const crashed = await f.http.handle(append({ ...device, installation }))!
+    assert.equal(crashed.status, 409)
+    assert.equal(providers(f).length, 1)
+    assert.equal(f.state.store.provider(device.machine_id, 'herdr'), undefined)
+    store.defineProvider = original
+    const retried = await f.http.handle(append({ ...device, installation }))!
+    assert.equal(retried.status, 200, JSON.stringify(await retried.clone().json()))
+    assert.equal(providers(f).length, 1)
+    assert.ok(f.state.store.provider(device.machine_id, 'herdr'))
+    // 同 kind 的另一个引用仍被拒。
+    const other = await f.http.handle(append({ ...device, installation: manifest(device.machine_id, randomUUID()) }))!
+    assert.equal(other.status, 409)
   } finally {
     await f.close()
   }

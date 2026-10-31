@@ -123,6 +123,20 @@ export class PairingReplayCache {
 }
 
 /** Gateway 侧单端点配对：账本兑换 + 自动批准 + 凭据交付；与 PairingCodes 共享同一 Store。 */
+/**
+ * 注册表条目所属的设备与 kind：Luvus 的 `target` 在顶层，Herdr 与 herdr-core 在 `config.target` 里。
+ * 形状不认识就返回 undefined，调用方按冲突处理（注册表是程序自己写的，认不出就不该再往里追加）。
+ */
+export function registryTarget(value: unknown): Readonly<{ machine_id: unknown; provider_id: unknown }> | undefined {
+  const object = (candidate: unknown): Record<string, unknown> | undefined =>
+    candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate)
+      ? (candidate as Record<string, unknown>)
+      : undefined
+  const row = object(value)
+  const target = object(row?.target) ?? object(object(row?.config)?.target)
+  return target ? { machine_id: target.machine_id, provider_id: target.provider_id } : undefined
+}
+
 export class SimplePairingHttp {
   readonly #codes: PairingCodes
   readonly #requests = new Set<Promise<Response>>()
@@ -193,6 +207,8 @@ export class SimplePairingHttp {
 
   /**
    * 追加登记：设备凭据是唯一信任锚，只能新增同 machine 的 kind，绝不覆盖已存在条目。
+   * 一次请求可带 1–3 个来源（共用一个 attempt），整批先预检、再登记、只 reload 一次：
+   * 逐个发请求会让第二个请求撞上第一个成功后的 listener 重开。
    * 同 reference 且内容完全相同的重放幂等成功（崩溃窗口的收敛）。
    */
   private async append(request: Request): Promise<Response> {
@@ -208,65 +224,83 @@ export class SimplePairingHttp {
       if (typeof input.credential !== 'string' || !/^[A-Za-z0-9_-]{32,256}$/u.test(input.credential)) {
         throw new GatewayError('provider_append_refused')
       }
-      // reference 就是 `<kind>_<attempt>`（与 /pairing 同一规则）：从清单里取出 attempt，
-      // 再交给同一 reviewSetupManifest 复核（它会按这个 attempt 重算 reference 并比对）。
+      // reference 就是 `<kind>_<attempt>`（与 /pairing 同一规则）：单个 {reference,value} 或 {installations:[…]}，
+      // 全部条目共用同一个 attempt；再交给同一 reviewSetupManifest 复核（它按这个 attempt 重算每个 reference 并比对）。
       const envelope = object(input.installation)
-      const reference = envelope.reference
-      if (typeof reference !== 'string' || !/^(luvus|herdr|herdr-core)_[a-f0-9-]{36}$/u.test(reference)) {
+      const listed = Object.hasOwn(envelope, 'installations') ? envelope.installations : [envelope]
+      if (!Array.isArray(listed) || listed.length < 1 || listed.length > 3) {
         throw new GatewayError('provider_append_conflict')
       }
-      const attempt = reference.slice(reference.indexOf('_') + 1)
+      const attempts = new Set<string>()
+      for (const entry of listed) {
+        const reference = object(entry).reference
+        const match =
+          typeof reference === 'string' ? /^(luvus|herdr|herdr-core)_([a-f0-9-]{36})$/u.exec(reference) : null
+        if (!match) {
+          throw new GatewayError('provider_append_conflict')
+        }
+        attempts.add(match[2]!)
+      }
+      if (attempts.size !== 1) {
+        throw new GatewayError('provider_append_conflict')
+      }
       this.#authenticateAppend(machine, input.credential, String(input.recovery_generation))
       const signal = AbortSignal.any([request.signal, this.#stop.signal])
       const reviewed = await reviewSetupManifest(
         input.installation,
-        { attempt_id: attempt, actor: SIMPLE_SETUP_ACTOR, lineage: SIMPLE_SETUP_LINEAGE },
+        { attempt_id: [...attempts][0]!, actor: SIMPLE_SETUP_ACTOR, lineage: SIMPLE_SETUP_LINEAGE },
         machine,
         this.config.state_dir,
         signal
       )
-      if (reviewed.reviewed.length !== 1) {
-        // 一次只追加一个来源：多个来源的重放语义与原子性不值得扩大调用面。
-        throw new GatewayError('provider_append_conflict')
-      }
-      const entry = reviewed.reviewed[0]!
-      const existing = this.state.store.provider(machine, entry.target.provider_id)
       const providersPath = runtimeReference(this.config.state_dir, 'providers')
-      /** registry 可能还不存在（设备尚未发布任何来源）：按空列表处理。 */
-      const registry = (): readonly { reference: string; value: unknown }[] => {
+      const registered = ((): readonly { reference: string; value: unknown }[] => {
         const value = readSetupJson(providersPath, 1_048_576)
         return value === undefined
           ? []
           : ((object(value).providers as readonly { reference: string; value: unknown }[] | undefined) ?? [])
-      }
-      if (existing) {
-        // 同 kind 只允许完全相同的重放；内容不同或换了 reference 一律拒绝（不改写、不替换）。
-        const registered = registry().find(
-          /** 注册表里同一 reference 的条目。 */ (value) => value.reference === entry.reference
-        )
+      })()
+      // 整批预检：任何一个条目冲突就整批拒绝，不留下登记了一半的状态。
+      const fresh: ReviewedSetupInstallation[] = []
+      for (const entry of reviewed.reviewed) {
+        const existing = this.state.store.provider(machine, entry.target.provider_id)
+        if (existing) {
+          // 同 kind 只允许完全相同的重放；内容不同或换了 reference 一律拒绝（不改写、不替换）。
+          const same = registered.find(
+            /** 注册表里同一 reference 的条目。 */ (value) => value.reference === entry.reference
+          )
+          if (
+            boundedJson(existing) !== boundedJson(entry.binding) ||
+            !same ||
+            boundedJson(same.value, 1_048_576) !== boundedJson(entry.value, 1_048_576)
+          ) {
+            throw new GatewayError('provider_append_conflict')
+          }
+          continue
+        }
+        // 同 machine 同 kind 不能有第二个 reference（上次崩溃可能留下注册表半成品：同 reference 的由 merge 核对内容）。
         if (
-          boundedJson(existing) !== boundedJson(entry.binding) ||
-          !registered ||
-          boundedJson(registered.value, 1_048_576) !== boundedJson(entry.value, 1_048_576)
+          registered.some(
+            /** 同一设备的同一 kind，且不是同一个 reference。 */ (value) => {
+              if (value.reference === entry.reference) {
+                return false
+              }
+              const target = registryTarget(value.value)
+              return !target || (target.machine_id === machine && target.provider_id === entry.target.provider_id)
+            }
+          )
         ) {
           throw new GatewayError('provider_append_conflict')
         }
-        return setupReply({ state: 'appended', providers: [entry.reference], replayed: true })
+        fresh.push(entry)
       }
-      // 同 machine 同 kind 不能有第二个 reference（注册表可能留有上次崩溃的半成品）。
-      if (
-        registry().some(
-          /** 同一设备的同一 kind。 */ (value) => {
-            const target = object(object(value.value).target)
-            return target.machine_id === machine && target.provider_id === entry.target.provider_id
-          }
-        )
-      ) {
-        throw new GatewayError('provider_append_conflict')
+      const references = reviewed.reviewed.map(/** 响应只带引用。 */ (entry) => entry.reference)
+      if (fresh.length === 0) {
+        return setupReply({ state: 'appended', providers: references, replayed: true })
       }
-      await this.registerProviders(reviewed.reviewed, providersPath, signal)
+      await this.registerProviders(fresh, providersPath, signal)
       setImmediate(() => this.reload())
-      return setupReply({ state: 'appended', providers: [entry.reference] })
+      return setupReply({ state: 'appended', providers: references })
     } catch (error) {
       this.#appendFailures.push(Date.now())
       const code = error instanceof GatewayError ? error.code : 'provider_append_failed'

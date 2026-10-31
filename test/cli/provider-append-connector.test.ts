@@ -3,7 +3,9 @@
  * （reference 必须等于 kind_attempt，本地配置必须与注册表逐字相同）。
  */
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -208,6 +210,232 @@ test('mixed 设备也会追加缺的来源：factory 仍只收到已配对的两
     )
     assert.deepEqual(handed, [['luvus', 'herdr']])
   } finally {
+    rmSync(f.root, { recursive: true, force: true })
+  }
+})
+
+/** 本机假 Gateway：记录每个 POST，按脚本回应；只监听回环。 */
+async function fakeGateway(
+  respond: (body: Record<string, unknown>, count: number) => { status: number; json: unknown }
+) {
+  const requests: Record<string, unknown>[] = []
+  const server: Server = createServer((request, response) => {
+    const chunks: Buffer[] = []
+    request.on('data', (chunk: Buffer) => chunks.push(chunk))
+    request.on('end', () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>
+      requests.push(body)
+      const reply = respond(body, requests.length)
+      response.writeHead(reply.status, { 'content-type': 'application/json' })
+      response.end(JSON.stringify(reply.json))
+    })
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  return {
+    requests,
+    port: (server.address() as AddressInfo).port,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+}
+
+/** 给 unpaired 的来源预置一份已准备的记录（重试路径：沿用自己的 attempt）。 */
+function preparedRecord(f: ReturnType<typeof fixture>, kind: 'luvus' | 'herdr-core', attempt: string) {
+  const reference = setupReference(attempt, kind)
+  const local = { kind, config: { marker: kind + attempt.slice(0, 4) } }
+  writeSetupJson(
+    providerSetupPath(f.root, kind),
+    {
+      schema_version: 1,
+      attempt_id: attempt,
+      machine_id: f.machine,
+      phase: 'prepared',
+      settings: f.config.native,
+      reference,
+      local,
+      remote: { kind, schema_bundle: 'bundle-' + kind }
+    },
+    false,
+    1_048_576
+  )
+  return { reference, local }
+}
+
+const device = { machine_id: 'm_synthetic', recovery_generation: 'g_generation', credential: 'C'.repeat(48) }
+
+test('同一次启动追加多个来源：共用一个 attempt 的只发一个请求，Gateway 确认后才写本机注册表', async () => {
+  const f = fixture('mixed')
+  const gateway = await fakeGateway(() => ({ status: 200, json: { state: 'appended', providers: [] } }))
+  try {
+    const shared = '33333333-3333-3333-3333-333333333333'
+    const luvus = preparedRecord(f, 'luvus', shared)
+    const core = preparedRecord(f, 'herdr-core', shared)
+    const config = { ...f.config, gateway_url: 'ws://127.0.0.1:' + gateway.port } as ConnectorConfig
+    const { io: cliIo } = io()
+    const outcome = await appendNativeProviders({
+      config,
+      kinds: ['luvus', 'herdr-core'],
+      credential: device,
+      console: silentConsole(cliIo),
+      signal: cliIo.signal
+    })
+    assert.deepEqual(outcome.failed, [])
+    assert.deepEqual(outcome.appended, ['luvus', 'herdr-core'])
+    // 只有一个 POST，带两个条目，顺序固定（luvus 在前），不含任何本机路径或本地配置。
+    assert.equal(gateway.requests.length, 1)
+    const installation = gateway.requests[0]!.installation as { installations: { reference: string; value: unknown }[] }
+    assert.deepEqual(
+      installation.installations.map((entry) => entry.reference),
+      [luvus.reference, core.reference]
+    )
+    assert.equal(JSON.stringify(gateway.requests[0]).includes('marker'), false)
+    const registry = readSetupJson(runtimeReference(f.root, 'providers'), 1_048_576) as {
+      providers: { reference: string; value: unknown }[]
+    }
+    assert.deepEqual(
+      registry.providers.map((entry) => entry.reference).sort(),
+      [f.reference, luvus.reference, core.reference].sort()
+    )
+    assert.deepEqual(registry.providers.find((entry) => entry.reference === core.reference)!.value, core.local)
+  } finally {
+    await gateway.close()
+    rmSync(f.root, { recursive: true, force: true })
+  }
+})
+
+test('此前准备过但没登记成功的来源带着自己的旧 attempt，单独一组；一组失败不影响另一组', async () => {
+  const f = fixture('mixed')
+  const gateway = await fakeGateway((body) => {
+    const refs = (
+      (body.installation as { reference?: string }).reference
+        ? [(body.installation as { reference: string }).reference]
+        : []
+    ).join()
+    return refs.startsWith('luvus_')
+      ? { status: 409, json: { error: 'provider_append_conflict' } }
+      : { status: 200, json: { state: 'appended', providers: [] } }
+  })
+  try {
+    const luvus = preparedRecord(f, 'luvus', '44444444-4444-4444-4444-444444444444')
+    const core = preparedRecord(f, 'herdr-core', '55555555-5555-5555-5555-555555555555')
+    const config = { ...f.config, gateway_url: 'ws://127.0.0.1:' + gateway.port } as ConnectorConfig
+    const { io: cliIo } = io()
+    const outcome = await appendNativeProviders({
+      config,
+      kinds: ['luvus', 'herdr-core'],
+      credential: device,
+      console: silentConsole(cliIo),
+      signal: cliIo.signal
+    })
+    assert.equal(gateway.requests.length, 2)
+    assert.deepEqual(outcome.appended, ['herdr-core'])
+    assert.deepEqual(outcome.failed, [{ kind: 'luvus', code: 'provider_append_conflict' }])
+    // 失败的那组不写本机注册表。
+    const registry = readSetupJson(runtimeReference(f.root, 'providers'), 1_048_576) as {
+      providers: { reference: string }[]
+    }
+    assert.deepEqual(registry.providers.map((entry) => entry.reference).sort(), [f.reference, core.reference].sort())
+    void luvus
+  } finally {
+    await gateway.close()
+    rmSync(f.root, { recursive: true, force: true })
+  }
+})
+
+test('Gateway 正在重开 listener（连接被拒）时按幂等重试，不把这当作追加失败', async () => {
+  const f = fixture('mixed')
+  // 先占一个端口再释放，保证开头几次连接被拒；稍后在同一端口起假 Gateway。
+  const probe = await fakeGateway(() => ({ status: 200, json: {} }))
+  const port = probe.port
+  await probe.close()
+  try {
+    const core = preparedRecord(f, 'herdr-core', '66666666-6666-6666-6666-666666666666')
+    const config = { ...f.config, gateway_url: 'ws://127.0.0.1:' + port } as ConnectorConfig
+    const { io: cliIo } = io()
+    let late: Awaited<ReturnType<typeof fakeGateway>> | undefined
+    const starting = (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      const server = createServer((request, response) => {
+        request.resume()
+        request.on('end', () => {
+          response.writeHead(200, { 'content-type': 'application/json' })
+          response.end(JSON.stringify({ state: 'appended', providers: [core.reference], replayed: true }))
+        })
+      })
+      await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve))
+      late = { requests: [], port, close: () => new Promise<void>((resolve) => server.close(() => resolve())) }
+    })()
+    const outcome = await appendNativeProviders({
+      config,
+      kinds: ['herdr-core'],
+      credential: device,
+      console: silentConsole(cliIo),
+      signal: cliIo.signal
+    })
+    await starting
+    assert.deepEqual(outcome.failed, [])
+    assert.deepEqual(outcome.appended, ['herdr-core'])
+    await late?.close()
+  } finally {
+    rmSync(f.root, { recursive: true, force: true })
+  }
+})
+
+test('一直连不上：重试几次后固定码 append_network，本机注册表不变', async () => {
+  const f = fixture('mixed')
+  const probe = await fakeGateway(() => ({ status: 200, json: {} }))
+  const port = probe.port
+  await probe.close()
+  try {
+    preparedRecord(f, 'herdr-core', '77777777-7777-7777-7777-777777777777')
+    const config = { ...f.config, gateway_url: 'ws://127.0.0.1:' + port } as ConnectorConfig
+    const { io: cliIo } = io()
+    const outcome = await appendNativeProviders({
+      config,
+      kinds: ['herdr-core'],
+      credential: device,
+      console: silentConsole(cliIo),
+      signal: cliIo.signal
+    })
+    assert.deepEqual(outcome.failed, [{ kind: 'herdr-core', code: 'append_network' }])
+    const registry = readSetupJson(runtimeReference(f.root, 'providers'), 1_048_576) as { providers: unknown[] }
+    assert.equal(registry.providers.length, 1)
+  } finally {
+    rmSync(f.root, { recursive: true, force: true })
+  }
+})
+
+test('上一次本机准备做到一半（initializing）：固定码拒绝，记录原样保留，不改写、不退役', async () => {
+  const f = fixture('mixed')
+  const gateway = await fakeGateway(() => ({ status: 200, json: { state: 'appended', providers: [] } }))
+  try {
+    const path = providerSetupPath(f.root, 'herdr-core')
+    writeSetupJson(
+      path,
+      {
+        schema_version: 1,
+        attempt_id: '88888888-8888-8888-8888-888888888888',
+        machine_id: f.machine,
+        phase: 'initializing'
+      },
+      false,
+      1_048_576
+    )
+    const before = readFileSync(path, 'utf8')
+    const config = { ...f.config, gateway_url: 'ws://127.0.0.1:' + gateway.port } as ConnectorConfig
+    const { io: cliIo } = io()
+    const outcome = await appendNativeProviders({
+      config,
+      kinds: ['herdr-core'],
+      credential: device,
+      console: silentConsole(cliIo),
+      signal: cliIo.signal
+    })
+    assert.deepEqual(outcome.failed, [{ kind: 'herdr-core', code: 'configuration_required' }])
+    assert.equal(readFileSync(path, 'utf8'), before)
+    assert.equal(existsSync(join(f.root, 'retired')), false)
+    assert.equal(gateway.requests.length, 0)
+  } finally {
+    await gateway.close()
     rmSync(f.root, { recursive: true, force: true })
   }
 })
