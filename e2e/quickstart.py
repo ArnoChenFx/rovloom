@@ -948,7 +948,8 @@ def main():
             stop_servers(herdr_dir)
         except Exception as error:
             print('CLEANUP servers error', error, flush=True)
-        if args.herdr_core:
+        if args.herdr_core or args.append_core:
+            # --append-core 起的私有 core 同样属于本轮（原先只在 --herdr-core 时回收，会遗留 core 与 holder 进程）。
             try:
                 stop_herdr_core(herdr_dir, args.herdr_core_session, home_c)
             except Exception as error:
