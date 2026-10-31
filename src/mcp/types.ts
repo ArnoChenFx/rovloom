@@ -66,6 +66,7 @@ export type CallRefusalReason =
   | 'template_unavailable'
   | 'template_ambiguous'
   | 'capacity'
+  | 'conflict'
   | 'name_taken'
   | 'invalid_template'
   | 'unavailable'

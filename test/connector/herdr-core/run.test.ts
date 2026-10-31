@@ -104,10 +104,19 @@ test('模板声明与真实模板不符时在写入前拒绝', async () => {
 
 test('parent/caller/on 一律拒绝，no_parent/no_notify 只接受 true', async () => {
   await withSession({ discover: DISCOVER }, async ({ core, session }) => {
+    // parent 必须带父终端的 created_ms；caller/on 一律拒绝，die_with_parent 仍拒绝。
+    await assert.rejects(
+      execute(session, 'terminal.run', { argv: ['cat'], parent: 't1' }),
+      /herdr_core_terminal_fence_required/u
+    )
+    await assert.rejects(
+      execute(session, 'terminal.run', { argv: ['cat'], parent: 't1', parent_created_ms: 1, no_parent: true }),
+      /herdr_core_param_invalid/u
+    )
     for (const params of [
-      { argv: ['cat'], parent: 't1' },
       { argv: ['cat'], caller: 't1' },
-      { argv: ['cat'], on: 'box' }
+      { argv: ['cat'], on: 'box' },
+      { argv: ['cat'], die_with_parent: true }
     ]) {
       // 固定在审核表里拒绝，不靠 schema 的「未知字段」兜底。
       await assert.rejects(execute(session, 'terminal.run', params), /herdr_core_param_blocked/u)

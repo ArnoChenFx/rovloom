@@ -53,7 +53,8 @@ import {
   HERDR_CORE_GUIDE,
   HERDR_CORE_SYNTHETIC_METHODS,
   HERDR_CORE_METHOD_USAGE,
-  HERDR_CORE_CLASSIFICATION_REVISION,
+  HERDR_CORE_CLASSIFICATION_REVISIONS,
+  HERDR_CORE_UNAVAILABLE,
   herdrCoreTier
 } from './methods.js'
 import { requiresTerminalExecution } from '../terminal-execution.js'
@@ -219,7 +220,7 @@ export function parseHerdrCoreProviderRefConfig(input: unknown): HerdrCoreProvid
     fail('herdr_core_contract_unreviewed')
   }
   // 分类修订标识本仓库的档位表，是配置事实：不属于它的配置在读取任何文件之前就拒绝。core 的版本与协议代次不设限。
-  if (value.expected_source.classification_revision !== HERDR_CORE_CLASSIFICATION_REVISION) {
+  if (!HERDR_CORE_CLASSIFICATION_REVISIONS.includes(value.expected_source.classification_revision ?? '')) {
     fail('herdr_core_contract_unreviewed')
   }
   const parsedTarget = Object.freeze({ ...value.target }) as V2Target & { profile: 'session' }
@@ -252,6 +253,8 @@ export function describeHerdrCoreContract(input: {
     contract_identity: input.contract.identity,
     /** 全局使用说明（rovloom 撰写、经审核），随每次 describe 一起交付。 */
     guide: HERDR_CORE_GUIDE,
+    /** core 有、rovloom 不开放的方法与原因（固定码），让控制端能发现边界而不是以为能力缺失。 */
+    blocked_methods: HERDR_CORE_UNAVAILABLE,
     methods: Object.freeze(
       HERDR_CORE_EXPOSED_METHODS.map(
         /** 只描述本期开放的方法；参数 schema 与说明来自本次实例的审核结果。 */ (method) =>
@@ -451,7 +454,9 @@ export async function createHerdrCoreGatewayResources(
             blocked_params: found.blocked_params,
             ...(found.usage ? { usage: found.usage } : {}),
             /** 使用说明是全局的，逐条 describe 也带上，控制端不必先读整份目录。 */
-            guide: described.guide
+            guide: described.guide,
+            /** core 有、rovloom 不开放的方法与原因。 */
+            blocked_methods: described.blocked_methods
           }
         }
       })

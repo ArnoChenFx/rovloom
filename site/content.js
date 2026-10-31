@@ -77,7 +77,7 @@ export const copy = {
     'why.targetBody': '明确选择设备、Provider 与会话。自己的 Linux 工作站和 Windows 电脑，各自保留独立的运行环境。',
     'why.controlTitle': '控制权留在你手中',
     'why.controlBody':
-      'Gateway 核对调用权限，本机终端执行开关由机器所有者掌握，可随时关闭。设备凭据与 MCP Bearer 各自管理。',
+      'Gateway 核对调用权限，本机终端执行开关（含执行命令、文件与 core 生命周期）由机器所有者掌握，可随时关闭。设备凭据与 MCP Bearer 各自管理。',
     'why.recoveryTitle': '断线，也有明确边界',
     'why.recoveryBody': '原生实例消失后重新附着或重建。可能已经送达的变更不会自动重发，不确定的结果会明确保留。',
     'how.label': '02 / ONE GATEWAY. MANY POSSIBILITIES.',

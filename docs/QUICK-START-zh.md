@@ -146,7 +146,12 @@ tar -xzf herdr-core.tar.gz -C ~/.local/bin
   `terminal.interrupt`、`terminal.put`、`terminal.kill`、`terminal.rm`、`terminal.keep`、
   `terminal.label`；
 - 启动（需要 `allow_terminal_execution`）：`terminal.run`（程序或模板）与 `templates.list`；
-- 其余保持关闭：`machine.*`、`file.*`、`doc.set`、`server.stop/restart`、`terminal.attach`。
+- 宿主级能力（需要 `allow_terminal_execution`）：`machine.exec`、`file.read`、`file.write`、
+  `file.edit`、`doc.get`、`doc.set`、`server.restart`、`server.stop`（后两个要带
+  `server.status` 里的 `core_id`）；`terminal.run` 带 `parent` + `parent_created_ms` 可以建
+  多 agent 树，再用 `terminal.wait {children}` 等；
+- 仍然关闭、并由 `runtime_describe` 带原因列出：`machine.list/add/connect/rename/rm`
+  （会绕过 token 的按设备限定）与原始流 `terminal.attach` / `events.subscribe`。
 
 要跟踪状态变化而不停 `terminal.list`，用长轮询 `terminal.events`：返回当前快照 + `after_seq`
 之后至多 `limit` 条事件（默认 64 条，最多等 30 秒）。把返回的 `next_after_seq` 带回去。

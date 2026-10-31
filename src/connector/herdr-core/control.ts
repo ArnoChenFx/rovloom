@@ -115,6 +115,59 @@ export async function assertHerdrCoreTemplate(options: {
 }
 
 /**
+ * `server.stop` / `server.restart` 的 core_id 栅栏：调用方必须先读 `server.status`，
+ * 把 stop/restart 打到错的 core 上是不可撤销的。`core_id` 是 rovloom 自有参数，不转发给 core。
+ */
+export function assertHerdrCoreCoreFence(client: HerdrCoreClient, coreId: unknown): void {
+  if (typeof coreId !== 'string') {
+    fail('herdr_core_core_id_required')
+  }
+  if (client.hello.core.id !== coreId) {
+    fail('herdr_core_core_identity_mismatch')
+  }
+}
+
+/**
+ * `terminal.run {parent}` 的父终端栅栏：多 agent 编排会把子终端挂到父终端上，
+ * 父地址被复用（只删 terminals.json）时不能把新子终端挂到同地址的另一个终端。
+ * 与终端三元组同款：地址 + 调用方认定的 `created_ms`，并且父必须仍在运行。
+ */
+export async function assertHerdrCoreParent(options: {
+  client: HerdrCoreClient
+  contract: HerdrCoreContract
+  params: Readonly<Record<string, unknown>>
+  timeout_ms: number
+}): Promise<void> {
+  const parent = options.params.parent
+  if (parent === undefined || parent === null) {
+    return
+  }
+  const created = options.params.parent_created_ms
+  if (typeof parent !== 'string' || typeof created !== 'number') {
+    fail('herdr_core_terminal_fence_required')
+  }
+  const budget = Math.min(options.timeout_ms, HERDR_CORE_FENCE_TIMEOUT_MS)
+  if (budget < 1) {
+    fail('herdr_core_timeout')
+  }
+  let live: JsonObject
+  try {
+    live = options.contract.validateResult(
+      'terminal.get',
+      await options.client.request('terminal.get', { terminal: parent }, budget)
+    )
+  } catch {
+    fail('herdr_core_terminal_unavailable')
+  }
+  if (live.address !== parent || live.created_ms !== created) {
+    fail('herdr_core_terminal_identity_mismatch')
+  }
+  if (live.state !== 'live') {
+    fail('herdr_core_terminal_unavailable')
+  }
+}
+
+/**
  * 执行前核对：先看这条连接自己的 `core.id`，再读实时终端事实。
  * 地址、`created_ms` 或 `core.id` 任一不符即拒绝，绝不把输入送给同地址的另一个终端。
  * 只有真正送输入的方法（send/keys/interrupt）才做 blocked 判定；`put` 只写文件，

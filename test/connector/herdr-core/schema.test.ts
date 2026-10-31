@@ -120,9 +120,23 @@ test('blocked parameters are refused before any schema or native call', () => {
     /herdr_core_timeout_invalid/u
   )
   // 其余宿主级方法仍不在开放集合里；terminal.run 已开放，但 parent/caller 一律拒绝。
-  assert.throws(() => reviewHerdrCoreParams('machine.exec', { argv: ['sh'] }), /herdr_core_method_unavailable/u)
+  assert.throws(() => reviewHerdrCoreParams('machine.list', {}), /herdr_core_method_unavailable/u)
+  // machine.exec 必须显式给 timeout；宿主级已经开放。
+  assert.throws(() => reviewHerdrCoreParams('machine.exec', { argv: ['sh'] }), /herdr_core_timeout_invalid/u)
+  // parent 现在开放，但必须带调用方认定的 parent_created_ms；其它方法仍不接受 parent。
   assert.throws(
     () => reviewHerdrCoreParams('terminal.run', { argv: ['sh'], parent: 't1' }),
+    /herdr_core_terminal_fence_required/u
+  )
+  assert.throws(
+    () =>
+      reviewHerdrCoreParams('terminal.send', {
+        terminal: 't1',
+        core_id: 'a'.repeat(16),
+        created_ms: 1,
+        parent: 't1',
+        text: 'x'
+      }),
     /herdr_core_param_blocked/u
   )
   assert.throws(
@@ -219,7 +233,7 @@ test('describe 的参数 schema 没有悬空 $ref，被拒绝的参数不出现�
     const schema = contract.paramsSchema(method)
     assert.deepEqual(refs(schema), [], `${method} has dangling $ref`)
     const properties = (schema as { properties: Record<string, unknown> }).properties
-    for (const blocked of ['caller', 'on', 'parent', 'core', 'calls_you', 'children_of']) {
+    for (const blocked of ['caller', 'on', 'core', 'calls_you', 'die_with_parent', 'children_of']) {
       assert.equal(Object.hasOwn(properties, blocked), false, `${method} exposes ${blocked}`)
     }
   }

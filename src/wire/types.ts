@@ -112,8 +112,13 @@ export type DispatchRefusalCode =
   | 'herdr_core_native_not_found'
   | 'herdr_core_native_machine_unknown'
   | 'herdr_core_native_invalid_params'
+  | 'herdr_core_core_identity_mismatch'
+  | 'herdr_core_core_id_required'
   | 'herdr_core_events_closed'
   | 'herdr_core_event_invalid'
+  | 'herdr_core_native_conflict'
+  | 'herdr_core_native_edit_failed'
+  | 'herdr_core_native_not_text'
   | 'herdr_core_native_name_taken'
   | 'herdr_core_native_invalid_template'
 /** 闭合集合的运行时副本；编解码与账本共用同一份，避免两处枚举漂移。 */
@@ -133,8 +138,13 @@ export const DISPATCH_REFUSAL_CODES: readonly DispatchRefusalCode[] = Object.fre
   'herdr_core_native_not_found',
   'herdr_core_native_machine_unknown',
   'herdr_core_native_invalid_params',
+  'herdr_core_core_identity_mismatch',
+  'herdr_core_core_id_required',
   'herdr_core_events_closed',
   'herdr_core_event_invalid',
+  'herdr_core_native_conflict',
+  'herdr_core_native_edit_failed',
+  'herdr_core_native_not_text',
   'herdr_core_native_name_taken',
   'herdr_core_native_invalid_template'
 ])

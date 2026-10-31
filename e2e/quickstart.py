@@ -571,7 +571,7 @@ def main():
             if args.luvus:
                 subprocess.run(['bun', '--no-env-file', os.path.join(os.path.dirname(__file__), 'luvus-wait-output.mjs')],
                                env=probe_env, check=True, timeout=90)
-            print('NATIVE_UPGRADE_OK', json.dumps({'provider': 'herdr' if args.herdr else 'luvus',
+            print('NATIVE_UPGRADE_OK', json.dumps({'provider': selection,
                                                  'credential_preserved': True, 'token_preserved': True,
                                                  'registry_version': 2, 'old_result_readable': True}), flush=True)
         if args.legacy_wait_output:
@@ -783,7 +783,8 @@ def main():
                                  'HERDR_CORE_BLOCKED_LOG': os.path.join(work, 'blocked.log'),
                                  'HERDR_CORE_FAKEAGENT': os.path.join(os.path.dirname(__file__), 'herdr-core-fakeagent.py'),
                                  'HERDR_CORE_FAKEAGENT_LOG': os.path.join(work, 'fakeagent.log'),
-                                 'HERDR_CORE_BLOCKED': os.path.join(os.path.dirname(__file__), 'herdr-core-blocked.py')})
+                                 'HERDR_CORE_BLOCKED': os.path.join(os.path.dirname(__file__), 'herdr-core-blocked.py'),
+                                 'HERDR_CORE_WORK': work})
                 if args.herdr_core_mode == 'managed':
                     then_env['HERDR_CORE_MANAGED_CONFIG'] = os.path.join(managed_root, 'config')
             for attempt in range(8 if args.service else 1):

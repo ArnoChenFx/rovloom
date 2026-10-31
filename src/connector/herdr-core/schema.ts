@@ -339,6 +339,24 @@ function paramsSchema(method: JsonObject, budget: AnnotationBudget, components: 
       fail('herdr_core_schema_invalid')
     }
     properties.template = { type: 'boolean' }
+    // 父终端的栅栏：与地址一起给出调用方认定的 created_ms；只在带 parent 时必需（审核函数里核对）。
+    if (Object.hasOwn(properties, 'parent_created_ms')) {
+      fail('herdr_core_schema_invalid')
+    }
+    properties.parent_created_ms = { type: 'integer', minimum: 0, format: 'uint64' }
+  }
+  // machine.exec 的 timeout 在 OpenRPC 里是可选的（core 默认 60 秒），但 rovloom 要求显式给出；
+  // 参数根也标成 required，控制端在 describe 里就能看到这个约束。
+  if (name === 'machine.exec' && !required.includes('timeout')) {
+    required.push('timeout')
+  }
+  // core 生命周期没有原生参数，只有 rovloom 自有的 core_id 栅栏。
+  if (name === 'server.restart' || name === 'server.stop') {
+    if (Object.hasOwn(properties, 'core_id')) {
+      fail('herdr_core_schema_invalid')
+    }
+    properties.core_id = { type: 'string', pattern: '^[a-f0-9]{8,64}$' }
+    required.push('core_id')
   }
   if (typeof name === 'string' && herdrCoreControl(name)) {
     for (const field of HERDR_CORE_FENCE_PARAMS) {

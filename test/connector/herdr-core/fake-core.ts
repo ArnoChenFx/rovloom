@@ -120,6 +120,20 @@ function defaultHandler(request: FakeCoreRequest, options: FakeCoreOptions, stat
         live: 1,
         finished: 0
       }
+    case 'machine.exec':
+      return { code: 0, signal: null, stdout: '', stderr: '', timed_out: false, truncated: false, ms: 1 }
+    case 'file.read':
+      return { text: 'hello\n', first: 1, last: 1, lines: 1 }
+    case 'file.write':
+    case 'file.edit':
+      return { path: '/tmp/rovloom-fake.txt', bytes: 6 }
+    case 'doc.get':
+      return { value: { ok: true }, version: 1 }
+    case 'doc.set':
+      return { version: 2 }
+    case 'server.restart':
+    case 'server.stop':
+      return { stopped: true }
     case 'terminal.list':
       return {
         terminals: Array.from({ length: Math.max(1, state.runs) }, (_, index) =>

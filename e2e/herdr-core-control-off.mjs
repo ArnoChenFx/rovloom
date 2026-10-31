@@ -11,30 +11,37 @@ const { client, target, tool, ok, call } = await connect()
 try {
   const discovered = await ok('runtime_discover', { target, expected_binding_revision: 1, limit: 100 })
   const methods = discovered.items.map((item) => item.method).sort()
-  // 开关关闭时控制档与启动类仍然列出，但标成 available:false。
-  assert.deepEqual(methods, [
+  // 脚本要同时对旧版本（0.10.0，16 个方法）与新版本（24 个方法）成立：
+  // 读取必须在；列出来的每个受控方法都必须是 available:false。
+  for (const method of [
     'server.status',
     'templates.list',
     'terminal.events',
     'terminal.get',
-    'terminal.interrupt',
-    'terminal.keep',
-    'terminal.keys',
-    'terminal.kill',
-    'terminal.label',
     'terminal.list',
-    'terminal.put',
-    'terminal.read',
-    'terminal.rm',
-    'terminal.run',
-    'terminal.send',
-    'terminal.wait'
-  ])
+    'terminal.read'
+  ]) {
+    assert(methods.includes(method), `${method} missing: ${JSON.stringify(methods)}`)
+  }
   const available = Object.fromEntries(discovered.items.map((item) => [item.method, item.available]))
   for (const method of ['terminal.send', 'terminal.keys', 'terminal.run']) {
     assert.equal(available[method], false, `${method}:${JSON.stringify(available)}`)
   }
-  // terminal.read 只有 lines>0 需要开关，所以它仍可用（限制写在参数说明里）。
+  // 新版本的宿主级方法同样不可用；旧版本里没有它们就不要求。
+  for (const method of [
+    'machine.exec',
+    'file.read',
+    'file.write',
+    'file.edit',
+    'doc.get',
+    'doc.set',
+    'server.restart',
+    'server.stop'
+  ]) {
+    if (methods.includes(method)) {
+      assert.equal(available[method], false, `${method}:${JSON.stringify(available)}`)
+    }
+  }
   for (const method of [
     'server.status',
     'templates.list',

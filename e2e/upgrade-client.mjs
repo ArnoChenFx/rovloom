@@ -60,7 +60,9 @@ try {
   // managed 实例在升级时重启、attach 复用原会话，因此只有前者可跨升级断言。
   const provider = await tool('providers_get', { machine_id: target.machine_id, provider_id: target.provider_id })
   const installation = { schema_sha256: provider.schema_sha256, native_version: provider.native_version }
-  const description = await tool('runtime_describe', { ...route, method: 'pane.list' })
+  // 只读方法随 provider 不同：herdr-core 没有 pane.list，用 server.status。
+  const readMethod = target.provider_id === 'herdr-core' ? 'server.status' : 'pane.list'
+  const description = await tool('runtime_describe', { ...route, method: readMethod })
   if (phase === 'after') {
     const previous = JSON.parse(readFileSync(process.env.UPGRADE_EVIDENCE, 'utf8'))
     assert.deepEqual(
@@ -73,7 +75,7 @@ try {
   let call = await tool('runtime_call', {
     ...route,
     contract_ref: description.contract_ref,
-    native_request: { method: 'pane.list', params: {} },
+    native_request: { method: readMethod, params: {} },
     deadline: Date.now() + 20000,
     wait_ms: 500
   })
@@ -95,7 +97,9 @@ try {
       { mode: 0o600 }
     )
   }
-  console.log(`UPGRADE_${phase.toUpperCase()}_OK provider=${target.provider_id} native=pane.list bytes_verified=true`)
+  console.log(
+    `UPGRADE_${phase.toUpperCase()}_OK provider=${target.provider_id} native=${readMethod} bytes_verified=true`
+  )
 } finally {
   await client.close()
 }

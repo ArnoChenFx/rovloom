@@ -141,6 +141,38 @@ const mutations = [
     expect: 'stale'
   },
   {
+    name: '宿主级开关（Connector 最终写入前）',
+    file: 'src/connector/herdr-core/runtime.ts',
+    from: "      assertTerminalExecutionAllowed(\n        'herdr-core',",
+    to: "      void assertTerminalExecutionAllowed && (\n        'herdr-core',",
+    test: ['test/connector/herdr-core/host.test.ts', '-t', '开关关闭时宿主级方法'],
+    expect: 'terminal_execution_disabled'
+  },
+  {
+    name: '绝对路径检查',
+    file: 'src/connector/herdr-core/methods.ts',
+    from: "  if (typeof value !== 'string' || !value.startsWith('/') || value.includes('\\0') || Buffer.byteLength(value) > 4096) {",
+    to: "  if (typeof value !== 'string' || value.includes('\\0') || Buffer.byteLength(value) > 4096) {",
+    test: ['test/connector/herdr-core/host.test.ts', '-t', '宿主级方法的参数逐项收紧'],
+    expect: 'file.read'
+  },
+  {
+    name: 'server.* 的 core_id 栅栏',
+    file: 'src/connector/herdr-core/control.ts',
+    from: '  if (client.hello.core.id !== coreId) {',
+    to: '  if (false as boolean) {',
+    test: ['test/connector/herdr-core/host.test.ts', '-t', 'server.* 的 core_id 栅栏'],
+    expect: 'core_id'
+  },
+  {
+    name: 'parent 栅栏',
+    file: 'src/connector/herdr-core/control.ts',
+    from: '  if (live.address !== parent || live.created_ms !== created) {',
+    to: '  if (live.address !== parent) {',
+    test: ['test/connector/herdr-core/host.test.ts', '-t', 'terminal.run 的 parent 栅栏'],
+    expect: 'parent'
+  },
+  {
     name: 'managed 不走 hc',
     file: 'src/connector/herdr-core/managed.ts',
     from: "  const child = launch(binary, ['serve'], {",
