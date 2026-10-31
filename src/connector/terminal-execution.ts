@@ -1,6 +1,6 @@
 /** 统一目录预检与本机最终写入的直接终端执行开关；不替代原生授权或操作系统隔离。 */
 import { fail } from '../wire/index.js'
-import { HERDR_CORE_METHODS } from './herdr-core/methods.js'
+import { HERDR_CORE_SWITCHED_METHODS } from './herdr-core/methods.js'
 
 export type TerminalExecutionKind = 'luvus' | 'herdr' | 'herdr-core'
 
@@ -23,14 +23,10 @@ const direct = Object.freeze({
     'task.retry'
   ]),
   herdr: new Set(['pane.send_text', 'pane.send_keys', 'pane.send_input', 'pane.link.activate']),
-  // herdr-core 的输入与控制档从同一份已审核档位表派生，不按方法名前缀猜；
-  // terminal.run 是宿主级的任意程序能力，本阶段随开关开放，启动即执行，必须受同一开关约束。
-  'herdr-core': new Set([
-    ...Object.entries(HERDR_CORE_METHODS)
-      .filter(/** 只有审核为 control 的方法才进入直接输入集合。 */ ([, tier]) => tier === 'control')
-      .map(/** 方法名本身即审核表键。 */ ([method]) => method),
-    'terminal.run'
-  ])
+  // herdr-core 的输入/启动/宿主级能力从同一份已审核表派生，不按方法名前缀猜。
+  // 宿主级（`machine.exec`、`file.*`、`doc.*`、`server.*`）不超过 `terminal.run` 的能力，
+  // 所以共用同一个开关，不新增第三个开关。
+  'herdr-core': new Set(HERDR_CORE_SWITCHED_METHODS)
 })
 
 const launches = Object.freeze({
