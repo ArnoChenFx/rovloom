@@ -48,10 +48,16 @@ try {
     assert(managed, 'CONNECTOR_MANAGED is required with APPEND_IDENTITY')
     const digest = (path) => createHash('sha256').update(readFileSync(path)).digest('hex')
     assert.equal(digest(join(managed, 'device.json')), recorded.device_sha256)
-    assert.equal(digest(join(managed, 'providers.json')) === recorded.providers_sha256, false, 'providers changed as expected')
+    assert.equal(
+      digest(join(managed, 'providers.json')) === recorded.providers_sha256,
+      false,
+      'providers changed as expected'
+    )
     identity = { device_unchanged: true }
   }
-  console.log(JSON.stringify({ ok: true, providers: kinds, reads, refs: refs.size, identity, targets: [...targets.keys()] }))
+  console.log(
+    JSON.stringify({ ok: true, providers: kinds, reads, refs: refs.size, identity, targets: [...targets.keys()] })
+  )
 } finally {
   await client.close()
 }

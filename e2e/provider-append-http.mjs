@@ -29,9 +29,17 @@ async function post(body) {
 }
 
 try {
-  const base = { machine_id: device.machine_id, recovery_generation: device.recovery_generation, credential: device.credential }
+  const base = {
+    machine_id: device.machine_id,
+    recovery_generation: device.recovery_generation,
+    credential: device.credential
+  }
   // 1. 错凭据：同一个固定错误。
-  const wrong = await post({ ...base, credential: 'A'.repeat(43), installation: { reference: 'herdr_' + randomUUID(), value: setup.remote } })
+  const wrong = await post({
+    ...base,
+    credential: 'A'.repeat(43),
+    installation: { reference: 'herdr_' + randomUUID(), value: setup.remote }
+  })
   assert.equal(wrong.status, 403, JSON.stringify(wrong))
   assert.equal(wrong.body.error, 'provider_append_refused')
   // 2. 已存在 kind 的另一个引用：拒绝，注册表不变。
@@ -45,8 +53,19 @@ try {
   const after = JSON.parse(readFileSync(join(managed, 'providers.json'), 'utf8')).providers
   assert.equal(after.length, providers.length)
   assert.equal(after.filter((entry) => entry.value.kind === 'herdr').length, 1)
-  assert.equal(after.some((entry) => entry.reference === reference), false)
-  console.log(JSON.stringify({ ok: true, wrong_credential: wrong.body.error, existing_kind: conflict.body.error, registry_unchanged: true, kinds: [...byKind.keys()] }))
+  assert.equal(
+    after.some((entry) => entry.reference === reference),
+    false
+  )
+  console.log(
+    JSON.stringify({
+      ok: true,
+      wrong_credential: wrong.body.error,
+      existing_kind: conflict.body.error,
+      registry_unchanged: true,
+      kinds: [...byKind.keys()]
+    })
+  )
 } finally {
   /* 无状态 */
 }
