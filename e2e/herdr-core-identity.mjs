@@ -1,19 +1,16 @@
 /**
- * 对真实 herdr-core 验证三处身份失败关闭：同机转发代理冒充、socket 目录权限不对、未审核版本。
+ * 对真实 herdr-core 验证两处身份失败关闭：同机转发代理冒充、socket 目录权限不对。
  * 由 quickstart --herdr-core 在真实 core 运行时调用；只读 /proc、只连本机套接字，不改 core 状态。
  * 用法：HERDR_CORE_SOCKET=... HERDR_CORE_SESSION=... HERDR_CORE_RUNTIME=... \
- *       HERDR_CORE_PROXY_ROOT=... HERDR_CORE_OLD_BINARY=... bun e2e/herdr-core-identity.mjs
+ *       HERDR_CORE_PROXY_ROOT=... bun e2e/herdr-core-identity.mjs
  */
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { chmodSync, mkdirSync, rmSync } from 'node:fs'
 import { createConnection, createServer } from 'node:net'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { setTimeout as pause } from 'node:timers/promises'
 import { openHerdrCoreClient } from '../src/connector/herdr-core/client.js'
 import { herdrCorePeerFacts, inspectHerdrCoreSocket } from '../src/connector/herdr-core/identity.js'
-import { herdrCoreClassificationRevision } from '../src/connector/herdr-core/methods.js'
+import { HERDR_CORE_CLASSIFICATION_REVISION } from '../src/connector/herdr-core/methods.js'
 import { compileHerdrCoreContract } from '../src/connector/herdr-core/schema.js'
 import { boundedJson, hash } from '../src/wire/index.js'
 
@@ -44,7 +41,7 @@ async function expectedSource() {
       native_protocol_version: String(client.hello.generation),
       runtime_generation: null,
       adapter_revision: 'adapter-herdr-core-1',
-      classification_revision: herdrCoreClassificationRevision(client.hello.version),
+      classification_revision: HERDR_CORE_CLASSIFICATION_REVISION,
       support_basis: 'schema_and_version'
     }
   } finally {
@@ -85,46 +82,6 @@ async function proxy(realSocket, directory) {
   }
 }
 
-/** 未审核版本用独立运行时目录启动，失败后按精确 env 停止。 */
-async function versionRefusal(oldBinary) {
-  // Unix 套接字路径上限 107 字节：旧 core 的运行时目录放在最短的临时根下。
-  const oldRoot = mkdtempSync(join(tmpdir(), 'hco-'))
-  const oldRuntime = join(oldRoot, 'r')
-  const oldState = join(oldRoot, 's')
-  for (const path of [oldRuntime, oldState]) {
-    mkdirSync(path, { recursive: true, mode: 0o700 })
-  }
-  const childEnv = {
-    HOME: env.HERDR_CORE_HOME ?? oldRoot,
-    PATH: `${join(oldBinary, '..')}:/usr/bin:/bin`,
-    XDG_RUNTIME_DIR: oldRuntime,
-    XDG_STATE_HOME: oldState,
-    HC_SESSION: 'old',
-    SHELL: '/bin/sh',
-    LANG: 'C.UTF-8',
-    TERM: 'xterm-256color',
-    HERDR_RELEASES_URL: 'http://127.0.0.1:9'
-  }
-  const started = spawn(oldBinary, ['server', 'start', '--json'], { env: childEnv, stdio: 'ignore', detached: true })
-  started.unref()
-  const path = join(oldRuntime, 'herdr-core', `old.sock`)
-  const deadline = Date.now() + 10_000
-  while (Date.now() < deadline && !existsSync(path)) {
-    await pause(50)
-  }
-  assert(existsSync(path), 'old core did not start')
-  try {
-    await assert.rejects(
-      openHerdrCoreClient(path),
-      (error) => error instanceof Error && error.code === 'herdr_core_version_unreviewed'
-    )
-  } finally {
-    const stopped = spawn(oldBinary, ['server', 'stop', '--json'], { env: childEnv, stdio: 'ignore' })
-    await new Promise((resolve) => stopped.on('exit', resolve))
-    rmSync(oldRoot, { recursive: true, force: true })
-  }
-}
-
 const source = await expectedSource()
 const proxyDirectory = join(proxyRoot, 'proxy')
 rmSync(proxyDirectory, { recursive: true, force: true })
@@ -150,10 +107,6 @@ try {
   assert.throws(() => inspectHerdrCoreSocket(forwarder.path), /herdr_core_endpoint_untrusted/u)
   chmodSync(forwarder.directory, 0o700)
   evidence.permissions_refused = 'herdr_core_endpoint_untrusted'
-  if (env.HERDR_CORE_OLD_BINARY) {
-    await versionRefusal(env.HERDR_CORE_OLD_BINARY)
-    evidence.version_refused = 'herdr_core_version_unreviewed'
-  }
   console.log(JSON.stringify({ ok: true, ...evidence }))
 } finally {
   await forwarder.close()

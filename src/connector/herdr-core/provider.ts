@@ -53,9 +53,10 @@ import {
   HERDR_CORE_GUIDE,
   HERDR_CORE_SYNTHETIC_METHODS,
   HERDR_CORE_METHOD_USAGE,
+  HERDR_CORE_CLASSIFICATION_REVISION,
   HERDR_CORE_REVIEW,
-  herdrCoreClassificationRevision,
-  herdrCoreTier
+  herdrCoreTier,
+  herdrCoreVersionShape
 } from './methods.js'
 import { requiresTerminalExecution } from '../terminal-execution.js'
 import { compileHerdrCoreContract } from './schema.js'
@@ -219,10 +220,10 @@ export function parseHerdrCoreProviderRefConfig(input: unknown): HerdrCoreProvid
   ) {
     fail('herdr_core_contract_unreviewed')
   }
-  // 分类修订与协议代次是配置事实：不属于本次审核表的配置在读取任何文件之前就拒绝。
+  // 分类修订、协议代次与版本形状是配置事实：不属于本仓库审核表的配置在读取任何文件之前就拒绝。
   if (
-    value.expected_source.classification_revision !==
-      herdrCoreClassificationRevision(value.expected_source.binary_version) ||
+    value.expected_source.classification_revision !== HERDR_CORE_CLASSIFICATION_REVISION ||
+    !herdrCoreVersionShape(value.expected_source.binary_version) ||
     value.expected_source.native_protocol_version !== String(HERDR_CORE_REVIEW.protocol_generation)
   ) {
     fail('herdr_core_contract_unreviewed')

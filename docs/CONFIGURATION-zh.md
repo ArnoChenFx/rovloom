@@ -85,7 +85,7 @@ Connector，通常为 `~/.config/rovloom/connector.json`：
 | `native.herdr_core.config_home` | 规范绝对路径，可选 | 仅 `managed`；`attach` 下给了会被拒绝。managed core 用它放 `templates/` 与 `config.toml`（默认是 Connector 状态目录下的私有空目录）。指向你自己准备的目录即可使用自己的模板。 |
 | `native.runtime_bin_dirs` | 规范绝对路径数组，可选 | `managed` 下查找 `herdr-core` 的目录（省略时按 `PATH`）。rovloom 不下载、不更新、不安装 core。 |
 
-herdr-core 只接受已审核的 0.1.14 与 0.1.15：握手只认这两个版本，每次配对还会钉住当时的二进制摘要与契约哈希（所以升级 core 后需要用新的配对码重新配对：`rovloom connector --join …`）。`allow_terminal_execution` 约束所有往终端输入或启动程序的方法（`terminal.send`、`terminal.keys`、`terminal.interrupt`、`terminal.put`、`terminal.kill`、`terminal.rm`、`terminal.keep`、`terminal.label`、`terminal.run`，以及带 `lines>0` 的 `terminal.read`）。Connector 另外把「自己经 `terminal.run` 启动的存活终端」限制在每个 Connector 进程 32 个（`HERDR_CORE_MAX_RUN_TERMINALS`）。
+herdr-core 没有版本白名单：握手要求协议代次为 1 且版本串形状正确，契约里必须包含 rovloom 审核过的全部方法（CI 固定测 0.1.14 与 0.1.15）；每次配对还会钉住当时的二进制摘要与契约哈希（所以升级 core 后需要用新的配对码重新配对：`rovloom connector --join …`）。`allow_terminal_execution` 约束所有往终端输入或启动程序的方法（`terminal.send`、`terminal.keys`、`terminal.interrupt`、`terminal.put`、`terminal.kill`、`terminal.rm`、`terminal.keep`、`terminal.label`、`terminal.run`，以及带 `lines>0` 的 `terminal.read`）。Connector 另外把「自己经 `terminal.run` 启动的存活终端」限制在每个 Connector 进程 32 个（`HERDR_CORE_MAX_RUN_TERMINALS`）。
 
 Gateway 已启用的监听端口必须不同。未知字段、旧扁平字段、runtime/ref 选择、TLS/CA
 路径、schema 摘要、binary pin 和凭据值均拒绝。用户参数不含原生 root、账本、绑定或

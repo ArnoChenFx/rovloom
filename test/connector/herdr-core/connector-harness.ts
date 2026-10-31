@@ -4,6 +4,7 @@
  */
 import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { HERDR_CORE_CLASSIFICATION_REVISION } from '../../../src/connector/herdr-core/methods.js'
 import { openHerdrCoreClient } from '../../../src/connector/herdr-core/client.js'
 import { herdrCorePinnedEndpoint } from '../../../src/connector/herdr-core/identity.js'
 import type { HerdrCoreAttachment } from '../../../src/connector/herdr-core/installation.js'
@@ -37,7 +38,7 @@ export const source: ContractSource = Object.freeze({
   native_protocol_version: '1',
   runtime_generation: null,
   adapter_revision: 'adapter-herdr-core-1',
-  classification_revision: '0.1.14@29e6d37',
+  classification_revision: HERDR_CORE_CLASSIFICATION_REVISION,
   support_basis: 'schema_and_version'
 })
 export const reference = contractRef(source)

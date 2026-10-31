@@ -8,6 +8,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
+import { HERDR_CORE_CLASSIFICATION_REVISION } from '../../../src/connector/herdr-core/methods.js'
 import { createHerdrCoreAdapter } from '../../../src/connector/herdr-core/readonly.js'
 import type { HerdrCoreBackend, HerdrCoreContractRecord } from '../../../src/connector/herdr-core/readonly.js'
 import {
@@ -36,7 +37,7 @@ const source: ContractSource = {
   native_protocol_version: '1',
   runtime_generation: '2ca46c83a83eea75c38e44cf83dbb35d',
   adapter_revision: 'adapter-herdr-core-1',
-  classification_revision: '0.1.14@29e6d37',
+  classification_revision: HERDR_CORE_CLASSIFICATION_REVISION,
   support_basis: 'schema_and_version'
 }
 

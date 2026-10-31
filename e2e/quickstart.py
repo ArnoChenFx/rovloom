@@ -195,7 +195,6 @@ def main():
     ap.add_argument('--herdr-core-mode', dest='herdr_core_mode', choices=('attach', 'managed'), default='attach',
                     help='attach（默认）附着已运行 core；managed 由 Connector 在私有目录里拉起 core')
     ap.add_argument('--herdr-core-session', default='e2e', help='herdr-core 会话名（默认 e2e）')
-    ap.add_argument('--herdr-core-old', dest='herdr_core_old', help='（可选）未审核版本的 herdr-core，用于验证版本拒绝')
     ap.add_argument('--work', help='工作目录（需位于祖先不可被其它用户写入的位置；默认 ~/.rq-*）')
     ap.add_argument('--luvus-mode', choices=['attach', 'managed'], default='attach',
                     help='Luvus 的运行方式（默认 attach：附着用户的 default 会话，没有才自建）')
@@ -495,8 +494,6 @@ def main():
             identity_env = {**os.environ, 'HERDR_CORE_SOCKET': os.path.join(identity_runtime, 'herdr-core', args.herdr_core_session + '.sock'),
                             'HERDR_CORE_SESSION': args.herdr_core_session, 'HERDR_CORE_RUNTIME': identity_runtime,
                             'HERDR_CORE_PROXY_ROOT': os.path.join(work, 'identity'), 'HERDR_CORE_HOME': home_c}
-            if args.herdr_core_old:
-                identity_env['HERDR_CORE_OLD_BINARY'] = args.herdr_core_old
             done = subprocess.run(['bun', '--no-env-file', os.path.join(os.path.dirname(__file__), 'herdr-core-identity.mjs')],
                                   env=identity_env, cwd=os.path.dirname(__file__), capture_output=True, text=True, timeout=120)
             print('HERDR_CORE_IDENTITY', (done.stdout + done.stderr).strip()[-800:], flush=True)

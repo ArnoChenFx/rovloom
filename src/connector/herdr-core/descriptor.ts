@@ -3,7 +3,7 @@
  * 不继承 Herdr TUI 的方法表或保证强度。
  */
 import type { ProviderDescriptor } from '../../runtime/provider-port.js'
-import { HERDR_CORE_METHODS, HERDR_CORE_REVIEWED_VERSIONS } from './methods.js'
+import { HERDR_CORE_CLASSIFICATION_REVISION, HERDR_CORE_METHODS } from './methods.js'
 
 export const HERDR_CORE_PROVIDER_DESCRIPTOR: ProviderDescriptor = Object.freeze({
   kind: 'herdr-core',
@@ -21,9 +21,8 @@ export const HERDR_CORE_PROVIDER_DESCRIPTOR: ProviderDescriptor = Object.freeze(
   })
 })
 
-/** 本次审核对应的 core 版本与提交；新版本必须重新分类后加入，不能沿用本表。 */
+/** 本仓库档位表的修订与方法数；改了档位或参数规则就要递增修订并重新配对。 */
 export const HERDR_CORE_DESCRIPTOR_REVISION = Object.freeze({
-  versions: Object.freeze(Object.keys(HERDR_CORE_REVIEWED_VERSIONS)),
-  commits: HERDR_CORE_REVIEWED_VERSIONS,
+  classification: HERDR_CORE_CLASSIFICATION_REVISION,
   methods: Object.keys(HERDR_CORE_METHODS).length
 })

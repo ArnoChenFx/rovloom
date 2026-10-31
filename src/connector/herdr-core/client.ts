@@ -16,7 +16,7 @@ import {
   HERDR_CORE_MAX_REQUEST_BYTES,
   HERDR_CORE_REQUEST_MAX_MS,
   HERDR_CORE_REVIEW,
-  herdrCoreReviewedCommit
+  herdrCoreVersionShape
 } from './methods.js'
 
 /** 帧头 9 字节；与 core 的 wire.rs 一致。 */
@@ -105,7 +105,7 @@ function helloResult(value: unknown): HerdrCoreHello {
   if (
     result.generation !== HERDR_CORE_REVIEW.protocol_generation ||
     result.framed !== true ||
-    typeof result.version !== 'string' ||
+    !herdrCoreVersionShape(result.version) ||
     typeof core.id !== 'string' ||
     !/^[a-f0-9]{8,64}$/u.test(core.id) ||
     typeof core.name !== 'string' ||
@@ -114,11 +114,7 @@ function helloResult(value: unknown): HerdrCoreHello {
   ) {
     fail('herdr_core_handshake_refused')
   }
-  // 每个 core 版本重新分类（spike 实测 6 天 5 个版本）：不在已审核集合里的版本明确拒绝，不沿用旧档位。
-  // 单独判定，让拒绝原因与「形状不符」区分开。
-  if (herdrCoreReviewedCommit(result.version) === undefined) {
-    fail('herdr_core_version_unreviewed')
-  }
+  // 不按版本号拒绝：core 升级后的不兼容由后面的契约编译、逐方法严格校验与配对时的摘要钉住来失败关闭。
   return Object.freeze({
     generation: result.generation,
     version: result.version,
@@ -411,7 +407,7 @@ export async function openHerdrCoreClient(
           handshaking = false
           return result
         } catch (error) {
-          // 未审核版本或形状不符时也要关闭连接，不能留下半开套接字。
+          // 握手形状不符（协议代次、版本串、成员）时也要关闭连接，不能留下半开套接字。
           shutdown(error)
           throw error
         }

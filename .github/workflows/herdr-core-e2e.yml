@@ -1,6 +1,6 @@
-# herdr-core 的 Linux 端到端：私有 XDG 沙箱里分别运行官方 0.1.14 与 0.1.15 core（两个都是已审核版本），真实配对、5 个读取，
+# herdr-core 的 Linux 端到端：私有 XDG 沙箱里分别运行官方 0.1.14 与 0.1.15 core（握手不设版本白名单，这是 CI 固定测试的版本），真实配对、5 个读取，
 # 再验控制档（开关关闭时拒绝 → 打开后 send/读回/blocked/三元组/kill/rm）与计划重启、SIGKILL 后的重新附着；
-# 最后用未审核的 0.1.13 core、同机转发代理和 0755 socket 目录验证身份失败关闭。
+# 最后用同机转发代理和 0755 socket 目录验证身份失败关闭。
 name: herdr-core e2e
 on:
   workflow_dispatch:
@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 已审核的版本都要跑：摘要是官方发布清单里 linux-x86_64 压缩包的 SHA-256，钉在仓库里。
+        # 固定测试的版本：摘要是官方发布清单里 linux-x86_64 压缩包的 SHA-256，钉在仓库里。
         core:
           - version: 0.1.14
             sha256: e9dbabdead0ce0ce3de51b6f54cc9549efedbb41b2f8448b6932ab0d1442343e
@@ -54,26 +54,19 @@ jobs:
           CORE_VERSION: ${{ matrix.core.version }}
           # 发布清单与压缩包来自同一站点，只能挡传输损坏；摘要钉在仓库里，上游重发同版本时这里会失败。
           CORE_SHA256: ${{ matrix.core.sha256 }}
-          # 0.1.13 是未审核的旧版，只用来验证握手拒绝。
-          CORE_0_1_13_SHA256: d0dbfdd6e060832c629a6aed03687165479baceab5a5545a103490d0e4adab8c
         run: |
           set -eu
-          mkdir -p "$CORE_DIR/latest" "$CORE_DIR/old"
+          mkdir -p "$CORE_DIR/latest"
           fetch() { # fetch <manifest-url>：只输出下载地址与清单摘要，由 sha256sum 核对。
             curl -fsS --connect-timeout 15 --max-time 60 "$1" -o "$CORE_DIR/manifest.json"
             python3 -c 'import json,sys; t=json.load(open(sys.argv[1]))["targets"]["linux-x86_64"]; print(t["url"]); print(t["sha256"])' "$CORE_DIR/manifest.json"
           }
-          # 只跑审核过的版本；'latest' 会随上游发版变化，不能当固定测试输入。
+          # 只跑固定的版本；'latest' 会随上游发版变化，不能当固定测试输入。
           mapfile -t latest < <(fetch "https://releases.herdr.dev/core/$CORE_VERSION/manifest.json")
           curl -fsS --connect-timeout 15 --max-time 300 "${latest[0]}" -o "$CORE_DIR/latest.tgz"
           echo "${latest[1]}  $CORE_DIR/latest.tgz" | sha256sum --check
           echo "$CORE_SHA256  $CORE_DIR/latest.tgz" | sha256sum --check
           tar -xzf "$CORE_DIR/latest.tgz" -C "$CORE_DIR/latest"
-          mapfile -t old < <(fetch https://releases.herdr.dev/core/0.1.13/manifest.json)
-          curl -fsS --connect-timeout 15 --max-time 300 "${old[0]}" -o "$CORE_DIR/old.tgz"
-          echo "${old[1]}  $CORE_DIR/old.tgz" | sha256sum --check
-          echo "$CORE_0_1_13_SHA256  $CORE_DIR/old.tgz" | sha256sum --check
-          tar -xzf "$CORE_DIR/old.tgz" -C "$CORE_DIR/old"
           test "$("$CORE_DIR/latest/herdr-core" --version | awk '{print $2}')" = "$CORE_VERSION"
       - name: Build actual standalone product
         run: bun --no-env-file run release:build
@@ -84,7 +77,6 @@ jobs:
           python3 e2e/quickstart.py \
             --binary dist/release/bun-linux-x64/candidate/rovloom \
             --herdr-core "$CORE_DIR/latest/herdr-core" \
-            --herdr-core-old "$CORE_DIR/old/herdr-core" \
             --work "${{ runner.temp }}/hc-work" \
             --then "bun --no-env-file e2e/herdr-core-session.mjs"
   result:

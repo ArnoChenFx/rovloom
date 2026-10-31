@@ -12,12 +12,12 @@ import {
   inspectHerdrCoreSocket
 } from '../connector/herdr-core/identity.js'
 import { ensureHerdrCoreManaged, findHerdrCoreBinary, herdrCoreManagedDirs } from '../connector/herdr-core/managed.js'
-import { HERDR_CORE_REVIEW, herdrCoreClassificationRevision } from '../connector/herdr-core/methods.js'
+import { HERDR_CORE_CLASSIFICATION_REVISION, HERDR_CORE_REVIEW } from '../connector/herdr-core/methods.js'
 import { compileHerdrCoreContract } from '../connector/herdr-core/schema.js'
 import { parseHerdrCoreProviderRefConfig } from '../connector/herdr-core/provider.js'
 import type { HerdrCoreProviderRefConfig } from '../connector/herdr-core/provider.js'
 import { publishSchema, schemaReference } from '../connector/schema-store.js'
-import { boundedJson, fail, fields, hash, object } from '../wire/index.js'
+import { boundedJson, fields, hash, object } from '../wire/index.js'
 import { CliError, herdrCoreConfigHome, herdrCoreMode, herdrCoreSession, type ConnectorConfig } from './config.js'
 import { privateDirectory } from './first-config.js'
 import { readSetupJson, writeSetupJson } from './setup-files.js'
@@ -149,8 +149,8 @@ export async function prepareSetupHerdrCore(
     native_protocol_version: String(HERDR_CORE_REVIEW.protocol_generation),
     runtime_generation: null,
     adapter_revision: 'adapter-herdr-core-1',
-    // 握手已保证版本在审核集合里；这里按实际版本取修订号，不再写死一个版本。
-    classification_revision: herdrCoreClassificationRevision(binaryVersion) ?? fail('herdr_core_version_unreviewed'),
+    // 修订号标识本仓库的档位表，不随 core 版本变化。
+    classification_revision: HERDR_CORE_CLASSIFICATION_REVISION,
     support_basis: 'schema_and_version' as const
   }
   const shared: HerdrCoreSetupRemote['config'] = {

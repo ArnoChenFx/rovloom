@@ -1,24 +1,21 @@
 /**
- * herdr-core 0.1.14/0.1.15 的 32 个方法档位与本期开放集合；档位来自只读 spike（out/method-tiers.json），
+ * herdr-core 的 32 个方法档位与本期开放集合（按 0.1.14 核对，0.1.15 实测一致）；档位来自只读 spike（out/method-tiers.json），
  * 方法是否只读按参数判断，不能凭方法名或 schema 枚举开放。
  */
 import type { ProviderMethodTier } from '../../runtime/provider-port.js'
 import { fail, fields } from '../../wire/index.js'
 
 /**
- * 已审核的 core 版本与各自的上游发布提交。0.1.14 与 0.1.15 的 OpenRPC 契约除版本串和一句 `installed_by`
- * 说明外逐字相同；0.1.15 另在 360 个候选参数上与 0.1.14 的接受/拒绝结果逐条一致、真实输出样本形状一致，
- * 所以两者共用同一张档位表。新版本必须重新核对后再加入，不能用 schema 兼容代替行为兼容。
+ * rovloom 自己审核的方法档位表与参数规则的修订号，配对时记入 `classification_revision`。
+ * 它标识的是本仓库的表，不是 core 的版本：core 升级不改变它，只有改了档位或参数规则才递增。
  */
-export const HERDR_CORE_REVIEWED_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
-  '0.1.14': '29e6d37',
-  '0.1.15': 'd028423'
-})
+export const HERDR_CORE_CLASSIFICATION_REVISION = 'herdr-core-tiers-1'
 
-/** 被测契约位置；版本以 {@link HERDR_CORE_REVIEWED_VERSIONS} 为准。 */
+/**
+ * 契约位置。core 的版本号不设白名单：兼容性由协议代次、文档里表内方法齐全、参数/结果逐方法严格校验
+ * 与配对时钉住的二进制摘要和契约哈希共同判定；表外的新方法不在目录里，保持不可用。
+ */
 export const HERDR_CORE_REVIEW = Object.freeze({
-  /** 最新一次审核的版本，只用于文案与默认值，不参与握手判定。 */
-  latest: '0.1.15',
   protocol_generation: 1,
   openrpc: '1.3.2',
   methods_total: 32,
@@ -26,17 +23,10 @@ export const HERDR_CORE_REVIEW = Object.freeze({
   strictness: 'rovloom_reviewed_schemas'
 })
 
-/** 该版本已审核时返回它的发布提交，否则 `undefined`；只认自有键，`constructor` 之类原型键一律不算。 */
-export function herdrCoreReviewedCommit(version: unknown): string | undefined {
-  return typeof version === 'string' && Object.hasOwn(HERDR_CORE_REVIEWED_VERSIONS, version)
-    ? HERDR_CORE_REVIEWED_VERSIONS[version]
-    : undefined
-}
-
-/** 配对时记录的分类修订：`<版本>@<提交>`；未审核版本返回 `undefined`。 */
-export function herdrCoreClassificationRevision(version: unknown): string | undefined {
-  const commit = herdrCoreReviewedCommit(version)
-  return commit === undefined ? undefined : `${version as string}@${commit}`
+/** 版本串只核对形状（语义版本，带短后缀也可），不按数值放行或拒绝；怪值（空串、原型键、超长）不进入记录。 */
+const VERSION_SHAPE = /^\d{1,6}\.\d{1,6}\.\d{1,6}(?:[-+][0-9A-Za-z.-]{1,32})?$/u
+export function herdrCoreVersionShape(version: unknown): version is string {
+  return typeof version === 'string' && VERSION_SHAPE.test(version)
 }
 
 /**
