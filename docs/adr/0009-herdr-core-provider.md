@@ -105,7 +105,7 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 **开关**。8 个控制档方法全部受既有的 `allow_terminal_execution` 约束（`kill`/`rm`/`keep`/`label` 不是输入，但它们是同一批审核过的控制面，默认从严一并纳入）。三处门禁共用 Connector 上报的同一个观察值：Gateway 目录（`terminal_execution_catalog`）隐藏方法、Gateway 在登记前拒绝（`bindTerminalExecution` 晚绑定 `transport.terminalExecutionState`，未上报一律当作关闭）、Connector 在原生写入前再检查。关闭时的拒绝是确定未派发：`dispatch_refused` 的固定码集合因此只追加 herdr-core 的四个执行前固定码（`herdr_core_terminal_blocked`、`_identity_mismatch`、`_unavailable`、`herdr_core_connection_closed`），写入之后才失败的调用仍按 `outcome_unknown` 走保守路径，绝不自动重放。
 
-**期限**。`send` 默认要等粘贴安静窗口（约 3 秒）并按 200 ms 间隔逐段粘贴，本地期限 20 秒；`wait=true` 是这一轮的检查点，期限由调用方显式给出且 ≤60 秒（否则会落到 core 默认的 180 秒）。`interrupt` 不传 `timeout` 时 core 自己观察 10 秒，本地期限 15 秒。所有期限共用 `HERDR_CORE_REQUEST_MAX_MS`；超时只结束本地等待，不宣称原生停止。`force=true` 一律拒绝（`herdr_core_force_unsupported`）：它绕过 core 的 blocked 闸门，而 rovloom 的判定不依赖它。
+**期限**。`send` 默认要等粘贴安静窗口（约 3 秒）并按 200 ms 间隔逐段粘贴，本地期限 20 秒；`wait=true` 是这一轮的检查点，期限由调用方显式给出且 ≤60 秒（rovloom 的上限；core 自己的默认值不适用）。所有秒数一律是「秒」，上限 60；要等更久就反复用 `terminal.wait` 检查（每次 ≤60 秒），不要指望一次调用等很久。`interrupt` 不传 `timeout` 时 core 自己观察 10 秒，本地期限 15 秒。所有期限共用 `HERDR_CORE_REQUEST_MAX_MS`；超时只结束本地等待，不宣称原生停止。`force=true` 一律拒绝（`herdr_core_force_unsupported`）：它绕过 core 的 blocked 闸门，而 rovloom 的判定不依赖它。
 
 ### core 重启后的重新附着
 
