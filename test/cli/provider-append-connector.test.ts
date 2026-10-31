@@ -3,7 +3,7 @@
  * （reference 必须等于 kind_attempt，本地配置必须与注册表逐字相同）。
  */
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -150,7 +150,6 @@ test('启动校验对追加来源仍严格：reference 与 attempt 对不上即�
 
 test('mixed 设备也会追加缺的来源：factory 仍只收到已配对的两个', async () => {
   const f = fixture('mixed')
-  const { io: cliIo } = io()
   try {
     // 把本机注册表补成 mixed 的旧设备（luvus + herdr），没有 pairing 之外的来源。
     const providersPath = runtimeReference(f.root, 'providers')
