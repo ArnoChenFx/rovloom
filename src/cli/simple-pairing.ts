@@ -232,9 +232,16 @@ export class SimplePairingHttp {
       const entry = reviewed.reviewed[0]!
       const existing = this.state.store.provider(machine, entry.target.provider_id)
       const providersPath = runtimeReference(this.config.state_dir, 'providers')
+      /** registry 可能还不存在（设备尚未发布任何来源）：按空列表处理。 */
+      const registry = (): readonly { reference: string; value: unknown }[] => {
+        const value = readSetupJson(providersPath, 1_048_576)
+        return value === undefined
+          ? []
+          : ((object(value).providers as readonly { reference: string; value: unknown }[] | undefined) ?? [])
+      }
       if (existing) {
         // 同 kind 只允许完全相同的重放；内容不同或换了 reference 一律拒绝（不改写、不替换）。
-        const registered = readRuntimeConfig(this.config).providers.find(
+        const registered = registry().find(
           /** 注册表里同一 reference 的条目。 */ (value) => value.reference === entry.reference
         )
         if (
@@ -248,7 +255,7 @@ export class SimplePairingHttp {
       }
       // 同 machine 同 kind 不能有第二个 reference（注册表可能留有上次崩溃的半成品）。
       if (
-        readRuntimeConfig(this.config).providers.some(
+        registry().some(
           /** 同一设备的同一 kind。 */ (value) => {
             const target = object(object(value.value).target)
             return target.machine_id === machine && target.provider_id === entry.target.provider_id
@@ -257,7 +264,7 @@ export class SimplePairingHttp {
       ) {
         throw new GatewayError('provider_append_conflict')
       }
-      await this.registerProviders(reviewed.reviewed, providersPath, true, signal)
+      await this.registerProviders(reviewed.reviewed, providersPath, signal)
       setImmediate(() => this.reload())
       return setupReply({ state: 'appended', providers: [entry.reference] })
     } catch (error) {
@@ -471,7 +478,7 @@ export class SimplePairingHttp {
         expires_at: client.expires_at as number
       })
     }
-    await this.registerProviders(reviewed.reviewed, providersPath, additional, signal)
+    await this.registerProviders(reviewed.reviewed, providersPath, signal)
     return {
       machine_id: machine,
       recovery_generation: this.state.store.generation(),
@@ -487,13 +494,13 @@ export class SimplePairingHttp {
   private async registerProviders(
     reviewed: readonly ReviewedSetupInstallation[],
     providersPath: string,
-    additional: boolean,
     signal: AbortSignal
   ): Promise<void> {
     await publishSetupSchemas(reviewed, signal)
     // 只保存已核验清单的程序配置；Gateway 文件路径始终由本机程序选择。
     const entries = reviewed.map(/* 同一形状。 */ (entry) => ({ reference: entry.reference, value: entry.value }))
-    if (!additional) {
+    // 首次发布（注册表还不存在）与后续追加共用同一段；存在时只追加相同引用。
+    if (readSetupJson(providersPath, 1_048_576) === undefined) {
       publish(providersPath, { schema_version: 1, role: 'gateway', providers: entries }, 1_048_576)
     } else {
       mergeSetupProviders(providersPath, entries)
