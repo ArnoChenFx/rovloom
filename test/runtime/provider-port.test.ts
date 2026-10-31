@@ -149,7 +149,7 @@ test('herdr-core registers through the same ports with its own tiers and guarant
   assert.equal(registry.ports('herdr-core').descriptor.guarantees?.event_recovery, 'snapshot_rebuild')
   assert.equal(registry.ports('herdr').descriptor.guarantees?.event_recovery, 'unavailable')
   // 修订号标识本仓库的档位表，不含 core 版本；改了档位或参数规则就要递增。
-  assert.equal(HERDR_CORE_DESCRIPTOR_REVISION.classification, 'herdr-core-tiers-1')
+  assert.equal(HERDR_CORE_DESCRIPTOR_REVISION.classification, 'herdr-core-tiers-2')
   assert.equal(HERDR_CORE_DESCRIPTOR_REVISION.methods, 32)
 })
 
