@@ -1,4 +1,4 @@
-# herdr-core 的 Linux 端到端：私有 XDG 沙箱里分别运行官方 0.1.14 与 0.1.15 core（握手不设版本白名单，这是 CI 固定测试的版本），真实配对、5 个读取，
+# herdr-core 的 Linux 端到端：私有 XDG 沙箱里运行上游当前发布的最新版官方 core（握手不设版本限制，CI 不钉具体版本），真实配对、5 个读取，
 # 再验控制档（开关关闭时拒绝 → 打开后 send/读回/blocked/三元组/kill/rm）与计划重启、SIGKILL 后的重新附着；
 # 最后用同机转发代理和 0755 socket 目录验证身份失败关闭。
 name: herdr-core e2e
@@ -26,20 +26,11 @@ jobs:
       - id: plan
         run: bun --no-env-file scripts/ci/e2e-plan.mjs herdr-core
   herdr-core:
-    name: herdr-core (core ${{ matrix.core.version }})
+    name: herdr-core (latest core)
     needs: changes
     if: needs.changes.outputs.run == 'true'
     timeout-minutes: 25
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        # 固定测试的版本：摘要是官方发布清单里 linux-x86_64 压缩包的 SHA-256，钉在仓库里。
-        core:
-          - version: 0.1.14
-            sha256: e9dbabdead0ce0ce3de51b6f54cc9549efedbb41b2f8448b6932ab0d1442343e
-          - version: 0.1.15
-            sha256: efbb1382da3d5053cb20c60c166a62ec34e73d8299977fb1f5abed28ddec8d66
     steps:
       - uses: actions/checkout@v7
         with:
@@ -48,26 +39,25 @@ jobs:
       - name: Frozen install
         timeout-minutes: 5
         run: bun --no-env-file install --frozen-lockfile --ignore-scripts
-      - name: Download official herdr-core from the release manifest
+      - name: Download the latest official herdr-core from the release manifest
         env:
           CORE_DIR: ${{ runner.temp }}/core
-          CORE_VERSION: ${{ matrix.core.version }}
-          # 发布清单与压缩包来自同一站点，只能挡传输损坏；摘要钉在仓库里，上游重发同版本时这里会失败。
-          CORE_SHA256: ${{ matrix.core.sha256 }}
         run: |
           set -eu
           mkdir -p "$CORE_DIR/latest"
-          fetch() { # fetch <manifest-url>：只输出下载地址与清单摘要，由 sha256sum 核对。
-            curl -fsS --connect-timeout 15 --max-time 60 "$1" -o "$CORE_DIR/manifest.json"
-            python3 -c 'import json,sys; t=json.load(open(sys.argv[1]))["targets"]["linux-x86_64"]; print(t["url"]); print(t["sha256"])' "$CORE_DIR/manifest.json"
-          }
-          # 只跑固定的版本；'latest' 会随上游发版变化，不能当固定测试输入。
-          mapfile -t latest < <(fetch "https://releases.herdr.dev/core/$CORE_VERSION/manifest.json")
-          curl -fsS --connect-timeout 15 --max-time 300 "${latest[0]}" -o "$CORE_DIR/latest.tgz"
-          echo "${latest[1]}  $CORE_DIR/latest.tgz" | sha256sum --check
-          echo "$CORE_SHA256  $CORE_DIR/latest.tgz" | sha256sum --check
+          # 只测上游当前发布的最新版：latest.json 给出版本号、linux-x86_64 压缩包地址与 SHA-256，不在仓库里钉版本。
+          # 摘要与压缩包来自同一站点，只能挡传输损坏，不防上游被篡改；上游发新版时这里自动跟进。
+          curl -fsS --connect-timeout 15 --max-time 60 https://releases.herdr.dev/core/latest.json -o "$CORE_DIR/latest.json"
+          mapfile -t latest < <(python3 -I -c 'import json,sys; m=json.load(open(sys.argv[1])); t=m["targets"]["linux-x86_64"]; print(m["version"]); print(t["url"]); print(t["sha256"])' "$CORE_DIR/latest.json")
+          case "${latest[1]}" in
+            https://releases.herdr.dev/core/*) ;;
+            *) echo "unexpected download host" >&2; exit 1 ;;
+          esac
+          curl -fsS --connect-timeout 15 --max-time 300 "${latest[1]}" -o "$CORE_DIR/latest.tgz"
+          echo "${latest[2]}  $CORE_DIR/latest.tgz" | sha256sum --check
           tar -xzf "$CORE_DIR/latest.tgz" -C "$CORE_DIR/latest"
-          test "$("$CORE_DIR/latest/herdr-core" --version | awk '{print $2}')" = "$CORE_VERSION"
+          test "$("$CORE_DIR/latest/herdr-core" --version | awk '{print $2}')" = "${latest[0]}"
+          echo "testing herdr-core ${latest[0]}"
       - name: Build actual standalone product
         run: bun --no-env-file run release:build
       - name: Pair, discover, control a real herdr-core and reattach after restarts

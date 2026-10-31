@@ -65,7 +65,7 @@ workspace 创建后的计数，不调用模型。可选的 Agent 两轮对话方
 ## 真实 herdr-core 链路（Linux）
 
 `--herdr-core` 只附着已运行的 core：脚本在私有 `XDG_RUNTIME_DIR` 下用 `hc run --bg --json` 拉起 core
-（版本取自二进制自己的 `--version`；CI 固定测 0.1.14 与 0.1.15）和一个打印 `rovloom-e2e` 后休眠的终端，再按 Quick Start 完成配对。`herdr-core-session.mjs` 经 MCP 验证
+（版本取自二进制自己的 `--version`；CI 只测上游发布的最新版）和一个打印 `rovloom-e2e` 后休眠的终端，再按 Quick Start 完成配对。`herdr-core-session.mjs` 经 MCP 验证
 machines → providers（kind `herdr-core`）→ discover（恰好 5 个读取）→ describe → `server.status` /
 `terminal.list` / `terminal.get` / `terminal.read(lines=0)` / `terminal.wait`，并确认控制档被 Gateway 拒绝。
 

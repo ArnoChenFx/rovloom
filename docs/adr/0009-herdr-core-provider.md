@@ -58,7 +58,7 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 兼容性由这几道失败关闭的门共同判定，而不是版本号：①`rpc.discover` 的文档必须能编译，且本仓库档位表里的每个方法都在文档里（缺项 `herdr_core_schema_method_missing`）；新版本多出来的方法被忽略，不进目录，保持不可用；②参数规则由本仓库自己的 schema 收紧，结果逐层严格——新版本给已审核方法的结果加了字段，该方法会以 `herdr_core_result_invalid` 失败，而不是原样放行，出现时再调整；③配对时钉住二进制摘要与契约哈希。
 
-**已知的两个版本。** 0.1.14 与 0.1.15 各有真实文档与真实输出样本夹具（`test/fixtures/herdr-core/`），CI 的真实 core 端到端对两者各跑一遍。0.1.15 与 0.1.14 的 `rpc.discover` 文档逐字相同，只差 `info.version` 与 `StatusResult.installed_by` 的一句说明；同一批 360 个候选参数 core 接受/拒绝结果 0 条不同；上游 `29e6d37..d028423` 的净 diff 没有触及 `terminal.*`，systemd 关机守卫只在 `hc` 自动拉起路径上，managed 直接 `execve serve` 不经过它。
+**已知的两个版本。** 0.1.14 与 0.1.15 各有真实文档与真实输出样本夹具（`test/fixtures/herdr-core/`），CI 的真实 core 端到端只跑上游当前发布的最新版，不钉具体版本（这两个夹具留给单测）。0.1.15 与 0.1.14 的 `rpc.discover` 文档逐字相同，只差 `info.version` 与 `StatusResult.installed_by` 的一句说明；同一批 360 个候选参数 core 接受/拒绝结果 0 条不同；上游 `29e6d37..d028423` 的净 diff 没有触及 `terminal.*`，systemd 关机守卫只在 `hc` 自动拉起路径上，managed 直接 `execve serve` 不经过它。
 
 配对记录二进制摘要与契约哈希，所以升级 core 等于换了二进制：已配对设备按现有语义失败关闭（`herdr_core_installation_changed` / `herdr_core_schema_unreviewed`），用新的配对码重新配对即可（`rovloom connector --join …` 把这台机器作为新设备对新 core 重新配对；这与 Herdr TUI 换了二进制后的处理一致）。
 
