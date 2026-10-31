@@ -184,15 +184,22 @@ export async function joinConnector(
   const authorization = { principal_id: SIMPLE_SETUP_ACTOR }
   const prepared = []
   for (const kind of selectedNativeProviders(config)) {
-    prepared.push(
-      await (kind === 'luvus' ? prepareSetupNative : kind === 'herdr' ? prepareSetupHerdr : prepareSetupHerdrCore)(
-        config,
-        console,
-        code.machine,
-        code.attempt,
-        authorization
+    try {
+      prepared.push(
+        await (kind === 'luvus' ? prepareSetupNative : kind === 'herdr' ? prepareSetupHerdr : prepareSetupHerdrCore)(
+          config,
+          console,
+          code.machine,
+          code.attempt,
+          authorization
+        )
       )
-    )
+    } catch (error) {
+      // 固定错误码不带来源信息；多 provider（含 mixed）时用户必须知道是哪一个没准备好，才能装好它或改选 provider。
+      // 只输出 provider 名，不输出异常内容、路径或任何配置。
+      console.show(formatMessage(cliMessages(io.language)['setup.join.providerFailed'], { kind }))
+      throw error
+    }
   }
   const installations = prepared.map(
     /* 每份清单只包含原生来源和公开schema，不包含Connector的本地路径或凭据。 */ (native) => ({

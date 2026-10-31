@@ -110,7 +110,7 @@ Windows uses the explicitly selected existing user with S4U, without storing a p
   'run.pairingRequiredHint':
     'Gateway is running; pair a Connector (management page or rovloom gateway --issue-code, then run the join command on the device) before using an Agent.\n',
   'run.configurationRequiredHint':
-    'Setup requires a reachable Gateway, a valid pairing code and a compatible installed Luvus or Herdr. Preserve uncertain setup state for owner review.\n',
+    'Setup requires a reachable Gateway, a valid pairing code and a compatible installed Luvus, Herdr or herdr-core (whichever native.provider selects). Preserve uncertain setup state for owner review.\n',
   'setup.native.managedUnsupportedWindows':
     '{provider}_managed_unsupported_on_windows: set native.{configKey}.mode to "attach".\n',
   'setup.native.managedUnsupportedMacos':
@@ -121,6 +121,8 @@ Windows uses the explicitly selected existing user with S4U, without storing a p
   'setup.join.resettingState':
     'Previous pairing state for another device was retired to {retired}; pairing as a new device.\n',
   'setup.join.switchingGateway': 'Joining a different Gateway; previous pairing state was retired to {retired}.\n',
+  'setup.join.providerFailed':
+    'setup_failed: could not prepare {kind}. Install and start it on this machine, or choose the providers this machine has with native.provider in connector.json (for example "luvus,herdr"; "mixed" means every provider the platform supports), then run the join command again.\n',
   'unpair.completed':
     'unpair_completed: local pairing state was retired to {retired} and the Gateway address was cleared.\nRun rovloom connector --join to pair with any Gateway.\n',
   'unpair.empty': 'unpair_completed: no local pairing state found; nothing to reset.\n',
@@ -258,7 +260,7 @@ Windows 使用显式选择的既有用户与 S4U，不保存密码、不要求�
   'run.pairingRequiredHint':
     'Gateway 已启动；使用 Agent 前先配对一台 Connector（管理页或 rovloom gateway --issue-code 生成配对码，设备执行加入命令）。\n',
   'run.configurationRequiredHint':
-    '初始化需可达 Gateway、有效配对码及兼容的 Luvus/Herdr 安装；结果不确定时保留原状态并由所有者核查。\n',
+    '初始化需可达 Gateway、有效配对码及兼容的 Luvus/Herdr/herdr-core 安装（以 native.provider 所选为准）；结果不确定时保留原状态并由所有者核查。\n',
   'setup.native.managedUnsupportedWindows':
     '{provider}_managed_unsupported_on_windows: Windows 上暂不支持 managed，请把 native.{configKey}.mode 设为 "attach"。\n',
   'setup.native.managedUnsupportedMacos':
@@ -268,6 +270,8 @@ Windows 使用显式选择的既有用户与 S4U，不保存密码、不要求�
   'setup.join.mcpBlock': 'MCP URL: {url}\nBearer (private): {token}\n',
   'setup.join.resettingState': '另一台设备的旧配对状态已退役到 {retired}；正以新设备身份重新配对。\n',
   'setup.join.switchingGateway': '正在加入另一台 Gateway；旧配对状态已退役到 {retired}。\n',
+  'setup.join.providerFailed':
+    'setup_failed: 无法准备 {kind}。请在本机安装并启动它，或在 connector.json 的 native.provider 里改成本机实际有的 provider（例如 "luvus,herdr"；"mixed" 表示本平台支持的全部来源），然后重新执行加入命令。\n',
   'unpair.completed':
     'unpair_completed: 本地配对状态已退役到 {retired}，Gateway 地址已清空。\n运行 rovloom connector --join 即可与任意 Gateway 重新配对。\n',
   'unpair.empty': 'unpair_completed: 本机没有可重置的配对状态。\n',

@@ -32,12 +32,13 @@ const PAIRING_FILES = [
 // 隔离 Luvus 的状态根/HOME/工作目录与隔离 Herdr 的私有根，以及两者共用的控制目录（root 记录与 claim 账本）。
 // managed 模式重新配对要求这些目录回到空白（initializeManagedLuvusRoot 的 not_blank 门禁），因此必须一并退役。
 const PAIRING_DIRECTORIES = ['control', 'n', 'h', 'w', 'hr'] as const
-// 两个 provider 的 claim 账本锁共用同一格式；锁里记录持有者进程身份，只有能证明它已死才继续。
+// 三个 provider 的 claim 账本锁共用同一格式；锁里记录持有者进程身份，只有能证明它已死才继续。
 const CLAIM_LOCKS = [
   'control/luvus-claims.db.lock',
   'hr/control/claims.db.lock',
   'control/luvus/claims.db.lock',
-  'control/herdr/claims.db.lock'
+  'control/herdr/claims.db.lock',
+  'control/herdr-core/claims.db.lock'
 ] as const
 
 /** 任何半成品记录或隔离根都需要参与新 join 的恢复判断。 */
