@@ -107,6 +107,15 @@ const RELEASE_NOTES = Object.freeze({
     ],
     upgrade:
       'Upgrade the Gateway and the Connectors together: this release adds dispatch refusal codes and the `/pairing/providers` endpoint, which an older Gateway cannot serve. Nothing to migrate: pairings, tokens and ledgers are unchanged, and a device paired with herdr-core on 0.10.0 keeps working without pairing again. A Linux device paired as `mixed` before 0.10 gets herdr-core added at its next start if a core is reachable; with `allow_terminal_execution` on by default, callers whose token covers that device can then run commands and read and write files through it. Set `native.provider` to `luvus,herdr` to avoid that. Known limitation: if you narrow `native.provider` so the Connector no longer starts a provider that the Gateway still lists, a call to that provider returns `outcome_unknown` and makes the device reconnect once; its other providers recover on their own within about a second.'
+  },
+  '0.10.2': {
+    highlights: [
+      'A refused herdr-core call now says why. A request with bad parameters is refused before it is registered: `native_request_invalid` with `details.issues` (fixed paths and rules, no request values) and `parameter_help`, always `not_dispatched`, and no call is recorded. A call refused later (for example when the Gateway and the Connector are different versions) carries a `reason` in the call view instead of a bare `not_dispatched`. Omitting `params` is the same as `params: {}`.',
+      'herdr-core control methods (`terminal.send`, `keys`, `interrupt`, `kill`, `rm`, `keep`, `label`, `put`) no longer need `core_id` and `created_ms`: give them to reject a reused address or a replaced core, omit them to act on the terminal under that address or name now. `terminal` (and `parent` of `terminal.run`) may be a terminal name; the Connector resolves it to an address before writing, and `machine/<id>` is still refused. `server.stop` and `server.restart` still require `core_id`.',
+      '`runtime_describe` for herdr-core now matches what is enforced: the tiers are catalog labels and `allow_terminal_execution` is the only boundary, waiting calls return `connector_accepted` first and are finished with `runtime_call_get`, `status` and `turn` in a `send` reply are a snapshot taken at send time, and `terminal.run` with `rm` and `wait` returns no output.'
+    ],
+    upgrade:
+      'Upgrade the Gateway and the Connectors together. A new Gateway with an older Connector still works, but a control call that omits `core_id`/`created_ms` or uses a terminal name makes the older Connector drop and reconnect (about one second) and the call ends `outcome_unknown`; nothing is written to the core. Nothing to migrate: pairings, tokens and ledgers are unchanged, and devices paired with herdr-core on 0.10.0 or 0.10.1 keep working without pairing again.'
   }
 })
 
