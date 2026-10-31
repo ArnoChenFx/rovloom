@@ -9,14 +9,15 @@ import { fail, fields } from '../../wire/index.js'
  * rovloom 自己审核的方法档位表与参数规则的修订号，配对时记入 `classification_revision`。
  * 它标识的是本仓库的表，不是 core 的版本：core 升级不改变它，只有改了档位或参数规则才递增。
  */
-export const HERDR_CORE_CLASSIFICATION_REVISION = 'herdr-core-tiers-2'
+export const HERDR_CORE_CLASSIFICATION_REVISION = 'herdr-core-tiers-3'
 
 /**
- * 仍能读进配置的分类修订（封闭集合，只追加）：`-1` 是 0.10.0 配对时写下的值。
- * 档位表变了（新增宿主级开放与 parent 栅栏），但已配对的设备不能因此要求重新配对：
- * 旧值照常启动，新配对写新值；表外值仍然拒绝。
+ * 仍能读进配置的分类修订（封闭集合，只追加）：`-1` 是 0.10.0 配对时写下的值，
+ * `-2` 是指令 9 之前的栅栏规则。参数规则变了（控制档栅栏可选、终端可以用名字），
+ * 但已配对的设备不能因此要求重新配对：旧值照常启动，新配对写新值；表外值仍然拒绝。
  */
 export const HERDR_CORE_CLASSIFICATION_REVISIONS: readonly string[] = Object.freeze([
+  'herdr-core-tiers-3',
   'herdr-core-tiers-2',
   'herdr-core-tiers-1'
 ])
