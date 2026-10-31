@@ -12,22 +12,10 @@ import { fail, fields } from '../../wire/index.js'
 export const HERDR_CORE_CLASSIFICATION_REVISION = 'herdr-core-tiers-1'
 
 /**
- * 契约位置。core 的版本号不设白名单：兼容性由协议代次、文档里表内方法齐全、参数/结果逐方法严格校验
- * 与配对时钉住的二进制摘要和契约哈希共同判定；表外的新方法不在目录里，保持不可用。
+ * core 的版本号与协议代次都不设限制：握手只确认这是一个 framed 的 herdr-core（有核心 id、方法表与能力表），
+ * 并把实际的版本与协议代次原样记进配对记录。兼容性由这几道门判定，而不是版本号：`rpc.discover` 文档必须能编译且
+ * 档位表里每个方法都在、新版多出来的方法保持不可用、结果逐层严格、配对钉住二进制摘要与契约哈希。
  */
-export const HERDR_CORE_REVIEW = Object.freeze({
-  protocol_generation: 1,
-  openrpc: '1.3.2',
-  methods_total: 32,
-  /** 无认证的多余字段一律忽略，所以审核只信本仓库自己的参数规则。 */
-  strictness: 'rovloom_reviewed_schemas'
-})
-
-/** 版本串只核对形状（语义版本，带短后缀也可），不按数值放行或拒绝；怪值（空串、原型键、超长）不进入记录。 */
-const VERSION_SHAPE = /^\d{1,6}\.\d{1,6}\.\d{1,6}(?:[-+][0-9A-Za-z.-]{1,32})?$/u
-export function herdrCoreVersionShape(version: unknown): version is string {
-  return typeof version === 'string' && VERSION_SHAPE.test(version)
-}
 
 /**
  * A 观察 6、B 有条件 6、C 输入与控制 8、D 宿主级 12。

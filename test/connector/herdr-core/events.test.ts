@@ -163,15 +163,6 @@ test('慢消费者以背压结束订阅，不静默丢中间事件', async () =>
   }
 })
 
-test('形状不对的 core 版本串在握手阶段就拒绝；较新的版本号照常接受（版本矩阵见 versions.test.ts）', async () => {
-  const core = await startFakeCore({ hello: { version: 'latest' } })
-  try {
-    await assert.rejects(openHerdrCoreClient(core.socket), /herdr_core_handshake_refused/u)
-  } finally {
-    await core.close()
-  }
-})
-
 test('订阅不是普通 RPC：观察入口与 Wire 准入都拒绝，原生一次都不收到', async () => {
   const core = await startFakeCore()
   try {

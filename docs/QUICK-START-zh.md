@@ -104,7 +104,7 @@ rovloom config init connector --provider herdr
 ## 2b. herdr-core（仅 Linux）
 
 herdr-core 是第三种 runtime：core 自己的智能体管理 API（unix socket），不是 Herdr TUI。只支持
-Linux，不限制 core 版本：只要协议代次是 1、并且发布了 rovloom 审核过的那些方法，就接受（CI 固定测 **0.1.14** 与 **0.1.15**）。
+Linux，不限制 core 的版本号和协议代次（CI 固定测 **0.1.14** 与 **0.1.15**）。core 能不能用，看它自己发布的契约：必须包含 rovloom 审核过的那些方法。
 新版本多出来的方法不会出现在目录里；结果与文档不符时按协议不符拒绝，不会原样放行。
 二进制摘要与契约哈希会在配对时记录，所以升级 core 等于换了二进制，已配对设备会失败关闭（`herdr_core_installation_changed`），
 用新的配对码重新配对即可（`rovloom connector --join …` 会把这台机器作为新设备对新 core 重新配对）。

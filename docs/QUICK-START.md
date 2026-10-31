@@ -115,10 +115,10 @@ This creates configuration without starting the Connector or asking for an addre
 ## 2b. herdr-core (Linux only)
 
 herdr-core is a third runtime: the core's own agent-management API over a unix socket, not the Herdr
-TUI. It is Linux-only and does not restrict the core version: any core that speaks protocol generation 1 and
-publishes the methods rovloom has reviewed is accepted (CI runs against **0.1.14** and **0.1.15**). Methods a newer
-core adds are simply not offered, and a result that no longer matches the document is refused as a protocol mismatch
-rather than passed through. The binary digest and contract hash are recorded at pairing, so upgrading core replaces
+TUI. It is Linux-only and puts no limit on the core version or protocol generation (CI runs against **0.1.14** and
+**0.1.15**). What decides whether a core works is its own published contract: it must contain every method rovloom
+has reviewed. Methods a newer core adds are simply not offered, and a result that no longer matches the document
+is refused as a protocol mismatch rather than passed through. The binary digest and contract hash are recorded at pairing, so upgrading core replaces
 the binary and a paired device fails closed
 (`herdr_core_installation_changed`) until you pair again with a fresh code (`rovloom connector --join …`, which re-pairs this machine as a new device against the new core).
 

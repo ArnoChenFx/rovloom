@@ -54,9 +54,7 @@ import {
   HERDR_CORE_SYNTHETIC_METHODS,
   HERDR_CORE_METHOD_USAGE,
   HERDR_CORE_CLASSIFICATION_REVISION,
-  HERDR_CORE_REVIEW,
-  herdrCoreTier,
-  herdrCoreVersionShape
+  herdrCoreTier
 } from './methods.js'
 import { requiresTerminalExecution } from '../terminal-execution.js'
 import { compileHerdrCoreContract } from './schema.js'
@@ -220,12 +218,8 @@ export function parseHerdrCoreProviderRefConfig(input: unknown): HerdrCoreProvid
   ) {
     fail('herdr_core_contract_unreviewed')
   }
-  // 分类修订、协议代次与版本形状是配置事实：不属于本仓库审核表的配置在读取任何文件之前就拒绝。
-  if (
-    value.expected_source.classification_revision !== HERDR_CORE_CLASSIFICATION_REVISION ||
-    !herdrCoreVersionShape(value.expected_source.binary_version) ||
-    value.expected_source.native_protocol_version !== String(HERDR_CORE_REVIEW.protocol_generation)
-  ) {
+  // 分类修订标识本仓库的档位表，是配置事实：不属于它的配置在读取任何文件之前就拒绝。core 的版本与协议代次不设限。
+  if (value.expected_source.classification_revision !== HERDR_CORE_CLASSIFICATION_REVISION) {
     fail('herdr_core_contract_unreviewed')
   }
   const parsedTarget = Object.freeze({ ...value.target }) as V2Target & { profile: 'session' }

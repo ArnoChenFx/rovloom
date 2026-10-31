@@ -11,13 +11,7 @@ import { boundedJson, fail, object, parseJson } from '../../wire/index.js'
 import type { JsonObject } from '../../wire/types.js'
 import { readLinuxPeer } from '../local/linux-peer.js'
 import type { NativePeer } from '../local/linux-peer.js'
-import {
-  HERDR_CORE_MAX_FRAME_BYTES,
-  HERDR_CORE_MAX_REQUEST_BYTES,
-  HERDR_CORE_REQUEST_MAX_MS,
-  HERDR_CORE_REVIEW,
-  herdrCoreVersionShape
-} from './methods.js'
+import { HERDR_CORE_MAX_FRAME_BYTES, HERDR_CORE_MAX_REQUEST_BYTES, HERDR_CORE_REQUEST_MAX_MS } from './methods.js'
 
 /** 帧头 9 字节；与 core 的 wire.rs 一致。 */
 const HEADER = 9
@@ -98,14 +92,15 @@ function frameHeader(channel: number, kind: number, length: number): Buffer {
   return header
 }
 
-/** 只接受审核过的 hello 结果形状；不解释未知字段。 */
+/** 只确认 hello 结果是 herdr-core 的形状；版本与协议代次原样记录，不解释未知字段。 */
 function helloResult(value: unknown): HerdrCoreHello {
   const result = object(value)
   const core = object(result.core)
   if (
-    result.generation !== HERDR_CORE_REVIEW.protocol_generation ||
+    typeof result.generation !== 'number' ||
+    !Number.isSafeInteger(result.generation) ||
     result.framed !== true ||
-    !herdrCoreVersionShape(result.version) ||
+    typeof result.version !== 'string' ||
     typeof core.id !== 'string' ||
     !/^[a-f0-9]{8,64}$/u.test(core.id) ||
     typeof core.name !== 'string' ||
@@ -114,7 +109,7 @@ function helloResult(value: unknown): HerdrCoreHello {
   ) {
     fail('herdr_core_handshake_refused')
   }
-  // 不按版本号拒绝：core 升级后的不兼容由后面的契约编译、逐方法严格校验与配对时的摘要钉住来失败关闭。
+  // 不按版本号或协议代次拒绝：core 升级后的不兼容由后面的契约编译、逐方法严格校验与配对时的摘要钉住来失败关闭。
   return Object.freeze({
     generation: result.generation,
     version: result.version,

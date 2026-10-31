@@ -1,6 +1,7 @@
 /**
- * core 版本不设白名单：握手只核对协议代次与版本串形状；配对记录里的 classification_revision 标识
- * 本仓库的档位表，不随 core 版本变化。已有真实文档的版本（0.1.14、0.1.15）各自编译并校验真实输出样本。
+ * core 的版本号与协议代次都不设限制：握手只确认这是 framed 的 herdr-core 并原样记录二者；配对记录里的
+ * classification_revision 标识本仓库的档位表，不随 core 版本变化。已有真实文档的版本（0.1.14、0.1.15）
+ * 各自编译并校验真实输出样本；兼容性由契约编译（表内方法齐全）与逐方法严格校验判定。
  */
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -10,11 +11,7 @@ import { test } from 'node:test'
 import { openHerdrCoreClient } from '../../../src/connector/herdr-core/client.js'
 import { parseHerdrCoreProviderRefConfig } from '../../../src/connector/herdr-core/provider.js'
 import { compileHerdrCoreContract } from '../../../src/connector/herdr-core/schema.js'
-import {
-  HERDR_CORE_CLASSIFICATION_REVISION,
-  HERDR_CORE_METHODS,
-  herdrCoreVersionShape
-} from '../../../src/connector/herdr-core/methods.js'
+import { HERDR_CORE_CLASSIFICATION_REVISION, HERDR_CORE_METHODS } from '../../../src/connector/herdr-core/methods.js'
 import { publishSchema, schemaReference } from '../../../src/connector/schema-store.js'
 import { hash } from '../../../src/wire/index.js'
 import type { ContractSource, V2Target } from '../../../src/wire/types.js'
@@ -23,35 +20,24 @@ import { startFakeCore } from './fake-core.js'
 type Sample = { method: string; params: Record<string, unknown>; response: { result: unknown } }
 const fixture = (name: string) => readFileSync(new URL(`../../fixtures/herdr-core/${name}`, import.meta.url))
 const WITH_FIXTURES = ['0.1.14', '0.1.15'] as const
-const ACCEPTED = ['0.1.13', '0.1.14', '0.1.15', '0.1.16', '0.2.0', '1.0.0', '10.20.30', '0.1.15-rc1', '0.1.15+build.7']
-const MALFORMED = [
-  '',
-  'constructor',
-  '__proto__',
-  'toString',
-  '0.1.15 ',
-  ' 0.1.15',
+// 任何字符串都接受，包括不是语义版本的（latest、带后缀、原型键）：版本号不是准入条件。
+const VERSIONS = [
+  '0.1.13',
+  '0.1.14',
+  '0.1.15',
+  '0.1.16',
+  '0.2.0',
+  '1.0.0',
+  '10.20.30',
+  '0.1.15-rc1',
+  'latest',
   'v0.1.15',
-  '1.0',
-  '1.2.3.4',
-  'x'.repeat(100),
-  '0.1.15-'
+  'constructor',
+  '__proto__'
 ]
 
-test('version shape is checked, never a number: odd values cannot enter a pairing record', () => {
-  for (const version of ACCEPTED) {
-    assert.equal(herdrCoreVersionShape(version), true, version)
-  }
-  for (const version of MALFORMED) {
-    assert.equal(herdrCoreVersionShape(version), false, JSON.stringify(version))
-  }
-  for (const value of [undefined, null, 15, {}, ['0.1.15']]) {
-    assert.equal(herdrCoreVersionShape(value), false)
-  }
-})
-
-test('the handshake accepts any well-formed version and refuses a malformed one as a handshake failure', async () => {
-  for (const version of ACCEPTED) {
+test('the handshake accepts any version string and records it as is', async () => {
+  for (const version of VERSIONS) {
     const core = await startFakeCore({ hello: { version } })
     try {
       const client = await openHerdrCoreClient(core.socket)
@@ -61,29 +47,33 @@ test('the handshake accepts any well-formed version and refuses a malformed one 
       await core.close()
     }
   }
-  for (const version of [...MALFORMED, 15, null]) {
-    const core = await startFakeCore({ hello: { version } })
+})
+
+test('the handshake accepts any protocol generation and records it as is', async () => {
+  for (const generation of [0, 1, 2, 7, 99]) {
+    const core = await startFakeCore({ hello: { generation } })
     try {
-      await assert.rejects(
-        openHerdrCoreClient(core.socket),
-        /herdr_core_handshake_refused/u,
-        `version ${String(version)}`
-      )
+      const client = await openHerdrCoreClient(core.socket)
+      assert.equal(client.hello.generation, generation)
+      client.close()
     } finally {
       await core.close()
     }
   }
 })
 
-test('the protocol generation, not the version, decides compatibility', async () => {
-  for (const generation of [0, 2, '1', null]) {
-    const core = await startFakeCore({ hello: { generation } })
+test('a hello that is not shaped like a herdr-core hello is still refused (that is not a version limit)', async () => {
+  for (const hello of [
+    { version: 15 },
+    { version: null },
+    { generation: '1' },
+    { generation: null },
+    { generation: 1.5 },
+    { framed: false }
+  ]) {
+    const core = await startFakeCore({ hello })
     try {
-      await assert.rejects(
-        openHerdrCoreClient(core.socket),
-        /herdr_core_handshake_refused/u,
-        `generation ${String(generation)}`
-      )
+      await assert.rejects(openHerdrCoreClient(core.socket), /herdr_core_handshake_refused/u, JSON.stringify(hello))
     } finally {
       await core.close()
     }
@@ -111,9 +101,10 @@ for (const version of WITH_FIXTURES) {
   })
 }
 
-test('a newer core that adds methods still compiles: unknown methods stay out of the contract', () => {
+test('a newer core that adds methods or a newer OpenRPC revision still compiles: unknown methods stay out', () => {
   const document = JSON.parse(fixture('openrpc-0.1.15.json').toString('utf8')) as Record<string, any>
   document.info.version = '0.2.0'
+  document.openrpc = '1.4.0'
   document.methods.push({
     name: 'terminal.fork',
     paramStructure: 'by-name',
@@ -133,11 +124,15 @@ test('a newer core that drops a reviewed method is refused instead of silently l
   assert.throws(() => compileHerdrCoreContract(JSON.stringify(document)), /herdr_core_schema_method_missing/u)
 })
 
-test('a pairing is accepted for any well-formed version and only with this repository’s classification revision', () => {
+test('a pairing is accepted for any version and protocol generation, and only with this repository’s classification revision', () => {
   const root = mkdtempSync(join(tmpdir(), 'rovloom-hc-versions-'))
   try {
     const openrpc = fixture('openrpc-0.1.15.json')
-    const source = (binary_version: string, classification_revision: string | null): ContractSource => ({
+    const source = (
+      binary_version: string,
+      native_protocol_version: string,
+      classification_revision: string | null
+    ): ContractSource => ({
       provider_kind: 'herdr-core',
       protocol_family: 'herdr-core-jsonrpc',
       binary_version,
@@ -146,7 +141,7 @@ test('a pairing is accepted for any well-formed version and only with this repos
       schema_origin: 'live_instance',
       schema_command: 'rpc.discover',
       server_version: binary_version,
-      native_protocol_version: '1',
+      native_protocol_version,
       runtime_generation: null,
       adapter_revision: 'adapter-herdr-core-1',
       classification_revision,
@@ -164,26 +159,21 @@ test('a pairing is accepted for any well-formed version and only with this repos
       expected_source,
       schema_ref: reference
     })
-    for (const version of ACCEPTED) {
-      assert.doesNotThrow(
-        () => parseHerdrCoreProviderRefConfig(config(source(version, HERDR_CORE_CLASSIFICATION_REVISION))),
-        version
-      )
+    for (const version of VERSIONS) {
+      for (const generation of ['0', '1', '2']) {
+        assert.doesNotThrow(
+          () =>
+            parseHerdrCoreProviderRefConfig(config(source(version, generation, HERDR_CORE_CLASSIFICATION_REVISION))),
+          `${version}/${generation}`
+        )
+      }
     }
     // 修订号标识本仓库的档位表：别的值（含旧的 `<版本>@<提交>` 写法、空值）读取任何文件之前就拒绝。
     for (const revision of ['0.1.15@d028423', 'herdr-core-tiers-0', 'herdr-core-tiers-2', '', null]) {
       assert.throws(
-        () => parseHerdrCoreProviderRefConfig(config(source('0.1.15', revision))),
+        () => parseHerdrCoreProviderRefConfig(config(source('0.1.15', '1', revision))),
         /herdr_core_contract_unreviewed|invalid_config|invalid_text/u,
         String(revision)
-      )
-    }
-    // 版本串的怪值不能进入记录。
-    for (const version of MALFORMED.filter((value) => value !== '')) {
-      assert.throws(
-        () => parseHerdrCoreProviderRefConfig(config(source(version, HERDR_CORE_CLASSIFICATION_REVISION))),
-        /herdr_core_contract_unreviewed/u,
-        version
       )
     }
   } finally {

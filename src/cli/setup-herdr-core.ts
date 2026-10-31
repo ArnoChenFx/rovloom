@@ -12,7 +12,7 @@ import {
   inspectHerdrCoreSocket
 } from '../connector/herdr-core/identity.js'
 import { ensureHerdrCoreManaged, findHerdrCoreBinary, herdrCoreManagedDirs } from '../connector/herdr-core/managed.js'
-import { HERDR_CORE_CLASSIFICATION_REVISION, HERDR_CORE_REVIEW } from '../connector/herdr-core/methods.js'
+import { HERDR_CORE_CLASSIFICATION_REVISION } from '../connector/herdr-core/methods.js'
 import { compileHerdrCoreContract } from '../connector/herdr-core/schema.js'
 import { parseHerdrCoreProviderRefConfig } from '../connector/herdr-core/provider.js'
 import type { HerdrCoreProviderRefConfig } from '../connector/herdr-core/provider.js'
@@ -122,6 +122,7 @@ export async function prepareSetupHerdrCore(
   const client = await openHerdrCoreClient(endpoint.socket)
   let discovered: string
   let binaryVersion: string
+  let protocolGeneration: number
   let binarySha256: string
   let serverVersion: string | null
   try {
@@ -131,6 +132,7 @@ export async function prepareSetupHerdrCore(
     // pid 来自这条连接的内核 peer；自报 pid 只用于与内核值互相印证。
     const facts = herdrCorePeerFacts(client.peer(), status.pid, session)
     binaryVersion = client.hello.version
+    protocolGeneration = client.hello.generation
     binarySha256 = facts.binary_sha256
     serverVersion = typeof status.version === 'string' ? status.version : null
   } finally {
@@ -146,7 +148,7 @@ export async function prepareSetupHerdrCore(
     schema_origin: 'live_instance' as const,
     schema_command: 'rpc.discover' as const,
     server_version: serverVersion,
-    native_protocol_version: String(HERDR_CORE_REVIEW.protocol_generation),
+    native_protocol_version: String(protocolGeneration),
     runtime_generation: null,
     adapter_revision: 'adapter-herdr-core-1',
     // 修订号标识本仓库的档位表，不随 core 版本变化。

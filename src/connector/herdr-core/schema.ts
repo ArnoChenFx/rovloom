@@ -109,7 +109,7 @@ function document(input: string | Uint8Array): JsonObject {
     fail('herdr_core_schema_invalid')
   }
   const root = value as JsonObject
-  if (root.openrpc !== '1.3.2' || !root.info || typeof root.info !== 'object' || Array.isArray(root.info)) {
+  if (typeof root.openrpc !== 'string' || !root.info || typeof root.info !== 'object' || Array.isArray(root.info)) {
     fail('herdr_core_schema_invalid')
   }
   const info = root.info as JsonObject

@@ -54,7 +54,7 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 ### 版本策略（spike 第 9 条的结论被用户放宽）
 
-**不设 core 版本白名单**（用户决定：core 的大部分功能已经稳定，后面有调整就接着修，支持范围放宽）。握手只核对协议代次（`generation === 1`，core 自己的兼容契约）、`framed` 与版本串形状（语义版本，带短后缀可以；空串、原型键、超长一律 `herdr_core_handshake_refused`），不按版本号放行或拒绝。契约来源的 `classification_revision` 不再是 `<version>@<commit>`，而是常量 `herdr-core-tiers-1`，标识**本仓库的档位表与参数规则**：core 升级不改变它，改了档位或参数规则才递增。
+**对 core 的版本号和协议代次都不设限制**（用户决定：core 的大部分功能已经稳定，后面有调整就接着修，不做任何限制）。握手只确认这是一个 framed 的 herdr-core（有 core id、方法表与能力表，`version` 是字符串、`generation` 是整数），并把实际的版本与协议代次原样记进配对记录；不按版本号放行或拒绝，`openrpc` 文档版本号也不钉。契约来源的 `classification_revision` 不再是 `<version>@<commit>`，而是常量 `herdr-core-tiers-1`，标识**本仓库的档位表与参数规则**：core 升级不改变它，改了档位或参数规则才递增。
 
 兼容性由这几道失败关闭的门共同判定，而不是版本号：①`rpc.discover` 的文档必须能编译，且本仓库档位表里的每个方法都在文档里（缺项 `herdr_core_schema_method_missing`）；新版本多出来的方法被忽略，不进目录，保持不可用；②参数规则由本仓库自己的 schema 收紧，结果逐层严格——新版本给已审核方法的结果加了字段，该方法会以 `herdr_core_result_invalid` 失败，而不是原样放行，出现时再调整；③配对时钉住二进制摘要与契约哈希。
 
@@ -74,7 +74,7 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 - 端点由本地配置固定的 `runtime_dir` 或 `state_home` 重算，运行时不再读 `cwd` 或环境变量；目录必须是本用户 0700，套接字必须是本用户的 socket。
 - pid 取自这条连接的内核 peer（`SO_PEERCRED`），必须属于本用户并与 `server.status` 自报值一致；自报值本身不是证据。`/proc/<pid>/exe` 的 SHA-256 必须等于配对时发布的 `binary_sha256`，`argv` 恒为 `<bin> serve`，`HC_SESSION` 与本次 session 一致。每次执行前重读这些事实，不缓存旧许可。
-- 契约只来自本次连接的 `rpc.discover`，字节摘要必须等于配对时发布的 `schema_sha256`；摘要不符、协议代次不符、目录权限不对、代理冒充都在读写任何结果前失败关闭。
+- 契约只来自本次连接的 `rpc.discover`，字节摘要必须等于配对时发布的 `schema_sha256`；摘要不符、目录权限不对、代理冒充都在读写任何结果前失败关闭。
 - 只执行 `HERDR_CORE_EXPOSED_METHODS` 的 5 个读取；`reviewHerdrCoreParams` 与审核 schema 在发送前、结果 schema 在返回前各复核一次。控制档与宿主级方法仍在目录、Wire 准入和参数三处拒绝。
 - Connector 只在本地配置里携带 `connector`（session、固定端点、principal、发送墓碑）；Gateway 侧配置没有这些本机事实。
 
@@ -102,7 +102,7 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 ### core 重启后的重新附着
 
-Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着对象，连接关闭后由 `ensure()` 用有退避、有上限的单飞轮重新走一遍**完整**身份核对：套接字目录 0700 与属主、内核 peer 的 pid/uid、`server.status` 自报 pid 与内核值一致、`/proc/<pid>/exe` 的 SHA-256、`argv` 恒为 `<bin> serve`、`HC_SESSION`、本次 `rpc.discover` 的摘要与编译身份、握手的协议代次与版本串形状。任何一项不符仍失败关闭（`herdr_core_installation_changed` / `herdr_core_schema_unreviewed` / `herdr_core_handshake_refused`），不因为「以前核对过」而放行。
+Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着对象，连接关闭后由 `ensure()` 用有退避、有上限的单飞轮重新走一遍**完整**身份核对：套接字目录 0700 与属主、内核 peer 的 pid/uid、`server.status` 自报 pid 与内核值一致、`/proc/<pid>/exe` 的 SHA-256、`argv` 恒为 `<bin> serve`、`HC_SESSION`、本次 `rpc.discover` 的摘要与编译身份、配对时记录的版本与协议代次（升级即换二进制，所以会触发 `herdr_core_installation_changed`）。任何一项不符仍失败关闭（`herdr_core_installation_changed` / `herdr_core_schema_unreviewed`），不因为「以前核对过」而放行。
 
 - 退避序列 0/250/500/1000/1500/2000 毫秒（合计约 5.25 秒，覆盖 holder 默认 3 秒宽限加新 core 启动），单轮总预算上限 6 秒并按调用方剩余期限再收紧；一轮失败后冷却 1 秒，期间调用直接失败，不逐请求热循环。并发调用共享同一轮，不会同时建立多条连接。
 - 重新附着只在调用路径上发生（`executeWire` 在写入前、`readiness` 只踢一次后台轮），`current()` 不会自己重连。断线时 `client()`/`assert()` 直接 `herdr_core_connection_closed`，不返回已关闭的连接。
