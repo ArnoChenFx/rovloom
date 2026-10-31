@@ -120,6 +120,8 @@ runtime_call {
 - Luvus RPC defaults to a local cap of 10 minutes, bounded by the original call deadline and any explicit shorter local limit. Endpoint discovery and schema reading still have a 30-second preparation budget. Poll the original call for long waits; increasing `wait_ms` does not extend execution.
 - `client_request_key` is optional and deduplicates within one principal. Re-sending the same intent **must** reuse the original key.
 
+Calls are already asynchronous: with `wait_ms: 0`, keep the returned `call_id` and query it later. You can submit independent calls concurrently. A native long wait still occupies a Connector execution slot until that native call ends; the immediate MCP receipt does not release that slot. Current tools do not expose a persistent Agent job API, and an old call's result permission does not survive a Connector reconnect. Do not invent `job_id` fields or `runtime_job_*` tools.
+
 **6. Query and read the result**
 
 For a Luvus output sentinel, discover `wait.output` on the exact target, describe it, and call it with `{ "pane": "<observed pane ID>", "match": "<literal marker>", "timeout_s": 35 }`. Approved targets and read/dispatch/cancel actions apply uniformly to every exposed method; read-only access does not grant dispatch. Do not edit caller/local/raw method lists. New pairing stores no method snapshot and old lists are ignored. Allow RPC overhead before the call deadline and poll the original call. Historical output and prompt echo can match, so verify the actual reply. If discovery omits the method, the current provider does not expose it; continue reading state/output.
