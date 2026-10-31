@@ -14,7 +14,7 @@ for (const name of ['HERDR_CORE_HC', 'HERDR_CORE_BINARY', 'HERDR_CORE_SESSION', 
   assert(env[name], `${name} is required`)
 }
 const mode = env.HERDR_CORE_MODE ?? 'attach'
-const { client, target, ok, invoke, readAll, call } = await connect()
+const { client, target, tool, ok, invoke, readAll, call } = await connect()
 
 /** hc 只对沙箱里的 core 生效：环境与 quickstart 启动 core 时一致，联网更新指向本机不可达端口。 */
 const hcEnv = {
@@ -111,18 +111,83 @@ try {
     'children_of'
   ])
   assert.equal(Object.hasOwn(runDescription.params_schema.properties, 'caller'), false)
-  assert.equal((runDescription.guide ?? []).length, 9)
+  // 交互要点：core 侧事实 + 档位/等待/快照/rm 与 hidden_finished 的说明。
+  assert.equal((runDescription.guide ?? []).length, 13)
+  assert.ok(runDescription.guide.some((line) => line.includes('allow_terminal_execution') && line.includes('tier')))
+  assert.ok(runDescription.guide.some((line) => line.includes('runtime_call_get')))
+  assert.ok(runDescription.guide.some((line) => line.includes('hidden_finished')))
   const sendDescription = await ok('runtime_describe', {
     target,
     expected_binding_revision: 1,
     method: 'terminal.send'
   })
   assert.deepEqual(sendDescription.params_schema.properties.if.anyOf[0].enum, ['idle', 'working'])
+  // 控制档的 terminal 只收裸地址：说明不能再写 core 原文里的「a name」。
+  assert.doesNotMatch(String(sendDescription.params_schema.properties.terminal.description), /a name/u)
+  assert.match(String(sendDescription.params_schema.properties.terminal.description), /t7/u)
+  assert.ok(
+    sendDescription.usage.some((line) => line.includes('runtime_call_get')),
+    'send usage must point at runtime_call_get'
+  )
+  const waitDescription = await ok('runtime_describe', {
+    target,
+    expected_binding_revision: 1,
+    method: 'terminal.wait'
+  })
+  assert.ok(waitDescription.usage.some((line) => line.includes('runtime_call_get')))
 
   const status = await call(entry('server.status').contract_ref, 'server.status', {})
   assert.match(env.HERDR_CORE_EXPECT_VERSION ?? '', /^\d+\.\d+\.\d+$/u)
   assert.equal(status.version, env.HERDR_CORE_EXPECT_VERSION)
   const coreId = status.core.id
+
+  // ---- 省略 params 等同 {}：同一个方法、同一个结果 ----
+  const withoutParams = await invoke(entry('server.status').contract_ref, { method: 'server.status' })
+  assert.equal(withoutParams.state, 'responded', JSON.stringify(withoutParams))
+  const withoutParamsResult = await readAll(withoutParams)
+  // 除运行时长外逐字段相同：省略参数没有被当成另一种请求。
+  assert.deepEqual({ ...withoutParamsResult, uptime_ms: 0 }, { ...status, uptime_ms: 0 })
+  assert.equal(withoutParamsResult.pid, status.pid)
+
+  // ---- 参数预检：登记前就拒绝，带固定路径与规则，且不产生调用记录 ----
+  const refusals = [
+    [
+      'terminal name',
+      { method: 'terminal.kill', params: { terminal: 'build', core_id: coreId, created_ms: 1 } },
+      '/terminal'
+    ],
+    ['missing fence', { method: 'terminal.kill', params: { terminal: 't1' } }, '/core_id'],
+    [
+      'null created_ms',
+      { method: 'terminal.kill', params: { terminal: 't1', core_id: coreId, created_ms: null } },
+      '/created_ms'
+    ],
+    ['missing text', { method: 'terminal.send', params: { terminal: 't1', core_id: coreId, created_ms: 1 } }, '/text']
+  ]
+  for (const [label, native_request, path] of refusals) {
+    const refused = await tool('runtime_call', {
+      target,
+      expected_binding_revision: 1,
+      contract_ref: entry(native_request.method).contract_ref,
+      native_request,
+      deadline: Date.now() + 30_000,
+      wait_ms: 1000
+    })
+    assert.equal(refused.isError, true, `${label}:${JSON.stringify(refused.raw)}`)
+    const error = refused.raw?.gateway_error
+    assert.equal(error?.code, 'native_request_invalid', `${label}:${JSON.stringify(refused.raw)}`)
+    assert.equal(error?.outcome, 'not_dispatched', `${label}:${JSON.stringify(refused.raw)}`)
+    assert.ok(
+      (error?.details?.issues ?? []).some((issue) => issue.path === path),
+      `${label} issues:${JSON.stringify(error?.details?.issues)}`
+    )
+    // 被拒的调用没有调用记录：错误里没有 call_id，也没有可读的账本条目。
+    assert.equal(error?.call_id, undefined, label)
+    assert.equal(refused.data?.call_id, undefined, label)
+  }
+  // 同一个调用参数修好后可以正常提交，说明预检拒绝没有留下占位记录。
+  const retried = await invoke(entry('terminal.list').contract_ref, { method: 'terminal.list', params: {} })
+  assert.equal(retried.state, 'responded', JSON.stringify(retried))
 
   // ---- managed：先确认 Connector 重启前启动的终端还在 ----
   if (mode === 'managed') {

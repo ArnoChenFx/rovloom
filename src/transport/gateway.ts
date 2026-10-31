@@ -1100,7 +1100,9 @@ export function createGateway(options: GatewayOptions) {
             return code
           }
         }
-        return undefined
+        // 最后一道防线：编码阶段被 Gateway 本机拒绝的调用没有 Connector 帧，
+        // 原因码来自本机审计，和 Connector 上报走同一个闭合映射。
+        return options.store.gatewayDispatchRefusal(callId)
       } catch {
         return undefined
       }

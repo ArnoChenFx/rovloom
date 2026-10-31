@@ -1290,6 +1290,28 @@ export class Store {
       false
     )
   }
+  /**
+   * Gateway 自己在编码阶段拒绝的固定码（只读审计），供调用视图交付 `reason`。
+   * 只回放本机证据，不参与授权或状态判断；没有记录时返回 undefined。
+   */
+  gatewayDispatchRefusal(callId: string): string | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT details FROM audit WHERE call_id=? AND action='dispatch_refused' AND actor='gateway' ORDER BY at DESC, rowid DESC LIMIT 1"
+      )
+      .get(callId) as { details: string } | undefined
+    if (!row) {
+      return undefined
+    }
+    try {
+      const code = (JSON.parse(row.details) as { code?: unknown }).code
+      // 固定码形状之外的任何内容都不外泄。
+      return typeof code === 'string' && /^[a-z][a-z0-9_]{0,63}$/u.test(code) ? code : undefined
+    } catch {
+      return undefined
+    }
+  }
+
   /** Gateway 在调用 socket.send 前失败的本机证据；不能由 Connector 帧调用，也不能覆盖 accepted。 */
   commitGatewayDispatchRefusal(binding: AttemptBinding, code: string): boolean {
     if (!/^[a-z][a-z0-9_]{0,63}$/u.test(code)) {

@@ -484,7 +484,8 @@ def main():
         open(out, 'w').write(json.dumps(info)); os.chmod(out, 0o600)
         print('READY', json.dumps({'mcp_url': info['url'], 'targets': info['targets'], 'config': out}), flush=True)
         inflight_file = os.path.join(work, 'mixed-inflight.json')
-        if multi and args.herdr_core and not args.upgrade_from:
+        # 三来源组合才跑 mixed 的开关对照：只有 luvus+herdr-core 时没有 herdr 目标。
+        if multi and args.herdr and args.herdr_core and not args.upgrade_from:
             # (a) 关闭终端执行时三个来源的输入/启动类都必须被拒，读取不受影响。
             off_env = {**os.environ, 'MCP_CONFIG': out}
             done = subprocess.run(['bun', '--no-env-file',

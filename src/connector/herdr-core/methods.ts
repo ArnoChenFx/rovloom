@@ -256,7 +256,11 @@ export const HERDR_CORE_GUIDE: readonly string[] = Object.freeze([
   '`turn` and `seq` are not proof that a turn succeeded. `screen=inexact` means core crashed and older history may be missing.',
   'Codex must run with `--no-daemon`, otherwise its commands run outside core.',
   "core capabilities rovloom does NOT expose: `machine.*` and the `on` parameter (they route through core's own machine table and would bypass the per-device scope of a rovloom token), `terminal.attach` (raw VT stream), `events.subscribe` (streaming; use `terminal.events`). `caller`/`calls_you`/`core` are unauthenticated identity fields and are always rejected.",
-  'Write calls are never replayed. After a disconnect the result may be `outcome_unknown`; check `terminal.list` (by `name` or labels) before retrying.'
+  'Write calls are never replayed. After a disconnect the result may be `outcome_unknown`; check `terminal.list` (by `name` or labels) before retrying.',
+  'Tiers (`observe`/`control`/`host`) are catalog labels, not separate switches: one local switch, `allow_terminal_execution`, gates `terminal.send`/`keys`/`run`/`kill`, `machine.exec`, `file.write` and the rest. Turning it off closes all of them; it is not a way around a tier.',
+  'Waiting calls (`terminal.wait`, `terminal.events`, `terminal.send`/`terminal.run` with `wait=true`, `terminal.interrupt`) usually return the synchronous view `connector_accepted`/`possibly_dispatched` without a result handle. Keep waiting with `runtime_call_get {call_id, wait_ms}` until the state is `responded`, then read the handle with `runtime_result_read`.',
+  "`terminal.send`/`terminal.keys` report `status`/`turn` **as of the send**, and `turn` counts completed turns. Use `wait=true` (`wait.turn` is the turn after it ended) or `terminal.get`/`terminal.events` afterwards. `terminal.get` status comes from the program's own report and can lag the screen by hundreds of milliseconds; do not treat one read as final.",
+  '`terminal.run` with `rm:true` deletes the terminal as soon as it exits: `wait:true` then returns empty `output` and `wait.exit_code:null`. Drop `rm` when you need the output and run `terminal.rm` after reading. `hidden_finished` counts finished terminals that were not removed; `terminal.rm` clears them.'
 ])
 
 /** 逐方法的使用说明；没有条目的方法不补造。 */
@@ -265,10 +269,25 @@ export const HERDR_CORE_METHOD_USAGE: Readonly<Record<string, readonly string[]>
     '`lines=0` reads the screen only and never types into the program. `lines>0` may type scroll keys into a full-screen program (stitching, up to 15s) and needs `allow_terminal_execution`.'
   ]),
   'terminal.wait': Object.freeze([
-    'With `children`, pass `terminal` explicitly: rovloom never sends `caller`. `output` is for plain programs, not agents.'
+    'With `children`, pass `terminal` explicitly: rovloom never sends `caller`. `output` is for plain programs, not agents.',
+    'Within `wait_ms` the synchronous view is usually `connector_accepted`/`possibly_dispatched` with no result handle: continue with `runtime_call_get {call_id, wait_ms}` until `responded`, then `runtime_result_read`.'
   ]),
-  'terminal.send': Object.freeze(['`wait=true` requires an explicit `timeout` (≤60s). rovloom rejects `force`.']),
-  'terminal.interrupt': Object.freeze(['Sends the stop key and observes the outcome; it never escalates.']),
+  'terminal.send': Object.freeze([
+    '`wait=true` requires an explicit `timeout` (≤60s). rovloom rejects `force`.',
+    'Without `wait`, `status`/`turn` in the reply are the snapshot taken when the text was sent (`turn` counts completed turns); read again with `terminal.get`/`terminal.events`, or ask for the turn with `wait=true`.',
+    'With `wait=true` the call usually returns `connector_accepted`/`possibly_dispatched` first: keep waiting with `runtime_call_get {call_id, wait_ms}`, then `runtime_result_read`.'
+  ]),
+  'terminal.keys': Object.freeze([
+    '`status`/`turn` in the reply are the snapshot taken when the keys were sent; read again with `terminal.get`/`terminal.events` if you need the effect.'
+  ]),
+  'terminal.interrupt': Object.freeze([
+    'Sends the stop key and observes the outcome; it never escalates.',
+    'The synchronous view can be `connector_accepted`/`possibly_dispatched`: finish with `runtime_call_get {call_id, wait_ms}` and `runtime_result_read`.'
+  ]),
+  'terminal.run': Object.freeze([
+    '`rm:true` deletes the terminal as soon as it exits, so `wait:true` returns empty `output` and `wait.exit_code:null`: drop `rm` when you need the output, read it, then `terminal.rm`.',
+    'With `wait=true` the synchronous view can be `connector_accepted`/`possibly_dispatched`: finish with `runtime_call_get {call_id, wait_ms}` and `runtime_result_read`.'
+  ]),
   'machine.exec': Object.freeze([
     'Runs one program without a terminal. `timeout` is required and capped by rovloom at 60s; `truncated:true` means it wrote more than core kept, so do not treat stdout/stderr as complete.'
   ]),
@@ -291,6 +310,7 @@ export const HERDR_CORE_METHOD_USAGE: Readonly<Record<string, readonly string[]>
     'Stops the core and its programs; kept terminals get new shells when a core starts again. `core_id` must match. In attach mode the provider stays unavailable until someone starts the core; in managed mode the next call starts it again.'
   ]),
   'terminal.events': Object.freeze([
+    'The synchronous view is usually `connector_accepted`/`possibly_dispatched` with no result handle: keep waiting with `runtime_call_get {call_id, wait_ms}` until `responded`, then `runtime_result_read`.',
     'Long poll: returns the current terminal snapshot plus up to `limit` events after `after_seq`. `rebuilt:true` means the state was replaced (missed events or a core restart) and earlier events are gone; `truncated:true` means the local buffer overflowed. Feed `next_after_seq` back as `after_seq`; filter with `address`/`labels`.'
   ])
 })
