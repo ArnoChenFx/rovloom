@@ -669,6 +669,11 @@ export class Store {
   failPairingClaim(claimId: string): void {
     this.devices.failPairingClaim(claimId)
   }
+  /** 只读核验设备凭据（不改 epoch/状态）：追加登记用它当信任锚。 */
+  verifyDeviceCredential(machine: string, credential: string): string {
+    return this.devices.verifyDeviceCredential(machine, credential)
+  }
+
   connect(machine: string, credential: string): string {
     return this.devices.connect(machine, credential)
   }

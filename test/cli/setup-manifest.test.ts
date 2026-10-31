@@ -268,8 +268,8 @@ test(
       }
       saveCredential(join(managed, 'device.json'), credential)
       const providers = kinds.map(
-        /* 合成条目只用于检验loader前置门禁，不构造实际来源。 */ (kind) => ({
-          reference: kind + '_synthetic',
+        /* 合成条目只用于检验loader前置门禁，不构造实际来源；引用形状与真实配对一致。 */ (kind) => ({
+          reference: kind + '_' + plan.attempt_id,
           value:
             kind === 'luvus'
               ? { kind, native: { root_record: join(root, 'control', 'luvus-root.json') } }

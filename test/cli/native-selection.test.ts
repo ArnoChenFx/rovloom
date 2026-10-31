@@ -31,7 +31,7 @@ test('native.provider 是对已配对来源的筛选：缩小范围不报错，�
   })
 })
 
-test('点名了从未配对的来源：不启动、要 join 才能加入；mixed 是「本平台全部」不算点名', () => {
+test('点名了从未配对的来源：不启动、启动时用设备凭据追加；mixed 也参与追加但按平台展开', () => {
   assert.deepEqual(selectNativeProviders(config({ provider: 'herdr-core' }), ['luvus', 'herdr'], 'linux'), {
     active: [],
     idle: ['luvus', 'herdr'],
@@ -42,9 +42,23 @@ test('点名了从未配对的来源：不启动、要 join 才能加入；mixed
     idle: [],
     unpaired: ['herdr-core']
   })
-  // 老 mixed 设备（只配对了 luvus+herdr）：mixed 在 Linux 展开为三种，缺的 herdr-core 不当作错误。
+  // 老 mixed 设备（只配对了 luvus+herdr）：mixed 在 Linux 展开为三种，缺的 herdr-core 要追加。
   assert.deepEqual(selectNativeProviders(config({ provider: 'mixed' }), ['luvus', 'herdr'], 'linux'), {
     active: ['luvus', 'herdr'],
+    idle: [],
+    unpaired: ['herdr-core']
+  })
+  // macOS/Windows 的 mixed 只有两项：不会去追加 herdr-core（core 只支持 Linux）。
+  for (const platform of ['darwin', 'win32'] as const) {
+    assert.deepEqual(selectNativeProviders(config({ provider: 'mixed' }), ['luvus', 'herdr'], platform), {
+      active: ['luvus', 'herdr'],
+      idle: [],
+      unpaired: []
+    })
+  }
+  // 省略 native.provider 时不追加任何来源。
+  assert.deepEqual(selectNativeProviders(config({}), ['luvus'], 'linux'), {
+    active: ['luvus'],
     idle: [],
     unpaired: []
   })

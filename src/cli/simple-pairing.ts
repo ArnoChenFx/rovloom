@@ -11,6 +11,7 @@ import type { GatewayConfig } from './config.js'
 import { canonicalLoopbackHost } from '../mcp/listen.js'
 import { PairingCodes } from './pairing-codes.js'
 import { publishSetupSchemas, reviewSetupManifest } from './setup-manifest.js'
+import type { ReviewedSetupInstallation } from './setup-manifest.js'
 import { mergeSetupProviders, publish, publishSetupCaller } from './setup-publish.js'
 import { SIMPLE_SETUP_ACTOR, SIMPLE_SETUP_LINEAGE } from './setup-targets.js'
 import { readSetupJson } from './setup-files.js'
@@ -164,9 +165,135 @@ export class SimplePairingHttp {
     return { actor: SIMPLE_SETUP_ACTOR, confirmation_id: permit.confirmation }
   }
 
+  // 追加登记只需设备凭据：失败限速按全局滑窗计数，超限后固定码拒绝（不改设备状态）。
+  readonly #appendFailures: number[] = []
+
+  /** 只读认证：机器存在、未撤销、未被要求重新确认、凭据摘要一致；返回当前恢复代次。 */
+  #authenticateAppend(machine: string, credential: string, generation: string): void {
+    let current: string
+    try {
+      current = this.state.store.verifyDeviceCredential(machine, credential)
+    } catch {
+      // 不存在与凭据错返回同一个固定码，不泄漏哪一半错了。
+      throw new GatewayError('provider_append_refused')
+    }
+    if (current !== generation) {
+      throw new GatewayError('provider_append_refused')
+    }
+  }
+
+  /** 失败限速：60 秒窗口内最多 20 次失败，超限后固定码拒绝。 */
+  #appendRateLimited(): boolean {
+    const now = Date.now()
+    while (this.#appendFailures.length && this.#appendFailures[0]! <= now - 60_000) {
+      this.#appendFailures.shift()
+    }
+    return this.#appendFailures.length >= 20
+  }
+
+  /**
+   * 追加登记：设备凭据是唯一信任锚，只能新增同 machine 的 kind，绝不覆盖已存在条目。
+   * 同 reference 且内容完全相同的重放幂等成功（崩溃窗口的收敛）。
+   */
+  private async append(request: Request): Promise<Response> {
+    if (this.#appendRateLimited()) {
+      return setupReply({ error: 'provider_append_busy' }, 429)
+    }
+    try {
+      const input = await requestJson(request, 1_048_576, this.#stop.signal)
+      fields(input, ['machine_id', 'recovery_generation', 'credential', 'installation'])
+      id(input.machine_id)
+      id(input.recovery_generation)
+      const machine = String(input.machine_id)
+      if (typeof input.credential !== 'string' || !/^[A-Za-z0-9_-]{32,256}$/u.test(input.credential)) {
+        throw new GatewayError('provider_append_refused')
+      }
+      // reference 就是 `<kind>_<attempt>`（与 /pairing 同一规则）：从清单里取出 attempt，
+      // 再交给同一 reviewSetupManifest 复核（它会按这个 attempt 重算 reference 并比对）。
+      const envelope = object(input.installation)
+      const reference = envelope.reference
+      if (typeof reference !== 'string' || !/^(luvus|herdr|herdr-core)_[a-f0-9-]{36}$/u.test(reference)) {
+        throw new GatewayError('provider_append_conflict')
+      }
+      const attempt = reference.slice(reference.indexOf('_') + 1)
+      this.#authenticateAppend(machine, input.credential, String(input.recovery_generation))
+      const signal = AbortSignal.any([request.signal, this.#stop.signal])
+      const reviewed = await reviewSetupManifest(
+        input.installation,
+        { attempt_id: attempt, actor: SIMPLE_SETUP_ACTOR, lineage: SIMPLE_SETUP_LINEAGE },
+        machine,
+        this.config.state_dir,
+        signal
+      )
+      if (reviewed.reviewed.length !== 1) {
+        // 一次只追加一个来源：多个来源的重放语义与原子性不值得扩大调用面。
+        throw new GatewayError('provider_append_conflict')
+      }
+      const entry = reviewed.reviewed[0]!
+      const existing = this.state.store.provider(machine, entry.target.provider_id)
+      const providersPath = runtimeReference(this.config.state_dir, 'providers')
+      if (existing) {
+        // 同 kind 只允许完全相同的重放；内容不同或换了 reference 一律拒绝（不改写、不替换）。
+        const registered = readRuntimeConfig(this.config).providers.find(
+          /** 注册表里同一 reference 的条目。 */ (value) => value.reference === entry.reference
+        )
+        if (
+          boundedJson(existing) !== boundedJson(entry.binding) ||
+          !registered ||
+          boundedJson(registered.value, 1_048_576) !== boundedJson(entry.value, 1_048_576)
+        ) {
+          throw new GatewayError('provider_append_conflict')
+        }
+        return setupReply({ state: 'appended', providers: [entry.reference], replayed: true })
+      }
+      // 同 machine 同 kind 不能有第二个 reference（注册表可能留有上次崩溃的半成品）。
+      if (
+        readRuntimeConfig(this.config).providers.some(
+          /** 同一设备的同一 kind。 */ (value) => {
+            const target = object(object(value.value).target)
+            return target.machine_id === machine && target.provider_id === entry.target.provider_id
+          }
+        )
+      ) {
+        throw new GatewayError('provider_append_conflict')
+      }
+      await this.registerProviders(reviewed.reviewed, providersPath, true, signal)
+      setImmediate(() => this.reload())
+      return setupReply({ state: 'appended', providers: [entry.reference] })
+    } catch (error) {
+      this.#appendFailures.push(Date.now())
+      const code = error instanceof GatewayError ? error.code : 'provider_append_failed'
+      return setupReply({ error: code }, code === 'provider_append_refused' ? 403 : 409)
+    }
+  }
+
   // 明确拒绝浏览器Origin、URL凭据和非JSON请求。
   handle(request: Request): Promise<Response> | undefined {
     const url = new URL(request.url)
+    if (url.pathname === '/pairing/providers') {
+      if (
+        this.#closed ||
+        request.method !== 'POST' ||
+        request.headers.has('origin') ||
+        url.search ||
+        url.hash ||
+        url.username ||
+        url.password ||
+        request.headers.get('content-type')?.split(';')[0]?.trim() !== 'application/json'
+      ) {
+        return Promise.resolve(setupReply({ error: 'setup_request_refused' }, 403))
+      }
+      if (this.#requests.size >= 16) {
+        return Promise.resolve(setupReply({ error: 'setup_busy' }, 503))
+      }
+      const task = this.append(request)
+      this.#requests.add(task)
+      void task.then(
+        /* 同一请求实际收尾后才释放额度。 */ () => this.#requests.delete(task),
+        /* 异常收尾也只回收自己的额度。 */ () => this.#requests.delete(task)
+      )
+      return task
+    }
     if (url.pathname !== '/pairing') {
       return undefined
     }
@@ -267,7 +394,6 @@ export class SimplePairingHttp {
     if (redeemed.machine_id !== machine) {
       throw new GatewayError('pairing_target_mismatch')
     }
-    await publishSetupSchemas(reviewed.reviewed, signal)
     const authorization = reviewed.authorization
     const providersPath = runtimeReference(this.config.state_dir, 'providers')
     const additional = readSetupJson(providersPath, 1_048_576) !== undefined
@@ -335,12 +461,6 @@ export class SimplePairingHttp {
     }
     publish(clientPath, client)
     const callersPath = runtimeReference(this.config.state_dir, 'mcp-callers')
-    const reviewedEntries = reviewed.reviewed.map(
-      /* 只保存已核验清单的程序配置；Gateway文件路径始终由本机程序选择。 */ (entry) => ({
-        reference: entry.reference,
-        value: entry.value
-      })
-    )
     if (!additional) {
       publishSetupCaller(callersPath, resource, {
         principal: { id: authorization.principal_id },
@@ -350,11 +470,35 @@ export class SimplePairingHttp {
         issued_at: client.issued_at as number,
         expires_at: client.expires_at as number
       })
-      publish(providersPath, { schema_version: 1, role: 'gateway', providers: reviewedEntries }, 1_048_576)
-    } else {
-      mergeSetupProviders(providersPath, reviewedEntries)
     }
-    for (const entry of reviewed.reviewed) {
+    await this.registerProviders(reviewed.reviewed, providersPath, additional, signal)
+    return {
+      machine_id: machine,
+      recovery_generation: this.state.store.generation(),
+      credential: redeemed.credential,
+      ...(minted ? { mcp: minted } : {})
+    }
+  }
+
+  /**
+   * 发布 schema、追加（或首次发布）providers 注册表，并按一次性许可登记 provider。
+   * `/pairing` 与追加登记共用这一段，避免两份实现漂移。
+   */
+  private async registerProviders(
+    reviewed: readonly ReviewedSetupInstallation[],
+    providersPath: string,
+    additional: boolean,
+    signal: AbortSignal
+  ): Promise<void> {
+    await publishSetupSchemas(reviewed, signal)
+    // 只保存已核验清单的程序配置；Gateway 文件路径始终由本机程序选择。
+    const entries = reviewed.map(/* 同一形状。 */ (entry) => ({ reference: entry.reference, value: entry.value }))
+    if (!additional) {
+      publish(providersPath, { schema_version: 1, role: 'gateway', providers: entries }, 1_048_576)
+    } else {
+      mergeSetupProviders(providersPath, entries)
+    }
+    for (const entry of reviewed) {
       const target = entry.target.machine_id + '/' + entry.target.provider_id
       this.#permits.set(target, {
         confirmation: randomUUID(),
@@ -371,12 +515,6 @@ export class SimplePairingHttp {
       } finally {
         this.#permits.delete(target)
       }
-    }
-    return {
-      machine_id: machine,
-      recovery_generation: this.state.store.generation(),
-      credential: redeemed.credential,
-      ...(minted ? { mcp: minted } : {})
     }
   }
 

@@ -11,7 +11,10 @@ export type NativeSelection = Readonly<{
   active: readonly NativeProviderKind[]
   /** 配对过但本次没被选中（用户用 native.provider 缩小了范围），不启动，不提示。 */
   idle: readonly NativeProviderKind[]
-  /** 用户点名选了、但这台设备从未配对的来源：需要用新码 join 才能加入。`mixed` 是「本平台全部」，不算点名。 */
+  /**
+   * `native.provider` 展开出的、这台设备从未配对的来源：启动时用设备凭据向 Gateway 追加登记。
+   * `mixed` 与显式组合值一样参与追加（Linux 上缺 herdr-core 就追加它；macOS/Windows 的 mixed 只有两项）。
+   */
   unpaired: readonly NativeProviderKind[]
 }>
 
@@ -29,7 +32,7 @@ export function selectNativeProviders(
   return Object.freeze({
     active: paired.filter(/** 配对过且被选中。 */ (kind) => selected.includes(kind)),
     idle: paired.filter(/** 配对过但没被选中。 */ (kind) => !selected.includes(kind)),
-    unpaired: provider === 'mixed' ? [] : selected.filter(/** 点名选了却没配对。 */ (kind) => !paired.includes(kind))
+    unpaired: selected.filter(/** 点名（或 mixed 展开）选了却没配对。 */ (kind) => !paired.includes(kind))
   })
 }
 

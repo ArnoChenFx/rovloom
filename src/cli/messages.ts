@@ -125,8 +125,10 @@ Windows uses the explicitly selected existing user with S4U, without storing a p
     'setup_failed: could not prepare {kind}. Install and start it on this machine, or choose the providers this machine has with native.provider in connector.json (for example "luvus,herdr"; "mixed" means every provider the platform supports), then run the join command again.\n',
   'run.nativeSettingsKept':
     'native_settings_kept: {fields} changed after pairing. They are fixed when pairing (which native instance and binary this device is bound to), so the paired values are still used; run the join command with a new code to apply the new ones.\n',
-  'run.nativeProviderNotPaired':
-    'native_provider_not_paired: {kinds} selected by native.provider is not paired on this device and is not started; run the join command with a new code to pair it.\n',
+  'run.nativeProviderAppended':
+    'native_provider_appended: {kinds} was paired to the Gateway with this device credential and is used from this start on.\n',
+  'run.nativeProviderAppendFailed':
+    'native_provider_append_failed: {kind} {code}; the paired providers still start. It is retried on the next start.\n',
   'unpair.completed':
     'unpair_completed: local pairing state was retired to {retired} and the Gateway address was cleared.\nRun rovloom connector --join to pair with any Gateway.\n',
   'unpair.empty': 'unpair_completed: no local pairing state found; nothing to reset.\n',
@@ -278,8 +280,10 @@ Windows 使用显式选择的既有用户与 S4U，不保存密码、不要求�
     'setup_failed: 无法准备 {kind}。请在本机安装并启动它，或在 connector.json 的 native.provider 里改成本机实际有的 provider（例如 "luvus,herdr"；"mixed" 表示本平台支持的全部来源），然后重新执行加入命令。\n',
   'run.nativeSettingsKept':
     'native_settings_kept: {fields} 在配对后被改动。它们在配对时固化（决定本设备绑定哪个原生实例与可执行文件），所以仍沿用配对时的值；要应用新值，请用新码重新执行加入命令。\n',
-  'run.nativeProviderNotPaired':
-    'native_provider_not_paired: native.provider 选的 {kinds} 在本设备上没有配对，本次不启动；要使用它，请用新码重新执行加入命令。\n',
+  'run.nativeProviderAppended':
+    'native_provider_appended: {kinds} 已用本设备凭据追加登记到 Gateway，本次启动就会使用。\n',
+  'run.nativeProviderAppendFailed':
+    'native_provider_append_failed: {kind} {code}；已配对的来源照常启动，下次启动会再试。\n',
   'unpair.completed':
     'unpair_completed: 本地配对状态已退役到 {retired}，Gateway 地址已清空。\n运行 rovloom connector --join 即可与任意 Gateway 重新配对。\n',
   'unpair.empty': 'unpair_completed: 本机没有可重置的配对状态。\n',
