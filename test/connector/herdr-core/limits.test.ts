@@ -303,6 +303,95 @@ test('每个上限：刚好等于上限通过，上限 + 1 被拒且能读到数
   assert.equal(HERDR_CORE_LIMITS['terminal.label']!.label!.max, HERDR_CORE_LABEL_MAX_LENGTH)
 })
 
+test('每个下界：表里写的 min / exclusiveMin 与真实复核一致（刚好在下界通过，低于下界被拒）', async (t) => {
+  const { admit } = await fixture(t)
+  const cases: {
+    label: string
+    method: string
+    ok: Record<string, unknown>
+    below: Record<string, unknown>
+    limit: { method: string; field: string; kind: 'min' | 'exclusiveMin'; value: number }
+  }[] = [
+    {
+      label: 'interrupt.timeout >= 0',
+      method: 'terminal.interrupt',
+      ok: { terminal: 't1', timeout: 0 },
+      below: { terminal: 't1', timeout: -1 },
+      limit: { method: 'terminal.interrupt', field: 'timeout', kind: 'min', value: 0 }
+    },
+    {
+      label: 'wait.timeout > 0',
+      method: 'terminal.wait',
+      ok: { terminal: 't1', timeout: 0.5 },
+      below: { terminal: 't1', timeout: 0 },
+      limit: { method: 'terminal.wait', field: 'timeout', kind: 'exclusiveMin', value: 0 }
+    },
+    {
+      label: 'send.timeout > 0',
+      method: 'terminal.send',
+      ok: { terminal: 't1', text: 'x', wait: true, timeout: 0.5 },
+      below: { terminal: 't1', text: 'x', wait: true, timeout: 0 },
+      limit: { method: 'terminal.send', field: 'timeout', kind: 'exclusiveMin', value: 0 }
+    },
+    {
+      label: 'exec.timeout > 0',
+      method: 'machine.exec',
+      ok: { argv: ['true'], timeout: 0.5 },
+      below: { argv: ['true'], timeout: 0 },
+      limit: { method: 'machine.exec', field: 'timeout', kind: 'exclusiveMin', value: 0 }
+    },
+    {
+      label: 'events.limit >= 1',
+      method: 'terminal.events',
+      ok: { limit: 1 },
+      below: { limit: 0 },
+      limit: { method: 'terminal.events', field: 'limit', kind: 'min', value: 1 }
+    },
+    {
+      label: 'events.timeout_ms >= 1',
+      method: 'terminal.events',
+      ok: { timeout_ms: 1 },
+      below: { timeout_ms: 0 },
+      limit: { method: 'terminal.events', field: 'timeout_ms', kind: 'min', value: 1 }
+    },
+    {
+      label: 'keys count >= 1',
+      method: 'terminal.keys',
+      ok: { terminal: 't1', keys: ['enter'] },
+      below: { terminal: 't1', keys: [] },
+      limit: { method: 'terminal.keys', field: 'keys', kind: 'min', value: 1 }
+    },
+    {
+      label: 'edits count >= 1',
+      method: 'file.edit',
+      ok: { path: '/tmp/x', edits: [{ old: 'a', new: 'b' }] },
+      below: { path: '/tmp/x', edits: [] },
+      limit: { method: 'file.edit', field: 'edits', kind: 'min', value: 1 }
+    }
+  ]
+  for (const item of cases) {
+    // 表里写的下界就是测试断言的下界：表与复核任何一边改了都会红。
+    const entry = HERDR_CORE_LIMITS[item.limit.method]![item.limit.field]!
+    assert.equal(entry[item.limit.kind], item.limit.value, `${item.label}: table`)
+    assert.doesNotThrow(() => admit({ method: item.method, params: item.ok }), `${item.label}: at the bound`)
+    const diagnostic = helpOf(admit, item.method, item.below)
+    assert.ok((diagnostic?.issues ?? []).length > 0, `${item.label}: below the bound should be rejected`)
+  }
+})
+
+test('一句话里带两个数的上限句子：两个数都必须来自常量', () => {
+  const sentence = (method: string, ...numbers: number[]) => {
+    const help = herdrCoreParameterHelp(contract, method) as { rules: string[] }
+    return help.rules.some((line) => numbers.every((value) => line.includes(String(value))))
+  }
+  // keys：条数与单键长度在同一句里。
+  assert.ok(sentence('terminal.keys', HERDR_CORE_KEYS_MAX, HERDR_CORE_KEY_MAX_LENGTH), 'keys')
+  // labels：条数与值长度。
+  assert.ok(sentence('terminal.label', HERDR_CORE_LABELS_MAX, HERDR_CORE_LABEL_MAX_LENGTH), 'labels')
+  // argv：条数与总字节。
+  assert.ok(sentence('terminal.run', HERDR_CORE_RUN_MAX_ARGV, HERDR_CORE_RUN_MAX_ARGV_BYTES), 'argv')
+})
+
 test('没有上限的方法不带 timeout 的上限说明', async (t) => {
   const { admit, resources } = await fixture(t)
   for (const method of ['server.status', 'terminal.get', 'terminal.list', 'templates.list', 'terminal.kill']) {
