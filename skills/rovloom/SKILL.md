@@ -251,6 +251,7 @@ The script performs `initialize` → `notifications/initialized` → call → `D
 
 ### Authorization model and upgrades
 
+A device can add a provider it was not paired with by naming it in `native.provider` and restarting: the Connector appends it with the device credential (no new pairing code) and uses it from that start; `mixed` does this too on Linux.
 Herdr, Luvus and mixed installations use the same two authorization controls: token device visibility and Connector `allow_terminal_execution`. For herdr-core the same switch also covers host capabilities (`machine.exec`, `file.*`, `doc.*`, `server.restart/stop`, `terminal.run` with `parent`); there is no second switch.
  No caller/local/gateway policy snapshots, per-method lists, action grants, raw grants or policy revision agreement are required. The current backend still defines which native methods it implements and exposes; discovery does not promise every method in the native schema is implemented.
 

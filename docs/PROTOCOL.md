@@ -73,4 +73,6 @@ AI 客户端 ──MCP Streamable HTTP──▶ Gateway ──Wire v2 (WS/WSS)�
 
 ## 4. 配对（Gateway ↔ Connector 的专用 HTTP）
 
-`POST /pairing` 是唯一的配对端点，挂在设备 listener 上、随 Gateway 常开：请求携带一机一码与实测原生安装清单，响应一次交付设备凭据（及首台设备的 MCP Bearer）；原生安装经编译核验后自动批准。已用/作废的码返回 409。命令见 [快速开始](QUICK-START-zh.md) 和 [运维指南](OPERATIONS.md)。
+`POST /pairing` 是配对端点，挂在设备 listener 上、随 Gateway 常开：请求携带一机一码与实测原生安装清单，响应一次交付设备凭据（及首台设备的 MCP Bearer）；原生安装经编译核验后自动批准。已用/作废的码返回 409。命令见 [快速开始](QUICK-START-zh.md) 和 [运维指南](OPERATIONS.md)。
+
+`POST /pairing/providers` 是**已配对设备**追加来源的端点（不需要配对码）：请求体 `{ machine_id, recovery_generation, credential, installation }`，`installation` 与 `/pairing` 同格式、只含新来源。认证是**只读**核验（机器存在、未撤销、未被要求重新确认、恢复代次一致、设备凭据摘要 `timingSafeEqual` 一致），不改连接 epoch、不改设备状态；失败统一返回 403 `provider_append_refused`，并有限速。只能追加：同一设备同一 kind 已存在时，只有「同 reference 且内容完全相同」的重放幂等成功，其它一律 409 `provider_append_conflict`；不改写、不替换、不删除已有条目。成功返回 `{ state: 'appended', providers: [reference] }` 并重载 Gateway（与 `/pairing` 相同，在线设备会短暂重连）。它沿用 `handle()` 对 Origin、URL 凭据、Content-Type、并发与 1 MiB 体积的全部拒绝规则。

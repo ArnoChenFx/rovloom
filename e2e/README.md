@@ -62,6 +62,20 @@ workspace 创建后的计数，不调用模型。可选的 Agent 两轮对话方
 配对仍在两个容器的真实 TTY（`docker run -it`）里按 Quick Start 完成；MCP 只在 Gateway 的回环上（设计如此），客户端容器共享该网络命名空间，用官方 MCP SDK 走完整 Herdr 链路。
 随后 `docker network disconnect` 把 Connector 摘出网络：Gateway 在空闲超时（20 秒）内发现，新调用立即不可用而不是悬挂；接回后数秒内自动恢复。
 
+## 追加来源（不重新 join）
+
+```sh
+# 已按 luvus 配对后，把 native.provider 改成 luvus,herdr 并重启 Connector（不 join）
+python3 e2e/quickstart.py --binary dist/release/bun-linux-x64/candidate/rovloom \
+  --luvus /path/to/luvus --append luvus,herdr --append-binaries herdr=/path/to/herdr \
+  --then "bun --no-env-file e2e/provider-append-session.mjs"
+```
+
+`--append-binaries` 只把二进制放进 PATH 供追加使用，不参与配对；`--append-core` 起一个私有 core 供追加 core；
+`--append-crash` 追加成功后再把本机注册表回滚并重启，模拟「Gateway 已登记而本机没写完」。
+`e2e/provider-append-http.mjs` 直接对 `POST /pairing/providers` 构造错凭据与已存在 kind 的请求，
+`e2e/provider-append-failure.mjs` 验证追加失败非致命。
+
 ## 真实 herdr-core 链路（Linux）
 
 `--herdr-core` 只附着已运行的 core：脚本在私有 `XDG_RUNTIME_DIR` 下用 `hc run --bg --json` 拉起 core

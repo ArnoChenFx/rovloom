@@ -128,6 +128,12 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 - **Luvus/Herdr 的端口迁移**：两种既有 provider 仍走原工厂；把它们也迁到 `ProviderPorts` 会改动它们的会话、目录与身份路径，留给后续。
 - **Gateway 侧的本地身份事实**：`LocalIdentityVerifier` 端口仍没有 Gateway 本机的 core 身份事实；身份核对发生在 Connector（`HerdrCoreInstallation`），Gateway 只信任已认证设备通道和发布的契约来源。
 
+## 已配对设备追加来源（ADR 补充）
+
+`native.provider` 点名了这台设备没配对过的 kind 时，Connector 在启动时用设备凭据把它追加进 Gateway（`POST /pairing/providers`），当次启动即使用；不需要新的配对码，设备身份、凭据与 MCP token 不变。信任锚是设备凭据：Gateway 只读核验（不改 epoch、不写设备状态），只能追加、不能覆盖，同 reference 同内容的重放幂等。`mixed` 也参与追加（Linux 上会追加 herdr-core；macOS/Windows 的 mixed 只有两项）。追加失败一律非致命，只打印 `native_provider_append_failed: <kind> <固定码>`。
+
+安全后果：追加后持有该设备范围令牌的调用方默认就能使用新来源（`allow_terminal_execution` 默认开启）；设备凭据泄漏者能追加 provider，但他本来就能冒充该设备。
+
 ## 验证
 
 单测用假 core 覆盖 framed 握手、请求配对、错误映射、超时、EOF、参数先于原生请求、结果严格性与三元组；Connector 执行端覆盖 5 个读取、控制档拒绝、`/proc` 事实不符与契约摘要不符的失败关闭；配对认领覆盖 `herdr-core` 与旧 kind 不变。schema 用 0.1.14 的真实 OpenRPC 文档和 7 个真实输出样本核对。
