@@ -6,7 +6,7 @@ import { appendNativeProviders } from './provider-append.js'
 import type { AppendOutcome } from './provider-append.js'
 import { loadCredential } from '../transport/credentials.js'
 import { runtimeReference } from './runtime-files.js'
-import type { ConnectorConfig, NativeProviderKind } from './config.js'
+import { CliError, type ConnectorConfig, type NativeProviderKind } from './config.js'
 import { silentConsole } from './setup-console.js'
 import { cliMessages, formatMessage } from './messages.js'
 import { LuvusAdapterError } from '../connector/luvus/types.js'
@@ -60,10 +60,15 @@ export class CliSetup {
         console: silentConsole(io),
         signal: io.signal
       })
-    } catch {
+    } catch (error) {
+      // 只投影固定码；其它异常统一成 append_internal，不带异常文本。
+      const code =
+        error instanceof CliError && typeof error.code === 'string' && /^[a-z][a-z0-9_]{0,63}$/u.test(error.code)
+          ? error.code
+          : 'append_internal'
       outcome = Object.freeze({
         appended: Object.freeze([]),
-        failed: Object.freeze(kinds.map((kind) => Object.freeze({ kind, code: 'append_credential_unavailable' })))
+        failed: Object.freeze(kinds.map((kind) => Object.freeze({ kind, code })))
       })
     }
     const messages = cliMessages(io.language)

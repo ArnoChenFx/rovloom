@@ -152,12 +152,22 @@ async function appendOne(
   }
   // 只在 Gateway 确认之后写本机注册表：保留已有条目，追加同一个 {reference, local}。
   const path = runtimeReference(config.state_dir, 'providers')
-  const current = object(readRuntimeJson(path, 1_048_576))
-  fields(current, ['schema_version', 'role', 'providers'])
+  let current: Record<string, unknown>
+  try {
+    current = object(readRuntimeJson(path, 1_048_576))
+  } catch {
+    return Object.freeze({ code: 'append_registry_invalid' })
+  }
+  try {
+    fields(current, ['schema_version', 'role', 'providers'])
+  } catch {
+    return Object.freeze({ code: 'append_registry_invalid' })
+  }
   if (current.schema_version !== 1 || current.role !== 'connector' || !Array.isArray(current.providers)) {
     return Object.freeze({ code: 'append_registry_invalid' })
   }
-  const entries = current.providers as { reference: string; value: unknown }[]
+  // readRuntimeJson 的结果是只读的：在副本上追加，绝不原地改冻结数组。
+  const entries = [...(current.providers as { reference: string; value: unknown }[])]
   const found = entries.find(/** 同一 reference。 */ (entry) => entry.reference === prepared.reference)
   if (found) {
     if (boundedJson(found.value, 1_048_576) !== boundedJson(prepared.local, 1_048_576)) {
@@ -192,7 +202,13 @@ export async function appendNativeProviders(input: {
       failed.push({ kind, code: 'append_cancelled' })
       continue
     }
-    const outcome = await appendOne(input.config, kind, input.credential, input.signal, input.console)
+    let outcome: 'appended' | Readonly<{ code: string }>
+    try {
+      outcome = await appendOne(input.config, kind, input.credential, input.signal, input.console)
+    } catch {
+      // 任何未预期异常都只投影成固定码，不带路径或异常文本。
+      outcome = Object.freeze({ code: 'append_internal' })
+    }
     if (outcome === 'appended') {
       appended.push(kind)
     } else {
