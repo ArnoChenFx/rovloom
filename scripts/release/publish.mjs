@@ -116,6 +116,15 @@ const RELEASE_NOTES = Object.freeze({
     ],
     upgrade:
       'Upgrade the Gateway and the Connectors together. A new Gateway with an older Connector still works, but a control call that omits `core_id`/`created_ms` or uses a terminal name makes the older Connector drop and reconnect (about one second) and the call ends `outcome_unknown`; nothing is written to the core. Nothing to migrate: pairings, tokens and ledgers are unchanged, and devices paired with herdr-core on 0.10.0 or 0.10.1 keep working without pairing again.'
+  },
+  '0.10.3': {
+    highlights: [
+      'A herdr-core request refused for a number that is too large now says the limit. The `parameter_help` of a refused request carries `limits` (`max`, `min`, `unit`) and a fixed sentence for every reviewed limit of that method: `timeout` (at most 60 seconds on `terminal.send`, `terminal.run`, `terminal.wait`, `terminal.interrupt` and `machine.exec`), `text`, `keys`, `labels`, `lines`, the byte limits of `put`, `file.write`, `file.edit` and `doc.set`, `argv`, `line`, `env`, and `limit` and `timeout_ms` of `terminal.events`. A method without such a limit carries none.',
+      "`runtime_describe` for herdr-core states the limits Rovloom enforces: `timeout` now has a `maximum`, and core's own default of 180 seconds and maximum of 600 seconds are no longer shown, because Rovloom caps every `timeout` at 60 seconds.",
+      '`runtime_call` and `runtime_call_get` explain `wait_ms` (0-5000, default 0). With it, a call that finishes quickly or is definitively refused returns its state, `reason` or result in the same reply; without it the first reply is usually `dispatching` and the `reason` comes from `runtime_call_get`. The default is unchanged.'
+    ],
+    upgrade:
+      'Nothing to migrate: only descriptions and diagnostics changed, and no parameter rule, pairing, token or ledger is different. Known limitation: a `terminal.wait` without `timeout` is only waited for 5 seconds locally and ends as `outcome_unknown`, and the device reconnects once; always pass `timeout` (at most 60). The MCP layer also rejects a tool call whose arguments exceed 65536 bytes, so the larger per-method byte limits cannot be reached.'
   }
 })
 
