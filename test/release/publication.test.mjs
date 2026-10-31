@@ -590,6 +590,18 @@ test('Release 说明按版本生成：没有该版本条目就不带升级提示
   assert(!core.includes('now defaults to on'))
   assert(!core.includes('already contains `allow_terminal_execution` explicitly'))
   assert(!core.includes('single definition'))
+  // 0.10.1 讲追加来源、native 不再逐字核对与 herdr-core 宿主级能力；不沿用 0.10.0 的要点。
+  const append = releaseBody({ tag: 'v0.10.1', version: '0.10.1', commit: 'a'.repeat(40) })
+  assert.match(append, /without a new pairing code/u)
+  assert.match(append, /`POST \/pairing\/providers`/u)
+  assert.match(append, /native_provider_append_failed/u)
+  assert.match(append, /native_settings_kept/u)
+  assert.match(append, /herdr-core offers 24 methods/u)
+  assert.match(append, /Upgrade the Gateway and the Connectors together/u)
+  assert.match(append, /Known limitation/u)
+  assert(!append.includes('herdr-core is a third runtime'))
+  assert(!append.includes('now defaults to on'))
+  assert(!append.includes('single definition'))
   // 未登记的版本不继承任何旧提示，只保留固定的公共段落与契约标记。
   const future = releaseBody({ tag: 'v0.9.9', version: '0.9.9', commit: 'b'.repeat(40) })
   assert(!future.includes('Upgrade note'))
