@@ -133,10 +133,25 @@ test('追加失败非致命：本机准备失败只给固定码，不写注册�
 test('启动校验对追加来源仍严格：reference 与 attempt 对不上即拒绝', async () => {
   const f = fixture('herdr')
   try {
-    // 把准备记录的 reference 改成另一个 attempt：篡改的本地记录必须被拒。
+    // 把准备记录与注册表**一起**改成另一个 attempt 的引用（本地配置也同步改）：
+    // 只靠「本地=注册表」是看不出来的，必须由 reference === kind_attempt 这条拦住。
+    const other = '22222222-2222-2222-2222-222222222222'
     const path = providerSetupPath(f.root, 'herdr')
     const record = readSetupJson(path, 1_048_576) as Record<string, unknown>
-    writeSetupJson(path, { ...record, reference: 'herdr_22222222-2222-2222-2222-222222222222' }, true, 1_048_576)
+    const local = record.local as { config: { config_ref: string } }
+    const tamperedLocal = { ...local, config: { ...local.config, config_ref: 'herdr_' + other } }
+    writeSetupJson(path, { ...record, reference: 'herdr_' + other, local: tamperedLocal }, true, 1_048_576)
+    const providersPath = runtimeReference(f.root, 'providers')
+    const providers = readSetupJson(providersPath, 1_048_576) as { providers: { reference: string; value: unknown }[] }
+    writeSetupJson(
+      providersPath,
+      {
+        ...providers,
+        providers: [{ reference: 'herdr_' + other, value: tamperedLocal }]
+      },
+      true,
+      1_048_576
+    )
     const runtime = createProductionCliRuntime({
       connector: /** 门禁失败时绝不能调用工厂。 */ async () => {
         throw new Error('must_not_start')
