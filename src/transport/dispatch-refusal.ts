@@ -30,6 +30,9 @@ const HERDR_CORE_REFUSALS: readonly string[] = Object.freeze([
   'herdr_core_core_id_required',
   'herdr_core_events_closed',
   'herdr_core_event_invalid',
+  'herdr_core_native_conflict',
+  'herdr_core_native_edit_failed',
+  'herdr_core_native_not_text',
   'herdr_core_native_name_taken',
   'herdr_core_native_invalid_template'
 ])

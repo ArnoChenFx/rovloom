@@ -61,7 +61,8 @@ test('宿主级方法的参数逐项收紧', () => {
   bad('machine.exec', { argv: ['true'], line: 'true', timeout: 5 })
   bad('machine.exec', { argv: ['true'], timeout: 61 }, /herdr_core_timeout_exceeds_limit/u)
   bad('machine.exec', { argv: ['true'], timeout: 5, on: 'box' }, /herdr_core_param_blocked/u)
-  bad('machine.exec', { argv: ['true'], timeout: 5, cwd: '/tmp' }, /herdr_core_param_blocked/u)
+  bad('machine.exec', { argv: ['true'], timeout: 5, cwd: 'relative' }, /herdr_core_param_invalid/u)
+  assert.doesNotThrow(() => reviewHerdrCoreParams('machine.exec', { argv: ['true'], timeout: 5, cwd: '/tmp' }))
   bad('machine.exec', { argv: [], timeout: 5 })
   bad('machine.exec', { argv: ['true'], timeout: 5, input: 'A'.repeat(300 * 1024) }, /herdr_core_text_too_large/u)
   // file.*：绝对路径、不接受 cwd、载荷有界。

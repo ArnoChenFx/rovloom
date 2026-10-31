@@ -325,7 +325,12 @@ export const HERDR_CORE_NATIVE_REJECTION_KINDS: readonly string[] = Object.freez
   'invalid_params',
   // terminal.run：名字在创建终端之前就查重，模板不可用也在启动之前。
   'name_taken',
-  'invalid_template'
+  'invalid_template',
+  // file.edit：先算出全部替换再落盘，任何一条不满足就整体失败、文件不变。
+  'edit_failed',
+  'not_text',
+  // doc.set：版本不符发生在写入之前（CAS），文件/文档不变。
+  'conflict'
 ])
 
 /** 固定码：core 明确拒绝（不是「结果未知」），带上 core 自己的类别。 */
@@ -558,12 +563,17 @@ function reviewBase64(value: unknown, limit: number): void {
  * 它们都不接受 `on`（远程机器会绕过按设备限定的 token）与 `cwd`（相对路径必须由调用方自己解析成绝对路径）。
  */
 function reviewHostParams(method: string, params: Readonly<Record<string, unknown>>): void {
-  for (const key of ['on', 'cwd']) {
-    if (params[key] !== undefined) {
-      fail('herdr_core_param_blocked')
-    }
+  // `on` 一律拒绝；`cwd` 只有 machine.exec 接受（必须是绝对路径），文件方法是绝对路径语义。
+  if (params.on !== undefined) {
+    fail('herdr_core_param_blocked')
+  }
+  if (method !== 'machine.exec' && params.cwd !== undefined) {
+    fail('herdr_core_param_blocked')
   }
   if (method === 'machine.exec') {
+    if (params.cwd !== undefined && params.cwd !== null) {
+      reviewAbsolutePath(params.cwd)
+    }
     const argv = params.argv
     const line = params.line
     if ((argv === undefined) === (line === undefined)) {

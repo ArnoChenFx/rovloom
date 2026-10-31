@@ -345,6 +345,11 @@ function paramsSchema(method: JsonObject, budget: AnnotationBudget, components: 
     }
     properties.parent_created_ms = { type: 'integer', minimum: 0, format: 'uint64' }
   }
+  // machine.exec 的 timeout 在 OpenRPC 里是可选的（core 默认 60 秒），但 rovloom 要求显式给出；
+  // 参数根也标成 required，控制端在 describe 里就能看到这个约束。
+  if (name === 'machine.exec' && !required.includes('timeout')) {
+    required.push('timeout')
+  }
   // core 生命周期没有原生参数，只有 rovloom 自有的 core_id 栅栏。
   if (name === 'server.restart' || name === 'server.stop') {
     if (Object.hasOwn(properties, 'core_id')) {

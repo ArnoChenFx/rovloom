@@ -19,6 +19,7 @@ export const CALL_REFUSAL_REASONS = [
   'template_unavailable',
   'template_ambiguous',
   'capacity',
+  'conflict',
   'name_taken',
   'invalid_template',
   'unavailable'
@@ -41,6 +42,9 @@ const REFUSAL_REASONS: Readonly<Record<string, CallRefusalReason>> = Object.free
   herdr_core_template_unavailable: 'template_unavailable',
   herdr_core_template_ambiguous: 'template_ambiguous',
   herdr_core_run_capacity: 'capacity',
+  herdr_core_native_conflict: 'conflict',
+  herdr_core_native_edit_failed: 'invalid_params',
+  herdr_core_native_not_text: 'invalid_params',
   herdr_core_native_name_taken: 'name_taken',
   herdr_core_native_invalid_template: 'invalid_template',
   herdr_core_connection_closed: 'unavailable',

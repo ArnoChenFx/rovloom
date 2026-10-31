@@ -20,6 +20,7 @@ test('每个内部拒绝码都映射到闭合集合里的原因，未知码不�
     ['herdr_core_template_ambiguous', 'template_ambiguous'],
     ['herdr_core_run_capacity', 'capacity'],
     ['herdr_core_native_name_taken', 'name_taken'],
+    ['herdr_core_native_conflict', 'conflict'],
     ['herdr_core_native_invalid_template', 'invalid_template'],
     ['herdr_core_connection_closed', 'unavailable']
   ]
