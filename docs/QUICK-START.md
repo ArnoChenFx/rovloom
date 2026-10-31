@@ -110,6 +110,13 @@ running; use `luvus,herdr` for just those two):
 rovloom config init connector --provider herdr
 ```
 
+Later, adding a provider to an already paired device does not need a new code: put it into
+`native.provider` (a single kind, a pair, or `mixed`) and restart the Connector. It prepares the
+provider locally, appends it to the Gateway with the device credential, and uses it from that start
+(`native_provider_appended: <kind>`); on failure it prints `native_provider_append_failed` and the
+paired providers still start. `mixed` also triggers this on Linux, so a pre-0.10 `mixed` device with
+a reachable core gets herdr-core appended.
+
 This creates configuration without starting the Connector or asking for an address. Existing configuration is preserved; if it selects another provider, the command returns `config_exists` so you can review it before changing it.
 
 ## 2b. herdr-core (Linux only)

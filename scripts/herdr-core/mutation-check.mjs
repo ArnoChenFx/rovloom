@@ -173,6 +173,46 @@ const mutations = [
     expect: 'parent'
   },
   {
+    name: '追加端点去掉凭据校验',
+    file: 'src/cli/simple-pairing.ts',
+    from: '      this.#authenticateAppend(machine, input.credential, String(input.recovery_generation))',
+    to: '      void this.#authenticateAppend',
+    test: ['test/cli/provider-append.test.ts', '-t', '认证只认设备凭据'],
+    expect: 'provider_append_refused'
+  },
+  {
+    name: '追加端点允许覆盖已存在 kind',
+    file: 'src/cli/simple-pairing.ts',
+    from: '      if (existing) {',
+    to: '      if (false as boolean) {',
+    test: ['test/cli/provider-append.test.ts', '-t', '同 reference 同内容重放幂等'],
+    expect: 'provider_append_conflict'
+  },
+  {
+    name: '追加端点改用 connect() 认证',
+    file: 'src/cli/simple-pairing.ts',
+    from: '      current = this.state.store.verifyDeviceCredential(machine, credential)',
+    to: '      current = (this.state.store.connect(machine, credential), generation)',
+    test: ['test/cli/provider-append.test.ts', '-t', '设备凭据追加一个来源'],
+    expect: 'online'
+  },
+  {
+    name: 'mixed 不再触发追加',
+    file: 'src/cli/native-selection.ts',
+    from: '    unpaired: selected.filter(',
+    to: "    unpaired: (provider === 'mixed' ? [] : selected).filter(",
+    test: ['test/cli/native-selection.test.ts', '-t', '点名了从未配对的来源'],
+    expect: 'herdr-core'
+  },
+  {
+    name: '启动校验放宽 attempt 检查',
+    file: 'src/cli/production.ts',
+    from: "            prepared.reference !== kind + '_' + String(prepared.attempt_id) ||",
+    to: '            false ||',
+    test: ['test/cli/provider-append-connector.test.ts', '-t', '启动校验对追加来源仍严格'],
+    expect: 'configuration_required'
+  },
+  {
     name: 'managed 不走 hc',
     file: 'src/connector/herdr-core/managed.ts',
     from: "  const child = launch(binary, ['serve'], {",

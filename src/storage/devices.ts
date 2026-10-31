@@ -558,6 +558,27 @@ export class DeviceLedger {
       })
     })
   }
+  /**
+   * 只读核验设备凭据：不改 epoch、不改状态、不写审计。用于已认证设备的追加登记
+   * （`/pairing/providers`）。失败一律同一个固定码，不区分「机器不存在」与「凭据不对」；
+   * 摘要比较用 timingSafeEqual。返回当前恢复代次，由调用方与请求里的值比较。
+   */
+  verifyDeviceCredential(machine: string, credential: string): string {
+    const row = this.db
+      .prepare('SELECT status,credential_hash,needs_confirmation FROM machines WHERE machine_id=?')
+      .get(machine)
+    const expected = row && typeof row.credential_hash === 'string' ? row.credential_hash : undefined
+    const supplied = digest(credential)
+    const same =
+      expected !== undefined &&
+      expected.length === supplied.length &&
+      timingSafeEqual(Buffer.from(expected), Buffer.from(supplied))
+    if (!row || !same || row.status === 'revoked' || row.needs_confirmation !== 0) {
+      throw new GatewayError('invalid_device_credential')
+    }
+    return this.generation()
+  }
+
   // 核验设备凭据并生成新连接 epoch，旧连接不继承新会话身份。
   connect(machine: string, credential: string): string {
     return this.transaction(

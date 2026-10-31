@@ -2,6 +2,12 @@
 import type { RoleConfig } from './config.js'
 import type { CliIo, CliPrepareOptions, RunningConnector } from './run.js'
 import { joinConnector } from './join-connector.js'
+import { appendNativeProviders } from './provider-append.js'
+import type { AppendOutcome } from './provider-append.js'
+import { loadCredential } from '../transport/credentials.js'
+import { runtimeReference } from './runtime-files.js'
+import { CliError, type ConnectorConfig, type NativeProviderKind } from './config.js'
+import { silentConsole } from './setup-console.js'
 import { cliMessages, formatMessage } from './messages.js'
 import { LuvusAdapterError } from '../connector/luvus/types.js'
 import { HerdrLocalError } from '../connector/herdr/local.js'
@@ -33,6 +39,49 @@ export class CliSetup {
     }
     this.#issueCode = options?.issueCode === true
     return config
+  }
+
+  /**
+   * 启动时追加 `native.provider` 点名但没配对过的来源：用本机设备凭据自动登记，失败非致命。
+   * 打印只含 kind 与固定码，不含路径、异常文本或凭据。
+   */
+  async appendProviders(config: ConnectorConfig, kinds: readonly NativeProviderKind[]): Promise<AppendOutcome> {
+    const io = this.#io
+    if (!io || kinds.length === 0) {
+      return Object.freeze({ appended: Object.freeze([]), failed: Object.freeze([]) })
+    }
+    let outcome: AppendOutcome
+    try {
+      const credential = loadCredential(runtimeReference(config.state_dir, 'device'))
+      outcome = await appendNativeProviders({
+        config,
+        kinds,
+        credential,
+        console: silentConsole(io),
+        signal: io.signal
+      })
+    } catch (error) {
+      // 只投影固定码；其它异常统一成 append_internal，不带异常文本。
+      const code =
+        error instanceof CliError && typeof error.code === 'string' && /^[a-z][a-z0-9_]{0,63}$/u.test(error.code)
+          ? error.code
+          : 'append_internal'
+      outcome = Object.freeze({
+        appended: Object.freeze([]),
+        failed: Object.freeze(kinds.map((kind) => Object.freeze({ kind, code })))
+      })
+    }
+    const messages = cliMessages(io.language)
+    // 每个来源一行，方便按 kind grep；同一次启动里追加的多个来源也是如此。
+    for (const kind of outcome.appended) {
+      io.stderr.write(formatMessage(messages['run.nativeProviderAppended'], { kind }))
+    }
+    for (const failure of outcome.failed) {
+      io.stderr.write(
+        formatMessage(messages['run.nativeProviderAppendFailed'], { kind: failure.kind, code: failure.code })
+      )
+    }
+    return outcome
   }
 
   // Gateway 真实监听后按需签发一张一机一码并打印完整加入命令；每次进程只打印一次，重载不重复签发。

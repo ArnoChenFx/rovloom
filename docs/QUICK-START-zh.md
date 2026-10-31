@@ -99,6 +99,11 @@ Connector **附着到你已在运行的会话**，因此远程调用操作的是
 rovloom config init connector --provider herdr
 ```
 
+已配对设备之后想加一个来源，不需要新配对码：把 `native.provider` 改成含它（单个 kind、两两组合或
+`mixed`）并重启 Connector。本机会准备该来源，用设备凭据把它追加给 Gateway，当次启动就用上
+（`native_provider_appended: <kind>`）；失败会打印 `native_provider_append_failed`，已配对的来源照常启动。
+`mixed` 在 Linux 上也会触发追加，所以 0.10 之前按 mixed 配对、且 core 可达的设备会被追加 herdr-core。
+
 只生成配置，不启动 Connector 或询问地址。已有配置不会覆盖；如果已选择其它 provider，命令返回 `config_exists`，请先核对再修改。
 
 ## 2b. herdr-core（仅 Linux）
