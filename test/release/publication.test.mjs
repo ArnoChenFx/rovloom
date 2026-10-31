@@ -616,6 +616,18 @@ test('Release 说明按版本生成：没有该版本条目就不带升级提示
   assert(!refusal.includes('herdr-core offers 24 methods'))
   assert(!refusal.includes('native_settings_kept'))
   assert(!refusal.includes('herdr-core is a third runtime'))
+  // 0.10.3 讲超限诊断带上限与 wait_ms 的取法；不沿用 0.10.2 的要点。
+  const limits = releaseBody({ tag: 'v0.10.3', version: '0.10.3', commit: 'd'.repeat(40) })
+  assert.match(limits, /now says the limit/u)
+  assert.match(limits, /`limits` \(`max`, `min`, `unit`\)/u)
+  assert.match(limits, /at most 60 seconds/u)
+  assert.match(limits, /explain `wait_ms` \(0-5000, default 0\)/u)
+  assert.match(limits, /always pass `timeout` \(at most 60\)/u)
+  assert.match(limits, /65536 bytes/u)
+  assert(!limits.includes('A refused herdr-core call now says why'))
+  assert(!limits.includes('no longer need `core_id` and `created_ms`'))
+  assert(!limits.includes('without a new pairing code'))
+  assert(!limits.includes('herdr-core is a third runtime'))
   // 未登记的版本不继承任何旧提示，只保留固定的公共段落与契约标记。
   const future = releaseBody({ tag: 'v0.9.9', version: '0.9.9', commit: 'b'.repeat(40) })
   assert(!future.includes('Upgrade note'))
