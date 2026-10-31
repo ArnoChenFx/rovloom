@@ -87,6 +87,16 @@ const RELEASE_NOTES = Object.freeze({
     ],
     upgrade:
       'A `connector.json` written by an earlier Rovloom (`config template`, first-run setup or pairing) already contains `allow_terminal_execution` explicitly, so its choice is kept and nothing changes. Only a hand-written file that omits the key turns the switch on after the upgrade; callers whose token covers that device can then type into its terminals and choose launch commands. To keep the old behaviour, add `"allow_terminal_execution": false` to that file and restart the Connector. Pairings, tokens and ledgers are unchanged.'
+  },
+  '0.10.0': {
+    highlights: [
+      'herdr-core is a third runtime (Linux only). Set `native.provider` to `herdr-core` (`native.herdr_core.mode`: `attach` to a core you already run, or `managed` to let the Connector start a private one; Rovloom never uses `hc`, and never downloads, updates or stops core), pair as usual, and the catalog offers 16 methods: reading (`server.status`, `terminal.get`, `terminal.list`, `terminal.read`, `terminal.wait`, `templates.list`, and `terminal.events`, a long poll for status changes), input and lifecycle (`terminal.send` with `wait`, `terminal.keys`, `terminal.interrupt`, `terminal.put`, `terminal.kill`, `terminal.rm`, `terminal.keep`, `terminal.label`) and launch (`terminal.run`, a program or a core template). Input and launch methods follow `allow_terminal_execution`.',
+      "Every write to a core terminal first checks the terminal's identity (core id, creation time and address) and refuses input to a terminal that is waiting for a person. A core's explicit refusal is reported as not dispatched with a fixed reason; a lost connection or timeout is an unknown outcome and is never replayed. After a core restart the Connector attaches again on its own.",
+      'Rovloom puts no limit on the core version or protocol generation. A core works if its published contract contains every method Rovloom has reviewed: methods a newer core adds are not offered, and a result that no longer matches the contract is refused instead of passed through. Tested against core 0.1.14 and 0.1.15.',
+      '`native.provider` also accepts `luvus,herdr`, `luvus,herdr-core` and `herdr,herdr-core`. `mixed` now means every provider the platform supports: Luvus, Herdr and herdr-core on Linux, Luvus and Herdr on macOS and Windows (herdr-core is Linux only).'
+    ],
+    upgrade:
+      'Devices already paired with `mixed` (Luvus and Herdr) keep starting with those two and do not need to pair again. A new pairing with `mixed` on Linux also needs herdr-core installed and running; use `luvus,herdr` to get the old pair. Upgrading herdr-core itself replaces its binary, and a device paired with the old binary fails closed (`herdr_core_installation_changed`) until it is paired again with a fresh code. Nothing changes for Luvus or Herdr only setups: pairings, tokens and ledgers are unchanged.'
   }
 })
 
