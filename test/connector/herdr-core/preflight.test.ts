@@ -105,6 +105,9 @@ test('拒绝的情形在登记前给出固定路径与规则（名字与省略�
       path: '/terminal',
       rule: 'pattern'
     },
+    // 完全没有 terminal 是缺字段，不是格式问题：用户实际踩到的就是这种被误判成别的原因的情形。
+    { method: 'terminal.kill', params: { core_id: 'abcdef01', created_ms: 5 }, path: '/terminal', rule: 'required' },
+    { method: 'terminal.keys', params: {}, path: '/terminal', rule: 'required' },
     {
       method: 'terminal.kill',
       params: { terminal: 't1', core_id: 'abcdef01', created_ms: null },

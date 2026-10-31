@@ -68,8 +68,11 @@ function issuesFor(method: string, params: Record<string, unknown>, code: string
       const key = blockedKey(method, params)
       return [{ path: key === undefined ? '/params' : '/' + key, rule: 'invalid_value' }]
     }
-    case 'herdr_core_terminal_address_unsupported':
-      return [{ path: terminalField(params), rule: 'pattern' }]
+    case 'herdr_core_terminal_address_unsupported': {
+      // 字段缺失与格式不符是两回事：缺失报 required，别让调用方去猜是不是格式问题。
+      const path = terminalField(params)
+      return [{ path, rule: Object.hasOwn(params, path.slice(1)) ? 'pattern' : 'required' }]
+    }
     case 'herdr_core_terminal_fence_required': {
       const missing = FENCE.filter((field) => params[field] === undefined)
       return missing.length
