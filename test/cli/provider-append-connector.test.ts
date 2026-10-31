@@ -18,6 +18,7 @@ import { saveCredential } from '../../src/transport/credentials.js'
 import { privateDirectory } from '../../src/cli/first-config.js'
 import { silentConsole } from '../../src/cli/setup-console.js'
 import { createProductionCliRuntime } from '../../src/cli/production.js'
+import { CliSetup } from '../../src/cli/setup-runtime.js'
 import { setupReference } from '../../src/cli/setup-targets.js'
 import { fixedHerdrSource } from '../../src/connector/herdr/review.js'
 import { hash } from '../../src/wire/index.js'
@@ -434,6 +435,42 @@ test('上一次本机准备做到一半（initializing）：固定码拒绝，�
     assert.equal(readFileSync(path, 'utf8'), before)
     assert.equal(existsSync(join(f.root, 'retired')), false)
     assert.equal(gateway.requests.length, 0)
+  } finally {
+    await gateway.close()
+    rmSync(f.root, { recursive: true, force: true })
+  }
+})
+
+test('成功与失败的提示都是每个来源一行，只含 kind 与固定码（不含路径、凭据或异常文本）', async () => {
+  const f = fixture('mixed')
+  const gateway = await fakeGateway((body) => {
+    const installation = body.installation as { installations?: { reference: string }[]; reference?: string }
+    const refs = installation.installations?.map((entry) => entry.reference) ?? [installation.reference]
+    return refs.some((ref) => ref?.startsWith('luvus_'))
+      ? { status: 409, json: { error: 'provider_append_conflict' } }
+      : { status: 200, json: { state: 'appended', providers: [] } }
+  })
+  try {
+    preparedRecord(f, 'luvus', '99999999-9999-9999-9999-999999999999')
+    preparedRecord(f, 'herdr-core', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+    const config = { ...f.config, gateway_url: 'ws://127.0.0.1:' + gateway.port } as ConnectorConfig
+    const { io: cliIo, sink } = io()
+    const setup = new CliSetup()
+    await setup.prepare(config, join(f.root, 'connector.json'), cliIo, undefined)
+    await setup.appendProviders(config, ['luvus', 'herdr-core'])
+    const lines = sink.written.trim().split('\n')
+    assert.equal(lines.length, 2, sink.written)
+    assert.match(
+      lines.find((line) => line.startsWith('native_provider_appended: '))!,
+      /^native_provider_appended: herdr-core /u
+    )
+    assert.match(
+      lines.find((line) => line.startsWith('native_provider_append_failed: '))!,
+      /^native_provider_append_failed: luvus provider_append_conflict;/u
+    )
+    assert.equal(sink.written.includes(f.root), false)
+    assert.equal(sink.written.includes('C'.repeat(48)), false)
+    setup.close()
   } finally {
     await gateway.close()
     rmSync(f.root, { recursive: true, force: true })

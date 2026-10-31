@@ -72,8 +72,9 @@ export class CliSetup {
       })
     }
     const messages = cliMessages(io.language)
-    if (outcome.appended.length) {
-      io.stderr.write(formatMessage(messages['run.nativeProviderAppended'], { kinds: outcome.appended.join(', ') }))
+    // 每个来源一行，方便按 kind grep；同一次启动里追加的多个来源也是如此。
+    for (const kind of outcome.appended) {
+      io.stderr.write(formatMessage(messages['run.nativeProviderAppended'], { kind }))
     }
     for (const failure of outcome.failed) {
       io.stderr.write(

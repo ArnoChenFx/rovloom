@@ -126,7 +126,7 @@ Windows uses the explicitly selected existing user with S4U, without storing a p
   'run.nativeSettingsKept':
     'native_settings_kept: {fields} changed after pairing. They are fixed when pairing (which native instance and binary this device is bound to), so the paired values are still used; run the join command with a new code to apply the new ones.\n',
   'run.nativeProviderAppended':
-    'native_provider_appended: {kinds} was paired to the Gateway with this device credential and is used from this start on.\n',
+    'native_provider_appended: {kind} was registered with the Gateway using this device credential and is used from this start on.\n',
   'run.nativeProviderAppendFailed':
     'native_provider_append_failed: {kind} {code}; the paired providers still start. It is retried on the next start.\n',
   'unpair.completed':
@@ -281,7 +281,7 @@ Windows 使用显式选择的既有用户与 S4U，不保存密码、不要求�
   'run.nativeSettingsKept':
     'native_settings_kept: {fields} 在配对后被改动。它们在配对时固化（决定本设备绑定哪个原生实例与可执行文件），所以仍沿用配对时的值；要应用新值，请用新码重新执行加入命令。\n',
   'run.nativeProviderAppended':
-    'native_provider_appended: {kinds} 已用本设备凭据追加登记到 Gateway，本次启动就会使用。\n',
+    'native_provider_appended: {kind} 已用本设备凭据追加登记到 Gateway，本次启动就会使用。\n',
   'run.nativeProviderAppendFailed':
     'native_provider_append_failed: {kind} {code}；已配对的来源照常启动，下次启动会再试。\n',
   'unpair.completed':

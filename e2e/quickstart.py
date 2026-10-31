@@ -659,6 +659,16 @@ def main():
             connector = Term('connector-upgraded', [rov, 'connector'], env_c, home_c); terms.append(connector)
             connector.expect('provider_ready=true', timeout=90)
             assert hashlib.sha256(open(credential_path, 'rb').read()).digest() == credential_digest, 'upgrade_changed_device_credential'
+            if args.append_core:
+                # 老 mixed 设备升级后，启动时把缺的 herdr-core 追加进 Gateway：必须真的追加成功（不是静默跳过），
+                # 并把它补进 mcp.json 的目标表，后面的 then 脚本才能调用它。
+                upgraded_text = ANSI.sub(b'', connector.log).decode('utf8', 'replace')
+                assert 'native_provider_appended: herdr-core' in upgraded_text, 'upgrade_did_not_append_herdr_core'
+                print('UPGRADE_APPENDED_HERDR_CORE', flush=True)
+                if not any(target['provider_id'] == 'herdr-core' for target in info['targets']):
+                    info['targets'].append({**info['targets'][0], 'provider_id': 'herdr-core',
+                                            'session': args.herdr_core_session})
+                    open(out, 'w').write(json.dumps(info)); os.chmod(out, 0o600)
             subprocess.run(['bun', '--no-env-file', probe, 'after'], env=probe_env, check=True, timeout=60)
             # 范围命令触发真实 v2 写盘，原 token 不轮换，旧方法/动作策略不再落盘。
             scoped = subprocess.run([rov, 'token', 'scope', '--principal', 'upgrade_test', '--devices', info['targets'][0]['machine_id']],
