@@ -8,7 +8,7 @@ import { test } from 'node:test'
 import { createHerdrCoreConnectorResources } from '../../../src/connector/herdr-core/connector.js'
 import { reviewHerdrCoreParams } from '../../../src/connector/herdr-core/methods.js'
 import type { ConnectorWireSession } from '../../../src/transport/connector.js'
-import { startFakeCore } from './fake-core.js'
+import { fakeTerminal, startFakeCore } from './fake-core.js'
 import { CREATED_MS, CORE_ID, OPENRPC, attachment, connection, fixture, request } from './connector-harness.js'
 
 const DISCOVER = JSON.parse(OPENRPC.toString('utf8'))
@@ -122,22 +122,47 @@ test('server.* 的 core_id 栅栏：不符即确定未派发', async () => {
   })
 })
 
-test('terminal.run 的 parent 栅栏：父终端不符即拒绝，对上了才转发', async () => {
-  await withSession({ discover: DISCOVER }, async ({ core, session }) => {
+test('terminal.run 的 parent 栅栏：给了 created_ms 就严格比对，省略就用名字解析出的终端', async () => {
+  // 假 core：名字 parent-a 解析成 t1；不存在的名字按 not_found 报错。
+  const handler = (call: { method: string; params: Record<string, unknown> }) => {
+    if (call.method === 'terminal.get') {
+      if (call.params.terminal !== 't1' && call.params.terminal !== 'parent-a') {
+        return { error: { code: -32602, message: 'no terminal', data: { kind: 'not_found' } } }
+      }
+      return fakeTerminal({ terminal: { address: 't1', created_ms: CREATED_MS, state: 'live', name: 'parent-a' } })
+    }
+    if (call.method === 'terminal.run') {
+      return {
+        ...fakeTerminal({ terminal: { address: 't7', created_ms: 777, state: 'live', name: 'child' } }),
+        first_message: null,
+        output: null,
+        wait: null,
+        template: null
+      }
+    }
+    if (call.method === 'templates.list') {
+      return { templates: [] }
+    }
+    return {}
+  }
+  await withSession({ discover: DISCOVER, handler }, async ({ core, session }) => {
+    // 给了错的 created_ms：读完之后、写入之前拒绝。
     await refuses(
       execute(session, 'terminal.run', { argv: ['cat'], parent: 't1', parent_created_ms: CREATED_MS + 1 }),
       'herdr_core_terminal_identity_mismatch'
     )
+    // 父终端不存在：确定未派发。
     await refuses(
-      execute(session, 'terminal.run', { argv: ['cat'], parent: 't9', parent_created_ms: CREATED_MS }),
-      'herdr_core_terminal_identity_mismatch'
+      execute(session, 'terminal.run', { argv: ['cat'], parent: 'ghost' }),
+      'herdr_core_terminal_unavailable'
     )
-    const run = await execute(session, 'terminal.run', { argv: ['cat'], parent: 't1', parent_created_ms: CREATED_MS })
+    // 名字 + 省略 parent_created_ms 可以；发给 core 的 parent 是解析出的地址。
+    const run = await execute(session, 'terminal.run', { argv: ['cat'], parent: 'parent-a' })
     assert.equal(typeof run.address, 'string')
-    const sent = core.calls.find((call) => call.method === 'terminal.run')!
-    // 自有栅栏字段不转发给 core。
-    assert.deepEqual(Object.keys(sent.params).sort(), ['argv', 'parent'])
-    assert.equal(sent.params.parent, 't1')
+    const sent = core.calls.filter((call) => call.method === 'terminal.run')
+    assert.equal(sent.length, 1)
+    assert.deepEqual(Object.keys(sent[0]!.params).sort(), ['argv', 'parent'])
+    assert.equal(sent[0]!.params.parent, 't1')
   })
 })
 

@@ -95,30 +95,34 @@ test('省略 params 等同空对象：登记前规范成 params:{}', async (t) =
   })
 })
 
-test('缺参数、终端名、缺栅栏、null 栅栏都在登记前被拒，且带固定路径与规则', async (t) => {
+test('拒绝的情形在登记前给出固定路径与规则（名字与省略栅栏是允许的）', async (t) => {
   const { admit, admissions } = await fixture(t)
   const cases: { method: string; params: Record<string, unknown>; path: string; rule: string }[] = [
-    // 控制档的终端必须是裸地址；名字会被 label 改写，machine/t7 属于远端路由。
+    // `machine/t7` 走 core 自己的机器表，绕开设备令牌范围；地址与名字都允许。
     {
       method: 'terminal.kill',
-      params: { terminal: 'build', core_id: 'abcdef01', created_ms: 5 },
+      params: { terminal: 'machine/t1', core_id: 'abcdef01', created_ms: 5 },
       path: '/terminal',
       rule: 'pattern'
     },
     // 完全没有 terminal 是缺字段，不是格式问题：用户实际踩到的就是这种被误判成别的原因的情形。
     { method: 'terminal.kill', params: { core_id: 'abcdef01', created_ms: 5 }, path: '/terminal', rule: 'required' },
     { method: 'terminal.keys', params: {}, path: '/terminal', rule: 'required' },
-    { method: 'terminal.kill', params: { terminal: 't1' }, path: '/core_id', rule: 'required' },
-    { method: 'terminal.kill', params: { terminal: 't1', core_id: 'abcdef01' }, path: '/created_ms', rule: 'required' },
     {
       method: 'terminal.kill',
       params: { terminal: 't1', core_id: 'abcdef01', created_ms: null },
       path: '/created_ms',
       rule: 'invalid_value'
     },
+    {
+      method: 'terminal.kill',
+      params: { terminal: 't1', core_id: 'ABCDEF01', created_ms: 5 },
+      path: '/core_id',
+      rule: 'pattern'
+    },
     // 被屏蔽的参数不出现在 schema 里，预检也要说清是哪一个。
     { method: 'terminal.get', params: { terminal: 't1', caller: 'x' }, path: '/caller', rule: 'invalid_value' },
-    // core 生命周期只接受 core_id 栅栏。
+    // core 生命周期只接受 core_id 栅栏，仍然必填。
     { method: 'server.stop', params: {}, path: '/core_id', rule: 'required' },
     // 必填参数由 Ajv 报，路径是参数名本身。
     {
@@ -147,6 +151,11 @@ test('缺参数、终端名、缺栅栏、null 栅栏都在登记前被拒，且
   }
   // 预检拒绝发生在登记之前：没有任何调用被登记。
   assert.equal(admissions.registered, 0)
+  // 名字形态与省略栅栏都不再被预检拒绝（执行端会解析并核对存在的终端）。
+  assert.doesNotThrow(() => admit({ method: 'terminal.kill', params: { terminal: 'build' } }))
+  assert.doesNotThrow(() => admit({ method: 'terminal.kill', params: { terminal: 't1', core_id: 'abcdef01' } }))
+  assert.doesNotThrow(() => admit({ method: 'terminal.kill', params: { terminal: 't1', created_ms: 5 } }))
+  assert.equal(admissions.registered, 3)
 })
 
 test('合法请求照常登记，未被预检放宽', async (t) => {

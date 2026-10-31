@@ -17,7 +17,6 @@ import {
   herdrCoreRequestTimeout,
   reviewHerdrCoreParams
 } from '../../../src/connector/herdr-core/methods.js'
-import { herdrCoreControlNativeParams } from '../../../src/connector/herdr-core/control.js'
 import { startFakeCore } from './fake-core.js'
 import { CREATED_MS, CORE_ID, OPENRPC, attachment, connection, fixture, request } from './connector-harness.js'
 import type { ConnectorWireSession } from '../../../src/transport/connector.js'
@@ -205,10 +204,10 @@ test('本机开关省略即开启，只有显式 false 关闭；目录上报与�
       const session = resources.session(connection())
       assert.equal(session.terminalExecutionState?.()[0]?.enabled, enabled, label)
       if (enabled) {
-        // 开启时同一个缺栅栏的请求越过开关，被参数审核的栅栏码拒绝（不是开关拒绝，且原生一次都没发）。
+        // 开启时同一个缺栅栏的请求越过开关，被参数审核拒绝（不是开关拒绝，且原生一次都没发）。
         await assert.rejects(
-          execute(session, 'terminal.send', { terminal: 't1', text: 'x' }),
-          (error: unknown) => (error as { code?: string }).code === 'herdr_core_terminal_fence_required'
+          execute(session, 'terminal.send', { terminal: 'machine/t1', text: 'x' }),
+          (error: unknown) => (error as { code?: string }).code === 'herdr_core_terminal_address_unsupported'
         )
         assert.deepEqual(core.requests, [])
       } else {
@@ -222,16 +221,19 @@ test('本机开关省略即开启，只有显式 false 关闭；目录上报与�
   }
 })
 
-test('名字与 machine/tN 不作为输入目标，宿主级方法仍不可调用', async () => {
+test('名字是合法的输入目标，machine/tN 与宿主级方法仍被拒', async () => {
   await withSession({ discover: DISCOVER }, async ({ core, session }) => {
-    for (const [method, params] of [
-      ['terminal.send', { terminal: 'e2e', core_id: CORE_ID, created_ms: CREATED_MS, text: 'x' }],
-      ['terminal.send', { terminal: 'm1/t1', core_id: CORE_ID, created_ms: CREATED_MS, text: 'x' }],
-      ['terminal.run', fence({ argv: ['sh'] })]
-    ] as const) {
-      await assert.rejects(execute(session, method, params))
-    }
-    assert.deepEqual(core.requests, [])
+    // 名字由执行端的 terminal.get 解析成地址；写入用解析出的地址。
+    const sent = await execute(session, 'terminal.send', { terminal: 'e2e', text: 'x' })
+    assert.equal(typeof sent.turn, 'number')
+    const native = core.calls.find((call) => call.method === 'terminal.send')!
+    assert.equal(native.params.terminal, 't1')
+    await assert.rejects(
+      execute(session, 'terminal.send', { terminal: 'm1/t1', text: 'x' }, '2'),
+      (error: unknown) => (error as { code?: string }).code === 'herdr_core_terminal_address_unsupported'
+    )
+    await assert.rejects(execute(session, 'terminal.run', fence({ argv: ['sh'] }), '3'))
+    assert.deepEqual(core.requests, ['terminal.get', 'terminal.send'])
   })
 })
 
@@ -239,13 +241,18 @@ test('控制档参数在原生请求之前逐项收紧，超限拒绝而不是�
   const review = (method: string, params: Record<string, unknown>) => {
     assert.throws(() => reviewHerdrCoreParams(method, params))
   }
-  // 栅栏必须齐全且形状正确。
-  review('terminal.send', { terminal: 't1', text: 'x' })
+  // 栅栏字段各自可选，但给了就必须形状正确。
   review('terminal.keys', { terminal: 't1', core_id: CORE_ID, created_ms: -1, keys: ['enter'] })
+  review('terminal.keys', { terminal: 't1', core_id: CORE_ID, created_ms: 1.5, keys: ['enter'] })
   review('terminal.kill', { terminal: 't1', core_id: 'zz', created_ms: CREATED_MS })
-  // 名字与远端路由都不是输入目标。
-  review('terminal.send', { terminal: 'e2e', core_id: CORE_ID, created_ms: CREATED_MS, text: 'x' })
-  review('terminal.send', { terminal: 'm1/t1', core_id: CORE_ID, created_ms: CREATED_MS, text: 'x' })
+  review('terminal.kill', { terminal: 't1', core_id: CORE_ID, created_ms: null })
+  // 名字合法（1-32 位 a-z 0-9 - _ .，字母或数字开头）；远端路由与表外字符不是。
+  assert.doesNotThrow(() => reviewHerdrCoreParams('terminal.send', { terminal: 'e2e', text: 'x' }))
+  assert.doesNotThrow(() => reviewHerdrCoreParams('terminal.send', { terminal: 'e2e', core_id: CORE_ID, text: 'x' }))
+  review('terminal.send', { terminal: 'm1/t1', text: 'x' })
+  review('terminal.send', { terminal: 'E2E', text: 'x' })
+  review('terminal.send', { terminal: 'a'.repeat(33), text: 'x' })
+  review('terminal.send', { text: 'x' })
   // force 会绕过 core 自己的 blocked 闸门；rovloom 的判定不依赖它，默认从严拒绝。
   review('terminal.send', fence({ text: 'x', force: true }))
   review('terminal.send', fence({ text: 'x'.repeat(HERDR_CORE_SEND_MAX_BYTES + 1) }))
@@ -281,7 +288,7 @@ test('控制档的本地期限覆盖粘贴安静窗口与 interrupt 的默认观
   assert.equal(herdrCoreRequestTimeout('terminal.wait', { timeout: 0.2 }), 5_200)
   assert.equal(herdrCoreRequestTimeout('terminal.wait', { timeout: 60 }), HERDR_CORE_REQUEST_MAX_MS)
   assert.equal(herdrCoreRequestTimeout('terminal.kill', {}), 5_000)
-  // 栅栏字段只属于 rovloom，发送前显式剥离。
-  assert.deepEqual(herdrCoreControlNativeParams(fence({ text: 'x' })), { terminal: 't1', text: 'x' })
+  // 栅栏字段只属于 rovloom，发送前显式剥离；解析出的地址替换掉调用方给的名字。
   assert.deepEqual(herdrCoreNativeParams(fence({ text: 'x' })), { terminal: 't1', text: 'x' })
+  assert.deepEqual(herdrCoreNativeParams(fence({ text: 'x' }), { terminal: 't9' }), { terminal: 't9', text: 'x' })
 })

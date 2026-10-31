@@ -168,10 +168,12 @@ test('a pairing is accepted for any version and protocol generation, and only wi
         )
       }
     }
-    // 修订号标识本仓库的档位表：别的值（含旧的 `<版本>@<提交>` 写法、空值）读取任何文件之前就拒绝。
-    // `-1` 是 0.10.0 配对时写下的旧值，仍在封闭集合里；更旧/未知/空值仍然拒绝。
-    assert.doesNotThrow(() => parseHerdrCoreProviderRefConfig(config(source('0.1.15', '1', 'herdr-core-tiers-1'))))
-    for (const revision of ['0.1.15@d028423', 'herdr-core-tiers-0', 'herdr-core-tiers-3', '', null]) {
+    // 修订号标识本仓库的档位表与参数规则：别的值（含旧的 `<版本>@<提交>` 写法、空值）在读取任何文件之前就拒绝。
+    // `-1`/`-2` 是已配对设备写下的旧值，仍在封闭集合里；更旧/未知/空值仍然拒绝。
+    for (const revision of ['herdr-core-tiers-1', 'herdr-core-tiers-2', HERDR_CORE_CLASSIFICATION_REVISION]) {
+      assert.doesNotThrow(() => parseHerdrCoreProviderRefConfig(config(source('0.1.15', '1', revision))), revision)
+    }
+    for (const revision of ['0.1.15@d028423', 'herdr-core-tiers-0', 'herdr-core-tiers-9', '', null]) {
       assert.throws(
         () => parseHerdrCoreProviderRefConfig(config(source('0.1.15', '1', revision))),
         /herdr_core_contract_unreviewed|invalid_config|invalid_text/u,

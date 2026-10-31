@@ -166,13 +166,15 @@ Pair as usual (`rovloom connector --join …`). What the MCP client can do:
   (`lines` up to 1000), `terminal.wait`;
 - input and lifecycle (`allow_terminal_execution` required): `terminal.send`, `terminal.keys`,
   `terminal.interrupt`, `terminal.put`, `terminal.kill`, `terminal.rm`, `terminal.keep`,
-  `terminal.label`;
+  `terminal.label`. `terminal` may be a bare address (`t7`) or a name; `core_id`/`created_ms` are
+  optional and checked strictly when given (omitting `created_ms` does not stop an address from being
+  reused; omitting `core_id` does not stop a replaced core); `machine/t7` is always rejected;
 - start (`allow_terminal_execution` required): `terminal.run` (program or template) and
   `templates.list`;
 - host capabilities (`allow_terminal_execution` required): `machine.exec`, `file.read`,
   `file.write`, `file.edit`, `doc.get`, `doc.set`, `server.restart`, `server.stop` (the last two
-  need `core_id` from `server.status`); `terminal.run` with `parent` + `parent_created_ms` builds
-  multi-agent trees for `terminal.wait {children}`;
+  need `core_id` from `server.status`); `terminal.run` with `parent` (address or name, optional
+  `parent_created_ms`) builds multi-agent trees for `terminal.wait {children}`;
 - still closed, listed by `runtime_describe` with a reason: `machine.list/add/connect/rename/rm`
   (they would bypass the per-device scope of a token) and the raw streams `terminal.attach` /
   `events.subscribe`.

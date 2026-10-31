@@ -252,9 +252,11 @@ export function createHerdrCoreConnectorRuntime(
         assertHerdrCoreCoreFence(installation.client(), request.params.core_id)
         installation.assert()
       }
+      // 执行端解析出的终端地址：写入 core 的请求用它，不用调用方给的名字。
+      const resolved: { terminal?: string; parent?: string } = {}
       // 启动类：先按本地上限、父终端与模板事实核对，再写发送墓碑（失败确定未派发）。
       if (request.method === 'terminal.run') {
-        await assertHerdrCoreParent({
+        resolved.parent = await assertHerdrCoreParent({
           client: installation.client(),
           contract: installation.record().contract,
           params: request.params,
@@ -296,9 +298,9 @@ export function createHerdrCoreConnectorRuntime(
         })
         installation.assert()
       }
-      // 控制档在写入前自己核对终端三元组并判断 blocked：core 只在 send 上拦 blocked（spike 3f）。
+      // 控制档在写入前自己读一次终端事实、按调用方给的栅栏核对并判断 blocked（core 只在 send 上拦 blocked，spike 3f）。
       if (herdrCoreControl(request.method)) {
-        await assertHerdrCoreTerminal({
+        resolved.terminal = await assertHerdrCoreTerminal({
           client: installation.client(),
           contract: installation.record().contract,
           method: request.method,
@@ -327,7 +329,9 @@ export function createHerdrCoreConnectorRuntime(
                 ? { labels: request.params.labels as Record<string, string> }
                 : {})
             })
-          : await installation.client().request(request.method, herdrCoreNativeParams(request.params), timeout)
+          : await installation
+              .client()
+              .request(request.method, herdrCoreNativeParams(request.params, resolved), timeout)
       ) as JsonObject
       // 结果形状由审核 schema（或长轮询自己的严格 schema）复验，这里只做统一投影。
       checkSignal(controller.signal)
@@ -337,7 +341,8 @@ export function createHerdrCoreConnectorRuntime(
       if (request.method === 'terminal.run') {
         started.set(String(result.address), Number(result.created_ms))
       } else if (request.method === 'terminal.kill' || request.method === 'terminal.rm') {
-        started.delete(String(request.params.terminal))
+        // 用名字调用时按解析出的地址删：否则容量计数漏回收，同一终端还能被反复计入。
+        started.delete(resolved.terminal ?? String(request.params.terminal))
       }
       return Object.freeze({ binding: observedBinding, native_response: result })
     } catch (error) {

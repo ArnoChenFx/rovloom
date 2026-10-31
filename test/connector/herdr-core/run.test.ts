@@ -104,10 +104,10 @@ test('模板声明与真实模板不符时在写入前拒绝', async () => {
 
 test('parent/caller/on 一律拒绝，no_parent/no_notify 只接受 true', async () => {
   await withSession({ discover: DISCOVER }, async ({ core, session }) => {
-    // parent 必须带父终端的 created_ms；caller/on 一律拒绝，die_with_parent 仍拒绝。
+    // parent 可以是地址或名字，`parent_created_ms` 可省略；`machine/t7` 与 no_parent 冲突仍拒绝。
     await assert.rejects(
-      execute(session, 'terminal.run', { argv: ['cat'], parent: 't1' }),
-      /herdr_core_terminal_fence_required/u
+      execute(session, 'terminal.run', { argv: ['cat'], parent: 'machine/t1' }),
+      /herdr_core_terminal_address_unsupported/u
     )
     await assert.rejects(
       execute(session, 'terminal.run', { argv: ['cat'], parent: 't1', parent_created_ms: 1, no_parent: true }),

@@ -149,7 +149,9 @@ tar -xzf herdr-core.tar.gz -C ~/.local/bin
   （`lines` 最多 1000）、`terminal.wait`；
 - 输入与生命周期（需要 `allow_terminal_execution`）：`terminal.send`、`terminal.keys`、
   `terminal.interrupt`、`terminal.put`、`terminal.kill`、`terminal.rm`、`terminal.keep`、
-  `terminal.label`；
+  `terminal.label`。终端用裸地址（`t7`）或名字都可以；`core_id`/`created_ms` 可选，给了就严格核对，
+  省略的含义是「就用现在名下的那个终端」（省略 `created_ms` 防不住地址复用，省略 `core_id` 防不住
+  core 换了实例）；`machine/t7` 一律拒绝；
 - 启动（需要 `allow_terminal_execution`）：`terminal.run`（程序或模板）与 `templates.list`；
 - 宿主级能力（需要 `allow_terminal_execution`）：`machine.exec`、`file.read`、`file.write`、
   `file.edit`、`doc.get`、`doc.set`、`server.restart`、`server.stop`（后两个要带

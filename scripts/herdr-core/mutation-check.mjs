@@ -21,10 +21,10 @@ const mutations = [
     expect: 'herdr_core_terminal_blocked'
   },
   {
-    name: '终端三元组核对',
+    name: '终端 created_ms 核对',
     file: 'src/connector/herdr-core/control.ts',
-    from: "  if (live.address !== fence.address || live.created_ms !== fence.created_ms) {\n    fail('herdr_core_terminal_identity_mismatch')\n  }",
-    to: "  if (live.address !== fence.address) {\n    fail('herdr_core_terminal_identity_mismatch')\n  }",
+    from: "  if (fence.created_ms !== undefined && live.created_ms !== fence.created_ms) {\n    fail('herdr_core_terminal_identity_mismatch')\n  }",
+    to: "  if (false as boolean) {\n    fail('herdr_core_terminal_identity_mismatch')\n  }",
     test: [TEST, '-t', 'created_ms 与 core.id 不一致'],
     expect: 'herdr_core_terminal_identity_mismatch'
   },
@@ -167,8 +167,8 @@ const mutations = [
   {
     name: 'parent 栅栏',
     file: 'src/connector/herdr-core/control.ts',
-    from: '  if (live.address !== parent || live.created_ms !== created) {',
-    to: '  if (live.address !== parent) {',
+    from: '  if (created !== undefined && live.created_ms !== created) {',
+    to: '  if (created !== undefined && false) {',
     test: ['test/connector/herdr-core/host.test.ts', '-t', 'terminal.run 的 parent 栅栏'],
     expect: 'parent'
   },

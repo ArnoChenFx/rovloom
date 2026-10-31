@@ -11,7 +11,13 @@ import { NativeRequestPreflightError } from '../preflight.js'
 import { ProviderAdapterError } from '../provider-error.js'
 import { boundedJson, fail, hash, parseJson } from '../../wire/index.js'
 import type { JsonObject } from '../../wire/types.js'
-import { HERDR_CORE_BLOCKED_PARAMS, HERDR_CORE_FENCE_PARAMS, HERDR_CORE_METHODS, herdrCoreControl } from './methods.js'
+import {
+  HERDR_CORE_BLOCKED_PARAMS,
+  HERDR_CORE_FENCE_PARAMS,
+  HERDR_CORE_METHODS,
+  HERDR_CORE_TERMINAL_TARGET,
+  herdrCoreControl
+} from './methods.js'
 
 /** 输入上限远大于 0.1.14 的 63 KB 文档，同时拒绝把任意大文件当 schema。 */
 export const HERDR_CORE_SCHEMA_INPUT_LIMIT = 1024 * 1024
@@ -359,6 +365,8 @@ function paramsSchema(method: JsonObject, budget: AnnotationBudget, components: 
     required.push('core_id')
   }
   if (typeof name === 'string' && herdrCoreControl(name)) {
+    // 栅栏字段各自可选：给了就按形状校验，省略就不核对。终端标识可以是地址或名字，
+    // `machine/tN`（含 `/`）与表外字符在 schema 这一层就拒绝。
     for (const field of HERDR_CORE_FENCE_PARAMS) {
       if (Object.hasOwn(properties, field)) {
         fail('herdr_core_schema_invalid')
@@ -367,7 +375,17 @@ function paramsSchema(method: JsonObject, budget: AnnotationBudget, components: 
         field === 'core_id'
           ? { type: 'string', pattern: '^[a-f0-9]{8,64}$' }
           : { type: 'integer', minimum: 0, format: 'uint64' }
-      required.push(field)
+    }
+    const terminal = properties.terminal
+    if (terminal && typeof terminal === 'object' && !Array.isArray(terminal)) {
+      ;(terminal as JsonObject).pattern = HERDR_CORE_TERMINAL_TARGET
+    }
+  }
+  // terminal.run 的 parent 与终端的规则一致（地址或名字）；parent_created_ms 可省略。
+  if (name === 'terminal.run') {
+    const parent = properties.parent
+    if (parent && typeof parent === 'object' && !Array.isArray(parent)) {
+      ;(parent as JsonObject).pattern = HERDR_CORE_TERMINAL_TARGET
     }
   }
   return inlineReferences(

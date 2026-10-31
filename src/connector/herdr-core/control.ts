@@ -12,38 +12,36 @@
 import type { JsonObject } from '../../wire/types.js'
 import { fail } from '../../wire/index.js'
 import type { HerdrCoreClient } from './client.js'
-import { herdrCoreInput, HERDR_CORE_OWNED_PARAMS } from './methods.js'
+import { herdrCoreInput } from './methods.js'
 import type { HerdrCoreContract } from './schema.js'
 
 /** 单次终端状态读取的本地期限：它只是执行前检查，不等待原生工作。 */
 export const HERDR_CORE_FENCE_TIMEOUT_MS = 5000
 
 /**
- * 调用方认定的终端事实；`terminal` 必须是裸本地地址，名字与 `machine/tN` 都不接受。
- * `core_id` 来自 `server.status` 的 `core.id`，`created_ms` 来自同一终端的读取结果。
+ * 调用方认定的终端事实；`terminal` 可以是裸本地地址或终端名字（`machine/tN` 不接受）。
+ * `core_id` 来自 `server.status` 的 `core.id`，`created_ms` 来自同一终端的读取结果；
+ * 两者都可以省略：给了就严格核对，省略就不比这一项（省略的代价见 guide 与文档）。
  */
-export type HerdrCoreTerminalFence = Readonly<{ core_id: string; created_ms: number; address: string }>
+export type HerdrCoreTerminalFence = Readonly<{
+  core_id?: string
+  created_ms?: number
+  terminal: string
+}>
 
 /** 只取栅栏字段；调用方参数里其余字段原样交给原生请求。 */
 export function herdrCoreFence(params: Readonly<Record<string, unknown>>): HerdrCoreTerminalFence {
+  const terminal = params.terminal
+  if (typeof terminal !== 'string') {
+    fail('herdr_core_terminal_address_unsupported')
+  }
   const core_id = params.core_id
   const created_ms = params.created_ms
-  const address = params.terminal
-  if (typeof core_id !== 'string' || typeof created_ms !== 'number' || typeof address !== 'string') {
-    fail('herdr_core_terminal_fence_required')
-  }
-  return Object.freeze({ core_id, created_ms, address })
-}
-
-/** 控制档请求里除栅栏字段外还有哪些原生参数；执行端只用它们发请求。 */
-export function herdrCoreControlNativeParams(params: Readonly<Record<string, unknown>>): JsonObject {
-  const native: JsonObject = {}
-  for (const [key, value] of Object.entries(params)) {
-    if (!HERDR_CORE_OWNED_PARAMS.includes(key)) {
-      native[key] = value
-    }
-  }
-  return native
+  return Object.freeze({
+    terminal,
+    ...(typeof core_id === 'string' ? { core_id } : {}),
+    ...(typeof created_ms === 'number' ? { created_ms } : {})
+  })
 }
 
 /**
@@ -130,21 +128,21 @@ export function assertHerdrCoreCoreFence(client: HerdrCoreClient, coreId: unknow
 /**
  * `terminal.run {parent}` 的父终端栅栏：多 agent 编排会把子终端挂到父终端上，
  * 父地址被复用（只删 terminals.json）时不能把新子终端挂到同地址的另一个终端。
- * 与终端三元组同款：地址 + 调用方认定的 `created_ms`，并且父必须仍在运行。
+ * `parent` 可以是地址或名字；`parent_created_ms` 可省略（给了才比对）。
+ * 返回解析出的父地址：写入 core 的是它，不是调用方给的名字。
  */
 export async function assertHerdrCoreParent(options: {
   client: HerdrCoreClient
   contract: HerdrCoreContract
   params: Readonly<Record<string, unknown>>
   timeout_ms: number
-}): Promise<void> {
+}): Promise<string | undefined> {
   const parent = options.params.parent
   if (parent === undefined || parent === null) {
-    return
+    return undefined
   }
-  const created = options.params.parent_created_ms
-  if (typeof parent !== 'string' || typeof created !== 'number') {
-    fail('herdr_core_terminal_fence_required')
+  if (typeof parent !== 'string') {
+    fail('herdr_core_terminal_address_unsupported')
   }
   const budget = Math.min(options.timeout_ms, HERDR_CORE_FENCE_TIMEOUT_MS)
   if (budget < 1) {
@@ -159,19 +157,23 @@ export async function assertHerdrCoreParent(options: {
   } catch {
     fail('herdr_core_terminal_unavailable')
   }
-  if (live.address !== parent || live.created_ms !== created) {
+  const created = options.params.parent_created_ms
+  // 只有调用方给了 parent_created_ms 才比对：省略就接受「当前名下的那个终端」。
+  if (created !== undefined && live.created_ms !== created) {
     fail('herdr_core_terminal_identity_mismatch')
   }
   if (live.state !== 'live') {
     fail('herdr_core_terminal_unavailable')
   }
+  return String(live.address)
 }
 
 /**
- * 执行前核对：先看这条连接自己的 `core.id`，再读实时终端事实。
- * 地址、`created_ms` 或 `core.id` 任一不符即拒绝，绝不把输入送给同地址的另一个终端。
+ * 执行前核对：读一次实时终端事实（`terminal.get` 接受地址或名字），把它解析成真实地址。
+ * 调用方给了 `core_id`/`created_ms` 就逐项严格比对，省略就不比这一项；
  * 只有真正送输入的方法（send/keys/interrupt）才做 blocked 判定；`put` 只写文件，
  * `kill`/`rm`/`keep`/`label` 改的是终端记录，blocked 时也必须可用（否则没法收拾现场）。
+ * 返回解析出的地址：写入 core 的请求用它，而不是调用方给的名字（名字可能在读写之间被改指）。
  */
 export async function assertHerdrCoreTerminal(options: {
   client: HerdrCoreClient
@@ -180,27 +182,29 @@ export async function assertHerdrCoreTerminal(options: {
   params: Readonly<Record<string, unknown>>
   /** 剩余期限；检查本身也不得超过这个预算。 */
   timeout_ms: number
-}): Promise<void> {
+}): Promise<string> {
   const fence = herdrCoreFence(options.params)
   const budget = Math.min(options.timeout_ms, HERDR_CORE_FENCE_TIMEOUT_MS)
   if (budget < 1) {
     fail('herdr_core_timeout')
   }
-  // 连接与调用方认定的实例必须一致：core.id 变了就是另一个实例，旧三元组一律作废。
-  if (options.client.hello.core.id !== fence.core_id) {
+  // 给了 core_id 才核对实例：core.id 变了就是另一个实例，旧栅栏一律作废。
+  if (fence.core_id !== undefined && options.client.hello.core.id !== fence.core_id) {
     fail('herdr_core_terminal_identity_mismatch')
   }
   let live: JsonObject
   try {
     live = options.contract.validateResult(
       'terminal.get',
-      await options.client.request('terminal.get', { terminal: fence.address }, budget)
+      await options.client.request('terminal.get', { terminal: fence.terminal }, budget)
     )
   } catch {
-    // 读不到终端事实就不能判断 blocked；固定码，不把原生错误文本带出去。
+    // 读不到终端事实（不存在、`machine/t7` 这类远端路由）就不能判断 blocked；固定码，不带原生文本。
     fail('herdr_core_terminal_unavailable')
   }
-  if (live.address !== fence.address || live.created_ms !== fence.created_ms) {
+  const address = String(live.address)
+  // 给了 created_ms 才比对终端化身；名字在读写之间被改指时这会拒绝。
+  if (fence.created_ms !== undefined && live.created_ms !== fence.created_ms) {
     fail('herdr_core_terminal_identity_mismatch')
   }
   // 送输入或写文件要求终端仍在运行；kill/rm/keep/label 改的是记录，
@@ -211,9 +215,10 @@ export async function assertHerdrCoreTerminal(options: {
     }
   }
   if (!herdrCoreInput(options.method)) {
-    return
+    return address
   }
   if (blocked(live.status)) {
     fail('herdr_core_terminal_blocked')
   }
+  return address
 }
