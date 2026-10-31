@@ -113,6 +113,7 @@ rovloom storage resume --role gateway --json
 | 调用停在 `dispatching` 很久 | 设备可能刚断网（Gateway 20 秒内发现后立即 `not_dispatched`）；已写出的调用是 `outcome_unknown`，**不会自动重发**，先核对再决定 |
 | `invalid_device_credential` | 凭据被撤销或重配：生成新码重新 join |
 | `configuration_required` | 需要真实本地终端完成配对 / 批准；不要删数据后重登记，结果不确定时保留原状态 |
+| 启动先输出 `working_directory_reset` | 终端所在的当前目录已被删除；Rovloom 自动切到了你的家目录继续运行（此前会在读取终端输入时直接崩溃）。命令里的**相对路径**因此按家目录解析，需要时先 `cd` 到存在的目录再运行；不影响配置与数据位置 |
 | Luvus / Herdr 不可用 | Connector 会按退避自动重新附着或重建；Linux 上附着要求对端是**你已安装的同一个**程序 |
 
 保留错误码求助；Bearer、管理员口令、配对码不要贴出来。
