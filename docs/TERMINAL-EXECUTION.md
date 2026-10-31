@@ -25,6 +25,8 @@ CLI 运行时以这份用户配置为准，覆盖 `managed/providers.json` 中�
 
 完整配置见 [配置参考](CONFIGURATION-zh.md)。
 
+herdr-core 的 `timeout` 一律以**秒**为单位、上限 60 秒（`machine.exec` 也是）；`terminal.wait` 的 `timeout` 建议显式给出（省略时本地只等 5 秒，调用会以 `outcome_unknown` 结束）。要等更久就反复调用 `terminal.wait`，每次 ≤60 秒。
+
 herdr-core 的输入/启动/宿主级能力共用同一个开关：`terminal.send`、`terminal.keys`、
 `terminal.interrupt`、`terminal.put`、`terminal.kill`、`terminal.rm`、`terminal.keep`、
 `terminal.label`、`terminal.run`、`machine.exec`、`file.read`、`file.write`、`file.edit`、

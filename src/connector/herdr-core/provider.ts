@@ -48,7 +48,6 @@ import { HERDR_CORE_PROVIDER_DESCRIPTOR } from './descriptor.js'
 import { herdrCoreSessionName } from './identity.js'
 import {
   HERDR_CORE_BLOCKED_PARAMS,
-  HERDR_CORE_EVENTS_PARAMS_SCHEMA,
   HERDR_CORE_EXPOSED_METHODS,
   HERDR_CORE_GUIDE,
   HERDR_CORE_SYNTHETIC_METHODS,
@@ -267,9 +266,8 @@ export function describeHerdrCoreContract(input: {
             description: HERDR_CORE_SYNTHETIC_METHODS.includes(method)
               ? 'rovloom long poll: current snapshot plus events after a watermark (not a core method).'
               : input.contract.methodDescription(method),
-            params_schema: HERDR_CORE_SYNTHETIC_METHODS.includes(method)
-              ? structuredClone(HERDR_CORE_EVENTS_PARAMS_SCHEMA)
-              : describeHerdrCoreParams(input.contract, method),
+            // 自有方法（长轮询）的 schema 也在覆盖层里：说明与上限同源，控制端不用分辨来源。
+            params_schema: describeHerdrCoreParams(input.contract, method),
             /** 审核表里一律拒绝的参数；它们不出现在 params_schema 里。 */
             blocked_params: HERDR_CORE_BLOCKED_PARAMS,
             ...(HERDR_CORE_METHOD_USAGE[method] ? { usage: HERDR_CORE_METHOD_USAGE[method] } : {})

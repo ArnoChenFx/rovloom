@@ -282,6 +282,77 @@ try {
   })
   assert.equal(removedCat.state, 'responded')
 
+  // ---- reason 在同一次返回里：`runtime_call` 的 wait_ms 决定它等多久 ----
+  const finishedRequest = {
+    method: 'terminal.send',
+    params: { terminal: catResult.address, text: 'x' }
+  }
+  const quick = await tool('runtime_call', {
+    target,
+    expected_binding_revision: 1,
+    contract_ref: entry('terminal.send').contract_ref,
+    native_request: finishedRequest,
+    deadline: Date.now() + 30_000,
+    wait_ms: 500
+  })
+  assert.equal(quick.isError, false, JSON.stringify(quick.raw))
+  // 给 wait_ms 时，确定拒绝（已结束/已删除的终端）在首个返回里就是终局 + reason。
+  assert.equal(quick.data.state, 'not_dispatched', JSON.stringify(quick.data))
+  assert.equal(quick.data.reason, 'terminal_unavailable', JSON.stringify(quick.data))
+  // 省略 wait_ms：首个返回允许是 dispatching 或已终局；终局后 reason 一定能经 runtime_call_get 取到。
+  const slow = await tool('runtime_call', {
+    target,
+    expected_binding_revision: 1,
+    contract_ref: entry('terminal.send').contract_ref,
+    native_request: finishedRequest,
+    deadline: Date.now() + 30_000
+  })
+  assert.equal(slow.isError, false, JSON.stringify(slow.raw))
+  let slowView = slow.data
+  for (
+    let index = 0;
+    index < 100 && !['responded', 'not_dispatched', 'outcome_unknown'].includes(slowView.state);
+    index++
+  ) {
+    await pause(50)
+    slowView = await ok('runtime_call_get', { call_id: slow.data.call_id, wait_ms: 100 })
+  }
+  assert.equal(slowView.state, 'not_dispatched', JSON.stringify(slowView))
+  assert.equal(slowView.reason, 'terminal_unavailable', JSON.stringify(slowView))
+
+  // ---- timeout 超限：诊断与 describe 都能读到 rovloom 的上限（60 秒）----
+  const overTimeout = await tool('runtime_call', {
+    target,
+    expected_binding_revision: 1,
+    contract_ref: entry('terminal.send').contract_ref,
+    native_request: {
+      method: 'terminal.send',
+      params: { terminal: 'e2e', text: 'x', wait: true, timeout: 120 }
+    },
+    deadline: Date.now() + 30_000,
+    wait_ms: 500
+  })
+  assert.equal(overTimeout.isError, true, JSON.stringify(overTimeout.raw))
+  const timeoutError = overTimeout.raw?.gateway_error
+  assert.equal(timeoutError?.code, 'native_request_invalid', JSON.stringify(overTimeout.raw))
+  assert.ok(
+    (timeoutError?.details?.issues ?? []).some((issue) => issue.path === '/timeout' && issue.rule === 'range'),
+    JSON.stringify(timeoutError?.details?.issues)
+  )
+  assert.equal(timeoutError?.details?.parameter_help?.limits?.timeout?.max, 60, JSON.stringify(timeoutError?.details))
+  assert.ok(
+    (timeoutError?.details?.parameter_help?.rules ?? []).some((line) => line.includes('at most 60')),
+    JSON.stringify(timeoutError?.details?.parameter_help?.rules)
+  )
+  const sendSchema = await ok('runtime_describe', {
+    target,
+    expected_binding_revision: 1,
+    method: 'terminal.send'
+  })
+  assert.equal(sendSchema.params_schema.properties.timeout.maximum, 60)
+  assert.match(String(sendSchema.params_schema.properties.timeout.description), /at most 60/u)
+  assert.doesNotMatch(String(sendSchema.params_schema.properties.timeout.description), /180|600/u)
+
   // ---- 栅栏字段可省略、终端可以用名字（用户 2026-10-31 拍板）----
   const named = await invoke(entry('terminal.run').contract_ref, {
     method: 'terminal.run',
