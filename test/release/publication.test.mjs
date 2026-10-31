@@ -579,6 +579,17 @@ test('Release 说明按版本生成：没有该版本条目就不带升级提示
   assert(!switchOn.includes('162,300'))
   assert(!switchOn.includes('luvus_operation_params_invalid'))
   assert(!switchOn.includes('Nothing to migrate and no behaviour change is expected'))
+  // 0.10.0 只讲 herdr-core 与 mixed 的变化；不沿用 0.9.0 的终端开关要点。
+  const core = releaseBody({ tag: 'v0.10.0', version: '0.10.0', commit: 'f'.repeat(40) })
+  assert.match(core, /herdr-core is a third runtime/u)
+  assert.match(core, /16 methods/u)
+  assert.match(core, /no limit on the core version or protocol generation/u)
+  assert.match(core, /`mixed` now means every provider the platform supports/u)
+  assert.match(core, /do not need to pair again/u)
+  assert.match(core, /herdr_core_installation_changed/u)
+  assert(!core.includes('now defaults to on'))
+  assert(!core.includes('already contains `allow_terminal_execution` explicitly'))
+  assert(!core.includes('single definition'))
   // 未登记的版本不继承任何旧提示，只保留固定的公共段落与契约标记。
   const future = releaseBody({ tag: 'v0.9.9', version: '0.9.9', commit: 'b'.repeat(40) })
   assert(!future.includes('Upgrade note'))
