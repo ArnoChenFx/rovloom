@@ -478,7 +478,7 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
       privateDirectory(config.state_dir)
       privateDirectory(join(config.state_dir, 'managed'))
       migrateConnectorControls(config.state_dir)
-      const settings = readRuntimeConfig(config)
+      let settings = readRuntimeConfig(config)
       if (!sources.connector) {
         throw new CliError('backend_unavailable', 3)
       }
@@ -500,17 +500,20 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
       credential()
       const control = providerControl(config.state_dir, 'luvus')
       const managedRoot = join(control, 'root.json')
-      const isolated = settings.providers.some(
-        /* 只对首次引导的固定控制记录选择独立账本目录，native仍由既有root工厂逐项复验。 */ (entry) =>
-          !!entry.value &&
-          typeof entry.value === 'object' &&
-          'native' in entry.value &&
-          !!entry.value.native &&
-          typeof entry.value.native === 'object' &&
-          (('root_record' in entry.value.native && entry.value.native.root_record === managedRoot) ||
-            // 用户自己的 Luvus 没有 Connector 拥有的 root，但同样把 claim 账本放在控制目录。
-            ('mode' in entry.value.native && entry.value.native.mode === 'user'))
-      )
+      // Luvus managed/user 的独立账本目录；追加来源后要按新注册表重算。
+      const computeIsolated = () =>
+        settings.providers.some(
+          /* 只对首次引导的固定控制记录选择独立账本目录，native仍由既有root工厂逐项复验。 */ (entry) =>
+            !!entry.value &&
+            typeof entry.value === 'object' &&
+            'native' in entry.value &&
+            !!entry.value.native &&
+            typeof entry.value.native === 'object' &&
+            (('root_record' in entry.value.native && entry.value.native.root_record === managedRoot) ||
+              // 用户自己的 Luvus 没有 Connector 拥有的 root，但同样把 claim 账本放在控制目录。
+              ('mode' in entry.value.native && entry.value.native.mode === 'user'))
+        )
+      let isolated = computeIsolated()
       const pairing = readSetupJson(runtimeReference(config.state_dir, 'pairing'))
       // 配对记录决定有哪些来源；`native.provider` 只决定本次启动其中哪几个，不再要求当前 native 与配对时逐字相同。
       let providers = settings.providers
@@ -530,7 +533,7 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
         }
         const kindOf = /** 形状不对的登记留给下面的严格解析，不在这里换错误码。 */ (entry: { value: unknown }) =>
           entry.value && typeof entry.value === 'object' && 'kind' in entry.value ? entry.value.kind : undefined
-        const pairedKinds = settings.providers.map(kindOf)
+        let pairedKinds = settings.providers.map(kindOf)
         if (
           pairedKinds.some(
             /* 只认固定 kind；未知值不能借筛选混过去。 */ (kind) =>
@@ -541,11 +544,22 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
           throw new CliError('configuration_required')
         }
         const messages = cliMessages(resolveCliLanguage(process.env))
-        const selection = selectNativeProviders(config, pairedKinds as NativeProviderKind[])
+        let selection = selectNativeProviders(config, pairedKinds as NativeProviderKind[])
         if (selection.unpaired.length) {
-          process.stderr.write(
-            formatMessage(messages['run.nativeProviderNotPaired'], { kinds: selection.unpaired.join(', ') })
-          )
+          // 已配对设备追加点名却没配对过的来源：用设备凭据自动登记，失败非致命。
+          await setup?.appendProviders(live, selection.unpaired)
+          settings = readRuntimeConfig(config)
+          providers = settings.providers
+          isolated = computeIsolated()
+          const refreshed = settings.providers.map(kindOf)
+          if (
+            refreshed.some(/** 追加后的注册表仍只认固定 kind。 */ (kind) => typeof kind !== 'string') ||
+            new Set(refreshed).size !== refreshed.length
+          ) {
+            throw new CliError('configuration_required')
+          }
+          pairedKinds = refreshed
+          selection = selectNativeProviders(config, pairedKinds as NativeProviderKind[])
         }
         if (selection.active.length === 0) {
           throw new CliError('configuration_required')
@@ -570,7 +584,10 @@ export function createProductionCliRuntime(sources: ProductionCliSources = {}, s
           if (
             prepared.schema_version !== 1 ||
             prepared.phase !== 'prepared' ||
-            prepared.attempt_id !== paired.attempt_id ||
+            // 配对时的来源共用 pairing.json 的 attempt；追加来的来源有自己的 attempt。
+            // 两种都必须满足「reference 就是 kind_attempt」且属于同一台设备，与逐字比较 attempt 等强度：
+            // 篡改 attempt/reference 任一侧都会让引用对不上，而本地配置仍须与注册表逐字相同。
+            prepared.reference !== kind + '_' + String(prepared.attempt_id) ||
             prepared.machine_id !== paired.machine_id ||
             !entry ||
             object(entry.value).kind !== kind ||

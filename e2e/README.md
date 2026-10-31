@@ -16,18 +16,18 @@ Herdr 二进制必须是固定的 0.9.5（SHA-256 `14d9e8bc…929d`，夹具会�
 
 ## 场景
 
-| 场景 | 验证 |
-|---|---|
-| `full-chain-herdr` | machines → providers → discover → describe → call → get → result_read（摘要校验）；有副作用的 `workspace.create` 用 `session.snapshot` 读回；显式关闭终端开关（`allow_terminal_execution:false`）时目录隐藏 `pane.send_text` |
-| `idempotent-retry` | 同 `client_request_key` + 同意图返回同一 `call_id` 且原生只执行一次；同 key 不同意图 → `conflict`；无 key 不合并 |
-| `terminal-switch` | 配置省略 `allow_terminal_execution`（默认开启）时 `pane.send_text` 放行且目录可见；写入显式 `false` 重启后目录隐藏、同一调用 → `not_dispatched`，连接与只读调用不受影响 |
-| `connector-restart` | 正常停止后 native 子进程被回收；离线调用立即 `unavailable`（毫秒级，不挂起）；重启后恢复 |
-| `connector-crash` | `kill -9`：Gateway 立即判不可用；孤儿 native 仍在监听时**重启被拒（退出码 3，fail-closed）且不触碰孤儿**；native 也消失（等同掉电）后重启自动清理遗留并恢复 |
-| `attach-existing` | 用户已运行 Herdr：Connector 附着它（不再起第二个）；Connector 退出后用户的实例继续存在 |
-| `attach-create-persist` | 没有实例：Connector 自建并放手；Connector 退出后仍运行，重启后附着同一个（之前创建的 workspace 还在） |
-| `attach-recover` | 附着的实例被 `kill -9`：Connector 自行重建并结束当前连接，数秒内调用恢复，Connector 进程不退出 |
-| `device-revoke` | Gateway 停止后经正式 Store 撤销设备，重启后设备为 `revoked`，调用不可达，Connector 持续重试而不得服务 |
-| `unknown-outcome` | native 已收到请求但未应答时 Connector 被杀：调用为 `outcome_unknown`；Connector 重启后状态不变，新 native 收不到该请求（不自动重发） |
+| 场景                    | 验证                                                                                                                                                                                                                         |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `full-chain-herdr`      | machines → providers → discover → describe → call → get → result_read（摘要校验）；有副作用的 `workspace.create` 用 `session.snapshot` 读回；显式关闭终端开关（`allow_terminal_execution:false`）时目录隐藏 `pane.send_text` |
+| `idempotent-retry`      | 同 `client_request_key` + 同意图返回同一 `call_id` 且原生只执行一次；同 key 不同意图 → `conflict`；无 key 不合并                                                                                                             |
+| `terminal-switch`       | 配置省略 `allow_terminal_execution`（默认开启）时 `pane.send_text` 放行且目录可见；写入显式 `false` 重启后目录隐藏、同一调用 → `not_dispatched`，连接与只读调用不受影响                                                      |
+| `connector-restart`     | 正常停止后 native 子进程被回收；离线调用立即 `unavailable`（毫秒级，不挂起）；重启后恢复                                                                                                                                     |
+| `connector-crash`       | `kill -9`：Gateway 立即判不可用；孤儿 native 仍在监听时**重启被拒（退出码 3，fail-closed）且不触碰孤儿**；native 也消失（等同掉电）后重启自动清理遗留并恢复                                                                  |
+| `attach-existing`       | 用户已运行 Herdr：Connector 附着它（不再起第二个）；Connector 退出后用户的实例继续存在                                                                                                                                       |
+| `attach-create-persist` | 没有实例：Connector 自建并放手；Connector 退出后仍运行，重启后附着同一个（之前创建的 workspace 还在）                                                                                                                        |
+| `attach-recover`        | 附着的实例被 `kill -9`：Connector 自行重建并结束当前连接，数秒内调用恢复，Connector 进程不退出                                                                                                                               |
+| `device-revoke`         | Gateway 停止后经正式 Store 撤销设备，重启后设备为 `revoked`，调用不可达，Connector 持续重试而不得服务                                                                                                                        |
+| `unknown-outcome`       | native 已收到请求但未应答时 Connector 被杀：调用为 `outcome_unknown`；Connector 重启后状态不变，新 native 收不到该请求（不自动重发）                                                                                         |
 
 ## 从零部署（真实首次配对）
 
@@ -61,6 +61,21 @@ workspace 创建后的计数，不调用模型。可选的 Agent 两轮对话方
 只通过 Docker 网络上的真实 TCP 通信；Gateway 容器里没有 Herdr，设备监听 `0.0.0.0`，Connector 用容器 DNS 名 `ws://rv-gw-…:9443` 连接。
 配对仍在两个容器的真实 TTY（`docker run -it`）里按 Quick Start 完成；MCP 只在 Gateway 的回环上（设计如此），客户端容器共享该网络命名空间，用官方 MCP SDK 走完整 Herdr 链路。
 随后 `docker network disconnect` 把 Connector 摘出网络：Gateway 在空闲超时（20 秒）内发现，新调用立即不可用而不是悬挂；接回后数秒内自动恢复。
+
+## 追加来源（不重新 join）
+
+```sh
+# 已按 luvus 配对后，把 native.provider 改成 luvus,herdr 并重启 Connector（不 join）
+python3 e2e/quickstart.py --binary dist/release/bun-linux-x64/candidate/rovloom \
+  --luvus /path/to/luvus --append luvus,herdr --append-binaries herdr=/path/to/herdr \
+  --then "bun --no-env-file e2e/provider-append-session.mjs"
+```
+
+`--append-binaries` 只把二进制放进 PATH 供追加使用，不参与配对；`--append-core` 起一个私有 core 供追加 core；
+`--append-crash` 追加成功后再把本机注册表回滚并重启，模拟「Gateway 已登记而本机没写完」。
+`e2e/provider-append-http.mjs` 直接对 `POST /pairing/providers` 构造错凭据与已存在 kind 的请求，
+`e2e/provider-append-failure.mjs` 验证追加失败非致命。
+`--narrow <kind>`（配合 `--append`）在追加后把 `native.provider` 缩小到只剩 `<kind>` 再重启 Connector，`e2e/provider-narrow-session.mjs` 检查：Gateway 仍登记着被缩掉的来源，留下的来源照常可用；调用被缩掉的来源会得到 `outcome_unknown` 并让这台设备重连一次（约 1 秒，其它来源随后自动恢复）——这是已知毛刺，脚本只断言「不挂起、留下的来源在有限时间内恢复」。
 
 ## 真实 herdr-core 链路（Linux）
 
@@ -165,7 +180,6 @@ OpenCode JSON 事件字段参考 [v1.19.3 CLI](https://github.com/anomalyco/open
 发现/选择/状态/`agent.prompt`/回复流程、WebUI 管理、真实双机网络或已发布二进制验证。相关缺口继续由
 [#153](https://github.com/ArnoChenFx/Rovloom/issues/153) 与 [#154](https://github.com/ArnoChenFx/Rovloom/issues/154) 跟踪。
 
-
 ## Windows
 
 `quickstart_windows.py` 在真实 Windows runner 的 ConPTY 里完成同样的从零配对，并附着官方 Herdr 或 Luvus（`--herdr-dir` / `--luvus-dir`），可选 `--pre-existing`、`--service`、`--kill-herdr`、`--kill-luvus`。CI 见 [Windows e2e](../.github/workflows/windows-e2e.yml)。
@@ -180,7 +194,6 @@ OpenCode JSON 事件字段参考 [v1.19.3 CLI](https://github.com/anomalyco/open
 - **LLM Agent 单独脚本**：`e2e/agent.mjs` 让 opencode（DeepSeek `deepseek-chat`）经 MCP 完成 list → discover → ping → `workspace.create`，再由独立 MCP 客户端读回 workspace 数（0→1）。依赖模型 API 域名可达与 `DEEPSEEK_API_KEY`，不在默认场景集里；模型输出有随机性，仅作冒烟。
 - `unknown-outcome` 证明“新 native 未被重发”；被暂停后又恢复的旧 native 是否执行了该请求，不在 Rovloom 可观察范围内
   （这正是 `outcome_unknown` 的含义）。
-
 
 ## 原位升级回归
 

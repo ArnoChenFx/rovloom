@@ -218,6 +218,13 @@ def main():
     ap.add_argument('--service', action='store_true',
                     help='（macOS，Herdr）就绪后终端 Connector 退出，改由 LaunchDaemon（sudo -n 安装并启动）提供原生连接；'
                          'Connector 使用真实 HOME（服务以所选用户运行），MCP 链路成功即证明服务可用')
+    ap.add_argument('--append', help='（已配对后）把 native.provider 改成含这些 kind 的组合并重启 Connector，不重新 join')
+    ap.add_argument('--append-binaries', help='追加时用的二进制，KIND=PATH[,KIND=PATH]；不参与配对')
+    ap.add_argument('--append-core', dest='append_core', action='store_true',
+                    help='（--append 含 herdr-core）起一个私有 core 供追加使用')
+    ap.add_argument('--narrow', help='（--append 之后）把 native.provider 缩小到这个 kind 再重启 Connector：Gateway 已登记、Connector 不再启动的来源，其余来源必须照常可用')
+    ap.add_argument('--append-crash', dest='append_crash', action='store_true',
+                    help='（--append）成功后再删掉本机注册表里的追加条目并重启，模拟 Gateway 已登记而本机没写完的崩溃窗口')
     ap.add_argument('--then', help='就绪后执行的命令，环境变量 MCP_CONFIG 指向连接信息')
     args = ap.parse_args()
     # 多 provider 是只追加的能力：只给一个时与之前完全一致（同样的参数、标记与清理）。
@@ -296,6 +303,29 @@ def main():
         env_c = {**env_c, 'XDG_RUNTIME_DIR': core_runtime, 'XDG_STATE_HOME': core_state,
                  'HC_SESSION': args.herdr_core_session, 'SHELL': '/bin/sh',
                  'HERDR_RELEASES_URL': 'http://127.0.0.1:9'}
+    append_core_runtime = os.path.join(work, 'append-runtime')
+    append_core_state = os.path.join(work, 'append-state')
+    if args.append_binaries:
+        for item in args.append_binaries.split(','):
+            kind, _, source = item.partition('=')
+            assert kind in ('luvus', 'herdr', 'herdr-core') and source, f'bad --append-binaries: {item}'
+            shutil.copy(source, os.path.join(herdr_dir, kind)); os.chmod(os.path.join(herdr_dir, kind), 0o700)
+        if 'herdr-core' in args.append_binaries or args.append_core:
+            if not os.path.exists(os.path.join(herdr_dir, 'hc')):
+                os.symlink('herdr-core', os.path.join(herdr_dir, 'hc'))
+    if args.append_core:
+        # 私有 core：与单 provider 的 core 场景同一套环境变量，供「追加」而不是「配对」使用。
+        for d in (append_core_runtime, append_core_state):
+            os.makedirs(d, mode=0o700, exist_ok=True)
+        env_c = {**env_c, 'XDG_RUNTIME_DIR': append_core_runtime, 'XDG_STATE_HOME': append_core_state,
+                 'HC_SESSION': args.herdr_core_session, 'SHELL': '/bin/sh',
+                 'HERDR_RELEASES_URL': 'http://127.0.0.1:9'}
+        started = subprocess.run([os.path.join(herdr_dir, 'hc'), 'run', '--bg', '--json', '--name', 'e2e',
+                                  'sh', '-c', 'printf "rovloom-e2e\\n"; exec sleep 300'],
+                                 env={**env_c, 'TERM': 'xterm-256color'}, cwd=home_c,
+                                 capture_output=True, text=True, timeout=30)
+        assert started.returncode == 0, f'append core run failed: {started.stderr[-400:]}'
+        print('APPEND_CORE_TERMINAL', started.stdout.strip()[:300], flush=True)
     terms = []
     gateway = None
     status = finished = None
@@ -488,6 +518,80 @@ def main():
                 print('MIXED_RESTART', json.dumps({'sigkill': True, 'providers': providers}), flush=True)
             else:
                 print('MIXED_CRASH', 'skipped (--mixed-crash not set)', flush=True)
+        append_markers = []
+        if args.append:
+            # 只改 native.provider（保留已有的 per-provider 设置），停掉再重启 Connector；不发新配对码。
+            requested = [kind for kind in args.append.split(',') if kind]
+            assert requested, '--append needs at least one kind'
+            combinations = {
+                ('luvus',): 'luvus',
+                ('herdr',): 'herdr',
+                ('herdr-core',): 'herdr-core',
+                ('luvus', 'herdr'): 'luvus,herdr',
+                ('luvus', 'herdr-core'): 'luvus,herdr-core',
+                ('herdr', 'herdr-core'): 'herdr,herdr-core',
+                ('luvus', 'herdr', 'herdr-core'): 'mixed'
+            }
+            ordered = tuple(kind for kind in ('luvus', 'herdr', 'herdr-core') if kind in requested)
+            assert ordered in combinations, f'unsupported --append combination: {ordered}'
+            # 本机注册表在追加前的条目（--append-crash 用它模拟「本机没写完」）。
+            providers_path = os.path.join(home_c, '.local', 'share', 'rovloom', 'connector', 'managed', 'providers.json')
+            before_entries = json.load(open(providers_path))['providers']
+            # 追加前后设备凭据必须逐字节不变；把摘要交给 then 脚本核对。
+            identity_path = os.path.join(work, 'append-identity.json')
+            device_path = os.path.join(home_c, '.local', 'share', 'rovloom', 'connector', 'managed', 'device.json')
+            open(identity_path, 'w').write(json.dumps({
+                'device_sha256': hashlib.sha256(open(device_path, 'rb').read()).hexdigest(),
+                'providers_sha256': hashlib.sha256(open(providers_path, 'rb').read()).hexdigest()
+            })); os.chmod(identity_path, 0o600)
+            connector.stop()
+            patched = json.load(open(path))
+            patched.setdefault('native', {})['provider'] = combinations[ordered]
+            if 'herdr-core' in ordered:
+                # 追加的 core 用本轮沙箱的会话名（与 --append-core 起的那个一致）。
+                patched['native'].setdefault('herdr_core', {})['session'] = args.herdr_core_session
+            open(path, 'w').write(json.dumps(patched, indent=2) + '\n'); os.chmod(path, 0o600)
+            connector = Term('connector-append', [rov, 'connector'], env_c, home_c); terms.append(connector)
+            connector.expect('provider_ready=true', timeout=120)
+            text = ANSI.sub(b'', connector.log).decode('utf8', 'replace')
+            append_markers = [line for line in text.splitlines() if line.startswith('native_provider_appended') or line.startswith('native_provider_append_failed')]
+            print('NATIVE_PROVIDER_APPEND', json.dumps(append_markers), flush=True)
+            # 追加成功后本次启动就用上新来源：把 mcp.json 的 target 列表补全（会话名按各来源的规则）。
+            appended = [kind for kind in ordered if 'native_provider_appended: ' + kind in text]
+            if appended:
+                machine_id = info['targets'][0]['machine_id']
+                append_sessions = {'luvus': 'default', 'herdr': 'default', 'herdr-core': args.herdr_core_session}
+                info['targets'] = [
+                    {'machine_id': machine_id, 'provider_id': kind, 'profile': 'session', 'session': append_sessions[kind]}
+                    for kind in ordered
+                ]
+                open(out, 'w').write(json.dumps(info)); os.chmod(out, 0o600)
+                print('APPEND_TARGETS', json.dumps([target['provider_id'] for target in info['targets']]), flush=True)
+            if args.append_crash:
+                # Gateway 已登记、本机 providers.json 还没写：把追加前的条目写回去，再重启。
+                after = json.load(open(providers_path))['providers']
+                kept = [entry for entry in after if any(entry['reference'] == old['reference'] for old in before_entries)]
+                assert len(kept) < len(after), 'nothing was appended to the local registry'
+                document = json.load(open(providers_path))
+                document['providers'] = kept
+                open(providers_path, 'w').write(json.dumps(document, indent=2) + '\n'); os.chmod(providers_path, 0o600)
+                connector.stop()
+                connector = Term('connector-append-crash', [rov, 'connector'], env_c, home_c); terms.append(connector)
+                connector.expect('provider_ready=true', timeout=120)
+                text = ANSI.sub(b'', connector.log).decode('utf8', 'replace')
+                append_markers += [line for line in text.splitlines() if line.startswith('native_provider_appended') or line.startswith('native_provider_append_failed')]
+                print('NATIVE_PROVIDER_APPEND_CRASH', json.dumps(append_markers), flush=True)
+            if args.narrow:
+                # Gateway 已登记 X，而 Connector 因 native.provider 缩小范围不再启动 X：其余来源必须照常可用。
+                assert args.narrow in ordered, '--narrow must be one of --append kinds'
+                connector.stop()
+                narrowed = json.load(open(path))
+                narrowed.setdefault('native', {})['provider'] = args.narrow
+                open(path, 'w').write(json.dumps(narrowed, indent=2) + '\n'); os.chmod(path, 0o600)
+                connector = Term('connector-narrow', [rov, 'connector'], env_c, home_c); terms.append(connector)
+                connector.expect('provider_ready=true', timeout=120)
+                print('NARROWED', args.narrow, flush=True)
+            # 追加后 registry 与 device 凭据的字节都在 then 脚本里核对。
         status = 0
         if args.herdr_core:
             identity_runtime = managed_run or core_runtime
@@ -553,10 +657,29 @@ def main():
             credential_digest = hashlib.sha256(open(credential_path, 'rb').read()).digest()
             # 只替换二进制，不重新 join、不编辑 managed 配对配置或设备凭据。
             shutil.copy(args.binary, rov); os.chmod(rov, 0o755)
+            if args.append_core:
+                # 追加用的私有 core 用本轮沙箱会话名；配置里写上，候选启动时才能追加 herdr-core。
+                upgraded = json.load(open(path))
+                upgraded.setdefault('native', {}).setdefault('herdr_core', {})['session'] = args.herdr_core_session
+                open(path, 'w').write(json.dumps(upgraded, indent=2) + '\n'); os.chmod(path, 0o600)
             gateway = Term('gateway-upgraded', [rov, 'gateway'], env_g, home_g); terms.append(gateway)
+            if args.append_core:
+                # 追加是启动时的 HTTP 请求：给 Gateway 一点监听时间，避免把「还没起好」当成追加失败。
+                gateway.pump(0.5)
+                time.sleep(1.5)
             connector = Term('connector-upgraded', [rov, 'connector'], env_c, home_c); terms.append(connector)
             connector.expect('provider_ready=true', timeout=90)
             assert hashlib.sha256(open(credential_path, 'rb').read()).digest() == credential_digest, 'upgrade_changed_device_credential'
+            if args.append_core:
+                # 老 mixed 设备升级后，启动时把缺的 herdr-core 追加进 Gateway：必须真的追加成功（不是静默跳过），
+                # 并把它补进 mcp.json 的目标表，后面的 then 脚本才能调用它。
+                upgraded_text = ANSI.sub(b'', connector.log).decode('utf8', 'replace')
+                assert 'native_provider_appended: herdr-core' in upgraded_text, 'upgrade_did_not_append_herdr_core'
+                print('UPGRADE_APPENDED_HERDR_CORE', flush=True)
+                if not any(target['provider_id'] == 'herdr-core' for target in info['targets']):
+                    info['targets'].append({**info['targets'][0], 'provider_id': 'herdr-core',
+                                            'session': args.herdr_core_session})
+                    open(out, 'w').write(json.dumps(info)); os.chmod(out, 0o600)
             subprocess.run(['bun', '--no-env-file', probe, 'after'], env=probe_env, check=True, timeout=60)
             # 范围命令触发真实 v2 写盘，原 token 不轮换，旧方法/动作策略不再落盘。
             scoped = subprocess.run([rov, 'token', 'scope', '--principal', 'upgrade_test', '--devices', info['targets'][0]['machine_id']],
@@ -769,6 +892,13 @@ def main():
                                  'HERDR_BINARY': os.path.join(herdr_dir, 'herdr') if args.herdr else '',
                                  'MIXED_INFLIGHT_FILE': inflight_file,
                                  'MIXED_AFTER_RESTART': '1' if (args.mixed_crash and not args.upgrade_from) else ''})
+            if args.append:
+                then_env.update({'APPEND_IDENTITY': os.path.join(work, 'append-identity.json'),
+                                 'APPEND_KINDS': args.append,
+                                 'GATEWAY_DEVICE_URL': 'http://127.0.0.1:' + str(gateway_cfg['devices']['port']),
+                                 'CONNECTOR_MANAGED': os.path.join(home_c, '.local', 'share', 'rovloom', 'connector', 'managed')})
+            if args.narrow:
+                then_env['NARROW_KIND'] = args.narrow
             if args.herdr_core:
                 # 控制档场景需要同一个沙箱里的 hc 与 core 路径：计划重启与 SIGKILL 只作用于本轮私有沙箱。
                 then_env.update({'HERDR_CORE_MODE': args.herdr_core_mode,
@@ -818,7 +948,8 @@ def main():
             stop_servers(herdr_dir)
         except Exception as error:
             print('CLEANUP servers error', error, flush=True)
-        if args.herdr_core:
+        if args.herdr_core or args.append_core:
+            # --append-core 起的私有 core 同样属于本轮（原先只在 --herdr-core 时回收，会遗留 core 与 holder 进程）。
             try:
                 stop_herdr_core(herdr_dir, args.herdr_core_session, home_c)
             except Exception as error:
