@@ -102,14 +102,92 @@ missing, pairing stops with `configuration_required`.
 The Connector **attaches to the session you already run**, so remote calls act on your real
 workspaces and Agent logins. It starts one in your own config directory only if none is running.
 
-Luvus is the default. Before first pairing, choose Herdr explicitly (use `mixed` for both — that
-needs both installed):
+Luvus is the default. Before first pairing, choose Herdr explicitly (`mixed` uses every provider this
+platform supports — Luvus, Herdr and herdr-core on Linux, so all three must be installed and a herdr-core
+running; use `luvus,herdr` for just those two):
 
 ```sh
 rovloom config init connector --provider herdr
 ```
 
 This creates configuration without starting the Connector or asking for an address. Existing configuration is preserved; if it selects another provider, the command returns `config_exists` so you can review it before changing it.
+
+## 2b. herdr-core (Linux only)
+
+herdr-core is a third runtime: the core's own agent-management API over a unix socket, not the Herdr
+TUI. It is Linux-only and puts no limit on the core version or protocol generation (CI runs against **0.1.14** and
+**0.1.15**). What decides whether a core works is its own published contract: it must contain every method rovloom
+has reviewed. Methods a newer core adds are simply not offered, and a result that no longer matches the document
+is refused as a protocol mismatch rather than passed through. The binary digest and contract hash are recorded at pairing, so upgrading core replaces
+the binary and a paired device fails closed
+(`herdr_core_installation_changed`) until you pair again with a fresh code (`rovloom connector --join …`, which re-pairs this machine as a new device against the new core).
+
+Install it from the official release manifest, verifying the archive yourself (never `curl | sh`):
+
+```sh
+curl -fsS https://releases.herdr.dev/core/0.1.15/manifest.json -o manifest.json
+python3 -c 'import json;t=json.load(open("manifest.json"))["targets"]["linux-x86_64"];print(t["url"]);print(t["sha256"])'
+# download the printed URL, then:
+echo "<sha256 from the manifest>  herdr-core.tar.gz" | sha256sum --check
+tar -xzf herdr-core.tar.gz -C ~/.local/bin
+```
+
+Then either start a core yourself (`HC_SESSION=default herdr-core serve`, or `hc run --bg ...`) and
+select `attach`, or let the Connector start a private one with `managed`:
+
+```json
+{
+  "native": {
+    "provider": "herdr-core",
+    "herdr_core": { "session": "default", "mode": "managed" }
+  }
+}
+```
+
+`mode: "managed"` runs `herdr-core serve` from `native.runtime_bin_dirs` (or `PATH`) with a private
+`XDG_RUNTIME_DIR`/`XDG_STATE_HOME`/`XDG_CONFIG_HOME`; rovloom never calls `hc`, never downloads or
+updates core, and leaves the core and its terminals running when the Connector exits. Templates live
+in `<config_home>/herdr-core/templates/*.md`; with `managed` the default config home is private and
+empty, so set `native.herdr_core.config_home` to a directory where you keep templates. Terminals the core
+starts inherit its environment: `PATH` is `/usr/bin:/bin` prefixed with `native.agent_bin_dirs` (the same rule
+as Luvus and Herdr, so set it to where your agents live), `HOME` stays your real home, and `XDG_*` are the
+private directories.
+
+Pair as usual (`rovloom connector --join …`). What the MCP client can do:
+
+- reads: `server.status`, `templates.list`, `terminal.get`, `terminal.list`, `terminal.read`
+  (`lines` up to 1000), `terminal.wait`;
+- input and lifecycle (`allow_terminal_execution` required): `terminal.send`, `terminal.keys`,
+  `terminal.interrupt`, `terminal.put`, `terminal.kill`, `terminal.rm`, `terminal.keep`,
+  `terminal.label`;
+- start (`allow_terminal_execution` required): `terminal.run` (program or template) and
+  `templates.list`;
+- everything else stays closed: `machine.*`, `file.*`, `doc.set`, `server.stop/restart`,
+  `terminal.attach`.
+
+To follow status changes without polling `terminal.list`, long-poll `terminal.events`: it returns the
+current snapshot plus up to `limit` events after `after_seq` (default `limit` 64, wait ≤30s). Feed the
+returned `next_after_seq` back. `rebuilt`, `truncated` and `dropped` answer for *your* `after_seq` and
+never stick: `rebuilt:true` means your watermark no longer fits (it is ahead of the core, e.g. after a core
+restart, or older than the feed's current snapshot), so rebuild from `terminals`; `truncated:true` with
+`dropped:n` means the local buffer already evicted `n` events you had not read. Events of terminals that are
+gone (`finished`, `removed`, `lost`) are delivered too, not filtered against the snapshot. Known limit: the core
+keeps its `core.id` across restarts and `seq` restarts at 0, so a stale watermark that happens to be inside the
+new range cannot be told apart; poll continuously and treat a falling `seq` as a restart. It is a read:
+`allow_terminal_execution` is not needed.
+
+A template run looks like this (`argv[0]` is the template name; `template: true` makes rovloom check
+it against `templates.list` first):
+
+```json
+{ "method": "terminal.run", "params": { "argv": ["reviewer", "Review src/x.rs"] , "template": true, "name": "review" } }
+```
+
+Then talk to it in turns: `terminal.send` with `wait: true` and an explicit `timeout` (≤60s) sends
+one message and waits for that turn, and `terminal.read` with `lines` reads the reply. A turn that
+ends leaves the agent in `done`, not `idle`; `if: "idle"` is therefore not a "ready for the next
+message" condition. Core-level rejections such as `status_mismatch` are reported as
+`not_dispatched` with a `reason`, so nothing was typed.
 
 ## 3. Start and pair
 

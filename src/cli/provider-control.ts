@@ -113,7 +113,8 @@ export function migrateConnectorControls(directory: string): void {
       const documents: Document[] = []
       for (const path of [
         runtimeReference(directory, 'providers'),
-        ...['luvus', 'herdr'].map((kind) => runtimeReference(directory, LEGACY_SETUP[kind as NativeProviderKind]))
+        // 旧布局只有这两种；herdr-core 是新增 kind，没有历史 setup 文档需要迁移。
+        ...(['luvus', 'herdr'] as const).map((kind) => runtimeReference(directory, LEGACY_SETUP[kind]))
       ]) {
         const value = readSetupJson(path, 1_048_576)
         if (value === undefined) {

@@ -85,6 +85,8 @@ type Peer = {
   providerSnapshotBytes: number
   providerFences: Map<string, ProviderBinding>
   terminalExecutions: Map<string, { binding: ProviderBinding; enabled: boolean }>
+  /** 逐调用拒绝的固定码：只保留到该 call 收敛或连接关闭，供调用视图给出原因。 */
+  refusals: Map<string, string>
   readyProviders: Set<string>
   epochReference?: string
   lastHeartbeatAt?: number
@@ -249,6 +251,7 @@ export function createGateway(options: GatewayOptions) {
     peer.providerSnapshotBytes = 0
     peer.providerFences.clear()
     peer.readyProviders.clear()
+    peer.refusals.clear()
     peers.delete(peer)
     for (const [call, original] of reads) {
       if (original.peer === peer) {
@@ -932,8 +935,14 @@ export function createGateway(options: GatewayOptions) {
           reads.delete(binding.call_id)
           peer.session.adapter.release(binding)
         }
+        // 只保存有界数量的固定码；原因只用于调用视图，不进入正文或结果。
+        if (peer.refusals.size >= 1024 && !peer.refusals.has(binding.call_id)) {
+          peer.refusals.clear()
+        }
+        peer.refusals.set(binding.call_id, decoded.payload.code)
       } else {
         commitNativeResponse(options.store, peer.session.adapter, decoded)
+        peer.refusals.delete(binding.call_id)
         inflight.delete(binding.call_id)
         pruneOriginalRead(binding.call_id)
         if (!reads.has(binding.call_id)) {
@@ -992,6 +1001,7 @@ export function createGateway(options: GatewayOptions) {
         providerSnapshots: new Map(),
         providerFences: new Map(),
         terminalExecutions: new Map(),
+        refusals: new Map(),
         readyProviders: new Set(),
         providerSnapshotBytes: 0
       }
@@ -1074,6 +1084,23 @@ export function createGateway(options: GatewayOptions) {
         assertPeer(peer)
         options.store.assertConnection(peer.connection)
         return structuredClone(peer.connection)
+      } catch {
+        return undefined
+      }
+    },
+    /** 当前连接对某次调用的逐调用拒绝码；没有记录（或连接已换）时返回 undefined。 */
+    refusalReason(callId: string): string | undefined {
+      try {
+        for (const peer of peers) {
+          if (peer.closed || !peer.connection) {
+            continue
+          }
+          const code = peer.refusals.get(callId)
+          if (code !== undefined) {
+            return code
+          }
+        }
+        return undefined
       } catch {
         return undefined
       }

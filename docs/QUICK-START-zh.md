@@ -93,13 +93,80 @@ Windows arm64 上 Herdr 安装脚本会退回用模拟运行 x64 构建，Luvus 
 Connector **附着到你已在运行的会话**，因此远程调用操作的是你真实的工作区和 Agent 登录；
 只有没有运行实例时，才会在你自己的配置目录里启动一个。
 
-默认使用 Luvus。首次配对前，用以下命令选择 Herdr（`mixed` 表示两个都用，需要两者都已安装）：
+默认使用 Luvus。首次配对前，用以下命令选择 Herdr（`mixed` 表示本平台支持的全部来源——Linux 上是 Luvus、Herdr 与 herdr-core，三者都要装好且有一个在运行的 herdr-core；只要前两个就用 `luvus,herdr`）：
 
 ```sh
 rovloom config init connector --provider herdr
 ```
 
 只生成配置，不启动 Connector 或询问地址。已有配置不会覆盖；如果已选择其它 provider，命令返回 `config_exists`，请先核对再修改。
+
+## 2b. herdr-core（仅 Linux）
+
+herdr-core 是第三种 runtime：core 自己的智能体管理 API（unix socket），不是 Herdr TUI。只支持
+Linux，不限制 core 的版本号和协议代次（CI 固定测 **0.1.14** 与 **0.1.15**）。core 能不能用，看它自己发布的契约：必须包含 rovloom 审核过的那些方法。
+新版本多出来的方法不会出现在目录里；结果与文档不符时按协议不符拒绝，不会原样放行。
+二进制摘要与契约哈希会在配对时记录，所以升级 core 等于换了二进制，已配对设备会失败关闭（`herdr_core_installation_changed`），
+用新的配对码重新配对即可（`rovloom connector --join …` 会把这台机器作为新设备对新 core 重新配对）。
+
+从官方发布清单安装，自己核对压缩包（不要 `curl | sh`）：
+
+```sh
+curl -fsS https://releases.herdr.dev/core/0.1.15/manifest.json -o manifest.json
+python3 -c 'import json;t=json.load(open("manifest.json"))["targets"]["linux-x86_64"];print(t["url"]);print(t["sha256"])'
+# 下载打印出来的地址，然后：
+echo "<清单里的 sha256>  herdr-core.tar.gz" | sha256sum --check
+tar -xzf herdr-core.tar.gz -C ~/.local/bin
+```
+
+然后要么自己启动 core（`HC_SESSION=default herdr-core serve`，或 `hc run --bg ...`）并选 `attach`，
+要么让 Connector 拉起私有实例：
+
+```json
+{
+  "native": {
+    "provider": "herdr-core",
+    "herdr_core": { "session": "default", "mode": "managed" }
+  }
+}
+```
+
+`mode: "managed"` 用 `native.runtime_bin_dirs`（或 `PATH`）里的 `herdr-core serve` 启动，并给它私有的
+`XDG_RUNTIME_DIR`/`XDG_STATE_HOME`/`XDG_CONFIG_HOME`；rovloom 不调用 `hc`、不下载或更新 core，Connector
+退出后 core 与终端继续运行。模板在 `<config_home>/herdr-core/templates/*.md`；managed 默认的 config home
+是私有空目录，用自己的模板就把 `native.herdr_core.config_home` 指向准备好的目录。core 启动的终端继承它的环境：
+`PATH` 是 `/usr/bin:/bin`，前面按顺序加上 `native.agent_bin_dirs`（与 Luvus、Herdr 同一规则，把它设成 agent 所在目录），
+`HOME` 保持真实家目录，`XDG_*` 是私有目录。
+
+配对照常（`rovloom connector --join …`）。MCP 客户端能做的事：
+
+- 读取：`server.status`、`templates.list`、`terminal.get`、`terminal.list`、`terminal.read`
+  （`lines` 最多 1000）、`terminal.wait`；
+- 输入与生命周期（需要 `allow_terminal_execution`）：`terminal.send`、`terminal.keys`、
+  `terminal.interrupt`、`terminal.put`、`terminal.kill`、`terminal.rm`、`terminal.keep`、
+  `terminal.label`；
+- 启动（需要 `allow_terminal_execution`）：`terminal.run`（程序或模板）与 `templates.list`；
+- 其余保持关闭：`machine.*`、`file.*`、`doc.set`、`server.stop/restart`、`terminal.attach`。
+
+要跟踪状态变化而不停 `terminal.list`，用长轮询 `terminal.events`：返回当前快照 + `after_seq`
+之后至多 `limit` 条事件（默认 64 条，最多等 30 秒）。把返回的 `next_after_seq` 带回去。
+`rebuilt`、`truncated`、`dropped` 是对**你这个 `after_seq`** 的回答，不会黏住：`rebuilt:true` 表示你的水位对不上了
+（比 core 当前水位还大，例如 core 重启后；或早于 feed 当前快照的起点），请用返回的 `terminals` 重建状态；
+`truncated:true` 且 `dropped:n` 表示本地缓冲已经挤掉了你还没读的 `n` 条事件。已消失终端的 `finished`、
+`removed`、`lost` 事件也会送达，不按快照过滤。已知局限：core 重启后 `core.id` 不变、`seq` 从 0 重来，
+一个恰好落在新范围内的旧水位无法分辨；请持续轮询，并把 `seq` 变小当作重启的信号。它是观察档，
+不需要 `allow_terminal_execution`。
+
+模板启动长这样（`argv[0]` 是模板名；`template: true` 让 rovloom 先用 `templates.list` 核对）：
+
+```json
+{ "method": "terminal.run", "params": { "argv": ["reviewer", "Review src/x.rs"], "template": true, "name": "review" } }
+```
+
+之后按轮对话：`terminal.send` 带 `wait: true` 和显式 `timeout`（≤60 秒）发一条并等这一轮结束，
+`terminal.read` 带 `lines` 读回复。一轮结束后智能体是 `done` 而不是 `idle`，所以 `if: "idle"`
+不能当「可以发下一条」的条件。`status_mismatch` 这类 core 明确拒绝会以 `not_dispatched` + `reason`
+返回，表示什么都没输入。
 
 ## 3. 启动与配对
 

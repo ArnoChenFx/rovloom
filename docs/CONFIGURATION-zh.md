@@ -15,7 +15,7 @@ rovloom config init connector --provider herdr
 rovloom config init gateway --container
 ```
 
-`--provider` 只适用于 Connector，可选 `luvus`、`herdr`、`mixed`。`--container` 只适用于 Gateway，显式将 MCP、设备和管理监听设为 `0.0.0.0`；维护的 Compose 文件仍把 MCP / 管理端口只发布到宿主回环。MCP、管理页与管理 API 均无需公网 URL 配置即可使用反向代理。不带该参数时，Gateway 保持普通默认值（MCP 与设备通道通配，管理页回环）。`--config` 只选择配置文件，默认状态路径仍属于当前用户 home。
+`--provider` 只适用于 Connector，可选 `luvus`、`herdr`、`herdr-core`、`mixed`（以及 `native.provider` 里列出的组合值）。`--container` 只适用于 Gateway，显式将 MCP、设备和管理监听设为 `0.0.0.0`；维护的 Compose 文件仍把 MCP / 管理端口只发布到宿主回环。MCP、管理页与管理 API 均无需公网 URL 配置即可使用反向代理。不带该参数时，Gateway 保持普通默认值（MCP 与设备通道通配，管理页回环）。`--config` 只选择配置文件，默认状态路径仍属于当前用户 home。
 
 初始化不启动服务、不创建设备身份、不批准 native 访问，沿用角色首次启动的独占文件发布机制。已有文件不覆盖；显式 provider / 监听请求与已有内容冲突时返回 `config_exists`。已有部署应先核对配置和配对状态，编辑后用 `config check` 校验再重启。
 
@@ -73,13 +73,19 @@ Connector，通常为 `~/.config/rovloom/connector.json`：
 | `gateway.url` | string，必填 | 初始化前为 `""`；其余为 ≤2048 字符的 WS/WSS origin，如 `ws://192.0.2.10:9443` 或 `wss://gateway.example`。不带凭据/查询/片段/路径，可带末尾 `/`；产品固定使用 `/connector`。 |
 | Connector `allow_terminal_execution` | boolean，可选 | `true`；省略也开启。只有字面量 `false` 关闭直接终端输入及自定义启动/恢复命令；只想接受严格 Agent 文本对话和读取的设备请设为 `false`。旧版本生成的文件已显式写出该值，沿用其选择；只有当初省略了该项的文件会变为开启。修改这一份用户文件并重启 Connector，不改变安装设置或 token 设备范围。 |
 | Connector `native` | object，可选 | 默认省略，只接受以下来源选择及安装目录字段，在首次原生初始化时应用。 |
-| `native.provider` | string enum，可选 | 省略时为 `luvus`；`herdr` 仅选 Herdr，`mixed` 各选一个。须在首次初始化前选定，之后不能更改。 |
+| `native.provider` | string enum，可选 | 省略时为 `luvus`；`herdr` 仅选 Herdr，`herdr-core` 使用 herdr-core（见 `native.herdr_core.mode`），`mixed` 选本平台支持的全部来源：Linux 上是 Luvus、Herdr 与 herdr-core，macOS/Windows 上是 Luvus 与 Herdr（herdr-core 仅 Linux）。两两组合写明：`luvus,herdr`、`luvus,herdr-core`、`herdr,herdr-core`。0.10 之前 `mixed` 只表示 Luvus + Herdr：已经按那个集合配对的设备继续只用这两个启动，不需要重新配对；新配对想要这一对就用 `luvus,herdr`。须在首次初始化前选定，之后不能更改。 |
 | `native.runtime_bin_dirs` | 1–16 个互不重复的规范绝对目录 string 数组（每项≤4096字符），可选 | 查找所选 `luvus`/`herdr` 程序的位置。搜索顺序：数组内目录依序，其后是 Connector 启动时 `PATH` 中可用的条目，最后是 `/usr/bin:/bin`（Windows 无此项）。不同程序可装在不同目录。不接受 shell 展开或可执行 argv。 |
 | `native.agent_bin_dirs` | 1–16 个互不重复的规范绝对目录 string 数组（每项≤4096字符），可选 | 查找 Agent 程序的目录。Agent PATH 在原生初始化时按同样顺序固化。Rovloom 不安装或认证 Agent。 |
 | `native.herdr.mode` | `"attach"`（默认）或 `"managed"`，可选 | 仅 Herdr。`attach`：连接你已在运行的 Herdr，仅在没有实例时在你自己的配置目录里启动一个，实例消失后重新附着/重建。`managed`：Connector 私有、由它拥有的隔离实例。见[Herdr：附着或隔离](#herdr附着或隔离)。 |
 | `native.luvus.mode` | `"attach"`（默认）或 `"managed"`，可选 | 仅 Luvus。`attach`：连接你自己的 `default` 会话，仅在没有运行的会话时在你自己的 `LUVUS_HOME` 里启动一个，消失后重新附着/重建。`managed`：Connector 私有的隔离实例（会话名 `rovloom`）。见[Luvus：附着或隔离](#luvus附着或隔离)。 |
 | `native.luvus.state_root` | 规范绝对目录 string，可选 | 附着模式下你的 Luvus 状态目录（默认取 Connector 环境里的 `$LUVUS_HOME`，否则 `~/.luvus`）。不存在时以 0700 创建，且必须是私有目录。 |
 | `native.herdr.config_home` | 规范绝对目录 string，可选 | 附着模式下你的 Herdr 使用的配置目录（默认 `$XDG_CONFIG_HOME`，否则 `~/.config`）。Connector 以服务运行、环境与你的终端不同时请显式设置。 |
+| `native.herdr_core.session` | 会话名（`A-Za-z0-9._-`，1–64 字符，并受 core 套接字路径上限约束），可选 | 仅 herdr-core。默认 `default`。会话名会成为 Target 的一部分，并在配对时固定。 |
+| `native.herdr_core.mode` | `attach` 或 `managed`，可选 | 默认 `attach`：Connector 只附着已用这个 `HC_SESSION` 运行的 core，不启动或停止 core。`managed`：Connector 自己用 `native.runtime_bin_dirs`（或 `PATH`）里的 `herdr-core serve` 拉起 core，并给它私有的 `XDG_RUNTIME_DIR`/`XDG_STATE_HOME`/`XDG_CONFIG_HOME`；绝不调用 `hc`、不下载或更新 core，Connector 退出后 core 与终端继续运行。 |
+| `native.herdr_core.config_home` | 规范绝对路径，可选 | 仅 `managed`；`attach` 下给了会被拒绝。managed core 用它放 `templates/` 与 `config.toml`（默认是 Connector 状态目录下的私有空目录）。指向你自己准备的目录即可使用自己的模板。 |
+| `native.runtime_bin_dirs` | 规范绝对路径数组，可选 | `managed` 下查找 `herdr-core` 的目录（省略时按 `PATH`）。rovloom 不下载、不更新、不安装 core。 |
+
+herdr-core 不限制版本号和协议代次：能不能用由它自己发布的契约决定，契约里必须包含 rovloom 审核过的全部方法（CI 固定测 0.1.14 与 0.1.15）；每次配对还会钉住当时的二进制摘要与契约哈希（所以升级 core 后需要用新的配对码重新配对：`rovloom connector --join …`）。`allow_terminal_execution` 约束所有往终端输入或启动程序的方法（`terminal.send`、`terminal.keys`、`terminal.interrupt`、`terminal.put`、`terminal.kill`、`terminal.rm`、`terminal.keep`、`terminal.label`、`terminal.run`，以及带 `lines>0` 的 `terminal.read`）。Connector 另外把「自己经 `terminal.run` 启动的存活终端」限制在每个 Connector 进程 32 个（`HERDR_CORE_MAX_RUN_TERMINALS`）。
 
 Gateway 已启用的监听端口必须不同。未知字段、旧扁平字段、runtime/ref 选择、TLS/CA
 路径、schema 摘要、binary pin 和凭据值均拒绝。用户参数不含原生 root、账本、绑定或

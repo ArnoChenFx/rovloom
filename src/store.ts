@@ -10,6 +10,7 @@ import {
   assertBinding,
   boundedJson,
   LIMITS,
+  PROVIDER_KINDS,
   registeredRequestDigest,
   validateAttempt,
   validateDevicePlatform,
@@ -17,6 +18,7 @@ import {
   validateTarget
 } from './wire/index.js'
 import type { ResponseAnchor, ResponseEvidencePlan } from './wire/evidence.js'
+import { DISPATCH_REFUSAL_CODES } from './wire/types.js'
 import type { DevicePlatformPayload } from './wire/types.js'
 import type {
   AttemptBinding,
@@ -614,7 +616,7 @@ export class Store {
         if (
           binding.machine_id !== claim.machine_id ||
           binding.provider_id !== binding.kind ||
-          !['luvus', 'herdr'].includes(binding.kind) ||
+          !PROVIDER_KINDS.includes(binding.kind) ||
           binding.config_ref !== binding.kind + '_' + claimId ||
           binding.binding_revision !== 1 ||
           !binding.enabled ||
@@ -1292,7 +1294,7 @@ export class Store {
   }
   /** 仅由已认证 Wire 拒绝路径调用；原子提交确定未写出，未知或既有终态绝不倒退。 */
   commitDispatchRefusal(binding: AttemptBinding, code: DispatchRefusalCode): boolean {
-    if (code !== 'terminal_execution_disabled') {
+    if (!DISPATCH_REFUSAL_CODES.includes(code)) {
       throw new GatewayError('invalid_dispatch_refusal')
     }
     return this.dispatchRefused(binding, code, 'connector', ['dispatching', 'connector_accepted'])

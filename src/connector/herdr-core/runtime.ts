@@ -1,0 +1,394 @@
+/**
+ * herdr-core 的 Connector 执行端：把已准入的普通 Wire 请求转成一次 framed JSON-RPC 调用，
+ * 结果用本次实例 `rpc.discover` 编译出的审核 schema 复验。这里不订阅事件、不发送输入、
+ * 不宣称 turn 完成，也不把超时解释成原生停止。
+ */
+import { DispatchClaims } from '../claims.js'
+import { ProviderAdapterError } from '../provider-error.js'
+import { GatewayError } from '../../contracts.js'
+import { assertBinding, boundedJson, fail, object } from '../../wire/index.js'
+import type { AttemptBinding, AuthenticatedEnvelope, JsonObject } from '../../wire/types.js'
+import type { ConnectorWireSession, WireExecutionResult } from '../../transport/connector.js'
+import { createProviderWireAdapter } from '../../runtime/provider-wire.js'
+import { ConnectorAttemptBook, createConnectorAdmissionBackend } from '../../runtime/connector-attempts.js'
+import type { Connection } from '../../transport/index.js'
+import { createHerdrCoreAdapter } from './readonly.js'
+import type { HerdrCoreBackend } from './readonly.js'
+import type { HerdrCoreAttachment } from './installation.js'
+import { HERDR_CORE_REATTACH_WINDOW_MS } from './installation.js'
+import { contractRef } from '../../wire/index.js'
+import type { V2Target } from '../../wire/types.js'
+import {
+  herdrCoreRequestTimeout,
+  herdrCoreControl,
+  herdrCoreNativeParams,
+  HERDR_CORE_EVENTS_DEFAULT_LIMIT,
+  HERDR_CORE_EVENTS_MAX_TIMEOUT_MS,
+  herdrCoreNativeRejectionCode,
+  reviewHerdrCoreParams,
+  HERDR_CORE_EVENTS_POLL_METHOD,
+  HERDR_CORE_MAX_RUN_TERMINALS,
+  HERDR_CORE_NATIVE_REJECTION_KINDS
+} from './methods.js'
+import { HerdrCoreRpcError } from './client.js'
+import { assertHerdrCoreTerminal, assertHerdrCoreTemplate } from './control.js'
+import { createHerdrCoreEventFeed } from './feed.js'
+import { assertTerminalExecutionAllowed } from '../terminal-execution.js'
+
+/** 已验证的 herdr-core 本机来源与当前 epoch 的受保护路由。 */
+export type HerdrCoreConnectorOptions = Readonly<{
+  installation: HerdrCoreAttachment
+  connection: Connection
+  target: V2Target & { profile: 'session' }
+  principal_id: string
+  binding: Readonly<{
+    machine_id: string
+    provider_id: string
+    kind: 'herdr-core'
+    config_ref: string
+    binding_revision: number
+    enabled: boolean
+  }>
+  now(): number
+  /** 本机直接终端输入开关的观察值；执行端自己没有配置来源，未提供接缝即按关闭（失败关闭）。目录、Gateway 登记与最终写入三处共用同一个观察值。 */
+  terminalExecution?: () => boolean
+  /** 经 terminal.run 启动的终端上限；省略用默认值。 */
+  max_run_terminals?: number
+}>
+
+/** 只允许 method/params 与 Wire 注入的原生 id；未知字段是协议不符。 */
+function reviewedRequest(value: unknown): Readonly<{ method: string; params: JsonObject }> {
+  const request = object(value)
+  for (const key of Object.keys(request)) {
+    if (key !== 'method' && key !== 'params' && key !== 'id') {
+      fail('herdr_core_native_request_invalid')
+    }
+  }
+  if (request.id !== undefined && typeof request.id !== 'string') {
+    fail('herdr_core_native_request_invalid')
+  }
+  if (typeof request.method !== 'string') {
+    fail('herdr_core_method_unavailable')
+  }
+  const params = object(request.params)
+  reviewHerdrCoreParams(request.method, params)
+  return { method: request.method, params }
+}
+
+/** 只在本 epoch 内保存已观察的完整绑定；连接关闭即丢弃。 */
+export function createHerdrCoreConnectorRuntime(
+  options: HerdrCoreConnectorOptions,
+  claims: DispatchClaims,
+  book: ConnectorAttemptBook
+) {
+  const { installation, target, binding, principal_id } = options
+  const reference = contractRef(installation.record().wire.source)
+  const admission = createConnectorAdmissionBackend({
+    connection: options.connection,
+    routes: [{ target, principal_id }],
+    book,
+    source: { now: options.now }
+  })
+  const listeners = new Set<(event: import('../../storage/model.js').LedgerInvalidation) => void>()
+  const backend: HerdrCoreBackend = {
+    ...admission,
+    contract: /** 只解析本资源实际连接的契约摘要。 */ (ref) => (ref === reference ? installation.record() : undefined),
+    now: options.now,
+    currentPrincipal: admission.currentPrincipal,
+    localProvider: /** 固定受保护目标；不读取 Gateway Store 或 caller 参数。 */ (value) =>
+      boundedJson(value) === boundedJson(target) ? binding : undefined,
+    context: /** 每次使用准入后端当前 epoch；关闭后旧连接不能继续通过认证。 */ (principal, direction) => ({
+      phase: 'authenticated',
+      direction,
+      connection: admission.connection(),
+      resolveProvider: /** 只解析这一个完整固定目标。 */ (value) =>
+        boundedJson(value) === boundedJson(target) ? binding : undefined,
+      resolveContract: /** 原生契约只来自实际连接与本机审核。 */ (ref) =>
+        ref === reference ? installation.record().wire : undefined
+    }),
+    /** Connector 没有 Gateway 锚点：以已解码的本机 attempt 合成，期限取原请求 deadline。 */
+    responseAnchor(value: AttemptBinding) {
+      const stored = admission.attempt(value.call_id, value.attempt_id)
+      if (!stored) {
+        fail('attempt_anchor_unavailable')
+      }
+      assertBinding(value, stored.binding)
+      return {
+        binding: structuredClone(stored.binding),
+        method: stored.method,
+        mode: stored.mode,
+        state: 'connector_accepted',
+        content_status: options.now() < value.registration.deadline ? 'available' : 'expired',
+        content_expires_at: value.registration.deadline,
+        dedup_expires_at: value.registration.deadline
+      }
+    },
+    subscribeInvalidation: /** 只转接本 epoch 的关闭通知。 */ (listener) => {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    }
+  }
+  const core = createHerdrCoreAdapter(backend)
+  const adapter = createProviderWireAdapter(core, 'herdr_core_transport_unsupported', options.now)
+  // 执行侧独立消息窗口；与 adapter 共用同一 core permit，避免已观察消息二次执行。
+  const execution = createProviderWireAdapter(core, 'herdr_core_transport_unsupported', options.now)
+  const seen = new Map<string, number>()
+  const active = new Set<AbortController>()
+  /**
+   * 本 Connector 进程经 `terminal.run` 启动、仍认为存活的终端（address → created_ms）。
+   * 只是「不要无限制启动」的本地护栏，不是 core 级配额；Connector 重启后从头计数。
+   */
+  const started = new Map<string, number>()
+  let startedCore: string | undefined
+  /** 长轮询的唯一后台订阅；随本 epoch 关闭，重连时自己重建。 */
+  const feed = createHerdrCoreEventFeed({
+    client: () => installation.client(),
+    contract: () => installation.record().contract
+  })
+  let closed = false
+  let highWater = -1
+
+  /** 不回退的宿主时钟；回拨直接拒绝，不修正期限。 */
+  function now(): number {
+    const value = options.now()
+    if (!Number.isSafeInteger(value) || value < 0 || value < highWater) {
+      throw new ProviderAdapterError('clock_untrusted')
+    }
+    highWater = value
+    return value
+  }
+
+  function checkSignal(signal: AbortSignal): void {
+    if (signal.aborted) {
+      throw new ProviderAdapterError('herdr_core_cancelled')
+    }
+  }
+
+  /** 在每次原生写入前重新核对本机来源与当前 epoch，不缓存旧许可。 */
+  async function executeWire(input: string, signal: AbortSignal): Promise<WireExecutionResult> {
+    let dispatched = false
+    const controller = new AbortController()
+    const cancel = /** 只结束本地等待；不向 core 发送取消或控制请求。 */ () => controller.abort(signal.reason)
+    signal.addEventListener('abort', cancel, { once: true })
+    if (signal.aborted) {
+      cancel()
+    }
+    active.add(controller)
+    try {
+      if (closed) {
+        throw new ProviderAdapterError('herdr_core_runtime_closed')
+      }
+      checkSignal(controller.signal)
+      const decoded = execution.decode(input, 'gateway_to_connector')
+      if (decoded.type !== 'request' || !('connection_epoch' in decoded)) {
+        throw new ProviderAdapterError('herdr_core_request_required')
+      }
+      const frame = decoded as Extract<AuthenticatedEnvelope, { type: 'request' }>
+      const observedBinding: AttemptBinding = {
+        machine_id: frame.machine_id,
+        recovery_generation: frame.recovery_generation,
+        connection_epoch: frame.connection_epoch,
+        ...frame.payload.attempt
+      }
+      if (!installation.source(observedBinding)) {
+        throw new ProviderAdapterError('herdr_core_binding_mismatch')
+      }
+      const observed = now()
+      const remaining = observedBinding.registration.deadline - observed
+      if (remaining <= 0) {
+        throw new ProviderAdapterError('herdr_core_timeout')
+      }
+      for (const [previous, expires] of seen) {
+        if (expires <= observed) {
+          seen.delete(previous)
+        }
+      }
+      const key = boundedJson(observedBinding)
+      if (seen.has(key)) {
+        throw new ProviderAdapterError('attempt_already_observed')
+      }
+      if (seen.size >= 4096 || active.size > 8) {
+        throw new ProviderAdapterError('herdr_core_runtime_limit')
+      }
+      if (execution.observeMessage(frame, 'gateway_to_connector') !== 'new') {
+        throw new ProviderAdapterError('duplicate_message')
+      }
+      seen.set(key, observedBinding.registration.deadline)
+      const request = reviewedRequest(frame.payload.native_request)
+      // 直接输入与控制档必须显式打开本机开关；关闭时在原生写入前拒绝，结果确定未派发。
+      assertTerminalExecutionAllowed(
+        'herdr-core',
+        { method: request.method, params: request.params },
+        options.terminalExecution ? options.terminalExecution() : false
+      )
+      // core 退出或被 holder 重建后先重新附着：退避与上限在附着层，预算不超过调用方剩余期限。
+      await installation.ensure(Math.min(Math.max(1, remaining - 1000), HERDR_CORE_REATTACH_WINDOW_MS))
+      const left = observedBinding.registration.deadline - now()
+      if (left < 1) {
+        throw new ProviderAdapterError('herdr_core_timeout')
+      }
+      const timeout = Math.min(left, herdrCoreRequestTimeout(request.method, request.params))
+      if (timeout < 1) {
+        throw new ProviderAdapterError('herdr_core_timeout')
+      }
+      const context = core.resolve(frame.payload.attempt)
+      // 唯一发送墓碑与实际写入在同一同步边界前准备；失败不自动重放。
+      core.encodeRequest(
+        { method: request.method, params: request.params, id: observedBinding.native_request_id },
+        context
+      )
+      // 先复核本机来源，再写发送墓碑：来源已变化时不能把一次未发送的意图记成已发送。
+      installation.assert()
+      // 启动类：先按本地上限与模板事实核对，再写发送墓碑（失败确定未派发）。
+      if (request.method === 'terminal.run') {
+        const client = installation.client()
+        const coreId = client.hello.core.id
+        if (startedCore !== coreId) {
+          // 换了 core 实例，旧地址不再属于这台设备。
+          started.clear()
+          startedCore = coreId
+        }
+        const capacity = options.max_run_terminals ?? HERDR_CORE_MAX_RUN_TERMINALS
+        if (started.size >= capacity) {
+          // 到上限时用一次 terminal.list 回收已经不在的终端，读不到就失败关闭。
+          const listed = installation
+            .record()
+            .contract.validateResult('terminal.list', await client.request('terminal.list', {}, timeout))
+          const live = new Set(
+            (listed.terminals as JsonObject[]).map(
+              /** 三元组一致才算同一个终端。 */ (entry) => `${String(entry.address)}:${String(entry.created_ms)}`
+            )
+          )
+          for (const [address, created] of started) {
+            if (!live.has(`${address}:${created}`)) {
+              started.delete(address)
+            }
+          }
+          const capacity = options.max_run_terminals ?? HERDR_CORE_MAX_RUN_TERMINALS
+          if (started.size >= capacity) {
+            fail('herdr_core_run_capacity')
+          }
+        }
+        await assertHerdrCoreTemplate({
+          client,
+          contract: installation.record().contract,
+          params: request.params,
+          timeout_ms: timeout
+        })
+        installation.assert()
+      }
+      // 控制档在写入前自己核对终端三元组并判断 blocked：core 只在 send 上拦 blocked（spike 3f）。
+      if (herdrCoreControl(request.method)) {
+        await assertHerdrCoreTerminal({
+          client: installation.client(),
+          contract: installation.record().contract,
+          method: request.method,
+          params: request.params,
+          timeout_ms: timeout
+        })
+        installation.assert()
+      }
+      const anchor = backend.responseAnchor(observedBinding)
+      claims.claim(observedBinding, anchor.dedup_expires_at)
+      checkSignal(controller.signal)
+      dispatched = true
+      // 栅栏与 template 字段只属于 rovloom，core 不认识它们；发送前显式剥离。
+      // 长轮询是 rovloom 自己的观察入口：走普通 RPC，不建立 Wire 流。
+      const result: JsonObject = (
+        request.method === HERDR_CORE_EVENTS_POLL_METHOD
+          ? await feed.poll({
+              after_seq: typeof request.params.after_seq === 'number' ? request.params.after_seq : 0,
+              limit: typeof request.params.limit === 'number' ? request.params.limit : HERDR_CORE_EVENTS_DEFAULT_LIMIT,
+              timeout_ms:
+                typeof request.params.timeout_ms === 'number'
+                  ? request.params.timeout_ms
+                  : HERDR_CORE_EVENTS_MAX_TIMEOUT_MS,
+              ...(typeof request.params.address === 'string' ? { address: request.params.address } : {}),
+              ...(request.params.labels && typeof request.params.labels === 'object'
+                ? { labels: request.params.labels as Record<string, string> }
+                : {})
+            })
+          : await installation.client().request(request.method, herdrCoreNativeParams(request.params), timeout)
+      ) as JsonObject
+      // 结果形状由审核 schema（或长轮询自己的严格 schema）复验，这里只做统一投影。
+      checkSignal(controller.signal)
+      installation.assert()
+      core.validator.validateResponse(result, context)
+      // 记录/回收本进程启动过的终端；kill/rm 成功后不再计入。
+      if (request.method === 'terminal.run') {
+        started.set(String(result.address), Number(result.created_ms))
+      } else if (request.method === 'terminal.kill' || request.method === 'terminal.rm') {
+        started.delete(String(request.params.terminal))
+      }
+      return Object.freeze({ binding: observedBinding, native_response: result })
+    } catch (error) {
+      // core 返回了 JSON-RPC 错误响应 = 它已明确答复；对核对过的类别可以确定没有写入。
+      if (error instanceof HerdrCoreRpcError && HERDR_CORE_NATIVE_REJECTION_KINDS.includes(error.kind)) {
+        throw new ProviderAdapterError(herdrCoreNativeRejectionCode(error.kind), 'not_dispatched')
+      }
+      const code =
+        error instanceof ProviderAdapterError || error instanceof GatewayError
+          ? error.code
+          : ((error as { code?: string })?.code ?? 'herdr_core_runtime_unavailable')
+      if (code === 'herdr_core_connection_closed') {
+        // 连接已断：丢弃当前值，下一次调用重新走完整身份核对；原调用不重放。
+        installation.invalidate()
+      }
+      // 长轮询是只读观察：订阅结束或参数不符时确定没有产生任何原生副作用。
+      if (code === 'herdr_core_events_closed' || code === 'herdr_core_event_invalid') {
+        throw new ProviderAdapterError(code, 'not_dispatched')
+      }
+      throw new ProviderAdapterError(code, dispatched ? 'outcome_unknown' : 'not_dispatched')
+    } finally {
+      signal.removeEventListener('abort', cancel)
+      active.delete(controller)
+    }
+  }
+
+  const session: ConnectorWireSession = {
+    adapter,
+    executeWire,
+    nativeVersions: /** 连接上报固定来源的已实测版本；不重新探测 core。 */ () => [
+      { provider_id: binding.provider_id, native_version: installation.record().wire.source.binary_version }
+    ],
+    readiness:
+      /**
+       * 只在附着能力仍存在时报告可用：core 正在被 holder 重建时不能报告不可用，
+       * 否则 transport 会永久撤回 provider。真实身份仍由每次写入前的 ensure/assert 核对，
+       * 断线期间的调用明确失败（未派发），不重放、不悬挂。
+       */ () => {
+        if (closed) {
+          fail('herdr_core_runtime_closed')
+        }
+        const status = installation.status()
+        if (status.state === 'closed') {
+          fail('herdr_core_installation_closed')
+        }
+        if (status.state === 'detached') {
+          void installation.ensure(HERDR_CORE_REATTACH_WINDOW_MS).catch(/** 重新附着失败由调用路径报告。 */ () => {})
+        }
+        return { providers: [{ expected: binding, local: binding, native_ready: true }] }
+      },
+    /** 目录与 Gateway 共用这一个本机开关观察值；最终写入仍由 executeWire 再检查。 */
+    terminalExecutionState: () => [
+      { binding, enabled: options.terminalExecution ? options.terminalExecution() : false }
+    ],
+    close: /** 只关闭本 epoch 的桥接与等待；外部 core 与共享墓碑仍归宿主所有。 */ () => {
+      closed = true
+      for (const controller of active) {
+        controller.abort('closed')
+      }
+      feed.close()
+      execution.close()
+      adapter.close()
+      admission.close()
+      for (const listener of listeners) {
+        listener({ kind: 'closed' })
+      }
+      listeners.clear()
+    }
+  }
+  return { session, admission, core }
+}

@@ -95,6 +95,52 @@ def luvus_servers(binary_dir):
     return sorted(found)
 
 
+def herdr_core_pids(binary_dir, session):
+    """本轮私有目录里、指定 HC_SESSION 的 herdr-core（serve 与 holder）；按 exe 路径核对。"""
+    found = []
+    for entry in os.listdir('/proc'):
+        if not entry.isdigit():
+            continue
+        try:
+            exe = os.readlink(f'/proc/{entry}/exe')
+            if not exe.startswith(binary_dir + os.sep):
+                continue
+            environ = open(f'/proc/{entry}/environ', 'rb').read().split(b'\0')
+            if f'HC_SESSION={session}'.encode() in environ:
+                found.append(int(entry))
+        except (OSError, UnicodeDecodeError):
+            continue
+    return sorted(found)
+
+
+def stop_herdr_core(binary_dir, session, work):
+    """回收本轮 `hc run` 拉起的 core/holder 与终端；先核 exe 或 cwd 属于本轮私有目录。"""
+    for sig, grace in ((signal.SIGTERM, 5.0), (signal.SIGKILL, 2.0)):
+        pids = herdr_core_pids(binary_dir, session)
+        for entry in os.listdir('/proc'):
+            if not entry.isdigit():
+                continue
+            try:
+                cwd = os.readlink(f'/proc/{entry}/cwd')
+                if not cwd.startswith(work + os.sep) or int(entry) in pids:
+                    continue
+                environ = open(f'/proc/{entry}/environ', 'rb').read().split(b'\0')
+                if f'HC_SESSION={session}'.encode() in environ:
+                    pids.append(int(entry))
+            except (OSError, UnicodeDecodeError):
+                continue
+        if not pids:
+            return
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                pass
+        end = time.monotonic() + grace
+        while time.monotonic() < end and herdr_core_pids(binary_dir, session):
+            time.sleep(0.1)
+
+
 def stop_servers(binary_dir):
     """结束本次部署私有目录里的 herdr/luvus server。
 
@@ -144,7 +190,11 @@ def main():
     ap.add_argument('--binary', required=True)
     ap.add_argument('--upgrade-from', help='先用旧 Rovloom 二进制配对并读取，再原位替换两端，验证原 token/设备凭据/结果句柄')
     ap.add_argument('--herdr', help='官方 herdr 0.9.5 可执行文件')
-    ap.add_argument('--luvus', help='官方 luvus 0.14.3 可执行文件（与 --herdr 二选一；走默认的 Luvus 引导）')
+    ap.add_argument('--luvus', help='官方 luvus 0.14.3 可执行文件（与 --herdr/--herdr-core 三选一；走默认的 Luvus 引导）')
+    ap.add_argument('--herdr-core', dest='herdr_core', help='官方 herdr-core 可执行文件（0.1.14 或 0.1.15，附着已运行实例）')
+    ap.add_argument('--herdr-core-mode', dest='herdr_core_mode', choices=('attach', 'managed'), default='attach',
+                    help='attach（默认）附着已运行 core；managed 由 Connector 在私有目录里拉起 core')
+    ap.add_argument('--herdr-core-session', default='e2e', help='herdr-core 会话名（默认 e2e）')
     ap.add_argument('--work', help='工作目录（需位于祖先不可被其它用户写入的位置；默认 ~/.rq-*）')
     ap.add_argument('--luvus-mode', choices=['attach', 'managed'], default='attach',
                     help='Luvus 的运行方式（默认 attach：附着用户的 default 会话，没有才自建）')
@@ -153,6 +203,8 @@ def main():
     ap.add_argument('--kill-luvus', action='store_true',
                     help='就绪后 kill -9 Luvus server：Connector 应自行重建并恢复调用')
     ap.add_argument('--crash', action='store_true', help='就绪后 kill -9 Connector 再重启，验证无需人工清理即可恢复')
+    ap.add_argument('--mixed-crash', dest='mixed_crash', action='store_true',
+                    help='（多 provider）三个来源就绪后：core 在途调用 → kill -9 Connector → 重启，核对不重放')
     ap.add_argument('--legacy-wait-output', action='store_true',
                     help='（Luvus）注入旧 policy/raw 字段，重启后用原 test token 验证字段不再限制输出等待')
     ap.add_argument('--unknown-outcome', action='store_true',
@@ -168,8 +220,27 @@ def main():
                          'Connector 使用真实 HOME（服务以所选用户运行），MCP 链路成功即证明服务可用')
     ap.add_argument('--then', help='就绪后执行的命令，环境变量 MCP_CONFIG 指向连接信息')
     args = ap.parse_args()
-    if bool(args.herdr) == bool(args.luvus):
-        ap.error('exactly one of --herdr / --luvus is required')
+    # 多 provider 是只追加的能力：只给一个时与之前完全一致（同样的参数、标记与清理）。
+    providers = [kind for kind, value in (('luvus', args.luvus), ('herdr', args.herdr), ('herdr-core', args.herdr_core)) if value]
+    if not providers:
+        ap.error('at least one of --herdr / --luvus / --herdr-core is required')
+    combinations = {
+        ('luvus',): 'luvus',
+        ('herdr',): 'herdr',
+        ('herdr-core',): 'herdr-core',
+        ('luvus', 'herdr'): 'luvus,herdr',
+        ('luvus', 'herdr-core'): 'luvus,herdr-core',
+        ('herdr', 'herdr-core'): 'herdr,herdr-core',
+        ('luvus', 'herdr', 'herdr-core'): 'mixed'
+    }
+    selection = combinations[tuple(providers)]
+    multi = len(providers) > 1
+    if args.upgrade_from and providers == ['luvus', 'herdr']:
+        # 老设备场景：旧产物只认 `mixed`（v0.9.0 的 mixed = Luvus + Herdr），
+        # 新产物必须按「配对记录只有两条」的老 mixed 分支启动。
+        selection = 'mixed'
+    if args.herdr_core and sys.platform != 'linux':
+        ap.error('--herdr-core is a Linux scenario (SO_PEERCRED)')
     if args.second_device and not args.herdr:
         ap.error('--second-device is a Herdr scenario')
     if args.service and not (args.herdr and sys.platform == 'darwin'):
@@ -188,13 +259,43 @@ def main():
         os.makedirs(d, mode=0o700, exist_ok=True)
     rov = os.path.join(tools, 'rovloom')
     shutil.copy(args.upgrade_from or args.binary, rov); os.chmod(rov, 0o755)
-    source, name = (args.herdr, 'herdr') if args.herdr else (args.luvus, 'luvus')
-    shutil.copy(source, os.path.join(herdr_dir, name)); os.chmod(os.path.join(herdr_dir, name), 0o700)
+    for kind, source in (('luvus', args.luvus), ('herdr', args.herdr), ('herdr-core', args.herdr_core)):
+        if source:
+            shutil.copy(source, os.path.join(herdr_dir, kind))
+            os.chmod(os.path.join(herdr_dir, kind), 0o700)
+    if args.herdr_core:
+        # herdr-core 二进制同时承担 `hc` 客户端；symlink 只影响 argv[0]，不影响被核对的 exe。
+        os.symlink('herdr-core', os.path.join(herdr_dir, 'hc'))
+        # 被测版本取自二进制自己（`hc 0.1.15`）：e2e 脚本据此核对 server.status 报的版本，
+        # 不再写死某一个版本；是否属于已审核集合由 Connector 的握手判定。
+        reported = subprocess.run([os.path.join(herdr_dir, 'herdr-core'), '--version'], capture_output=True, text=True, timeout=30)
+        assert reported.returncode == 0 and len(reported.stdout.split()) == 2, f'herdr-core --version failed: {reported.stderr[-200:]}'
+        os.environ['HERDR_CORE_EXPECT_VERSION'] = reported.stdout.split()[1]
+        print('HERDR_CORE_VERSION', os.environ['HERDR_CORE_EXPECT_VERSION'], flush=True)
     # ROVLOOM_LANG 固定英文输出，宿主 locale 不影响这些脚本的提示标记。
     base = {'LANG': 'C.UTF-8', 'TERM': 'xterm', 'ROVLOOM_LANG': 'en'}
     env_g = {**base, 'HOME': home_g, 'PATH': '/usr/bin:/bin'}
     # Connector 的 PATH 里有 herdr 所在目录：不写 runtime_bin_dirs，验证默认从 PATH 发现程序。
     env_c = {**base, 'HOME': home_c, 'PATH': f'{herdr_dir}:/usr/bin:/bin'}
+    core_runtime = os.path.join(work, 'runtime')
+    core_state = os.path.join(work, 'state')
+    managed_root = None
+    if args.herdr_core:
+        # managed：core 由 Connector 拉起，运行目录由它按状态目录摘要计算；这里只复现同一公式给 identity 场景。
+        connector_state = os.path.join(home_c, '.local', 'share', 'rovloom', 'connector')
+        managed_root = os.path.join(connector_state, 'managed', 'herdr-core')
+        managed_run = None
+        if args.herdr_core_mode == 'managed':
+            # rovloom 在 Connector 的 XDG_RUNTIME_DIR 下按状态目录摘要建私有运行目录；
+            # Connector 的 XDG_RUNTIME_DIR 仍是沙箱运行根，identity 场景用子目录定位套接字。
+            managed_run = os.path.join(core_runtime, 'rovloom-hc-' + hashlib.sha256(connector_state.encode()).hexdigest()[:16])
+            core_state = os.path.join(managed_root, 'state')
+        # core 的端点公式优先 XDG_RUNTIME_DIR；目录必须是私有的 0700。
+        for d in (core_runtime, core_state):
+            os.makedirs(d, mode=0o700, exist_ok=True)
+        env_c = {**env_c, 'XDG_RUNTIME_DIR': core_runtime, 'XDG_STATE_HOME': core_state,
+                 'HC_SESSION': args.herdr_core_session, 'SHELL': '/bin/sh',
+                 'HERDR_RELEASES_URL': 'http://127.0.0.1:9'}
     terms = []
     gateway = None
     status = finished = None
@@ -203,13 +304,79 @@ def main():
         signal.signal(signum, lambda number, _frame: sys.exit(128 + number))
     try:
         # 按 Quick Start 显式生成 provider 配置，不先启动再 Ctrl-C 或手改 provider。
-        initialized = subprocess.run([rov, 'config', 'init', 'connector', '--provider',
-                                      'herdr' if args.herdr else 'luvus'],
+        initialized = subprocess.run([rov, 'config', 'init', 'connector', '--provider', selection],
                                      env=env_c, cwd=home_c, capture_output=True, text=True, timeout=10)
         assert initialized.returncode == 0 and initialized.stderr == 'config_ready\n', 'connector_init_failed'
         path = os.path.join(home_c, '.config', 'rovloom', 'connector.json')
         cfg = json.load(open(path))
-        if args.herdr and args.service:
+        if multi:
+            # 组合值决定配对准备哪些来源；per-provider 子配置只写真正需要的那几项。
+            native = {'provider': selection}
+            if args.herdr_core:
+                native_core = {'session': args.herdr_core_session}
+                if args.herdr_core_mode == 'managed':
+                    native_core['mode'] = 'managed'
+                native['herdr_core'] = native_core
+            if args.luvus and args.luvus_mode == 'managed':
+                native['luvus'] = {'mode': 'managed'}
+                cfg['data'] = {'directory': os.path.join(work, 'd')}
+            if args.herdr and args.service:
+                native['runtime_bin_dirs'] = [herdr_dir]
+            if not (args.upgrade_from and selection == 'mixed'):
+                cfg['native'] = native
+            if not args.upgrade_from:
+                # 多 provider 先显式关闭终端执行，验证三个来源的输入/启动类都被拒，再省略该键（默认开启）。
+                cfg['allow_terminal_execution'] = False
+            open(path, 'w').write(json.dumps(cfg, indent=2) + '\n'); os.chmod(path, 0o600)
+            if args.herdr_core and args.herdr_core_mode == 'managed':
+                print('HERDR_CORE_MANAGED_ROOT', managed_root, flush=True)
+            if args.herdr_core and args.herdr_core_mode == 'attach':
+                # 与单 provider 路径同形：先用 hc 起两个可读终端，混合场景再经 MCP 操作它们。
+                started = subprocess.run([os.path.join(herdr_dir, 'hc'), 'run', '--bg', '--json', '--name', 'e2e',
+                                          'sh', '-c', 'printf "rovloom-e2e\\n"; exec cat'],
+                                         env={**env_c, 'TERM': 'xterm-256color'}, cwd=home_c,
+                                         capture_output=True, text=True, timeout=30)
+                assert started.returncode == 0, f'herdr-core run failed: {started.stderr[-400:]}'
+                print('HERDR_CORE_TERMINAL', started.stdout.strip()[:400], flush=True)
+                blocked_log = os.path.join(work, 'blocked.log')
+                blocked = subprocess.run([os.path.join(herdr_dir, 'hc'), 'run', '--bg', '--json', '--name', 'blocked',
+                                          'python3', '-I', os.path.join(os.path.dirname(__file__), 'herdr-core-blocked.py'),
+                                          blocked_log],
+                                         env={**env_c, 'TERM': 'xterm-256color'}, cwd=home_c,
+                                         capture_output=True, text=True, timeout=30)
+                assert blocked.returncode == 0, f'herdr-core blocked terminal failed: {blocked.stderr[-400:]}'
+                print('HERDR_CORE_BLOCKED_TERMINAL', blocked.stdout.strip()[:400], flush=True)
+        elif args.herdr_core:
+            # 会话名参与 Target 与端点；只通过受保护配置选择，不写其它凭据。
+            native_core = {'session': args.herdr_core_session}
+            if args.herdr_core_mode == 'managed':
+                # Connector 自己拉起 core：不预先把 core 跑起来，也不经过 hc。
+                native_core['mode'] = 'managed'
+            cfg['native'] = {'provider': 'herdr-core', 'herdr_core': native_core}
+            # 模板默认已开启终端执行；这里显式关闭，才能先验证“关闭”阶段，再翻成 true。
+            cfg['allow_terminal_execution'] = False
+            open(path, 'w').write(json.dumps(cfg, indent=2) + '\n'); os.chmod(path, 0o600)
+            if args.herdr_core_mode == 'managed':
+                print('HERDR_CORE_MANAGED_ROOT', managed_root, flush=True)
+            else:
+                # `hc run --bg --json` 会拉起脱离启动者的 core，并留下一个可读终端；不阻塞宿主。
+                # 终端程序必须读输入（cat），否则 send 的输入回显无从验证。
+                started = subprocess.run([os.path.join(herdr_dir, 'hc'), 'run', '--bg', '--json', '--name', 'e2e',
+                                          'sh', '-c', 'printf "rovloom-e2e\\n"; exec cat'],
+                                         env={**env_c, 'TERM': 'xterm-256color'}, cwd=home_c,
+                                         capture_output=True, text=True, timeout=30)
+                assert started.returncode == 0, f'herdr-core run failed: {started.stderr[-400:]}'
+                print('HERDR_CORE_TERMINAL', started.stdout.strip()[:400], flush=True)
+                # 第二个终端模拟「等人批准」的智能体：启动即上报 OSC 7501 blocked，并把输入记到日志。
+                blocked_log = os.path.join(work, 'blocked.log')
+                blocked = subprocess.run([os.path.join(herdr_dir, 'hc'), 'run', '--bg', '--json', '--name', 'blocked',
+                                          'python3', '-I', os.path.join(os.path.dirname(__file__), 'herdr-core-blocked.py'),
+                                          blocked_log],
+                                         env={**env_c, 'TERM': 'xterm-256color'}, cwd=home_c,
+                                         capture_output=True, text=True, timeout=30)
+                assert blocked.returncode == 0, f'herdr-core blocked terminal failed: {blocked.stderr[-400:]}'
+                print('HERDR_CORE_BLOCKED_TERMINAL', blocked.stdout.strip()[:400], flush=True)
+        elif args.herdr and args.service:
             # LaunchDaemon 的 PATH 只有系统目录：显式列出 herdr 所在目录。
             cfg['native']['runtime_bin_dirs'] = [herdr_dir]
             open(path, 'w').write(json.dumps(cfg, indent=2) + '\n'); os.chmod(path, 0o600)
@@ -269,12 +436,14 @@ def main():
         if not ready:
             raise RuntimeError('timeout waiting for provider_ready')
         log = ANSI.sub(b'', connector.log).decode('utf8', 'replace')
+        machine_id = join_value.split('#')[1].split('.')[0]
+        session_of = {'luvus': 'rovloom' if args.luvus_mode == 'managed' else 'default',
+                      'herdr': 'default',
+                      'herdr-core': args.herdr_core_session}
         info = {'url': re.search(r'MCP URL: (\S+)', log).group(1),
                 'token': re.search(r'Bearer \(private\): (\S+)', log).group(1),
-                'targets': [{'machine_id': join_value.split('#')[1].split('.')[0],
-                             'provider_id': 'herdr' if args.herdr else 'luvus',
-                             'profile': 'session',
-                             'session': 'rovloom' if args.luvus and args.luvus_mode == 'managed' else 'default'}]}
+                'targets': [{'machine_id': machine_id, 'provider_id': kind, 'profile': 'session', 'session': session_of[kind]}
+                            for kind in providers]}
         # 管理页口令不再由配对流程打印：另起进程 admin create（Gateway 热加载），写进 mcp.json 供后续页面登录检查，不打印。
         created = subprocess.run([rov, 'admin', 'create'], env=env_g, cwd=home_g, capture_output=True, text=True, timeout=10)
         if created.returncode == 0:
@@ -284,7 +453,84 @@ def main():
         out = os.path.join(work, 'mcp.json')
         open(out, 'w').write(json.dumps(info)); os.chmod(out, 0o600)
         print('READY', json.dumps({'mcp_url': info['url'], 'targets': info['targets'], 'config': out}), flush=True)
+        inflight_file = os.path.join(work, 'mixed-inflight.json')
+        if multi and args.herdr_core and not args.upgrade_from:
+            # (a) 关闭终端执行时三个来源的输入/启动类都必须被拒，读取不受影响。
+            off_env = {**os.environ, 'MCP_CONFIG': out}
+            done = subprocess.run(['bun', '--no-env-file',
+                                   os.path.join(os.path.dirname(__file__), 'mixed-control-off.mjs')],
+                                  env=off_env, cwd=os.path.dirname(__file__), capture_output=True, text=True, timeout=120)
+            print('MIXED_CONTROL_OFF', (done.stdout + done.stderr).strip()[-800:], flush=True)
+            assert done.returncode == 0, 'mixed control-off check failed'
+            # (b) 省略 allow_terminal_execution 即开启；只改本机开关并重启 Connector。
+            connector.stop()
+            switched = json.load(open(path))
+            switched.pop('allow_terminal_execution', None)
+            open(path, 'w').write(json.dumps(switched, indent=2) + '\n'); os.chmod(path, 0o600)
+            connector = Term('connector-mixed-on', [rov, 'connector'], env_c, home_c); terms.append(connector)
+            connector.expect('provider_ready=true', timeout=120)
+            print('MIXED_CONTROL_ON', 'allow_terminal_execution=omitted', flush=True)
+            # (c) 在途调用 + SIGKILL Connector：默认不跑。SIGKILL 后 herdr-core 的 claims 锁
+            # 没有恢复路径（见 questions-3），单独用 --mixed-crash 打开，避免把已知 src 缺陷混进主场景。
+            if args.mixed_crash:
+                prepare_env = {**os.environ, 'MCP_CONFIG': out, 'MIXED_INFLIGHT_FILE': inflight_file}
+                done = subprocess.run(['bun', '--no-env-file',
+                                       os.path.join(os.path.dirname(__file__), 'mixed-prepare.mjs')],
+                                      env=prepare_env, cwd=os.path.dirname(__file__), capture_output=True, text=True, timeout=120)
+                print('MIXED_PREPARE', (done.stdout + done.stderr).strip()[-600:], flush=True)
+                assert done.returncode == 0, 'mixed prepare failed'
+                os.kill(connector.child.pid, signal.SIGKILL)
+                deadline = time.time() + 15
+                while time.time() < deadline and connector.child.poll() is None:
+                    time.sleep(0.1)
+                connector = Term('connector-mixed-restart', [rov, 'connector'], env_c, home_c); terms.append(connector)
+                connector.expect('provider_ready=true', timeout=120)
+                print('MIXED_RESTART', json.dumps({'sigkill': True, 'providers': providers}), flush=True)
+            else:
+                print('MIXED_CRASH', 'skipped (--mixed-crash not set)', flush=True)
         status = 0
+        if args.herdr_core:
+            identity_runtime = managed_run or core_runtime
+            identity_env = {**os.environ, 'HERDR_CORE_SOCKET': os.path.join(identity_runtime, 'herdr-core', args.herdr_core_session + '.sock'),
+                            'HERDR_CORE_SESSION': args.herdr_core_session, 'HERDR_CORE_RUNTIME': identity_runtime,
+                            'HERDR_CORE_PROXY_ROOT': os.path.join(work, 'identity'), 'HERDR_CORE_HOME': home_c}
+            done = subprocess.run(['bun', '--no-env-file', os.path.join(os.path.dirname(__file__), 'herdr-core-identity.mjs')],
+                                  env=identity_env, cwd=os.path.dirname(__file__), capture_output=True, text=True, timeout=120)
+            print('HERDR_CORE_IDENTITY', (done.stdout + done.stderr).strip()[-800:], flush=True)
+            assert done.returncode == 0, 'herdr-core identity fail-closed check failed'
+        if args.herdr_core and not multi:
+            # 开关关闭时控制档在目录、describe 与 Gateway 登记前都被拒绝；同一轮配对后翻转开关再验控制档。
+            # 多 provider 的开关阶段在 READY 之后已经跑过（三个来源一起验），这里不重复。
+            control_env = {**os.environ, 'MCP_CONFIG': out}
+            done = subprocess.run(['bun', '--no-env-file', os.path.join(os.path.dirname(__file__), 'herdr-core-control-off.mjs')],
+                                  env=control_env, cwd=os.path.dirname(__file__), capture_output=True, text=True, timeout=120)
+            print('HERDR_CORE_CONTROL_OFF', (done.stdout + done.stderr).strip()[-800:], flush=True)
+            assert done.returncode == 0, 'herdr-core control-off check failed'
+            # 只改本机开关并重启 Connector；配对、设备凭据与已批准 provider 记录都不动。
+            connector.stop()
+            switched = json.load(open(path))
+            switched['allow_terminal_execution'] = True
+            open(path, 'w').write(json.dumps(switched, indent=2) + '\n'); os.chmod(path, 0o600)
+            connector = Term('connector-control', [rov, 'connector'], env_c, home_c); terms.append(connector)
+            connector.expect('provider_ready=true', timeout=90)
+            print('HERDR_CORE_CONTROL_ON', 'allow_terminal_execution=true', flush=True)
+            if args.herdr_core_mode == 'managed':
+                # managed：先经 MCP 启动一个命名终端，再重启 Connector，证明 core 与终端都没被打断。
+                prepared = subprocess.run(['bun', '--no-env-file',
+                                           os.path.join(os.path.dirname(__file__), 'herdr-core-managed-prepare.mjs')],
+                                          env={**os.environ, 'MCP_CONFIG': out}, cwd=os.path.dirname(__file__),
+                                          capture_output=True, text=True, timeout=120)
+                print('HERDR_CORE_MANAGED_PREPARE', (prepared.stdout + prepared.stderr).strip()[-400:], flush=True)
+                assert prepared.returncode == 0, 'managed prepare failed'
+                core_pids = herdr_core_pids(herdr_dir, args.herdr_core_session)
+                assert core_pids, 'managed core is not running'
+                connector.stop()
+                time.sleep(2.0)
+                alive = [pid for pid in core_pids if os.path.exists(f'/proc/{pid}')]
+                assert sorted(alive) == sorted(core_pids), f'connector exit killed the managed core: {core_pids} -> {alive}'
+                connector = Term('connector-managed-restart', [rov, 'connector'], env_c, home_c); terms.append(connector)
+                connector.expect('provider_ready=true', timeout=90)
+                print('HERDR_CORE_MANAGED_RESTART', json.dumps({'core_alive': True, 'terminal': 'survivor'}), flush=True)
         if args.luvus:
             servers = luvus_servers(herdr_dir)
             print('LUVUS_SERVERS', servers, flush=True)
@@ -414,6 +660,11 @@ def main():
             restarted = Term('connector-restarted', [rov, 'connector'], env_c, home_c); terms.append(restarted)
             restarted.expect('provider_ready=true', timeout=60)
             print('RECOVERED', flush=True)
+            if args.herdr_core:
+                # 强杀 Connector 一定会留下 claim 账本锁；重启后必须出现与 Luvus/Herdr 相同的接管标记。
+                recovered = 'claims_lock_recovered' in ANSI.sub(b'', restarted.log).decode('utf8', 'replace')
+                print('HERDR_CORE_CLAIMS_RECOVERED', recovered, flush=True)
+                assert recovered, 'herdr-core did not take over the claims lock after SIGKILL'
         def faults(*step):
             command = ['bun', '--no-env-file', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'luvus-faults.mjs'), *step]
             done = subprocess.run(command, env={**os.environ, 'MCP_CONFIG': out, 'LUVUS_WRITE': '{}'},
@@ -512,6 +763,29 @@ def main():
             then_env = {**os.environ, 'MCP_CONFIG': out,
                         'ROVLOOM_EXPECT_LEGACY_SCHEMA': '1' if args.upgrade_from else '',
                         'ROVLOOM_GATEWAY_STATE': os.path.join(home_g, '.local', 'share', 'rovloom', 'gateway')}
+            if multi:
+                then_env.update({'MIXED_PROVIDERS': ','.join(providers),
+                                 'LUVUS_BINARY': os.path.join(herdr_dir, 'luvus') if args.luvus else '',
+                                 'HERDR_BINARY': os.path.join(herdr_dir, 'herdr') if args.herdr else '',
+                                 'MIXED_INFLIGHT_FILE': inflight_file,
+                                 'MIXED_AFTER_RESTART': '1' if (args.mixed_crash and not args.upgrade_from) else ''})
+            if args.herdr_core:
+                # 控制档场景需要同一个沙箱里的 hc 与 core 路径：计划重启与 SIGKILL 只作用于本轮私有沙箱。
+                then_env.update({'HERDR_CORE_MODE': args.herdr_core_mode,
+                                 'HERDR_CORE_RUNTIME': managed_run or core_runtime,
+                                 'HERDR_CORE_SOCKET': os.path.join(managed_run or core_runtime, 'herdr-core', args.herdr_core_session + '.sock'),
+                                 'HERDR_CORE_MANAGED_ROOT': managed_root or '' if args.herdr_core_mode == 'managed' else '',
+                                 'HERDR_CORE_HC': os.path.join(herdr_dir, 'hc'),
+                                 'HERDR_CORE_BINARY': os.path.join(herdr_dir, 'herdr-core'),
+                                 'HERDR_CORE_SESSION': args.herdr_core_session,
+                                 'HERDR_CORE_STATE': core_state,
+                                 'HERDR_CORE_HOME': home_c,
+                                 'HERDR_CORE_BLOCKED_LOG': os.path.join(work, 'blocked.log'),
+                                 'HERDR_CORE_FAKEAGENT': os.path.join(os.path.dirname(__file__), 'herdr-core-fakeagent.py'),
+                                 'HERDR_CORE_FAKEAGENT_LOG': os.path.join(work, 'fakeagent.log'),
+                                 'HERDR_CORE_BLOCKED': os.path.join(os.path.dirname(__file__), 'herdr-core-blocked.py')})
+                if args.herdr_core_mode == 'managed':
+                    then_env['HERDR_CORE_MANAGED_CONFIG'] = os.path.join(managed_root, 'config')
             for attempt in range(8 if args.service else 1):
                 status = subprocess.call(shlex.split(args.then), env=then_env)
                 if status == 0:
@@ -543,6 +817,11 @@ def main():
             stop_servers(herdr_dir)
         except Exception as error:
             print('CLEANUP servers error', error, flush=True)
+        if args.herdr_core:
+            try:
+                stop_herdr_core(herdr_dir, args.herdr_core_session, home_c)
+            except Exception as error:
+                print('CLEANUP core error', error, flush=True)
         if args.work is None:
             discard_work(work, keep_state=finished != 0)
 

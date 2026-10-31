@@ -22,7 +22,7 @@ Usage:
   rovloom --help
   rovloom --version
   rovloom config template gateway|connector
-  rovloom config init connector [--provider luvus|herdr|mixed] [--config /absolute/path/config.json]
+  rovloom config init connector [--provider luvus|herdr|herdr-core|mixed] [--config /absolute/path/config.json]
   rovloom config init gateway [--container] [--config /absolute/path/config.json]
   rovloom config check [--role gateway|connector] [--config /absolute/path/config.json]
   rovloom config check-runtime [--role gateway|connector] [--config /absolute/path/config.json]
@@ -49,7 +49,7 @@ config check validates the configuration file read-only; check-runtime additiona
 Without --config, ~/.config/rovloom/gateway.json or connector.json is used (Windows also uses the user home).
 A missing file is created with defaults on the first run; an existing file is never overwritten or reset.
 Gateway supports Linux/macOS/Windows; Connector supports Linux x64, Windows x64 and macOS (x64 / arm64, attaching only already-running Herdr / Luvus).
-First-run setup selects luvus (default), herdr or mixed via the Connector's native.provider.
+First-run setup selects luvus (default), herdr, herdr-core or mixed via the Connector's native.provider (mixed: every provider this platform supports).
 Agent and model logins must be prepared separately; a ready native installation does not mean a model has replied.
 Exit codes: 0 success/clean shutdown, 2 argument or configuration error, 3 backend unavailable, 1 runtime or shutdown failure.
 `,
@@ -173,7 +173,7 @@ export const chinese: Readonly<Record<MessageKey, string>> = Object.freeze({
   rovloom --help
   rovloom --version
   rovloom config template gateway|connector
-  rovloom config init connector [--provider luvus|herdr|mixed] [--config /absolute/path/config.json]
+  rovloom config init connector [--provider luvus|herdr|herdr-core|mixed] [--config /absolute/path/config.json]
   rovloom config init gateway [--container] [--config /absolute/path/config.json]
   rovloom config check [--role gateway|connector] [--config /absolute/path/config.json]
   rovloom config check-runtime [--role gateway|connector] [--config /absolute/path/config.json]
@@ -198,7 +198,7 @@ config check 只读检查配置文件；check-runtime 另核对程序管理的�
 省略 --config 时读取 ~/.config/rovloom/gateway.json 或 connector.json（Windows 同样使用用户 home）。
 文件缺失时首次运行会生成默认配置，已有文件不会被覆盖或重置。
 Gateway 支持 Linux/macOS/Windows；Connector 支持 Linux x64、Windows x64 与 macOS（x64 / arm64，仅附着已运行的 Herdr / Luvus）。
-首次引导按 Connector 的 native.provider 选择 luvus（默认）、herdr 或 mixed。
+首次引导按 Connector 的 native.provider 选择 luvus（默认）、herdr、herdr-core 或 mixed（mixed：本平台支持的全部来源）。
 Agent 与模型登录需独立准备；原生 ready 不代表模型已回复。
 退出码：0 成功/正常关闭，2 参数或配置错误，3 后端不可用，1 运行或关闭失败。
 `,

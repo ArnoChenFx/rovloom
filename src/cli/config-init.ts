@@ -1,5 +1,5 @@
 /** 显式首次生成所选 provider / 容器监听配置，不启动角色、不创建状态或批准任何设备。 */
-import { CliError, type RoleConfig } from './config.js'
+import { CliError, NATIVE_PROVIDER_SELECTIONS, type NativeProviderSelection, type RoleConfig } from './config.js'
 import { resolveRoleConfigPath, type ConfigPathEnvironment } from './config-path.js'
 import { readOrCreateRoleConfig, type RoleInitialization } from './first-config.js'
 
@@ -24,7 +24,7 @@ export function initializeRoleConfig(args: readonly string[], environment?: Conf
         name === '--provider' &&
         provider === undefined &&
         role === 'connector' &&
-        ['luvus', 'herdr', 'mixed'].includes(value ?? '')
+        NATIVE_PROVIDER_SELECTIONS.includes(value as NativeProviderSelection)
       ) {
         provider = value as RoleInitialization['provider']
       } else {

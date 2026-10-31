@@ -44,19 +44,20 @@ test('native acceptance planning covers core changes, deletions and missing hist
     writeFileSync(join(root, 'README.md'), 'initial')
     let previous = commit()
     const cases = [
-      ['docs/OPERATIONS.md', [false, false, false]],
-      ['src/runtime/connector.ts', [true, true, true]],
-      ['src/storage/lock-recovery.ts', [true, true, true]],
-      ['bun.lock', [true, true, true]],
-      ['test/platform/windows.test.ts', [false, true, true]],
-      ['.github/workflows/two-host.yml', [true, false, false]],
-      ['scripts/ci/e2e-plan.mjs', [true, true, true]]
+      ['docs/OPERATIONS.md', [false, false, false, false]],
+      ['src/runtime/connector.ts', [true, true, true, true]],
+      ['src/storage/lock-recovery.ts', [true, true, true, true]],
+      ['bun.lock', [true, true, true, true]],
+      ['test/platform/windows.test.ts', [false, true, true, true]],
+      ['.github/workflows/two-host.yml', [true, false, false, false]],
+      ['scripts/ci/e2e-plan.mjs', [true, true, true, true]],
+      ['.github/workflows/herdr-core-e2e.yml', [false, false, false, true]]
     ]
     for (const [path, expected] of cases) {
       mkdirSync(dirname(join(root, path)), { recursive: true })
       writeFileSync(join(root, path), 'fixture')
       const head = commit()
-      for (const [index, suite] of ['two-host', 'macos', 'windows'].entries()) {
+      for (const [index, suite] of ['two-host', 'macos', 'windows', 'herdr-core'].entries()) {
         assert.equal(plan(suite, previous, head), `run=${expected[index]}`, path + ':' + suite)
       }
       previous = head

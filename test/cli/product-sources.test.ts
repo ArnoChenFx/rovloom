@@ -111,3 +111,137 @@ test(
     }
   }
 )
+
+test('herdr-core 走自己的静态工厂，Connector 也路由到执行端', async () => {
+  const gateway = configTemplate('gateway')
+  if (gateway.role !== 'gateway') {
+    assert.fail('role template mismatch')
+  }
+  const authority = createManagementSessionAuthority({
+    principal: /** 本例从不建立身份或 cookie。 */ () => null,
+    administrator: /** 空管理来源不授予任何权限。 */ () => null
+  })
+  const calls: string[] = []
+  const stop = new Error('factory_probe_only')
+  const owners: Partial<Record<'luvus' | 'herdr' | 'herdr-core', ProductionCliSources>> = {
+    'herdr-core': {
+      async gateway(_config, refs) {
+        assert.equal(this, owners['herdr-core'])
+        assert.equal(refs, selected)
+        calls.push('herdr-core:gateway')
+        throw stop
+      },
+      async connector(_config, refs) {
+        assert.equal(this, owners['herdr-core'])
+        assert.equal(refs, selected)
+        calls.push('herdr-core:connector')
+        throw stop
+      }
+    }
+  }
+  const selected: readonly ProductionProviderReference[] = [{ reference: 'core_one', value: { kind: 'herdr-core' } }]
+  const routed = routeProductionSources(owners)
+  await assert.rejects(
+    /** 路由只调用选中的 herdr-core 工厂一次。 */ () => routed.gateway!(gateway, selected, authority),
+    stop
+  )
+  // Connector 有实际执行端时只调用选中的同一静态工厂一次。
+  await assert.rejects(() => routed.connector!(configTemplate('connector') as never, selected), stop)
+  assert.deepEqual(calls, ['herdr-core:gateway', 'herdr-core:connector'])
+})
+
+test('混合 Gateway 里 herdr-core 引用按设备分组，不会被丢掉', async () => {
+  const gateway = configTemplate('gateway')
+  if (gateway.role !== 'gateway') {
+    assert.fail('role template mismatch')
+  }
+  const authority = createManagementSessionAuthority({
+    principal: /** 本例从不建立身份或 cookie。 */ () => null,
+    administrator: /** 空管理来源不授予任何权限。 */ () => null
+  })
+  const stop = new Error('factory_probe_only')
+  let coreReferences: readonly ProductionProviderReference[] | undefined
+  const owners: Partial<Record<'luvus' | 'herdr' | 'herdr-core', ProductionCliSources>> = {
+    luvus: {
+      // 最小可识别的原生资源：足以让组合层继续到 herdr-core 分组。
+      async gateway() {
+        return { providers: [], release: async () => {} } as never
+      }
+    },
+    'herdr-core': {
+      async gateway(_config, refs) {
+        coreReferences = refs
+        throw stop
+      }
+    }
+  }
+  const routed = routeProductionSources(owners)
+  const references: readonly ProductionProviderReference[] = [
+    { reference: 'luvus_one', value: { kind: 'luvus' } },
+    { reference: 'core_one', value: { kind: 'herdr-core' } }
+  ]
+  await assert.rejects(
+    /** 分组顺序固定：luvus 先交付，herdr-core 再被调用并停止本例。 */ () =>
+      routed.gateway!(gateway, references, authority),
+    stop
+  )
+  // 每台设备各一份引用：herdr-core 只收到自己那一条，没有被混合分组吞掉。
+  assert.deepEqual(coreReferences, [{ reference: 'core_one', value: { kind: 'herdr-core' } }])
+})
+
+test('herdr 与 herdr-core 组合各自成组，Connector 端两种 kind 都路由到自己的工厂', async () => {
+  const gateway = configTemplate('gateway')
+  const connector = configTemplate('connector')
+  if (gateway.role !== 'gateway' || connector.role !== 'connector') {
+    assert.fail('role template mismatch')
+  }
+  const authority = createManagementSessionAuthority({
+    principal: /** 本例从不建立身份或 cookie。 */ () => null,
+    administrator: /** 空管理来源不授予任何权限。 */ () => null
+  })
+  const calls: string[] = []
+  const stop = new Error('factory_probe_only')
+  const owners: Partial<Record<'luvus' | 'herdr' | 'herdr-core', ProductionCliSources>> = {
+    herdr: {
+      async connector(_config, refs) {
+        assert.deepEqual(refs, [{ reference: 'herdr_one', value: { kind: 'herdr' } }])
+        calls.push('herdr:connector')
+        throw stop
+      }
+    },
+    'herdr-core': {
+      async connector(_config, refs) {
+        assert.deepEqual(refs, [{ reference: 'core_one', value: { kind: 'herdr-core' } }])
+        calls.push('herdr-core:connector')
+        throw stop
+      }
+    }
+  }
+  const references: readonly ProductionProviderReference[] = [
+    { reference: 'herdr_one', value: { kind: 'herdr' } },
+    { reference: 'core_one', value: { kind: 'herdr-core' } }
+  ]
+  const routed = routeProductionSources(owners)
+  // 组合层要求两个 kind 都交付；本例第一个工厂失败即停止，顺序固定为 herdr 先。
+  await assert.rejects(() => routed.connector!(connector, references), stop)
+  assert.deepEqual(calls, ['herdr:connector'])
+  // Gateway 侧同一组引用也按设备各自成组，不需要 Luvus 原生资源。
+  const gatewayCalls: string[] = []
+  const gatewayOwners: Partial<Record<'luvus' | 'herdr' | 'herdr-core', ProductionCliSources>> = {
+    herdr: {
+      async gateway() {
+        gatewayCalls.push('herdr:gateway')
+        return { providers: [], release: async () => {} } as never
+      }
+    },
+    'herdr-core': {
+      async gateway(_config, refs) {
+        assert.deepEqual(refs, [{ reference: 'core_one', value: { kind: 'herdr-core' } }])
+        gatewayCalls.push('herdr-core:gateway')
+        throw stop
+      }
+    }
+  }
+  await assert.rejects(() => routeProductionSources(gatewayOwners).gateway!(gateway, references, authority), stop)
+  assert.deepEqual(gatewayCalls, ['herdr:gateway', 'herdr-core:gateway'])
+})

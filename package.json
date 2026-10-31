@@ -29,6 +29,7 @@
     "format": "bun --no-env-file node_modules/oxfmt/bin/oxfmt --config .oxfmtrc.json --write \"{src,test,scripts,e2e,site,skills}/**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}\" package.json tsconfig.json .oxlintrc.json .oxfmtrc.json",
     "format:check": "bun --no-env-file node_modules/oxfmt/bin/oxfmt --config .oxfmtrc.json --check \"{src,test,scripts,e2e,site,skills}/**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}\" package.json tsconfig.json .oxlintrc.json .oxfmtrc.json",
     "audit:luvus": "bun --no-env-file scripts/luvus/audit-fixtures.mjs",
+    "verify:herdr-core": "bun --no-env-file scripts/herdr-core/verify-observation.ts",
     "test:protocol": "bun --no-env-file test ./test/luvus ./test/mcp/sdk-compatibility.test.mjs",
     "test:toolchain": "bun --no-env-file test ./test/toolchain/compatibility.test.mjs",
     "site:build": "bun --no-env-file scripts/site/build.mjs",

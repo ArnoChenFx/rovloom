@@ -62,6 +62,22 @@ workspace 创建后的计数，不调用模型。可选的 Agent 两轮对话方
 配对仍在两个容器的真实 TTY（`docker run -it`）里按 Quick Start 完成；MCP 只在 Gateway 的回环上（设计如此），客户端容器共享该网络命名空间，用官方 MCP SDK 走完整 Herdr 链路。
 随后 `docker network disconnect` 把 Connector 摘出网络：Gateway 在空闲超时（20 秒）内发现，新调用立即不可用而不是悬挂；接回后数秒内自动恢复。
 
+## 真实 herdr-core 链路（Linux）
+
+`--herdr-core` 只附着已运行的 core：脚本在私有 `XDG_RUNTIME_DIR` 下用 `hc run --bg --json` 拉起 core
+（版本取自二进制自己的 `--version`；CI 固定测 0.1.14 与 0.1.15）和一个打印 `rovloom-e2e` 后休眠的终端，再按 Quick Start 完成配对。`herdr-core-session.mjs` 经 MCP 验证
+machines → providers（kind `herdr-core`）→ discover（恰好 5 个读取）→ describe → `server.status` /
+`terminal.list` / `terminal.get` / `terminal.read(lines=0)` / `terminal.wait`，并确认控制档被 Gateway 拒绝。
+
+```sh
+python3 e2e/quickstart.py --binary dist/release/bun-linux-x64/candidate/rovloom \
+  --herdr-core /path/to/herdr-core-0.1.15 --work ~/.rq-core \
+  --then "bun --no-env-file e2e/herdr-core-session.mjs"
+```
+
+同一次运行还会验证两处身份失败关闭：同机转发代理 `herdr_core_peer_pid_mismatch`、0755 socket 目录
+`herdr_core_endpoint_untrusted`。结束时按 exe 路径、`HC_SESSION` 与私有 cwd 回收 core/holder 和终端。
+
 ## 真实 Luvus 链路
 
 ```sh

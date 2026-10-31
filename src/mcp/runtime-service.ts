@@ -8,7 +8,7 @@ import type { createProviderGatewayRuntime } from '../runtime/gateway.js'
 import type { Store } from '../store.js'
 import { StoreGatewayService, type StoreGatewayOptions } from './store-service.js'
 import { isToolName, parseToolArguments } from './schema.js'
-import { publicCallView } from './call-view.js'
+import { callRefusalReason, publicCallView } from './call-view.js'
 import {
   FacadeServiceError,
   NativeRequestNotDispatchedError,
@@ -27,7 +27,11 @@ export type RuntimeGateway = Awaited<ReturnType<typeof createProviderGatewayRunt
 export type RuntimeGatewayPort = Pick<
   RuntimeGateway,
   'router' | 'principal' | 'runAuthenticated' | 'admit' | 'get' | 'cancel' | 'results' | 'targets'
-> & { store: Store; terminalExecutionState?: RuntimeGateway['terminalExecutionState'] }
+> & {
+  store: Store
+  terminalExecutionState?: RuntimeGateway['terminalExecutionState']
+  refusalReason?: RuntimeGateway['refusalReason']
+}
 export type RuntimeGatewayServiceOptions = Omit<StoreGatewayOptions, 'store' | 'router' | 'targets'> & {
   runtime: RuntimeGatewayPort
 }
@@ -45,7 +49,37 @@ const errors: Record<string, ServiceErrorCode> = {
   result_context_unavailable: 'content_unavailable',
   result_retention_context_unavailable: 'content_unavailable',
   discard_forbidden: 'forbidden',
-  clock_untrusted: 'storage_degraded'
+  clock_untrusted: 'storage_degraded',
+  // herdr-core 的固定拒绝码只投影为稳定的公开码，不把原生方法表或参数规则带到 MCP。
+  herdr_core_method_unavailable: 'not_found',
+  runtime_method_unavailable: 'not_found',
+  herdr_core_param_blocked: 'native_request_invalid',
+  herdr_core_read_history_unsupported: 'native_request_invalid',
+  herdr_core_native_request_invalid: 'native_request_invalid',
+  herdr_core_timeout_invalid: 'invalid_arguments',
+  herdr_core_timeout_exceeds_limit: 'invalid_arguments',
+  // 控制档的栅栏与参数规则同样只投影为固定公开码，不把原生方法表带到 MCP。
+  herdr_core_terminal_fence_required: 'native_request_invalid',
+  herdr_core_terminal_fence_invalid: 'native_request_invalid',
+  herdr_core_terminal_address_unsupported: 'native_request_invalid',
+  herdr_core_force_unsupported: 'native_request_invalid',
+  herdr_core_text_too_large: 'native_request_invalid',
+  herdr_core_param_invalid: 'native_request_invalid',
+  herdr_core_parent_unsupported: 'native_request_invalid',
+  herdr_core_template_required: 'native_request_invalid',
+  herdr_core_read_history_exceeds_limit: 'native_request_invalid',
+  herdr_core_template_unavailable: 'not_found',
+  herdr_core_template_ambiguous: 'native_request_invalid',
+  herdr_core_run_capacity: 'busy',
+  herdr_core_event_invalid: 'native_request_invalid',
+  herdr_core_events_closed: 'unavailable',
+  herdr_core_terminal_blocked: 'unavailable',
+  herdr_core_terminal_identity_mismatch: 'conflict',
+  herdr_core_terminal_unavailable: 'unavailable',
+  herdr_core_connection_closed: 'unavailable',
+  herdr_core_contract_unavailable: 'contract_unavailable',
+  // 本机直接终端输入开关关闭：Gateway 在登记前拒绝，公开码只说明本机策略不允许。
+  terminal_execution_disabled: 'forbidden'
 }
 
 // 只映射受信错误类中的固定公共码，未知原生异常及code不进入MCP诊断。
@@ -110,7 +144,7 @@ export class RuntimeGatewayService implements GatewayService {
     this.current(context)
     const runtime = this.options.runtime
     const call = runtime.get(callId)
-    let view = publicCallView(call)
+    let view = publicCallView(call, callRefusalReason(runtime.refusalReason?.(callId)))
     view.contract_ref = runtime.store.callContractRef(runtime.principal().id, callId)
     if (call.state === 'responded' && call.content_status === 'available') {
       try {

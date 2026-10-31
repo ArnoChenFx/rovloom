@@ -1,7 +1,7 @@
 /** MCP/CLI 与 WebUI 共用的管理契约；类型按管理面提供方维护，不实现身份或后台服务。 */
 import type { Principal } from '../router.js'
 import type { CallState } from '../contracts.js'
-import type { HostProfile } from '../wire/types.js'
+import type { HostProfile, ProviderKind } from '../wire/types.js'
 
 export type CallerIdentity = Readonly<{ principal_id: string }>
 export type Page<T> = { items: T[]; next_cursor?: string }
@@ -10,7 +10,7 @@ export type ResourceTarget = { machine_id: string; provider_id?: string }
 export type ProviderView = {
   machine_id: string
   provider_id: string
-  kind: 'luvus' | 'herdr'
+  kind: ProviderKind
   binding_revision: number
   enabled: boolean
   readiness: 'unavailable' | 'unverified' | 'ready'
@@ -147,7 +147,7 @@ export type CallSummary = {
   principal: string
   machine_id: string
   provider_id: string
-  provider_kind: 'luvus' | 'herdr'
+  provider_kind: ProviderKind
   method: string
   state: CallState
   /** 派发尝试是否已登记；不证明原生已接收或执行，原始 epoch 引用不离开账本。 */
@@ -165,7 +165,7 @@ export type CallSummary = {
 export type CallAggregate = {
   total: number
   by_state: readonly { state: CallState; count: number }[]
-  by_provider: readonly { machine_id: string; provider_id: string; kind: 'luvus' | 'herdr'; count: number }[]
+  by_provider: readonly { machine_id: string; provider_id: string; kind: ProviderKind; count: number }[]
   by_principal: readonly { principal: string; count: number }[]
   by_method: readonly { method: string; count: number }[]
 }
@@ -223,7 +223,7 @@ export type ManagementIntent =
   | { action: 'device_revoke'; target: { machine_id: string } }
   | {
       action: 'provider_disable' | 'provider_enable'
-      target: { machine_id: string; provider_id: string; kind: 'luvus' | 'herdr' }
+      target: { machine_id: string; provider_id: string; kind: ProviderKind }
       expected_binding_revision: number
     }
 export type IntentFence = { recovery_generation: string; expected_revision: number; reason: string }
@@ -232,7 +232,7 @@ export type ConfirmationView = {
   /** 撤销影响的当前实例摘要；不含config路径或秘密，资源变化使确认失效。 */
   affected_providers?: readonly {
     provider_id: string
-    kind: 'luvus' | 'herdr'
+    kind: ProviderKind
     binding_revision: number
     enabled: boolean
   }[]
@@ -295,7 +295,7 @@ export type ManagementArguments = {
   providers_disable: ManagementWrite & {
     machine_id: string
     provider_id: string
-    kind: 'luvus' | 'herdr'
+    kind: ProviderKind
     expected_binding_revision: number
   }
   providers_enable: ManagementArguments['providers_disable']

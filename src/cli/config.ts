@@ -28,7 +28,8 @@ export type ConnectorConfig = Readonly<{
   provider_config_refs: readonly string[]
   allow_terminal_execution?: boolean
   native?: Readonly<{
-    provider?: 'luvus' | 'herdr' | 'mixed'
+    // mixed 在 Linux 上表示全部三种（Luvus + Herdr TUI + herdr-core），其它平台仍是前两种；只要两种时用显式的组合值。
+    provider?: NativeProviderSelection
     runtime_bin_dirs?: readonly string[]
     agent_bin_dirs?: readonly string[]
     // Herdr 专属：attach（默认）附着用户真实会话、不存在才自建；managed 在 Connector 私有目录里拉一个隔离实例。
@@ -36,10 +37,37 @@ export type ConnectorConfig = Readonly<{
     // Luvus 专属：attach（默认）附着用户真实的 default 会话（LUVUS_HOME，默认 ~/.luvus）、不存在才自建；
     // managed 在 Connector 私有目录里拉一个隔离实例（会话名 rovloom）。
     luvus?: Readonly<{ mode?: 'attach' | 'managed'; state_root?: string }>
+    // herdr-core 专属：attach（默认）只附着已运行的 core；managed 由 Connector 在私有目录里拉起一个实例。
+    // session 与 core 的套接字名一致，省略为 default；config_home 只给 managed 用（模板与 config.toml）。
+    herdr_core?: Readonly<{ session?: string; mode?: 'attach' | 'managed'; config_home?: string }>
   }>
 }>
 export type RoleConfig = GatewayConfig | ConnectorConfig
-export type NativeProviderKind = 'luvus' | 'herdr'
+export type NativeProviderKind = 'luvus' | 'herdr' | 'herdr-core'
+
+/**
+ * `native.provider` 的闭合取值。`mixed` 从 0.10 起在 Linux 上表示全部三种（其它平台仍是 Luvus + Herdr TUI）；
+ * 原先的 Luvus + Herdr TUI 组合改用显式的 `luvus,herdr` 表达，已有配置逐字按原样解析
+ * （`mixed` 的老设备怎么启动见 {@link pairedNativeProviders}）。
+ */
+export const NATIVE_PROVIDER_SELECTIONS = Object.freeze([
+  'luvus',
+  'herdr',
+  'herdr-core',
+  'mixed',
+  'luvus,herdr',
+  'luvus,herdr-core',
+  'herdr,herdr-core'
+] as const)
+export type NativeProviderSelection = (typeof NATIVE_PROVIDER_SELECTIONS)[number]
+
+/** 组合值到 kind 的固定映射；单值仍按原样返回，不按分隔符猜测。 */
+const NATIVE_PROVIDER_COMBINATIONS: Readonly<Record<string, readonly NativeProviderKind[]>> = Object.freeze({
+  mixed: Object.freeze(['luvus', 'herdr', 'herdr-core'] as const),
+  'luvus,herdr': Object.freeze(['luvus', 'herdr'] as const),
+  'luvus,herdr-core': Object.freeze(['luvus', 'herdr-core'] as const),
+  'herdr,herdr-core': Object.freeze(['herdr', 'herdr-core'] as const)
+})
 
 // Herdr 的运行方式：默认附着用户已在运行的实例（不存在才自建），managed 为 Connector 私有的隔离实例。
 export function herdrMode(config: ConnectorConfig): 'attach' | 'managed' {
@@ -51,9 +79,58 @@ export function luvusMode(config: ConnectorConfig): 'attach' | 'managed' {
   return config.native?.luvus?.mode ?? 'attach'
 }
 
-// 省略选择时保留已有Luvus首次路径；混合选择只包含两份固定来源，不接受任意provider注册。
-export function selectedNativeProviders(config: ConnectorConfig): readonly NativeProviderKind[] {
-  return config.native?.provider === 'mixed' ? ['luvus', 'herdr'] : [config.native?.provider ?? 'luvus']
+// herdr-core 默认只附着已运行实例；managed 由 Connector 自己拉起（见 connector/herdr-core/managed.ts）。
+export function herdrCoreSession(config: ConnectorConfig): string {
+  return config.native?.herdr_core?.session ?? 'default'
+}
+
+export function herdrCoreMode(config: ConnectorConfig): 'attach' | 'managed' {
+  return config.native?.herdr_core?.mode ?? 'attach'
+}
+
+/** managed 的模板与 config.toml 目录；省略时用 Connector 私有的空目录（不碰真实 ~/.config）。 */
+export function herdrCoreConfigHome(config: ConnectorConfig): string | undefined {
+  return config.native?.herdr_core?.config_home
+}
+
+/** 0.10 之前 `mixed` 只表示 Luvus + Herdr TUI；按那个集合配对的设备没有 herdr-core 的准备记录。 */
+const LEGACY_MIXED_PROVIDERS: readonly NativeProviderKind[] = Object.freeze(['luvus', 'herdr'] as const)
+
+// 省略选择时保留已有Luvus首次路径；单值只选自己，mixed 选这个平台支持的全部来源，两种用显式组合值。
+// herdr-core 只支持 Linux（靠内核 peer 凭据），所以 mixed 在 macOS/Windows 上仍是 Luvus + Herdr TUI，与 0.10 之前相同。
+// 这里只决定「新配对准备哪些来源」；已配对设备启动时按 pairedNativeProviders 核对。
+export function selectedNativeProviders(
+  config: ConnectorConfig,
+  platform: NodeJS.Platform = process.platform
+): readonly NativeProviderKind[] {
+  const value: NativeProviderSelection = config.native?.provider ?? 'luvus'
+  if (value === 'mixed' && platform !== 'linux') {
+    return LEGACY_MIXED_PROVIDERS
+  }
+  const combined = NATIVE_PROVIDER_COMBINATIONS[value]
+  // 单值只能是 kind 本身（组合值都在表里），不按分隔符猜测。
+  return combined ?? [value as NativeProviderKind]
+}
+
+/**
+ * 已配对设备启动时应该核对的来源集合。通常就是 {@link selectedNativeProviders}；唯一的例外是 `mixed`：
+ * 已有真实用户的设备按旧含义（Luvus + Herdr TUI）配对，升级后 `mixed` 多了 herdr-core，
+ * 但这些设备的准备记录里没有它——继续按旧集合启动，不要求重新配对，也不替用户加上从没准备过的来源。
+ * 准备记录恰好是旧集合才算旧设备；其它任何不一致仍然是 `configuration_required`。
+ */
+export function pairedNativeProviders(
+  config: ConnectorConfig,
+  prepared: readonly unknown[],
+  platform: NodeJS.Platform = process.platform
+): readonly NativeProviderKind[] {
+  if (
+    config.native?.provider === 'mixed' &&
+    prepared.length === LEGACY_MIXED_PROVIDERS.length &&
+    LEGACY_MIXED_PROVIDERS.every(/** 旧集合的每一种都要有且只有一条准备记录。 */ (kind) => prepared.includes(kind))
+  ) {
+    return LEGACY_MIXED_PROVIDERS
+  }
+  return selectedNativeProviders(config, platform)
 }
 
 export const CLI_ERROR_CODES = [
@@ -228,7 +305,7 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
     const native =
       input.native === undefined
         ? undefined
-        : exact(input.native, [], ['provider', 'runtime_bin_dirs', 'agent_bin_dirs', 'herdr', 'luvus'])
+        : exact(input.native, [], ['provider', 'runtime_bin_dirs', 'agent_bin_dirs', 'herdr', 'luvus', 'herdr_core'])
     if (native) {
       if (native.herdr !== undefined) {
         const herdr = exact(native.herdr, [], ['mode', 'config_home'])
@@ -240,6 +317,19 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
         }
         Object.freeze(herdr)
       }
+      if (native.herdr_core !== undefined) {
+        const core = exact(native.herdr_core, [], ['session', 'mode', 'config_home'])
+        if (
+          (core.session !== undefined && !/^[A-Za-z0-9._-]{1,64}$/.test(core.session as string)) ||
+          (core.mode !== undefined && !['attach', 'managed'].includes(core.mode as string)) ||
+          (core.config_home !== undefined && !fixedPath(core.config_home, platform)) ||
+          // 只附着时没有可用的 config_home：拒绝而不是静默忽略。
+          (core.config_home !== undefined && core.mode !== 'managed')
+        ) {
+          return fail()
+        }
+        Object.freeze(core)
+      }
       if (native.luvus !== undefined) {
         const luvus = exact(native.luvus, [], ['mode', 'state_root'])
         if (
@@ -250,7 +340,10 @@ export function parseConfig(value: unknown, platform: NodeJS.Platform = process.
         }
         Object.freeze(luvus)
       }
-      if (native.provider !== undefined && !['luvus', 'herdr', 'mixed'].includes(native.provider as string)) {
+      if (
+        native.provider !== undefined &&
+        !NATIVE_PROVIDER_SELECTIONS.includes(native.provider as NativeProviderSelection)
+      ) {
         return fail()
       }
       for (const key of ['runtime_bin_dirs', 'agent_bin_dirs']) {

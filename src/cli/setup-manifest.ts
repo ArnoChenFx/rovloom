@@ -3,6 +3,8 @@ import { ProviderAdapterError } from '../connector/provider-error.js'
 import { HERDR_INPUT_LIMIT } from '../connector/herdr/compiler-protocol.js'
 import { compileHerdrSchemas } from '../connector/herdr/compiler-api.js'
 import { parseHerdrProviderRefConfig, createHerdrGatewayResources } from '../connector/herdr/provider.js'
+import { createHerdrCoreGatewayResources, parseHerdrCoreProviderRefConfig } from '../connector/herdr-core/provider.js'
+import { compileHerdrCoreContract } from '../connector/herdr-core/schema.js'
 import { createHerdrCodec } from '../connector/herdr/readonly.js'
 import { checkedRemoteLuvusConfig, createPinnedRemoteLuvus } from '../connector/luvus/host/remote-luvus.js'
 import { boundedJson, fields, hash, object } from '../wire/index.js'
@@ -72,11 +74,16 @@ export async function reviewSetupManifest(
   if (plan.providers && boundedJson(plan.providers) !== boundedJson(kinds)) {
     throw new CliError('configuration_required')
   }
-  // Luvus 的会话名来自 Connector 的运行方式（附着 default / managed rovloom），只接受这两个程序定义的值。
+  // Luvus 的会话名来自 Connector 的运行方式（附着 default / managed rovloom），只接受这两个程序定义的值；
+  // herdr-core 的会话名来自 Connector 本地配置，仍按同一字符集与长度规则核对。
   const luvusIndex = kinds.indexOf('luvus')
-  const sessions = setupSessions(
-    luvusIndex < 0 ? undefined : { luvus: object(object(object(entries[luvusIndex]).value).target).session }
-  )
+  const coreIndex = kinds.indexOf('herdr-core')
+  const coreSession =
+    coreIndex < 0 ? undefined : object(object(object(object(entries[coreIndex]).value).config).target).session
+  const sessions = setupSessions({
+    ...(luvusIndex < 0 ? {} : { luvus: object(object(object(entries[luvusIndex]).value).target).session }),
+    ...(coreSession === undefined ? {} : { herdr_core: coreSession })
+  })
   const authorization = { principal_id: plan.actor }
   const reviewed: ReviewedSetupInstallation[] = []
   for (let index = 0; index < entries.length; index++) {
@@ -125,7 +132,7 @@ export async function reviewSetupManifest(
           loaded.close()
         }
       })
-    } else {
+    } else if (kind === 'herdr') {
       const remote = object(entry.value)
       fields(remote, ['kind', 'config', 'schema_bundle'])
       const config = object(remote.config)
@@ -175,6 +182,56 @@ export async function reviewSetupManifest(
         /** 发布后按 Gateway 自己的路径重建资源，证明落盘字节与编译身份一致。 */
         async verifyPublished() {
           const verified = await createHerdrGatewayResources({ config: parsed, signal })
+          await verified.release()
+        }
+      })
+    } else {
+      const remote = object(entry.value)
+      fields(remote, ['kind', 'config', 'schema_bundle'])
+      const config = object(remote.config)
+      fields(config, ['version', 'target', 'binding_revision', 'config_ref', 'expected_source'])
+      if (
+        remote.kind !== 'herdr-core' ||
+        typeof remote.schema_bundle !== 'string' ||
+        Buffer.byteLength(remote.schema_bundle) > HERDR_INPUT_LIMIT
+      ) {
+        throw new CliError('configuration_required')
+      }
+      // herdr-core 的契约来自运行中实例的 rpc.discover；Gateway 按同一内容寻址布局保存原始字节。
+      const path = schemaReference(directory, object(config.expected_source).schema_sha256 as string)
+      const parsed = parseHerdrCoreProviderRefConfig({ ...config, schema_ref: path })
+      const bytes = Buffer.from(remote.schema_bundle, 'utf8')
+      if (
+        parsed.config_ref !== reference ||
+        parsed.binding_revision !== 1 ||
+        boundedJson(parsed.target) !== boundedJson(target) ||
+        hash(bytes) !== parsed.expected_source.schema_sha256
+      ) {
+        throw new CliError('configuration_required')
+      }
+      // 与 Herdr 一致：先编译审核根，再落盘；坏文档不会留下半发布的 schema。
+      compileHerdrCoreContract(bytes)
+      const binding: ProviderBinding = {
+        machine_id: machine,
+        provider_id: kind,
+        kind,
+        config_ref: reference,
+        binding_revision: 1,
+        enabled: true
+      }
+      reviewed.push({
+        kind,
+        reference,
+        target,
+        binding,
+        // 本地配置没有 Connector 的端点、主体或账本事实；Gateway 只保存契约与绑定。
+        value: { kind, config: parsed },
+        label: label(parsed.expected_source.binary_version),
+        binary_sha256: parsed.expected_source.binary_sha256,
+        schema: { path, bytes },
+        /** 发布后用 Gateway 自己的路径重建资源，证明落盘字节与审核契约一致。 */
+        async verifyPublished() {
+          const verified = await createHerdrCoreGatewayResources({ config: parsed })
           await verified.release()
         }
       })

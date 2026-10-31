@@ -5,7 +5,7 @@ import type { ProductionGatewayResources, RuntimeCliGatewayResources } from '../
 // 仅用于编译检查，不启动角色、构造来源或创建测试成功后端。
 export function neutralGatewayTypeChecks(
   provider: ProviderGatewayRuntimeOptions['providers'][number],
-  session: ProviderGatewayRuntimeOptions['session'],
+  session: NonNullable<ProviderGatewayRuntimeOptions['session']>,
   options: Omit<ProviderGatewayRuntimeOptions, 'providers' | 'session'>
 ) {
   const production: ProductionGatewayResources = {
@@ -19,7 +19,7 @@ export function neutralGatewayTypeChecks(
     options: { ...options, providers: [provider], session },
     authentication: { authenticate: /* 类型fixture不会处理请求，不授予任何身份。 */ () => null }
   }
-  // @ts-expect-error 中性分支缺真实session不能被当作可启动资源。
+  // @ts-expect-error 中性分支缺 session 与 ports 不能被当作可启动资源。
   const missing: ProductionGatewayResources = { kind: 'provider', providers: [provider], release: production.release }
   // @ts-expect-error 没有Luvus contract/source/authority时只能选择中性分支。
   const legacy: ProductionGatewayResources = {
