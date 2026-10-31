@@ -97,6 +97,16 @@ const RELEASE_NOTES = Object.freeze({
     ],
     upgrade:
       'Devices already paired with `mixed` (Luvus and Herdr) keep starting with those two and do not need to pair again. A new pairing with `mixed` on Linux also needs herdr-core installed and running; use `luvus,herdr` to get the old pair. Upgrading herdr-core itself replaces its binary, and a device paired with the old binary fails closed (`herdr_core_installation_changed`) until it is paired again with a fresh code. Nothing changes for Luvus or Herdr only setups: pairings, tokens and ledgers are unchanged.'
+  },
+  '0.10.1': {
+    highlights: [
+      'A paired device can add a provider it was not paired with, without a new pairing code. Name it in `native.provider` (one kind, a pair, or `mixed`) and restart the Connector: it prepares the provider locally, registers it with the Gateway using its device credential (`POST /pairing/providers`) and uses it from that start. Providers added in one start are registered together. It only adds: an existing provider is never changed or replaced, and a failure prints `native_provider_append_failed: <kind> <code>` while the paired providers keep starting.',
+      '`native.provider` is no longer compared with the value from pairing at startup, which made any edit fail with `configuration_required`. After pairing it only filters the paired providers. The settings that bind a device to a native instance or binary (modes, state and config directories, binary and agent directories, the herdr-core session) keep their paired values; changing one prints `native_settings_kept: <names>`.',
+      'herdr-core offers 24 methods. New: `machine.exec`, `file.read`, `file.write`, `file.edit`, `doc.get`, `doc.set`, `server.restart`, `server.stop`, and a `parent` for `terminal.run`. They follow `allow_terminal_execution` like the other terminal methods. `machine.*`, `terminal.attach` and `events.subscribe` stay closed, and `runtime_describe` lists them in `blocked_methods` with the reason.',
+      '`rovloom connector --join` now names the provider it could not prepare, and the check that no Connector is running before pairing state is retired also covers herdr-core.'
+    ],
+    upgrade:
+      'Upgrade the Gateway and the Connectors together: this release adds dispatch refusal codes and the `/pairing/providers` endpoint, which an older Gateway cannot serve. Nothing to migrate: pairings, tokens and ledgers are unchanged, and a device paired with herdr-core on 0.10.0 keeps working without pairing again. A Linux device paired as `mixed` before 0.10 gets herdr-core added at its next start if a core is reachable; with `allow_terminal_execution` on by default, callers whose token covers that device can then run commands and read and write files through it. Set `native.provider` to `luvus,herdr` to avoid that. Known limitation: if you narrow `native.provider` so the Connector no longer starts a provider that the Gateway still lists, a call to that provider returns `outcome_unknown` and makes the device reconnect once; its other providers recover on their own within about a second.'
   }
 })
 
