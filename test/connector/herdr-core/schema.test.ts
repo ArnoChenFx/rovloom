@@ -123,10 +123,12 @@ test('blocked parameters are refused before any schema or native call', () => {
   assert.throws(() => reviewHerdrCoreParams('machine.list', {}), /herdr_core_method_unavailable/u)
   // machine.exec 必须显式给 timeout；宿主级已经开放。
   assert.throws(() => reviewHerdrCoreParams('machine.exec', { argv: ['sh'] }), /herdr_core_timeout_invalid/u)
-  // parent 现在开放，但必须带调用方认定的 parent_created_ms；其它方法仍不接受 parent。
+  // parent 现在开放，名字或地址都行、parent_created_ms 可省略；其它方法仍不接受 parent。
+  assert.doesNotThrow(() => reviewHerdrCoreParams('terminal.run', { argv: ['sh'], parent: 't1' }))
+  assert.doesNotThrow(() => reviewHerdrCoreParams('terminal.run', { argv: ['sh'], parent: 'parent-a' }))
   assert.throws(
-    () => reviewHerdrCoreParams('terminal.run', { argv: ['sh'], parent: 't1' }),
-    /herdr_core_terminal_fence_required/u
+    () => reviewHerdrCoreParams('terminal.run', { argv: ['sh'], parent: 'machine/t1' }),
+    /herdr_core_terminal_address_unsupported/u
   )
   assert.throws(
     () =>
@@ -139,9 +141,11 @@ test('blocked parameters are refused before any schema or native call', () => {
       }),
     /herdr_core_param_blocked/u
   )
+  // 栅栏字段可选：省略可以；给了错形状仍拒绝。
+  assert.doesNotThrow(() => reviewHerdrCoreParams('terminal.send', { terminal: 't1', text: 'x' }))
   assert.throws(
-    () => reviewHerdrCoreParams('terminal.send', { terminal: 't1', text: 'x' }),
-    /herdr_core_terminal_fence_required/u
+    () => reviewHerdrCoreParams('terminal.send', { terminal: 't1', core_id: 'zz', text: 'x' }),
+    /herdr_core_terminal_fence_invalid/u
   )
   // 本期开放集合内的读取不需要额外开关。
   assert.doesNotThrow(() => reviewHerdrCoreParams('terminal.read', { terminal: 't1', lines: 0 }))

@@ -82,7 +82,9 @@ python3 e2e/quickstart.py --binary dist/release/bun-linux-x64/candidate/rovloom 
 `--herdr-core` 只附着已运行的 core：脚本在私有 `XDG_RUNTIME_DIR` 下用 `hc run --bg --json` 拉起 core
 （版本取自二进制自己的 `--version`；CI 只测上游发布的最新版）和一个打印 `rovloom-e2e` 后休眠的终端，再按 Quick Start 完成配对。`herdr-core-session.mjs` 经 MCP 验证
 machines → providers（kind `herdr-core`）→ discover（24 个方法：读取、控制、宿主级与 `terminal.events`）→ describe → `server.status` /
-`terminal.list` / `terminal.get` / `terminal.read(lines=0)` / `terminal.wait`，并确认控制档被 Gateway 拒绝。
+`terminal.list` / `terminal.get` / `terminal.read(lines=0)` / `terminal.wait`，并确认控制档被 Gateway 拒绝。同一脚本还覆盖
+「省略 `params` 等同 `{}`」、预检拒绝带固定 path 且没有调用记录、省略 `core_id`/`created_ms` 与名字形态的控制调用、
+错的 `created_ms` 仍是 `fence_mismatch`、`machine/t7` 与 `server.stop` 缺 `core_id` 仍被拒。
 
 ```sh
 python3 e2e/quickstart.py --binary dist/release/bun-linux-x64/candidate/rovloom \

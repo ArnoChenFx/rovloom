@@ -8,13 +8,17 @@ import type { ParameterDiagnostic } from '../../mcp/diagnostic.js'
 import { HERDR_CORE_CONTROL_METHODS, herdrCoreControl } from './methods.js'
 import type { HerdrCoreContract } from './schema.js'
 
-/** 控制档的终端参数：只接受裸地址。名字会被 label 改写，machine/t7 属于远端路由。 */
-const TERMINAL_CONTROL = 'Bare local address like `t7` only. rovloom rejects a terminal name and `machine/t7` here.'
-const CORE_ID = 'Current core id from `server.status` (`core_id`). rovloom rejects a stale or missing value.'
+/** 控制档的终端参数：裸地址或名字都行；`machine/t7` 走 core 的机器表，一律拒绝。 */
+const TERMINAL_CONTROL =
+  'Bare local address like `t7`, or a terminal name (1-32 of `a-z 0-9 - _ .`, starting with a letter or digit). `machine/t7` is rejected. rovloom reads `terminal.get` first and sends the resolved address.'
+const CORE_ID =
+  'Optional. Current core id from `server.status`. When given, a replaced core is rejected; omitting it means "whatever core is connected now".'
 const CREATED_MS =
-  'Terminal incarnation `created_ms` from `terminal.get` or `terminal.list`; it pins the terminal that existed when you read it.'
-const PARENT_ADDRESS = 'Bare local address of the parent terminal, like `t7`; a name is rejected.'
-const PARENT_CREATED_MS = 'Parent `created_ms` from `terminal.get` or `terminal.list`.'
+  'Optional. Terminal incarnation `created_ms` from `terminal.get`/`terminal.list`. When given, a reused address is rejected; omitting it means "the terminal under this name/address now".'
+const PARENT_ADDRESS =
+  'Bare local address like `t7`, or a terminal name. `machine/t7` is rejected; rovloom resolves the name to an address before starting.'
+const PARENT_CREATED_MS =
+  'Optional. Parent `created_ms` from `terminal.get`/`terminal.list`; when given, a reused parent address is rejected.'
 
 /** 每个方法要改写的字段说明；没有条目的字段保留 core 原文。 */
 export const HERDR_CORE_PARAM_DESCRIPTIONS: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze(
@@ -61,14 +65,16 @@ export function herdrCoreParameterHelp(
     : []
   const rules: string[] = ['Omitted `params` is the same as `params: {}`.']
   if (herdrCoreControl(method)) {
-    rules.push('`terminal` must be a bare local address like `t7`; a name or `machine/t7` is rejected.')
-    rules.push('`core_id` comes from `server.status`; `created_ms` comes from `terminal.get` or `terminal.list`.')
+    rules.push('`terminal` is a bare local address like `t7` or a terminal name; `machine/t7` is rejected.')
+    rules.push(
+      '`core_id` and `created_ms` are optional: give them to reject a replaced core or a reused address, omit them to use the terminal under that name/address now.'
+    )
   }
   if (method === 'server.stop' || method === 'server.restart') {
-    rules.push('`core_id` comes from `server.status`; a stale value is rejected.')
+    rules.push('`core_id` is required here: it comes from `server.status`; a stale value is rejected.')
   }
   if (method === 'terminal.run') {
-    rules.push('`parent` must be a bare local address like `t7`; `parent_created_ms` comes from `terminal.get`.')
+    rules.push('`parent` is an address or a name; `parent_created_ms` is optional and checked when given.')
   }
   return {
     source: 'herdr_core_published_schema',

@@ -267,9 +267,9 @@ test('宿主级方法与 blocked 参数在 Wire 与原生请求之前被拒绝',
   try {
     const session = resources.session(connection())
     for (const [method, params] of [
-      // 控制档已开放，但必须先带终端三元组栅栏；这里缺 core_id/created_ms。
-      ['terminal.send', { terminal: 't1', text: 'x' }],
-      ['terminal.keys', { terminal: 't1', keys: ['Enter'] }],
+      // 控制档已开放、栅栏字段可省略；这里被拒是因为 `machine/t7` 走远端路由、no_parent 只收 true、caller 一律拒绝。
+      ['terminal.send', { terminal: 'machine/t1', text: 'x' }],
+      ['terminal.keys', { terminal: 't1', core_id: 'zz', keys: ['Enter'] }],
       ['terminal.run', { argv: ['sh', '-c', 'id'], no_parent: false }],
       ['terminal.get', { terminal: 't1', caller: 't2' }]
     ] as const) {

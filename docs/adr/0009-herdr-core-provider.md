@@ -90,7 +90,13 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 开放 C 档 8 个方法：`terminal.send`、`terminal.keys`、`terminal.interrupt`、`terminal.put`、`terminal.kill`、`terminal.rm`、`terminal.keep`、`terminal.label`。D 档 12 个宿主级方法（`terminal.run`、`machine.*`、`file.*`、`doc.set`、`server.stop/restart`）仍不开放：目录、Wire 准入与参数复核三处继续拒绝，档位表本身不改。
 
-**终端三元组栅栏**。终端地址在同一 core 内永久，但只删 `terminals.json` 后地址会被复用（spike 4b-F：`core.id` 不变，新终端复用 `t1`），`(core.id, 地址)` 不唯一。控制档的每个方法都必须带 rovloom 自有的 `core_id` 与 `created_ms`（`HERDR_CORE_FENCE_PARAMS`），执行端在写入前用同一条连接读一次 `terminal.get`，要求 `client.hello.core.id === core_id`、`live.address === terminal`、`live.created_ms === created_ms`、`live.state === 'live'`，任一不符即 `herdr_core_terminal_identity_mismatch`，绝不把输入送给同地址的另一个终端。`terminal` 只接受裸本地地址 `tN`：名字会被 `label` 改写，`machine/tN` 属于远端路由。这两个字段由 `paramsSchema` 追加进参数根（必需），core 不认识它们，执行端在发送前显式剥离，不依赖 core 静默忽略未知字段。
+**终端栅栏（`core_id`/`created_ms` 可选，终端可以用名字）**。终端地址在同一 core 内永久，但只删 `terminals.json` 后地址会被复用（spike 4b-F：`core.id` 不变，新终端复用 `t1`），`(core.id, 地址)` 不唯一。用户 2026-10-31 决定放宽（反馈第 2、3 条：每次控制都要先取两个字段，多两步还容易错）：
+
+- 控制档的 `core_id`、`created_ms` 各自**可选**（`HERDR_CORE_FENCE_PARAMS`）。给了就严格核对：`client.hello.core.id === core_id`、`live.created_ms === created_ms`，不符即 `herdr_core_terminal_identity_mismatch`；省略就不比这一项。省略的含义是「就用现在名下的那个终端」：省略 `created_ms` 防不住地址复用，省略 `core_id` 防不住 core 换了一个实例。终端存在、仍在运行（`send`/`keys`/`interrupt`/`put` 要求 `live`）、blocked 判定这几道检查与栅栏无关，始终保留。
+- `terminal`（以及 `terminal.run` 的 `parent`）可以是裸本地地址（`tN`）或终端名字（1–32 位 `a-z 0-9 - _ .`，以字母或数字开头；0.1.15 的 core：唯一性只限存活终端，形如 `tN` 的字符串不算名字）。`machine/tN` 一律拒绝：它走 core 自己的机器表，会绕开设备令牌范围，和 `on` 同一个理由。
+- 执行端在写入前用同一条连接读一次 `terminal.get`（接受名字或地址），把名字**解析成地址**：真正发给 core 的 `terminal`/`parent` 是这次读到的地址，不是调用方给的名字。这样「读与写之间名字被改指」的窗口与地址形态一样大（残余风险见 `control.ts` 文件头）。给了 `parent_created_ms` 才比对父终端的化身。
+- 这两个字段由 `paramsSchema` 追加进参数根（不再必填），core 不认识它们，执行端在发送前显式剥离，不依赖 core 静默忽略未知字段。
+- `server.stop` / `server.restart` 的 `core_id` **仍然必填**：不可撤销，且 core 没有对应的 id 参数，错打一个实例的后果太重。
 
 **blocked 由 rovloom 判断**。spike 3f 实测 core 只在 `send` 上拦 blocked，`keys`、`interrupt`、`force` 照常送达；官方安全文档也说 blocked 不是访问边界。所以 `send`/`keys`/`interrupt` 在写入前自己判断：`terminal.get` 的 `status.state === 'blocked'` 即 `herdr_core_terminal_blocked`。判定 fail-closed：读不到终端事实、状态字形状不符、终端已结束都拒绝。`status === null`（程序从未上报 OSC 7501）不算未知——这类程序不可能进入 blocked，core 的闸门也只认上报过的状态；否则 `cat` 一类普通程序永远不能输入，e2e 的输入回显也就无从验证。`put` 只写文件、不送输入，`kill`/`rm`/`keep`/`label` 改的是终端记录，它们只做三元组核对：blocked 时仍必须能收拾现场。
 
@@ -106,7 +112,7 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 
 - 退避序列 0/250/500/1000/1500/2000 毫秒（合计约 5.25 秒，覆盖 holder 默认 3 秒宽限加新 core 启动），单轮总预算上限 6 秒并按调用方剩余期限再收紧；一轮失败后冷却 1 秒，期间调用直接失败，不逐请求热循环。并发调用共享同一轮，不会同时建立多条连接。
 - 重新附着只在调用路径上发生（`executeWire` 在写入前、`readiness` 只踢一次后台轮），`current()` 不会自己重连。断线时 `client()`/`assert()` 直接 `herdr_core_connection_closed`，不返回已关闭的连接。
-- `core.id` 变了就是新实例：调用方的 `core_id` 栅栏自动失效（旧三元组不会被接受），`created_ms` 也不会与旧终端相同。`core.id` 不变（计划重启、SIGKILL core 后 holder 重建）时终端记录保留，三元组仍然有效。
+- `core.id` 变了就是新实例：调用方给了 `core_id` 就自动失效（错的值不会被接受），省略 `core_id` 的调用会照它连上的新实例执行；`created_ms` 也不会与旧终端相同（给了才会比对）。`core.id` 不变（计划重启、SIGKILL core 后 holder 重建）时终端记录保留，三元组仍然有效。
 - 断线时在途调用保持 `outcome_unknown`，**不重放**：附着层不保存请求，重新附着后也不重发任何调用。
 - `readiness()` 只在附着对象已关闭时报告不可用。core 正在重启时报告不可用会让 transport 永久撤回 provider（`provider_fence`），所以「可重新附着」按可用报告；单次调用仍逐次核对身份，断线期间的调用明确失败（未派发），不悬挂、不重放。这是有意的取舍：可用性判断不再等价于「此刻已连接」。
 
@@ -138,7 +144,7 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 
 单测用假 core 覆盖 framed 握手、请求配对、错误映射、超时、EOF、参数先于原生请求、结果严格性与三元组；Connector 执行端覆盖 5 个读取、控制档拒绝、`/proc` 事实不符与契约摘要不符的失败关闭；配对认领覆盖 `herdr-core` 与旧 kind 不变。schema 用 0.1.14 的真实 OpenRPC 文档和 7 个真实输出样本核对。
 
-第四阶段把验收扩到控制档：`e2e/quickstart.py --herdr-core` 在同一轮配对里先验开关关闭（目录只剩 5 个读取、`runtime_call` 在登记前以 `forbidden` 拒绝），再改本机开关重启 Connector 验控制档——13 个方法、`send` 后用 `terminal.read(lines=0)` 读回、blocked 终端上 `send`/`keys`/`interrupt` 全部 `not_dispatched` 且程序日志为空、`kill`/`rm` 作用于本轮终端、`created_ms`/`core_id`/名字/远端目标四种栅栏拒绝、`hc server restart` 与 SIGKILL core 后在途调用 `outcome_unknown` 且重新附着后继续读（`core.id` 不变、终端记录保留）。`scripts/herdr-core/mutation-check.mjs` 逐条去掉 blocked 判定、三元组核对、Connector 与 Gateway 两处开关门禁，验证对应测试变红再恢复变绿。
+第四阶段把验收扩到控制档：`e2e/quickstart.py --herdr-core` 在同一轮配对里先验开关关闭（目录只剩 5 个读取、`runtime_call` 在登记前以 `forbidden` 拒绝），再改本机开关重启 Connector 验控制档——13 个方法、`send` 后用 `terminal.read(lines=0)` 读回、blocked 终端上 `send`/`keys`/`interrupt` 全部 `not_dispatched` 且程序日志为空、`kill`/`rm` 作用于本轮终端、`hc server restart` 与 SIGKILL core 后在途调用 `outcome_unknown` 且重新附着后继续读（`core.id` 不变、终端记录保留）。栅栏放宽后（指令 10）新增：省略 `core_id`/`created_ms`、只给其中一个、名字形态的 `send`/`keys`/`kill`/`rm`、错的 `created_ms` 仍是 `fence_mismatch`、`machine/tN` 与 `server.stop` 缺 `core_id` 仍被拒。`scripts/herdr-core/mutation-check.mjs` 逐条去掉 blocked 判定、三元组核对、Connector 与 Gateway 两处开关门禁，验证对应测试变红再恢复变绿。
 
 真实 core 验收脚本 `scripts/herdr-core/verify-observation.ts` 在私有沙箱里对 0.1.14（0.1.15 见上文）跑通：`rpc.discover` 契约身份、`server.status` 的 pid 与 `/proc/<pid>/exe` 摘要、`argv`、`HC_SESSION`，以及 `terminal.list`/`get`/`read`/`wait`；XDG 运行时目录与状态目录回退两种布局都实测。第三阶段新增 `e2e/quickstart.py --herdr-core`：真实 Gateway + Connector 配对 herdr-core、在目录看到 5 个方法、经 MCP 对沙箱 core 执行 5 个读取；同一次运行里用同机转发代理验证 `herdr_core_peer_pid_mismatch`、用 0755 socket 目录验证 `herdr_core_endpoint_untrusted`。
 
@@ -159,9 +165,9 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 | 状态 | `terminal.list` | 是 | 有条件 | 否 | 接受 core 自带的过期清理 |
 | 读取 | `terminal.read` | 是 | 有条件 | **`lines>0` 时需要** | `lines` ≤ 1000；`lines>0` 可能向全屏程序发滚轮输入 |
 | 多轮 | `terminal.wait` | 是 | 观察 | 否 | `timeout` ≤ 60 秒；`children` 必须显式给 `terminal`（rovloom 不发 `caller`）；`output` 给普通程序。同步视图常是 `connector_accepted`/`possibly_dispatched` 且没有结果句柄，用 `runtime_call_get {call_id, wait_ms}` 等到 `responded` 再 `runtime_result_read` |
-| 启动 | `terminal.run` | 是 | 宿主级 | 是 | 模板形态要 `template:true` 并用 `templates.list` 核对；`caller`/`on` 拒绝；`parent` 只接受 `tN` 且必须带 `parent_created_ms`（父必须 live、created_ms 一致），与 `no_parent` 互斥；`no_notify` 只接受 `true`；`wait=true` 必须给 ≤60 秒 `timeout`；argv ≤64 项/32 KiB、line ≤32 KiB、env ≤64 项、name 1–32 位；本 Connector 同时最多 32 个自己启动的存活终端。`rm:true` 的终端退出即被删，`wait:true` 会返回空 `output` 与 `wait.exit_code:null`（要输出就别 `rm`，读完再 `terminal.rm`） |
+| 启动 | `terminal.run` | 是 | 宿主级 | 是 | 模板形态要 `template:true` 并用 `templates.list` 核对；`caller`/`on` 拒绝；`parent` 是地址或名字（`machine/tN` 拒绝），`parent_created_ms` 可选（给了才核对父终端化身），与 `no_parent` 互斥；`no_notify` 只接受 `true`；`wait=true` 必须给 ≤60 秒 `timeout`；argv ≤64 项/32 KiB、line ≤32 KiB、env ≤64 项、name 1–32 位；本 Connector 同时最多 32 个自己启动的存活终端。`rm:true` 的终端退出即被删，`wait:true` 会返回空 `output` 与 `wait.exit_code:null`（要输出就别 `rm`，读完再 `terminal.rm`） |
 | 启动 | `templates.list` | 是 | 有条件 | 否 | 只列出名称/描述/命令；命令文本由机主维护 |
-| 输入 | `terminal.send` | 是 | 控制 | 是 | 必须带裸地址 `tN` + `core_id`+`created_ms`；`force` 拒绝；blocked 拒绝；`wait=true` 必须给 ≤60 秒 `timeout`。回复里的 `status`/`turn` 是**发送时**的快照，`turn` 数的是已完成轮次；要这一轮的结果用 `wait=true` 或之后 `terminal.get`/`terminal.events` |
+| 输入 | `terminal.send` | 是 | 控制 | 是 | `terminal` 是地址或名字（`machine/tN` 拒绝）；`core_id`/`created_ms` 可选（给了才严格核对）；`force` 拒绝；blocked 拒绝；`wait=true` 必须给 ≤60 秒 `timeout`。回复里的 `status`/`turn` 是**发送时**的快照，`turn` 数的是已完成轮次；要这一轮的结果用 `wait=true` 或之后 `terminal.get`/`terminal.events` |
 | 输入 | `terminal.keys` | 是 | 控制 | 是 | 同上三元组栅栏；≤64 键，每个 ≤32 字符；blocked 拒绝 |
 | 输入 | `terminal.interrupt` | 是 | 控制 | 是 | 同上；`timeout` ≤60 秒；blocked 拒绝 |
 | 输入 | `terminal.put` | 是 | 控制 | 是 | 同上三元组栅栏；data ≤512 KiB base64、name 只允许后缀字符 |

@@ -112,19 +112,24 @@ try {
   ])
   assert.equal(Object.hasOwn(runDescription.params_schema.properties, 'caller'), false)
   // 交互要点：core 侧事实 + 档位/等待/快照/rm 与 hidden_finished 的说明。
-  assert.equal((runDescription.guide ?? []).length, 13)
+  assert.equal((runDescription.guide ?? []).length, 14)
   assert.ok(runDescription.guide.some((line) => line.includes('allow_terminal_execution') && line.includes('tier')))
   assert.ok(runDescription.guide.some((line) => line.includes('runtime_call_get')))
   assert.ok(runDescription.guide.some((line) => line.includes('hidden_finished')))
+  // 栅栏字段可选、终端可用名字：说明与实际行为一致。
+  assert.ok(runDescription.guide.some((line) => line.includes('core_id') && line.includes('optional')))
   const sendDescription = await ok('runtime_describe', {
     target,
     expected_binding_revision: 1,
     method: 'terminal.send'
   })
   assert.deepEqual(sendDescription.params_schema.properties.if.anyOf[0].enum, ['idle', 'working'])
-  // 控制档的 terminal 只收裸地址：说明不能再写 core 原文里的「a name」。
-  assert.doesNotMatch(String(sendDescription.params_schema.properties.terminal.description), /a name/u)
+  // 控制档的 terminal 收裸地址或名字，但 `machine/t7` 一律拒绝：说明按实际规则写。
   assert.match(String(sendDescription.params_schema.properties.terminal.description), /t7/u)
+  assert.match(String(sendDescription.params_schema.properties.terminal.description), /name/u)
+  assert.match(String(sendDescription.params_schema.properties.core_id.description), /Optional/u)
+  assert.equal(sendDescription.params_schema.required.includes('core_id'), false)
+  assert.equal(sendDescription.params_schema.required.includes('created_ms'), false)
   assert.ok(
     sendDescription.usage.some((line) => line.includes('runtime_call_get')),
     'send usage must point at runtime_call_get'
@@ -151,18 +156,15 @@ try {
 
   // ---- 参数预检：登记前就拒绝，带固定路径与规则，且不产生调用记录 ----
   const refusals = [
-    [
-      'terminal name',
-      { method: 'terminal.kill', params: { terminal: 'build', core_id: coreId, created_ms: 1 } },
-      '/terminal'
-    ],
-    ['missing fence', { method: 'terminal.kill', params: { terminal: 't1' } }, '/core_id'],
+    // `machine/t7` 走 core 自己的机器表，绕开设备令牌范围：预检就拒绝。
+    ['machine route', { method: 'terminal.kill', params: { terminal: 'machine/t1' } }, '/terminal'],
     [
       'null created_ms',
       { method: 'terminal.kill', params: { terminal: 't1', core_id: coreId, created_ms: null } },
       '/created_ms'
     ],
-    ['missing text', { method: 'terminal.send', params: { terminal: 't1', core_id: coreId, created_ms: 1 } }, '/text']
+    ['missing text', { method: 'terminal.send', params: { terminal: 't1' } }, '/text'],
+    ['server.stop without core_id', { method: 'server.stop', params: {} }, '/core_id']
   ]
   for (const [label, native_request, path] of refusals) {
     const refused = await tool('runtime_call', {
@@ -279,6 +281,69 @@ try {
     params: { terminal: catResult.address, core_id: coreId, created_ms: catResult.created_ms }
   })
   assert.equal(removedCat.state, 'responded')
+
+  // ---- 栅栏字段可省略、终端可以用名字（用户 2026-10-31 拍板）----
+  const named = await invoke(entry('terminal.run').contract_ref, {
+    method: 'terminal.run',
+    params: { name: 'fence-omit', line: 'exec cat' }
+  })
+  assert.equal(named.state, 'responded', JSON.stringify(named))
+  const namedResult = await readAll(named)
+  const markerOmit = `rovloom-omit-${Date.now()}`
+  // 省略 core_id 与 created_ms、用名字：成功。
+  const omitted = await invoke(entry('terminal.send').contract_ref, {
+    method: 'terminal.send',
+    params: { terminal: 'fence-omit', text: `echo ${markerOmit}\n` }
+  })
+  assert.equal(omitted.state, 'responded', JSON.stringify(omitted))
+  await until('read sees the named send', async () => {
+    const read = await call(entry('terminal.read').contract_ref, 'terminal.read', {
+      terminal: 'fence-omit',
+      lines: 0
+    })
+    assert(read.text.includes(markerOmit), `marker missing: ${JSON.stringify(read.text.slice(-200))}`)
+    return read
+  })
+  // 只给 core_id、只给 created_ms 也都可以。
+  const onlyCore = await invoke(entry('terminal.send').contract_ref, {
+    method: 'terminal.send',
+    params: { terminal: 'fence-omit', core_id: coreId, text: `echo only-core-${markerOmit}\n` }
+  })
+  assert.equal(onlyCore.state, 'responded', JSON.stringify(onlyCore))
+  const onlyCreated = await invoke(entry('terminal.keys').contract_ref, {
+    method: 'terminal.keys',
+    params: { terminal: 'fence-omit', created_ms: namedResult.created_ms, keys: ['enter'] }
+  })
+  assert.equal(onlyCreated.state, 'responded', JSON.stringify(onlyCreated))
+  // 给了错的 created_ms 仍然拒绝，原因是 fence_mismatch（读完之后、写入之前）。
+  await refuses(
+    await invoke(entry('terminal.send').contract_ref, {
+      method: 'terminal.send',
+      params: { terminal: 'fence-omit', created_ms: namedResult.created_ms + 1, text: 'x' }
+    }),
+    'fence_mismatch',
+    'send with a wrong created_ms'
+  )
+  // 名字不存在：确定未派发，原因是 terminal_unavailable。
+  await refuses(
+    await invoke(entry('terminal.send').contract_ref, {
+      method: 'terminal.send',
+      params: { terminal: 'no-such-terminal', text: 'x' }
+    }),
+    'terminal_unavailable',
+    'send to an unknown name'
+  )
+  // 用名字 kill / rm：执行端解析成地址后写入，并回收本机名额。
+  const killedNamed = await invoke(entry('terminal.kill').contract_ref, {
+    method: 'terminal.kill',
+    params: { terminal: 'fence-omit' }
+  })
+  assert.equal(killedNamed.state, 'responded', JSON.stringify(killedNamed))
+  const removedNamed = await invoke(entry('terminal.rm').contract_ref, {
+    method: 'terminal.rm',
+    params: { terminal: 'fence-omit' }
+  })
+  assert.equal(removedNamed.state, 'responded', JSON.stringify(removedNamed))
 
   // ---- 模板形态 + 假智能体：多轮对话、读历史、core 明确拒绝 ----
   const templateDir = env.HERDR_CORE_MANAGED_CONFIG

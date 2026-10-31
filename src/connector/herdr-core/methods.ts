@@ -182,12 +182,20 @@ export const HERDR_CORE_EVENTS_PARAMS_SCHEMA: Readonly<Record<string, unknown>> 
 })
 
 /**
- * 控制档的终端栅栏参数：调用方必须带上它认定的 `(core_id, created_ms)`。
+ * 控制档的终端栅栏参数：调用方可以带上它认定的 `(core_id, created_ms)`，也可以省略。
  * 终端地址在同一 core 内永久，但只删 `terminals.json` 后地址会被复用（spike 4b-F），
- * `(core.id, 地址)` 不唯一；这三个字段与实时 `terminal.get` 不一致就拒绝，
- * 绝不把输入送给同地址的另一个终端。
+ * `(core.id, 地址)` 不唯一：给了就与实时 `terminal.get` 严格比对，省略就不比这一项；
+ * 省略 `created_ms` 就防不住地址复用，省略 `core_id` 就防不住 core 换了一个实例。
  */
 export const HERDR_CORE_FENCE_PARAMS: readonly string[] = Object.freeze(['core_id', 'created_ms'])
+
+/**
+ * 控制档/`parent` 的终端标识：裸地址（`t7`）或终端名字（1-32 位 `a-z 0-9 - _ .`，
+ * 以字母或数字开头）。`machine/t7` 一律拒绝：它走 core 自己的机器表，会绕开设备令牌范围。
+ * 0.1.15 的 core 对名字的规则见 `hc run --name` 与 `bad name` 错误文本：
+ * 唯一性只限存活终端，且「形如 id（`t7`）」的字符串不算名字。
+ */
+export const HERDR_CORE_TERMINAL_TARGET = '^[a-z0-9][a-z0-9._-]{0,31}$'
 
 /**
  * rovloom 自有参数：`template` 让调用方声明 `argv[0]` 是模板名（core 不认识它），
@@ -257,6 +265,7 @@ export const HERDR_CORE_GUIDE: readonly string[] = Object.freeze([
   'Codex must run with `--no-daemon`, otherwise its commands run outside core.',
   "core capabilities rovloom does NOT expose: `machine.*` and the `on` parameter (they route through core's own machine table and would bypass the per-device scope of a rovloom token), `terminal.attach` (raw VT stream), `events.subscribe` (streaming; use `terminal.events`). `caller`/`calls_you`/`core` are unauthenticated identity fields and are always rejected.",
   'Write calls are never replayed. After a disconnect the result may be `outcome_unknown`; check `terminal.list` (by `name` or labels) before retrying.',
+  'Control methods accept a bare address (`t7`) or a terminal name, and `core_id`/`created_ms` are optional. Give them to reject a reused address or a replaced core; omitting them means "the terminal under that name/address now" and loses that protection. `machine/t7` is always rejected.',
   'Tiers (`observe`/`control`/`host`) are catalog labels, not separate switches: one local switch, `allow_terminal_execution`, gates `terminal.send`/`keys`/`run`/`kill`, `machine.exec`, `file.write` and the rest. Turning it off closes all of them; it is not a way around a tier.',
   'Waiting calls (`terminal.wait`, `terminal.events`, `terminal.send`/`terminal.run` with `wait=true`, `terminal.interrupt`) usually return the synchronous view `connector_accepted`/`possibly_dispatched` without a result handle. Keep waiting with `runtime_call_get {call_id, wait_ms}` until the state is `responded`, then read the handle with `runtime_result_read`.',
   "`terminal.send`/`terminal.keys` report `status`/`turn` **as of the send**, and `turn` counts completed turns. Use `wait=true` (`wait.turn` is the turn after it ended) or `terminal.get`/`terminal.events` afterwards. `terminal.get` status comes from the program's own report and can lag the screen by hundreds of milliseconds; do not treat one read as final.",
@@ -274,6 +283,7 @@ export const HERDR_CORE_METHOD_USAGE: Readonly<Record<string, readonly string[]>
   ]),
   'terminal.send': Object.freeze([
     '`wait=true` requires an explicit `timeout` (≤60s). rovloom rejects `force`.',
+    '`terminal` is an address or a name; rovloom resolves it with `terminal.get` before sending.',
     'Without `wait`, `status`/`turn` in the reply are the snapshot taken when the text was sent (`turn` counts completed turns); read again with `terminal.get`/`terminal.events`, or ask for the turn with `wait=true`.',
     'With `wait=true` the call usually returns `connector_accepted`/`possibly_dispatched` first: keep waiting with `runtime_call_get {call_id, wait_ms}`, then `runtime_result_read`.'
   ]),
@@ -446,41 +456,50 @@ export function herdrCoreInput(method: string): boolean {
  * 这些字段在审核 schema 里是必需的（调用方必须提供），但 core 不认识它们；
  * core 对未知字段静默忽略，所以必须在发送前显式剥离，不能依赖它被忽略。
  */
-export function herdrCoreNativeParams(params: Readonly<Record<string, unknown>>): Record<string, unknown> {
+export function herdrCoreNativeParams(
+  params: Readonly<Record<string, unknown>>,
+  /** 执行端解析出的终端地址；写入 core 只用它，不用调用方给的名字。 */
+  resolved?: Readonly<{ terminal?: string; parent?: string }>
+): Record<string, unknown> {
   const native: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(params)) {
     if (!HERDR_CORE_OWNED_PARAMS.includes(key)) {
       native[key] = value
     }
   }
+  if (resolved?.terminal !== undefined && Object.hasOwn(native, 'terminal')) {
+    native.terminal = resolved.terminal
+  }
+  if (resolved?.parent !== undefined && Object.hasOwn(native, 'parent')) {
+    native.parent = resolved.parent
+  }
   return native
 }
 
 /**
- * 只接受本地终端地址 `t7`：名字会被 label 改写，`machine/t7` 属于远端路由，
- * 都不做输入目标。0.1.14/0.1.15 的扁平终端地址恒为 `tN`。
+ * 终端标识：裸地址 `t7` 或名字；`machine/t7`（含 `/`）、大写与表外字符都拒绝。
+ * 地址与名字都不改写调用方的值：执行端读一次 `terminal.get` 得到真实地址后再写入。
  */
-function reviewAddress(params: Readonly<Record<string, unknown>>): string {
-  const address = params.terminal
-  if (typeof address !== 'string' || !/^t[0-9]{1,9}$/u.test(address)) {
+function reviewTerminalTarget(value: unknown): string {
+  if (typeof value !== 'string' || !new RegExp(HERDR_CORE_TERMINAL_TARGET, 'u').test(value)) {
     fail('herdr_core_terminal_address_unsupported')
   }
-  return address
+  return value
 }
 
-/** 栅栏字段必须齐全且形状正确；缺失与形状不符分开，便于诊断。 */
+/** 控制档的 `terminal`：必填，地址或名字。 */
+function reviewAddress(params: Readonly<Record<string, unknown>>): string {
+  return reviewTerminalTarget(params.terminal)
+}
+
+/** 栅栏字段各自可选；给了就校验形状，省略就不核对。 */
 function reviewFence(params: Readonly<Record<string, unknown>>): void {
-  if (params.core_id === undefined || params.created_ms === undefined) {
-    fail('herdr_core_terminal_fence_required')
-  }
   const coreId = params.core_id
   const created = params.created_ms
-  if (
-    typeof coreId !== 'string' ||
-    !/^[a-f0-9]{8,64}$/u.test(coreId) ||
-    !Number.isSafeInteger(created) ||
-    (created as number) < 0
-  ) {
+  if (coreId !== undefined && (typeof coreId !== 'string' || !/^[a-f0-9]{8,64}$/u.test(coreId))) {
+    fail('herdr_core_terminal_fence_invalid')
+  }
+  if (created !== undefined && (!Number.isSafeInteger(created) || (created as number) < 0)) {
     fail('herdr_core_terminal_fence_invalid')
   }
 }
@@ -787,14 +806,12 @@ function reviewRunParams(params: Readonly<Record<string, unknown>>): void {
       fail('herdr_core_param_invalid')
     }
   }
-  // 父终端：与三元组同款的栅栏——地址 + 调用方认定的 created_ms，绝不把子终端挂到同地址的另一个终端。
+  // 父终端：地址或名字（同控制档规则）；`parent_created_ms` 可省略，给了就严格核对。
   if (params.parent !== undefined && params.parent !== null) {
-    if (typeof params.parent !== 'string' || !/^t[0-9]{1,9}$/u.test(params.parent)) {
-      fail('herdr_core_terminal_address_unsupported')
-    }
+    reviewTerminalTarget(params.parent)
     const created = params.parent_created_ms
-    if (!Number.isSafeInteger(created) || (created as number) < 0) {
-      fail('herdr_core_terminal_fence_required')
+    if (created !== undefined && (!Number.isSafeInteger(created) || (created as number) < 0)) {
+      fail('herdr_core_terminal_fence_invalid')
     }
     if (params.no_parent === true) {
       fail('herdr_core_param_invalid')

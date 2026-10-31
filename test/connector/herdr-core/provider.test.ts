@@ -178,15 +178,19 @@ test('资源工厂登记五个端口，目录暴露读取与控制档，身份�
       ])
       assert.equal(resolved.local_provider.kind, 'herdr-core')
       assert.doesNotThrow(() => resolved.describe('terminal.read'))
-      // 控制档已开放，参数 schema 里带着 rovloom 自有的终端栅栏字段。
+      // 控制档已开放：终端必填，栅栏字段可出现但不必填（省略就不核对）。
       const send = resolved.describe('terminal.send')
       const params = send.params_schema as { required: string[]; properties: Record<string, unknown> }
-      assert.deepEqual([...params.required].sort(), ['core_id', 'created_ms', 'terminal', 'text'])
+      assert.deepEqual([...params.required].sort(), ['terminal', 'text'])
       assert.ok(params.properties.core_id)
+      assert.ok(params.properties.created_ms)
+      // 终端标识的说明按实际规则写：地址或名字，`machine/t7` 拒绝。
+      assert.match(String((params.properties.terminal as { description?: string }).description), /t7/u)
+      assert.doesNotMatch(String((params.properties.terminal as { description?: string }).description), /a name, or/u)
       // core 自己的方法说明与 rovloom 的使用说明随 describe 交付；说明只是注释。
       assert.match(String(send.description), /Paste text and press Enter/u)
       assert.ok(Array.isArray(send.usage) && String(send.usage[0]).includes('wait=true'))
-      assert.equal((send.guide as string[]).length, 13)
+      assert.equal((send.guide as string[]).length, 14)
       assert.match(String((send.guide as string[])[2]), /wait=true/u)
       // 不开放的 core 方法也随 describe 交付固定原因，控制端能发现边界。
       assert.equal((send.blocked_methods as Record<string, string>)['machine.list'], 'bypasses_per_device_token_scope')
@@ -371,10 +375,25 @@ test('Wire 核心先复核档位与参数，再建立许可，结果用审核 sc
     assert.equal(resolved.binding.call_id, 'call-a')
     // 未建立许可前不能读取结果。
     assert.throws(() => adapter.checkResult(resolved), /dispatch_permit_unavailable/u)
-    // 控制档必须先带终端栅栏，宿主级方法与历史行数在准备阶段就被拒绝，不会进入原生请求。
+    // 控制档的栅栏字段各自可选：省略可以，给了错形状仍拒绝；`machine/t7` 一开始就拒绝。
+    assert.doesNotThrow(() =>
+      adapter.validator.validateRequest({ method: 'terminal.send', params: { terminal: 't1', text: 'x' } }, resolved)
+    )
     assert.throws(
-      () => adapter.validator.validateRequest({ method: 'terminal.send', params: { terminal: 't1' } }, resolved),
-      /herdr_core_terminal_fence_required/u
+      () =>
+        adapter.validator.validateRequest(
+          { method: 'terminal.send', params: { terminal: 't1', core_id: 'zz', text: 'x' } },
+          resolved
+        ),
+      /herdr_core_terminal_fence_invalid/u
+    )
+    assert.throws(
+      () =>
+        adapter.validator.validateRequest(
+          { method: 'terminal.send', params: { terminal: 'machine/t1', text: 'x' } },
+          resolved
+        ),
+      /herdr_core_terminal_address_unsupported/u
     )
     // 宿主级已开放：参数不全（machine.exec 缺 timeout）走参数规则；真正不开放的方法仍是不可用。
     assert.throws(
