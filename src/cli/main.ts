@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 // 提供同一产物的双角色命令入口，将进程信号接到本地桥接关闭并设置退出码。
+import './startup-directory.js'
 import './runtime-guard.js'
 import { parseCommand, runCli } from './run.js'
 import { createProductServiceHost } from './service-host.js'
