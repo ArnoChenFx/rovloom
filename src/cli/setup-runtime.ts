@@ -9,13 +9,38 @@ import { runtimeReference } from './runtime-files.js'
 import { CliError, type ConnectorConfig, type NativeProviderKind } from './config.js'
 import { silentConsole } from './setup-console.js'
 import { cliMessages, formatMessage } from './messages.js'
-import { LuvusAdapterError } from '../connector/luvus/types.js'
+import { ProviderAdapterError } from '../connector/provider-error.js'
 import { HerdrLocalError } from '../connector/herdr/local.js'
+import { GatewayError } from '../contracts.js'
 import { boundedDisconnect } from '../transport/disconnect.js'
 
 /** 计数与事件游标仅接受非负安全整数，不把宿主异常值打印到诊断。 */
 function observationCount(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+}
+
+/** 固定码的形状：小写字母开头，只含小写字母、数字和下划线。 */
+const SAFE_CODE = /^[a-z][a-z0-9_]{0,79}$/u
+/** 操作系统错误的 errno 名（ENOENT、EACCES、EADDRINUSE…）。 */
+const SYSTEM_CODE = /^E[A-Z0-9]{2,30}$/u
+
+/**
+ * 启动失败时可以交给用户的诊断码；没有就返回 undefined，调用方只剩 `runtime_failed`。
+ * 固定码异常（GatewayError 及其子类 WireError、ProviderAdapterError，LuvusAdapterError 是它的别名、HerdrLocalError）
+ * 的 `code` 本来就是约定不含路径、参数或输出的固定字符串，这里仍按形状再核对一次；
+ * 操作系统错误只取 errno 名并加 `system_` 前缀，不取 message、path 或 syscall 参数。
+ */
+export function nativeFailureCode(error: unknown): string | undefined {
+  if (error instanceof GatewayError || error instanceof ProviderAdapterError || error instanceof HerdrLocalError) {
+    return SAFE_CODE.test(error.code) ? error.code : undefined
+  }
+  if (error instanceof Error) {
+    const code = (error as { code?: unknown }).code
+    if (typeof code === 'string' && SYSTEM_CODE.test(code)) {
+      return 'system_' + code.toLowerCase()
+    }
+  }
+  return undefined
 }
 
 export class CliSetup {
@@ -103,8 +128,9 @@ export class CliSetup {
 
   // 原生失败只交付现有适配器的有界固定代码；不打印child输出、异常message/stack、路径或请求。
   nativeFailed(error: unknown): void {
-    if ((error instanceof LuvusAdapterError || error instanceof HerdrLocalError) && /^[a-z_]{1,80}$/.test(error.code)) {
-      this.#io?.stderr.write('native_unavailable ' + error.code + '\n')
+    const code = nativeFailureCode(error)
+    if (code !== undefined) {
+      this.#io?.stderr.write('native_unavailable ' + code + '\n')
     }
   }
 

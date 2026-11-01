@@ -114,6 +114,7 @@ rovloom storage resume --role gateway --json
 | `invalid_device_credential` | 凭据被撤销或重配：生成新码重新 join |
 | `configuration_required` | 需要真实本地终端完成配对 / 批准；不要删数据后重登记，结果不确定时保留原状态 |
 | 启动先输出 `working_directory_reset` | 终端所在的当前目录已被删除；Rovloom 自动切到了你的家目录继续运行（此前会在读取终端输入时直接崩溃）。命令里的**相对路径**因此按家目录解析，需要时先 `cd` 到存在的目录再运行；不影响配置与数据位置 |
+| Connector 启动就退出，只有 `runtime_failed` | 看它**前一行**：`native_unavailable <码>` 是启动时的固定失败码（`herdr_core_binary_unavailable`、`herdr_core_installation_changed`、`claim_ledger_invalid` 这类；操作系统错误以 `system_` 加小写 errno 名给出，如 `system_eaddrinuse`），按码排查并带着它求助；`luvus_crash_residue_cleared …`、`claims_lock_recovered` 只是接管上次崩溃留下的锁，**不是**失败原因。没有 `native_unavailable` 行时才是未归类的失败 |
 | Luvus / Herdr 不可用 | Connector 会按退避自动重新附着或重建；Linux 上附着要求对端是**你已安装的同一个**程序 |
 
 保留错误码求助；Bearer、管理员口令、配对码不要贴出来。
