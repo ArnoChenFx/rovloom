@@ -125,6 +125,14 @@ const RELEASE_NOTES = Object.freeze({
     ],
     upgrade:
       'Nothing to migrate: only descriptions and diagnostics changed, and no parameter rule, pairing, token or ledger is different. Known limitation: a `terminal.wait` without `timeout` is only waited for 5 seconds locally and ends as `outcome_unknown`, and the device reconnects once; always pass `timeout` (at most 60). The MCP layer also rejects a tool call whose arguments exceed 65536 bytes, so the larger per-method byte limits cannot be reached.'
+  },
+  '0.10.4': {
+    highlights: [
+      'A Connector that fails to start no longer hides the cause behind `runtime_failed`. The line before it, `native_unavailable <code>`, now also names the fixed code of a herdr-core or Gateway failure (for example `herdr_core_binary_unavailable` or `herdr_core_installation_changed`) and, for an operating-system error, only its errno name with a `system_` prefix (for example `system_eaddrinuse`); never the message, path or stack. Any other failure still prints nothing extra. `luvus_crash_residue_cleared` and `claims_lock_recovered` only report that locks left by an earlier crash were taken over; they are not the failure.',
+      'Rovloom no longer crashes when the terminal is standing in a directory that was deleted. Before, any command (even `rovloom --version`) died with `ENOENT: process.cwd failed` while reading the terminal input. Now it switches to your home directory, prints `working_directory_reset` to stderr and carries on. Relative paths in that command resolve against the home directory.'
+    ],
+    upgrade:
+      "Nothing to migrate: pairings, tokens, ledgers and the wire protocol are unchanged. Known limitation: the standalone single-file binary still stops with Bun's own `The current working directory was deleted` message in that situation, because the runtime exits before Rovloom starts; `cd` to an existing directory first. The npm install is fixed."
   }
 })
 
