@@ -61,7 +61,11 @@ export function createPairingDelivery(options: {
   >()
   let closed = false
   /** 在并发和超时预算内交付单次凭据；确认匹配全部关联轴，失败按精确 hash 跨 revision 拒绝。 */
-  async function transfer(machine: string, operation: 'enroll', issue: () => DeviceCredential): Promise<Receipt> {
+  async function transfer(
+    machine: string,
+    operation: 'enroll',
+    issue: () => { machine_id: string; credential: string }
+  ): Promise<Receipt> {
     if (closed || pending.size >= concurrency) {
       fail('pairing_unavailable')
     }
@@ -108,12 +112,18 @@ export function createPairingDelivery(options: {
     }
     const timer = setTimeout(abort, timeout)
     pending.set(deliveryId, { timer, abort })
+    let installedMachine: string | undefined
     let installedDigest: string | undefined
     let sending = false
     try {
-      const credential = issue()
-      installedDigest = hash(credential.credential)
-      const generation = credential.recovery_generation
+      const device = issue()
+      installedMachine = device.machine_id
+      installedDigest = hash(device.credential)
+      if (installedMachine !== machine) {
+        fail('pairing_target_mismatch')
+      }
+      const generation = options.backend.generation()
+      const credential = { ...device, recovery_generation: generation }
       const revision = options.identities.credentialRevision(machine)
       sending = true
       const delivered = Promise.resolve()
@@ -143,9 +153,9 @@ export function createPairingDelivery(options: {
       }
       return { machine_id: machine, delivery_id: deliveryId, state: 'delivered' }
     } catch {
-      if (installedDigest !== undefined) {
+      if (installedMachine !== undefined && installedDigest !== undefined) {
         try {
-          options.identities.rejectDelivery(machine, installedDigest)
+          options.identities.rejectDelivery(installedMachine, installedDigest)
         } catch {
           /* 身份库拒绝标记保持封锁。 */
         }
@@ -170,14 +180,8 @@ export function createPairingDelivery(options: {
       return transfer(
         request.registration_id,
         'enroll',
-        /** 复用 Store 的原子兑换（凭据摘要在同一事务保存），核对注册目标后才交付。 */
-        () => {
-          const device = options.backend.redeem(request.enrollment)
-          if (device.machine_id !== request.registration_id) {
-            fail('pairing_target_mismatch')
-          }
-          return { ...device, recovery_generation: options.backend.generation() }
-        }
+        /** 凭据摘要在原子兑换事务内保存；transfer 先记录清理所需身份，再校验目标与读取代次。 */
+        () => options.backend.redeem(request.enrollment)
       )
     },
     /** 只报告服务是否关闭和未完成发送数量，不暴露任何凭据内容。 */
