@@ -29,8 +29,7 @@ import {
   HERDR_CORE_SEND_MAX_BYTES,
   HERDR_CORE_SYNTHETIC_METHODS,
   HERDR_CORE_WAIT_MAX_SECONDS,
-  herdrCoreControl,
-  herdrCoreRequestTimeout
+  herdrCoreControl
 } from './methods.js'
 import type { HerdrCoreContract } from './schema.js'
 
@@ -56,9 +55,7 @@ const TIMEOUT_DESCRIPTIONS: Readonly<Record<string, string>> = Object.freeze({
   'terminal.send': secondsRule('greater than 0. Required with `wait=true`; must be omitted otherwise'),
   'terminal.run': secondsRule('greater than 0. Required with `wait=true`; must be omitted otherwise'),
   'terminal.wait': secondsRule(
-    `greater than 0. Optional, but give it: without it rovloom only waits ${
-      herdrCoreRequestTimeout('terminal.wait', {}) / 1000
-    } s locally and the call ends as outcome_unknown`
+    `greater than 0. Optional: omitted means rovloom uses its default ${HERDR_CORE_WAIT_MAX_SECONDS} (also the limit) and sends it explicitly`
   ),
   'terminal.interrupt': secondsRule(
     `0 or more. Optional; omitted means core's ${HERDR_CORE_INTERRUPT_DEFAULT_SECONDS} s observation`
@@ -101,6 +98,8 @@ export type HerdrCoreLimit = Readonly<{
   min?: number
   /** 下界为「大于它」时用这个（例如 timeout 必须大于 0）。 */
   exclusiveMin?: number
+  /** 省略时的默认值（只在 Gateway 登记前确实会补值时给出）。 */
+  default?: number
   unit: 'seconds' | 'milliseconds' | 'bytes' | 'lines' | 'count' | 'characters'
 }>
 
@@ -118,7 +117,9 @@ export const HERDR_CORE_LIMITS: Readonly<Record<string, Readonly<Record<string, 
     key: { max: HERDR_CORE_KEY_MAX_LENGTH, min: 1, unit: 'characters' }
   }),
   'terminal.interrupt': Object.freeze({ timeout: { max: HERDR_CORE_WAIT_MAX_SECONDS, min: 0, unit: 'seconds' } }),
-  'terminal.wait': Object.freeze({ timeout: { max: HERDR_CORE_WAIT_MAX_SECONDS, exclusiveMin: 0, unit: 'seconds' } }),
+  'terminal.wait': Object.freeze({
+    timeout: { max: HERDR_CORE_WAIT_MAX_SECONDS, default: HERDR_CORE_WAIT_MAX_SECONDS, exclusiveMin: 0, unit: 'seconds' }
+  }),
   'terminal.read': Object.freeze({ lines: { max: HERDR_CORE_READ_MAX_LINES, unit: 'lines' } }),
   'terminal.put': Object.freeze({ data: { max: HERDR_CORE_PUT_MAX_BASE64, unit: 'bytes' } }),
   'terminal.label': Object.freeze({
@@ -201,6 +202,9 @@ function applyLimits(properties: JsonObject, method: string): void {
     }
     if (limit.exclusiveMin !== undefined) {
       schema.exclusiveMinimum = limit.exclusiveMin
+    }
+    if (limit.default !== undefined) {
+      schema.default = limit.default
     }
   }
 }

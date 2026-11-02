@@ -54,6 +54,7 @@ import {
   HERDR_CORE_METHOD_USAGE,
   HERDR_CORE_CLASSIFICATION_REVISIONS,
   HERDR_CORE_UNAVAILABLE,
+  HERDR_CORE_WAIT_MAX_SECONDS,
   herdrCoreTier
 } from './methods.js'
 import { requiresTerminalExecution } from '../terminal-execution.js'
@@ -569,6 +570,22 @@ export async function createHerdrCoreGatewayResources(
          * 在登记前规范化，存档的请求、去重键与 Wire 帧因此完全一致；其它形状原样交给预检。
          */
         normalizeRequest(request) {
+          // `terminal.wait` 省略 `timeout` 时补成显式默认值（也是上限）：
+          // 存档的请求、去重键、Wire 帧、Gateway 的调用期限与发给 core 的参数从此是同一个值，
+          // 旧 Connector 收到的也是合法请求（没有版本混用毛刺）。只补 undefined，其它形状原样交给预检。
+          const params =
+            request.params === undefined
+              ? ({} as JsonObject)
+              : (request.params as JsonObject | null | undefined)
+          if (
+            request.method === 'terminal.wait' &&
+            params !== null &&
+            typeof params === 'object' &&
+            !Array.isArray(params) &&
+            !Object.hasOwn(params, 'timeout')
+          ) {
+            return Object.freeze({ ...request, params: Object.freeze({ ...params, timeout: HERDR_CORE_WAIT_MAX_SECONDS }) })
+          }
           return request.params === undefined ? Object.freeze({ ...request, params: {} }) : request
         },
         admit(request, admission, register) {

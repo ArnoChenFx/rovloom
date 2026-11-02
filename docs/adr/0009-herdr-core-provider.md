@@ -105,7 +105,7 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 **开关**。8 个控制档方法全部受既有的 `allow_terminal_execution` 约束（`kill`/`rm`/`keep`/`label` 不是输入，但它们是同一批审核过的控制面，默认从严一并纳入）。三处门禁共用 Connector 上报的同一个观察值：Gateway 目录（`terminal_execution_catalog`）隐藏方法、Gateway 在登记前拒绝（`bindTerminalExecution` 晚绑定 `transport.terminalExecutionState`，未上报一律当作关闭）、Connector 在原生写入前再检查。关闭时的拒绝是确定未派发：`dispatch_refused` 的固定码集合因此只追加 herdr-core 的四个执行前固定码（`herdr_core_terminal_blocked`、`_identity_mismatch`、`_unavailable`、`herdr_core_connection_closed`），写入之后才失败的调用仍按 `outcome_unknown` 走保守路径，绝不自动重放。
 
-**期限**。`send` 默认要等粘贴安静窗口（约 3 秒）并按 200 ms 间隔逐段粘贴，本地期限 20 秒；`wait=true` 是这一轮的检查点，期限由调用方显式给出且 ≤60 秒（rovloom 的上限；core 自己的默认值不适用）。所有秒数一律是「秒」，上限 60；要等更久就反复用 `terminal.wait` 检查（每次 ≤60 秒），不要指望一次调用等很久。`interrupt` 不传 `timeout` 时 core 自己观察 10 秒，本地期限 15 秒。所有期限共用 `HERDR_CORE_REQUEST_MAX_MS`；超时只结束本地等待，不宣称原生停止。`force=true` 一律拒绝（`herdr_core_force_unsupported`）：它绕过 core 的 blocked 闸门，而 rovloom 的判定不依赖它。
+**期限**。`send` 默认要等粘贴安静窗口（约 3 秒）并按 200 ms 间隔逐段粘贴，本地期限 20 秒；`wait=true` 是这一轮的检查点，期限由调用方显式给出且 ≤60 秒（rovloom 的上限；core 自己的默认值不适用）。所有秒数一律是「秒」，上限 60；`terminal.wait` 省略 `timeout` 时由 Gateway 在登记前补成显式 60（存档请求、去重键、Wire 帧与发给 core 的参数都是这个值），要等更久就反复用 `terminal.wait` 检查（每次 ≤60 秒）。`interrupt` 不传 `timeout` 时 core 自己观察 10 秒，本地期限 15 秒。所有期限共用 `HERDR_CORE_REQUEST_MAX_MS`；超时只结束本地等待，不宣称原生停止。`force=true` 一律拒绝（`herdr_core_force_unsupported`）：它绕过 core 的 blocked 闸门，而 rovloom 的判定不依赖它。
 
 ### core 重启后的重新附着
 
@@ -165,7 +165,7 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 | 状态 | `terminal.get` | 是 | 观察 | 否 | `terminal` 接受裸地址、名字与 `machine/tN`（core 自己解析）；状态来自程序自己的 OSC 7501 上报，可能比屏幕晚几百毫秒到数秒，别把一次读取当终局 |
 | 状态 | `terminal.list` | 是 | 有条件 | 否 | 接受 core 自带的过期清理 |
 | 读取 | `terminal.read` | 是 | 有条件 | **`lines>0` 时需要** | `lines` ≤ 1000；`lines>0` 可能向全屏程序发滚轮输入 |
-| 多轮 | `terminal.wait` | 是 | 观察 | 否 | `timeout` ≤ 60 秒；`children` 必须显式给 `terminal`（rovloom 不发 `caller`）；`output` 给普通程序。同步视图常是 `connector_accepted`/`possibly_dispatched` 且没有结果句柄，用 `runtime_call_get {call_id, wait_ms}` 等到 `responded` 再 `runtime_result_read` |
+| 多轮 | `terminal.wait` | 是 | 观察 | 否 | `timeout` ≤ 60 秒，省略时为 60；`children` 必须显式给 `terminal`（rovloom 不发 `caller`）；`output` 给普通程序。同步视图常是 `connector_accepted`/`possibly_dispatched` 且没有结果句柄，用 `runtime_call_get {call_id, wait_ms}` 等到 `responded` 再 `runtime_result_read` |
 | 启动 | `terminal.run` | 是 | 宿主级 | 是 | 模板形态要 `template:true` 并用 `templates.list` 核对；`caller`/`on` 拒绝；`parent` 是地址或名字（`machine/tN` 拒绝），`parent_created_ms` 可选（给了才核对父终端化身），与 `no_parent` 互斥；`no_notify` 只接受 `true`；`wait=true` 必须给 ≤60 秒 `timeout`；argv ≤64 项/32 KiB、line ≤32 KiB、env ≤64 项、name 1–32 位；本 Connector 同时最多 32 个自己启动的存活终端。`rm:true` 的终端退出即被删，`wait:true` 会返回空 `output` 与 `wait.exit_code:null`（要输出就别 `rm`，读完再 `terminal.rm`） |
 | 启动 | `templates.list` | 是 | 有条件 | 否 | 只列出名称/描述/命令；命令文本由机主维护 |
 | 输入 | `terminal.send` | 是 | 控制 | 是 | `terminal` 是地址或名字（`machine/tN` 拒绝）；`core_id`/`created_ms` 可选（给了才严格核对）；`force` 拒绝；blocked 拒绝；`wait=true` 必须给 ≤60 秒 `timeout`。回复里的 `status`/`turn` 是**发送时**的快照，`turn` 数的是已完成轮次；要这一轮的结果用 `wait=true` 或之后 `terminal.get`/`terminal.events` |
