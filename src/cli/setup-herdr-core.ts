@@ -190,10 +190,7 @@ export async function prepareSetupHerdrCore(
   })
   publishSchema(schemaPath, Buffer.from(discovered, 'utf8'))
   const claims = new DispatchClaims({ ...claimsRef, mode: 'create', now: Date.now })
-  try {
-  } finally {
-    claims.close()
-  }
+  claims.close()
   const result: PreparedSetupHerdrCore = {
     schema_version: 1,
     attempt_id: attempt,

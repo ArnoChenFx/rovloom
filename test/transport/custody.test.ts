@@ -272,3 +272,58 @@ test(
     }
   }
 )
+
+for (const failure of ['target', 'generation'] as const) {
+  test('兑换后' + failure + '失败拒绝实际签发的凭据并关闭渠道', async () => {
+    const store = new Store(':memory:', () => 1000, { management })
+    const actual = store.register('actual')
+    const requested = store.register('requested')
+    const token = store.issueEnrollment(actual.machine_id)
+    let issued: { machine_id: string; credential: string } | undefined
+    let sends = 0
+    let closes = 0
+    const delivery = createPairingDelivery({
+      backend: {
+        redeem(enrollment) {
+          issued = store.redeem(enrollment)
+          return issued
+        },
+        generation() {
+          throw new Error('generation unavailable')
+        }
+      },
+      identities: {
+        rejectDelivery: (machine, digest) => store.denyDelivery(machine, digest),
+        credentialRevision: (machine) => store.credentialRevision(machine)
+      },
+      authorizeChannel: () => ({
+        async deliver() {
+          sends++
+          throw new Error('must not deliver')
+        },
+        close() {
+          closes++
+        }
+      })
+    })
+    try {
+      await assert.rejects(
+        delivery.redeem({
+          registration_id: failure === 'target' ? requested.machine_id : actual.machine_id,
+          enrollment: token
+        }),
+        /pairing_delivery_unknown/
+      )
+      assert.equal(sends, 0)
+      assert.equal(closes, 1)
+      assert.equal(delivery.status().pending, 0)
+      assert.equal(store.machine(actual.machine_id).status, 'pending')
+      assert.equal(store.machine(requested.machine_id).status, 'pending')
+      assert.throws(() => store.connect(actual.machine_id, issued!.credential), /invalid_device_credential/)
+      assert.throws(() => store.redeem(token), /invalid_enrollment/)
+    } finally {
+      delivery.close()
+      store.close()
+    }
+  })
+}

@@ -105,7 +105,7 @@ code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; fo
 .read-indicator[data-state='current']::before { background: var(--good-text); }
 .read-indicator[data-state='stale'] { color: var(--warning-text); }
 .read-indicator[data-state='pending']::before { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
-.content, .pairing-section, .operation-region { width: 100%; max-width: 1360px; margin-inline: auto; padding-inline: 40px; }
+.content, .operation-region { width: 100%; max-width: 1360px; margin-inline: auto; padding-inline: 40px; }
 .content { padding-block: 20px 36px; min-height: calc(100dvh - 210px); }
 .content[data-section='pairing'], .content[data-section='connect'] { min-height: 0; padding-bottom: 0; }
 .page-heading { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-bottom: 24px; }
@@ -273,49 +273,15 @@ dd { margin: 0; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
 .operation-dialog > code { display: block; margin-block: 8px 18px; }
 .operation-dialog .facts { grid-template-columns: 1fr; margin-bottom: 24px; }
 .operation-dialog dd { white-space: pre-wrap; }
-.operation-form label, .pairing-form label { display: grid; gap: 8px; }
-.operation-form input, .pairing-form input { width: 100%; min-width: 0; font-weight: 400; }
+.operation-form label { display: grid; gap: 8px; }
+.operation-form input { width: 100%; min-width: 0; font-weight: 400; }
 .operation-form button { margin-top: 16px; }
-.operation-controls, .pairing-controls { display: flex; flex-wrap: wrap; gap: 8px; }
-.operation-confirm, .pairing-confirm { color: var(--accent-text); background: var(--accent); border-color: var(--accent); }
-.operation-confirm:hover:enabled, .pairing-confirm:hover:enabled { background: var(--accent-hover); border-color: var(--accent-hover); }
-.operation-status, .pairing-status { margin-block: 16px; overflow-wrap: anywhere; }
+.operation-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.operation-confirm { color: var(--accent-text); background: var(--accent); border-color: var(--accent); }
+.operation-confirm:hover:enabled { background: var(--accent-hover); border-color: var(--accent-hover); }
+.operation-status { margin-block: 16px; overflow-wrap: anywhere; }
 .operation-resume { margin-bottom: 16px; }
-/* 配对分成申请、终端认领与核对三个步骤。 */
-.pairing-section { margin-bottom: 36px; }
-.pairing-steps { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); padding: 0; margin: 0 0 26px; list-style: none; }
-.pairing-steps li { display: flex; align-items: center; gap: 12px; position: relative; color: var(--muted); font-size: 13px; }
-.pairing-steps li:not(:last-child)::after { content: ''; height: 1px; flex: 1; margin: 0 20px 0 4px; background: var(--border); }
-.pairing-step-number { display: grid; place-items: center; width: 31px; height: 31px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); font-size: 10px; flex: 0 0 auto; }
-.pairing-steps [data-state='current'], .pairing-steps [data-state='complete'] { color: var(--accent); }
-.pairing-steps [data-state='current'] .pairing-step-number, .pairing-steps [data-state='complete'] .pairing-step-number { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-.pairing-layout { display: grid; grid-template-columns: minmax(0,1.15fr) minmax(0,1fr); border: 1px solid var(--border); border-radius: 12px; background: var(--surface); overflow: clip; box-shadow: var(--shadow); }
-.pairing-setup { padding: 30px; }
-.pairing-setup > .muted { margin-top: 8px; font-size: 12px; line-height: 1.8; }
-.pairing-form { display: grid; gap: 22px; margin-top: 24px; }
-.pairing-form label > span { font-size: 12px; font-weight: 550; }
-.pairing-form input { border-color: var(--border); min-height: 44px; }
 .field-hint { color: var(--muted); font-size: 11px; line-height: 1.6; }
-.pairing-advanced { border-top: 1px solid var(--border); padding-top: 16px; color: var(--muted); font-size: 12px; }
-.pairing-advanced label { margin-top: 12px; }
-.pairing-form > button { justify-self: start; min-width: 150px; }
-.pairing-guide { padding: 30px; background-color: var(--subtle); background-image: radial-gradient(var(--border) .7px,transparent .7px); background-size: 12px 12px; border-left: 1px solid var(--border); }
-.pairing-guide-icon { display: grid; place-items: center; width: 42px; height: 42px; margin-bottom: 26px; border-radius: 11px; background: var(--surface); border: 1px solid var(--border); color: var(--accent); }
-.pairing-guide > p { margin-top: 12px; line-height: 1.9; font-size: 12px; }
-.pairing-guide .command-snippet { margin-top: 22px; }
-.pairing-guide .pairing-guide-note { margin-top: 20px; color: var(--muted); font-size: 11px; }
-.pairing-status:empty, .pairing-entries:empty { display: none; }
-.pairing-entries { display: grid; gap: 16px; margin: 24px 0 0; padding: 0; list-style: none; }
-.pairing-entry { border: 1px solid var(--border); border-radius: 12px; padding: 24px; background: var(--surface); }
-.pairing-entry-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-.pairing-entry .facts, .pairing-review .facts { grid-template-columns: minmax(90px,auto) minmax(0,1fr); gap: 10px 18px; }
-.pairing-entry dd { display: flex; align-items: center; gap: 10px; }
-.pairing-entry dd code { color: var(--text); }
-.pairing-code { margin-block: 12px 18px; font-family: ui-monospace,monospace; font-size: 32px; font-weight: 650; letter-spacing: 6px; }
-.pairing-review { border-top: 1px solid var(--border); margin-top: 24px; }
-.pairing-controls { margin-top: 18px; }
-.pairing-progress { max-width: 1232px; margin: 24px auto; padding: 24px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow-wrap: anywhere; }
-.pairing-progress > button { margin: 16px 8px 0 0; }
 /* MCP 接入说明与复制，仅复制用户明确选择的非秘密内容。 */
 .connection-guide { display: grid; gap: 16px; }
 .connection-step { display: flex; gap: 22px; padding: 28px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
@@ -352,12 +318,11 @@ dd { margin: 0; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
 @media (max-width: 1200px) {
   .sidebar { width: 200px; padding-inline: 16px; }
   .workspace { margin-left: 200px; }
-  .topbar, .content, .pairing-section, .operation-region { padding-inline: 28px; }
+  .topbar, .content, .operation-region { padding-inline: 28px; }
   .device-card, .device-columns { gap: 14px; }
   .device-tools { flex-wrap: wrap; }
   .search-field { flex: 1 1 220px; width: auto; }
   .component-item { padding-inline: 12px; }
-  .pairing-setup, .pairing-guide { padding: 24px; }
 }
 @media (max-width: 900px) {
   .sidebar { position: static; width: auto; padding: 10px 24px 0; border-right: 0; border-bottom: 1px solid var(--border); }
@@ -376,7 +341,7 @@ dd { margin: 0; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
   .call-charts { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 680px) {
-  .topbar, .content, .pairing-section, .operation-region { padding-inline: 20px; }
+  .topbar, .content, .operation-region { padding-inline: 20px; }
   .page-heading { align-items: flex-start; flex-wrap: wrap; gap: 18px; margin-bottom: 24px; }
   .eyebrow { font-size: 10px; }
   .metric-card { padding: 16px; }
@@ -405,20 +370,16 @@ dd { margin: 0; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
   .section-heading > .text-link { font-size: 11px; white-space: nowrap; }
   .section-heading p { font-size: 11px; }
   .cell-label { position: static; display: block; width: auto; height: auto; clip-path: none; margin-bottom: 6px; font-size: 11px; color: var(--muted); white-space: normal; }
-  .detail-layout, .pairing-layout { grid-template-columns: 1fr; }
+  .detail-layout { grid-template-columns: 1fr; }
   .detail-observation .facts, .detail-host .facts, .provider-facts { grid-template-columns: 1fr 1fr; }
   .provider-heading { flex-direction: column; }
   .provider-states { max-width: 100%; justify-content: flex-start; }
-  .pairing-guide { border-left: 0; border-top: 1px solid var(--border); }
-  .pairing-steps { gap: 8px; }
-  .pairing-steps li { flex-direction: column; align-items: flex-start; gap: 8px; font-size: 11px; }
-  .pairing-steps li::after { display: none; }
 }
 @media (max-width: 480px) {
   .sidebar { padding-inline: 16px; }
   .sidebar-nav { gap: 4px; }
   .nav-link { flex: 1 1 calc(50% - 4px); font-size: 12px; justify-content: flex-start; padding-inline: 10px; }
-  .topbar, .content, .pairing-section, .operation-region { padding-inline: 16px; }
+  .topbar, .content, .operation-region { padding-inline: 16px; }
   .topbar { flex-wrap: wrap; gap: 8px; }
   .topbar-actions { gap: 8px; }
   .topbar .header-label { font-size: 12px; }
@@ -440,15 +401,10 @@ dd { margin: 0; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
   .detail-layout { gap: 16px; }
   .detail-layout > section, .providers-section { padding: 18px; }
   .facts, .detail-observation .facts, .detail-host .facts, .provider-facts { grid-template-columns: 1fr; }
-  .actions button, .operation-dialog button, .operation-dialog input, .confirm-dialog button, .pairing-form input, .pairing-controls button { min-height: 48px; }
+  .actions button, .operation-dialog button, .operation-dialog input, .confirm-dialog button { min-height: 48px; }
   .operation-dialog, .confirm-dialog { padding: 20px; }
-  .pairing-setup, .pairing-guide { padding: 22px; }
-  .pairing-entry { padding: 18px; }
-  .pairing-entry .facts, .pairing-review .facts { grid-template-columns: 1fr; gap: 4px; }
-  .pairing-entry dd, .pairing-review dd { margin-bottom: 10px; }
   .connection-step { padding: 20px; gap: 14px; }
   .command-snippet { padding: 10px; }
-  .pairing-progress { margin: 16px; padding: 16px; }
 }
 
 /* 隔离测试页的标识独立于产品内容，避免固定侧栏遮住说明。 */

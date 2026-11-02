@@ -1,6 +1,6 @@
 # ADR 0009：provider 中性端口与 herdr-core 观察层
 
-状态：随 #252 的实现 PR 评审；启动条件「接入第三种 provider」已由用户批准。
+状态：已采纳并实现。分阶段章节保留当时的范围与证据，不代表当前开放面；当前方法目录、开关与参数边界见附录 A。
 
 ## 背景
 
@@ -14,7 +14,7 @@ herdr-core 与现有 Herdr TUI 适配（`herdr` 命令，65 个普通 RPC）不�
 
 只定义五个端口，不铺开抽象：`ProviderDescriptor`（kind、协议族、方法到档位的审核表、逐项保证）、`ProviderCatalogPort`、`ProviderSessionPort`、`LocalIdentityVerifier`、`NativeOwner`。注册表按 kind 固定登记，拒绝重复 kind、缺失端口、表外档位和自由文本保证；档位与保证都是闭合集合。
 
-本 PR 的落点是：Herdr TUI 的描述只从现有已审核表派生（`HERDR_RESPONSE_TYPES` 与终端执行表），herdr-core 的描述来自 spike 的实测档位表。Herdr TUI 的档位里只有协议探测是观察档，其余普通读取按 ADR 0004 留在有条件档——普通读取也可能改变终端状态。
+端口实现中，Herdr TUI 的描述只从现有已审核表派生（`HERDR_RESPONSE_TYPES` 与终端执行表），herdr-core 的描述来自 spike 的实测档位表。Herdr TUI 的档位里只有协议探测是观察档，其余普通读取按 ADR 0004 留在有条件档——普通读取也可能改变终端状态。
 
 ### herdr-core 的档位（按 0.1.14 提交 29e6d37 核对，0.1.15 提交 d028423 实测一致）
 
@@ -36,7 +36,7 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 `event_recovery` 是 `snapshot_rebuild`（快照加 `missed` 重建当前状态，没有回放），`terminal_fence`、`cancel`、`prompt_completion` 都是 `unavailable`。`turn` 在 core 崩溃后会少算，`seq` 在重启和崩溃后归零，所以都不能当成本轮完成或没丢事件的证据。
 
-## 第二阶段（同一 PR 追加）
+## 历史实施：第二阶段
 
 ### Wire kind 与配置
 
@@ -66,7 +66,7 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 本期不开放控制档，所以“blocked 由 rovloom 自己判断并拦 keys/interrupt/force”没有可以实施的调用面：`terminal.send`/`keys`/`interrupt` 等仍不在 `HERDR_CORE_EXPOSED_METHODS`，参数复核、Wire 核心与目录三处都会拒绝。`terminal-execution` 的 herdr-core 直接输入集合从同一份审核档位表派生（当前全是 control，因此目录与执行门禁都不放开），宿主级集合保持为空。blocked 状态判定留到开放控制档时与 send 一起实现，届时必须由 rovloom 自己判断，不能信 `blocked` 闸门（spike 2：keys/interrupt/force 在 blocked 时照常送达）。
 
-## 第三阶段（同一 PR 追加）
+## 历史实施：第三阶段
 
 ### Connector 附着执行端
 
@@ -84,7 +84,7 @@ pid 取自这条连接的内核 peer（`SO_PEERCRED`，经 `HerdrCoreClient.peer
 
 配对时 `prepareSetupHerdrCore` 连接一次真实 core，核对身份后把本次 `rpc.discover` 的内容寻址副本发布给两端，并建立 Connector 私有发送墓碑；`join` 与 Gateway 的 `reviewSetupManifest` 都按同一 Target/session 核对。已有用户的配置、配对、token 与调用记录不需要改动。
 
-## 第四阶段（同一 PR 追加）
+## 历史实施：第四阶段
 
 ### 输入与控制档
 
@@ -125,11 +125,11 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 
 装配层只做了几处最小改动：`selectedNativeProviders` 用固定映射展开组合值（`mixed` 按平台），启动时用 `selectNativeProviders` 筛选已配对来源；`prepareMixedConnector` 不再要求必须存在 Luvus 原生资源（`herdr + herdr-core` 没有 Luvus），没有 host 但有 Luvus 的既有「provider 明确不可用」形态保持不变。`routeProductionSources` 的分组、`prepareMixedGateway` 与 Gateway 侧每设备一份引用的路由原本就是中性的，没有改。
 
-配对发布路径不改语义：`publish` 对同一路径的差异一律 `configuration_required`，`mergeSetupProviders` 只追加相同引用、冲突即拒绝，`publishSetupCaller` 拒绝改写同一主体的凭据。本仓库没有名为 `unionGrants` 的函数（主管指令里提到的名字在本仓库不存在），等价的「绝不回溯扩大已批准权限」语义由上面三处承担，本次没有放宽。
+配对发布路径不改语义：`publish` 对同一路径的差异一律 `configuration_required`，`mergeSetupProviders` 只追加相同引用、冲突即拒绝，`publishSetupCaller` 拒绝改写同一主体的凭据。这些发布检查保留身份与引用的幂等/冲突边界；当前 token 设备范围内的调用方可以使用该设备新增的来源，见下节追加来源的信任边界。
 
-## 仍未包含（第五阶段之后）
+## 当前仍未包含
 
-- **`machine.*` 与 `on`**：core 自己的机器表与远端路由永远不开放——一个 token 会因此摸到别的设备，绕过 rovloom 按设备限定范围。多机本来就是每台机器各自一个 Connector。
+- **机器表与远端路由**：`machine.list/add/connect/rename/rm` 与 `on` 不开放，避免绕过 rovloom 的设备范围。已审核的 `machine.exec` 是当前设备上的命令执行，属于终端开关约束的宿主能力。
 - **原始流**：`terminal.attach`（首屏 VT 字节流）与 `events.subscribe`（framed 持续流）不进 MCP；读屏幕/历史用 `terminal.read`，状态变化用 `terminal.events` 长轮询。
 - **无认证身份字段**：`caller`、`calls_you`、`core` 一律拒绝。
 - **Luvus/Herdr 的端口迁移**：两种既有 provider 仍走原工厂；把它们也迁到 `ProviderPorts` 会改动它们的会话、目录与身份路径，留给后续。
@@ -145,7 +145,7 @@ Connector 不再只附着一次。`HerdrCoreInstallation` 保留同一个附着�
 
 单测用假 core 覆盖 framed 握手、请求配对、错误映射、超时、EOF、参数先于原生请求、结果严格性与三元组；Connector 执行端覆盖 5 个读取、控制档拒绝、`/proc` 事实不符与契约摘要不符的失败关闭；配对认领覆盖 `herdr-core` 与旧 kind 不变。schema 用 0.1.14 的真实 OpenRPC 文档和 7 个真实输出样本核对。
 
-第四阶段把验收扩到控制档：`e2e/quickstart.py --herdr-core` 在同一轮配对里先验开关关闭（目录只剩 5 个读取、`runtime_call` 在登记前以 `forbidden` 拒绝），再改本机开关重启 Connector 验控制档——13 个方法、`send` 后用 `terminal.read(lines=0)` 读回、blocked 终端上 `send`/`keys`/`interrupt` 全部 `not_dispatched` 且程序日志为空、`kill`/`rm` 作用于本轮终端、`hc server restart` 与 SIGKILL core 后在途调用 `outcome_unknown` 且重新附着后继续读（`core.id` 不变、终端记录保留）。栅栏放宽后（指令 10）新增：省略 `core_id`/`created_ms`、只给其中一个、名字形态的 `send`/`keys`/`kill`/`rm`、错的 `created_ms` 仍是 `fence_mismatch`、`machine/tN` 与 `server.stop` 缺 `core_id` 仍被拒。`scripts/herdr-core/mutation-check.mjs` 逐条去掉 blocked 判定、三元组核对、Connector 与 Gateway 两处开关门禁，验证对应测试变红再恢复变绿。
+第四阶段把验收扩到控制档：`e2e/quickstart.py --herdr-core` 在同一轮配对里先验开关关闭（目录只剩 5 个读取、`runtime_call` 在登记前以 `forbidden` 拒绝），再改本机开关重启 Connector 验控制档——13 个方法、`send` 后用 `terminal.read(lines=0)` 读回、blocked 终端上 `send`/`keys`/`interrupt` 全部 `not_dispatched` 且程序日志仅含 `ready`、`kill`/`rm` 作用于本轮终端、`hc server restart` 与 SIGKILL core 后在途调用 `outcome_unknown` 且重新附着后继续读（`core.id` 不变、终端记录保留）。栅栏放宽后新增：省略 `core_id`/`created_ms`、只给其中一个、名字形态的 `send`/`keys`/`kill`/`rm`、错的 `created_ms` 仍是 `fence_mismatch`、`machine/tN` 与 `server.stop` 缺 `core_id` 仍被拒。`scripts/herdr-core/mutation-check.mjs` 逐条去掉 blocked 判定、三元组核对、Connector 与 Gateway 两处开关门禁，验证对应测试变红再恢复变绿。
 
 真实 core 验收脚本 `scripts/herdr-core/verify-observation.ts` 在私有沙箱里对 0.1.14（0.1.15 见上文）跑通：`rpc.discover` 契约身份、`server.status` 的 pid 与 `/proc/<pid>/exe` 摘要、`argv`、`HC_SESSION`，以及 `terminal.list`/`get`/`read`/`wait`；XDG 运行时目录与状态目录回退两种布局都实测。第三阶段新增 `e2e/quickstart.py --herdr-core`：真实 Gateway + Connector 配对 herdr-core、在目录看到 5 个方法、经 MCP 对沙箱 core 执行 5 个读取；同一次运行里用同机转发代理验证 `herdr_core_peer_pid_mismatch`、用 0755 socket 目录验证 `herdr_core_endpoint_untrusted`。
 
@@ -203,9 +203,9 @@ Wire 桥接只做普通 RPC，`events.subscribe` 是 framed 持续流，因此�
 
 ### 智能体兼容性
 
-- **pi 1.4.0**：启动即报 OSC 7501（`app=pi`，`state=idle`）；主管经 MCP 用它跑过两轮上下文连续的对话与一次中断。本阶段的 e2e 用假智能体（`e2e/herdr-core-fakeagent.py`）覆盖同样的状态机，CI 不需要模型。
-- **Claude Code 2.1.312 / Codex 0.164.0**：**未验证**。空 HOME 下停在首次登录引导，没有进入主界面，因此不能据此判断它们是否上报状态；需要已登录环境与用户授权。
-- **Codex** 必须带 `--no-daemon`，否则它的命令跑在 core 之外，状态与轮次都会错。rovloom 不会替你改命令；写进模板或 README。
+- **pi 1.4.0**：启动即报 OSC 7501（`app=pi`，`state=idle`）；历史 MCP 验证记录包含两轮上下文连续的对话与一次中断。本阶段的 e2e 用假智能体（`e2e/herdr-core-fakeagent.py`）覆盖同样的状态机，CI 不需要模型。
+- **Claude Code 2.1.312 / Codex 0.164.0**：**未验证**。空 HOME 下停在首次登录引导，没有进入主界面，因此不能据此判断它们是否上报状态；尚需在已登录环境验证。
+- **Codex** 必须带 `--no-daemon`，否则它的命令跑在 core 之外，状态与轮次都会错。需要由操作者在启动模板中显式配置。
 
 ### 交互要点（由 rovloom 撰写，随 `runtime_describe` 的 `guide` 交付）
 

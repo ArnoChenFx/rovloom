@@ -4,11 +4,11 @@
 
 ## 1. 产品
 
-Rovloom 让 AI Agent 通过一个 MCP 入口，访问多台设备上的本地 **Luvus** 与 **Herdr** runtime。
+Rovloom 让 AI Agent 通过一个 MCP 入口，访问多台设备上的本地 **Luvus**、**Herdr** 与 **herdr-core** runtime。
 
 - 一个 **Gateway**：MCP 入口、设备注册与认证、调用方授权、路由、调用账本、结果存储、管理 UI。
-- 每台设备一个 **Connector**：主动出站连到 Gateway，承载若干 **provider**（一个 Luvus 或 Herdr 实例对应一个 provider）。
-- runtime 留在各自机器上。Rovloom 不安装、不启动、不升级它们，不复制它们的 UI，也不提供独立的任意 shell RPC。
+- 每台设备一个 **Connector**：主动出站连到 Gateway，承载若干 **provider**（一个 Luvus、Herdr 或 herdr-core 实例对应一个 provider）。
+- runtime 留在各自机器上，由操作者安装和升级。Connector 可附着受核验的已有实例，也可在 managed 模式启动并复用自己的隔离实例；Herdr/Luvus 的实例生命周期不等同于 Connector 进程，退出 Connector 不宣称原生工作已停止。Rovloom 不复制原生 UI；已开放的命令执行能力使用目标账号权限并受终端执行开关约束。
 
 目标用户：一个管理员，几台自己的机器，一个主 Agent。不支持多租户、多活集群和公网 SaaS。
 
@@ -18,7 +18,7 @@ Rovloom 让 AI Agent 通过一个 MCP 入口，访问多台设备上的本地 **
 |---|---|
 | 网络上的未授权方（没有 Bearer、没有设备凭据） | Gateway 或 Connector 所在主机已被攻陷 |
 | 泄露或过期的 Bearer / 设备凭据 | 同机其它 OS 用户读取状态目录（交给 OS 文件权限） |
-| 管理员配置错误导致的误暴露（默认只监听 loopback） | 整机回滚、备份篡改的自动检测 |
+| 管理员配置错误导致的误暴露（普通默认 MCP/设备通配，管理页回环） | 整机回滚、备份篡改的自动检测 |
 | 调用方越权访问 token 范围以外的设备 | 对 Agent 内部工具的沙箱（终端本身就是目标账号权限） |
 | 断线、重启导致的重复执行 | exactly-once、跨机器事务 |
 
@@ -26,60 +26,60 @@ Rovloom 让 AI Agent 通过一个 MCP 入口，访问多台设备上的本地 **
 
 ## 3. 不变量
 
-实现必须保持以下 8 条。
+实现必须保持以下 9 条。
 
 1. **显式目标**：每次调用给出 `machine_id + provider_id (+ session)`。没有"当前机器"，不跨 provider 自动 failover。`machine_id` 由 Gateway 随机生成。`machine_id` 与 `provider_id` 稳定、不复用，名称只用于展示。
 2. **设备身份**：一机一码（管理页或 `--issue-code` 生成，`--join` 一条命令兑换）换取设备凭据，Gateway 只存摘要。凭据不进 URL 和日志。公网上的设备通道应使用 WSS，Connector 的 WSS 连接强制校验证书与主机名。
-3. **双端授权**：每个调用方、每个 Connector 本机策略都对完整 `Target + method + action` 授权，两端都允许才放行。新增设备或 provider 不继承已有授权。
+3. **设备范围与本机执行门禁**：Gateway 逐次核对 token 的 `device_scope`，Connector 在原生写入前核对终端执行开关及真实来源。没有逐方法、provider 或动作 grant；新增设备受 token 当前设备范围约束，追加 provider 可被该设备范围内的 token 使用。
 4. **追加来源的信任锚是设备凭据**：已配对设备可以在启动时用设备凭据把 `native.provider` 点名却没配对过的来源追加进 Gateway（`POST /pairing/providers`）。Gateway 只做只读核验（不调用 `connect()`、不改设备状态），只能追加、不能覆盖；没有管理页确认，因为它带来的权限不超过设备凭据本身（持有者本来就能冒充该设备）。
 
 5. **终端执行开关**：Connector 本地布尔配置 `allow_terminal_execution`，默认开，可设为 `false` 关闭。直接终端输入、启动命令与宿主级能力（执行命令、文件、文档、core 生命周期）在发现与最终写入两处各检查一次；没有第二个开关，这些能力都不超过「启动任意程序」。
 6. **结果不确定性**：可能已送达的调用在断线、超时或崩溃后记为 `outcome_unknown`，不自动重发。只读方法由调用方显式重试。晚到的响应只补充原调用的证据，不重新执行。
 7. **有界资源**：请求体、单帧、单页、并发、结果保留时长、总存储都有上限，超限明确拒绝。
 8. **秘密不入日志**：凭据、prompt、原始输出和私人路径不写日志与审计。
-9. **HTTP 基础加固**：严格 JSON 解析（拒绝重复键、过深对象、截断 UTF-8）、请求体大小限制、Origin/Host 校验、固定错误体、默认只监听 loopback。
+9. **HTTP 基础加固**：严格 JSON 解析（拒绝重复键、过深对象、截断 UTF-8）、请求体大小限制、Origin/Host 校验、固定错误体。普通生成配置的 MCP/设备监听为 `0.0.0.0`，管理监听为 `127.0.0.1`；容器配置三者均为 `0.0.0.0`。
 
 ## 4. 架构
 
 ```text
-MCP Client ──HTTP (Bearer)──▶ Gateway ◀──WS/WSS (设备凭据)── Connector ── Provider (Luvus | Herdr)
+MCP Client ──HTTP (Bearer)──▶ Gateway ◀──WS/WSS (设备凭据)── Connector ── Provider (Luvus | Herdr | herdr-core)
                                  │                            本地终端开关
                               SQLite（单库、单 writer）
 ```
 
 | 模块 | 职责 |
 |---|---|
-| `mcp/` | Streamable HTTP facade、工具定义与参数校验、只读与调用服务；`catalog.ts` 是两个 provider 共用的目录门禁（身份/设备范围、绑定、分页、元数据投影），方法清单与原生描述由各 provider 提供 |
+| `mcp/` | Streamable HTTP facade、工具定义与参数校验、只读与调用服务；`catalog.ts` 是三个 provider 共用的目录门禁（身份/设备范围、绑定、分页、元数据投影），方法清单与原生描述由各 provider 提供 |
 | `runtime/` | Gateway 与 Connector 宿主：组合 Store、Router、传输、provider 会话与结果读取 |
 | `store.ts`、`router.ts`、`storage/` | SQLite 账本（设备、provider、调用、结果、审计、备份）；Router 负责授权与准入 |
 | `transport/` | 设备通道：握手、认证、心跳、派发、取消 |
 | `wire/` | Gateway ↔ Connector 的单一 major JSON 信封 |
 | `json/` | 与 provider 无关的有界 JSON 解析、冻结快照与结构比较 |
 | `connector/luvus/` | Luvus（UHP）的全部实现：方法表、参数规则、契约编译/校验、原生/Wire 适配、来源与宿主接线 |
-| `connector/` | 共享的发送账本、终端开关与两端 schema 落盘约定；Herdr（JSON socket）的本机 adapter |
-| `connector/luvus/wire.ts`、`connector/luvus/backend.ts` | Luvus/UHP 契约与 Wire 接缝；`wire/backend.ts` 只保留两个 provider 实际共享的 attempt/结果账本事实 |
+| `connector/` | 共享的发送账本、终端开关与两端 schema 落盘约定；Herdr（JSON socket）与 herdr-core（framed JSON-RPC）的本机 adapter |
+| `connector/luvus/wire.ts`、`connector/luvus/backend.ts` | Luvus/UHP 契约与 Wire 接缝；`wire/backend.ts` 只保留各 provider 实际共享的 attempt/结果账本事实 |
 | `admin/`、`webui/` | 独立 listener 的管理 API 与 Web UI |
 | `cli/`、`service/` | 单一可执行文件、角色配置、开机服务 |
 
 三条认证边界相互独立：调用方 → Gateway、Connector → Gateway、Connector → 本地 runtime。MCP 身份、设备凭据与管理员凭据互不通用。
 
-Luvus 与 Herdr 各自保留原生协议，Rovloom 不把 Herdr 改写成 UHP。Connector 只执行管理员在本机配置固定的 binary 与状态根。调用方不能提交 binary 路径、endpoint、环境或状态根。
+Luvus、Herdr 与 herdr-core 各自保留原生协议，Rovloom 不把其它 provider 改写成 UHP。Connector 只执行管理员在本机配置固定的 binary 与状态根。调用方不能提交 binary 路径、endpoint、环境或状态根。
 
 ### 4.1 Machine 与 Provider
 
 - `Machine`：Gateway 生成的稳定 ID。每次成功认证分配新的 `connection_epoch`。
-- `Provider binding`：`(machine_id, provider_id, kind, config_ref, binding_revision, enabled)`。`kind` 为 Luvus 或 Herdr，登记后不变。启停递增 `binding_revision`。实例换了（kind、状态根或实例身份变化）必须用新的 `provider_id`。
+- `Provider binding`：`(machine_id, provider_id, kind, config_ref, binding_revision, enabled)`。`kind` 为 `luvus`、`herdr` 或 `herdr-core`，登记后不变。启停递增 `binding_revision`。实例换了（kind、状态根或实例身份变化）必须用新的 `provider_id`。
 - `Target`：`(machine_id, provider_id, profile, session)`。调用同时带 `expected_binding_revision`，不匹配即拒绝。
 - 断开设备、撤销设备、禁用 provider 是三种不同操作。断开只关闭当前连接。撤销持久拒绝新认证。禁用 provider 阻断该实例的派发，不影响设备与其它 provider。
 - 单个 provider 失效不关闭整条连接，也不影响同设备其它 provider。
 
 ### 4.2 方法表与授权
 
-每个 provider 内置一份静态方法表。Luvus 的表把方法分为 `read` 与 `write`，并带 scope（见 `src/connector/luvus/methods.ts`）。Herdr 的表登记 65 个方法（见 `src/connector/herdr/methods.ts`）。
+每个 provider 内置一份静态方法表。Luvus 的表把方法分为 `read` 与 `write`，并带 scope（见 `src/connector/luvus/methods.ts`）。Herdr 的表登记 65 个方法（见 `src/connector/herdr/methods.ts`）；herdr-core 的独立目录和参数边界见 `src/connector/herdr-core/methods.ts` 与 ADR 0009。
 
 - 表中没有的方法一律拒绝。`schema` 通过只代表参数合法，不代表允许调用。
-- 流类方法、token 与 Host/server 管理方法不在表中。
-- Herdr、Luvus 和混合模式只保留 token 设备范围与 Connector 终端执行开关。没有按方法、provider 或动作授权的策略快照，配对不写方法清单；结果读/删核对当前设备范围与原主体归属。
+- 流类方法与 token 管理不进入通用 RPC 派发；herdr-core 已审核的宿主/生命周期方法受终端执行开关约束，具体范围见 ADR 0009。
+- Herdr、Luvus、herdr-core 和混合模式只保留 token 设备范围与 Connector 终端执行开关。没有按方法、provider 或动作授权的策略快照，配对不写方法清单；结果读/删核对当前设备范围与原主体归属。
 - 会输入终端或启动程序的方法，还要求 Connector 的终端开关开启。
 - 兼容性按实际安装的 schema 和方法能力判断。版本号只用于诊断，不设版本白名单。
 
@@ -87,8 +87,8 @@ Luvus 与 Herdr 各自保留原生协议，Rovloom 不把 Herdr 改写成 UHP。
 
 ```text
 runtime_call
-  → [Gateway] 认证调用方 → 双端策略 → 方法表 → schema 校验 → 登记调用并持久化 dispatching → 经 WS 发 request
-  → [Connector] 方向、绑定、策略、终端开关检查 → provider 执行 → response
+  → [Gateway] 认证调用方 → token 设备范围与本机开关观察 → 方法表 → schema 校验 → 登记调用并持久化 dispatching → 经 WS 发 request
+  → [Connector] 方向、绑定、来源、终端开关检查 → provider 执行 → response
   → [Gateway] 提交响应与结果（受 result_ttl）→ 返回
 ```
 
@@ -143,7 +143,7 @@ runtime_call
 
 期限在首次登记时固定，读取、重试、晚到都不会刷新。时钟回退时拒绝相关操作，不延长已有期限。磁盘或 I/O 写失败时进入 `storage_degraded`：停止新派发与配对，不报告未提交的变更已生效，可能已送达的调用保持 `outcome_unknown`。
 
-**备份与恢复**：备份快照不含结果原文与设备凭据。从快照恢复后，所有设备回到待配对状态，所有 provider 禁用并升版，调用方策略由快照之外的配置提供。快照之前未完成的调用记为 `outcome_unknown`，不重放。系统不检测整机回滚。步骤见 [存储](STORAGE.md)。
+**备份与恢复**：备份快照不含结果原文与设备凭据。从快照恢复后，所有设备回到待配对状态，所有 provider 禁用并升版，调用方身份与设备范围由快照之外的 token 注册表提供。快照之前未完成的调用记为 `outcome_unknown`，不重放。系统不检测整机回滚。步骤见 [存储](STORAGE.md)。
 
 ## 7. MCP 工具面
 

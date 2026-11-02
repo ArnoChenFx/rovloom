@@ -10,11 +10,11 @@ Connector 主动出站连接 Gateway，Gateway 不连接设备。通道上的帧
 - 设备 listener 只接受 GET `/connector`，拒绝带浏览器 `Origin` 头的请求。
 - 设备自报的名称、实例 ID 或 welcome 内容不能建立身份。身份只来自设备凭据，见 [存储与数据保留](STORAGE.md#设备凭据)。
 
-连接依次经过三个状态：已连接、已认证、provider ready。设备认证成功后才分配连接 epoch。provider ready 要求 Gateway 和 Connector 两端的绑定、启停状态、策略修订和本机健康一致。一个 provider 未就绪不影响同一设备上的其他 provider。
+连接依次经过三个状态：已连接、已认证、provider ready。设备认证成功后才分配连接 epoch。provider ready 要求 Gateway 和 Connector 两端的绑定、启停状态、契约来源和本机就绪事实一致。一个 provider 未就绪不影响同一设备上的其他 provider。
 
 ## 配对与凭据
 
-- 配对码由 Gateway 终端签发，Connector 在真实终端输入兑换。兑换后设备凭据只交给 Connector 的受保护存储，不出现在 welcome 帧、日志或普通响应中。
+- 配对码由管理页或 Gateway 的 `--issue-code` 签发，Connector 执行完整 `--join` 命令兑换，无需终端问答。兑换后设备凭据只交给 Connector 的受保护存储，不出现在 welcome 帧、日志或普通响应中。
 - 凭据交付失败或结果未知时，Gateway 清除该凭据，设备回到待配对状态，需要重新配对。交付不会自动重试。
 - 撤销或重新配对后，该设备的所有旧连接立即关闭。
 - 步骤与命令见 [运维指南](OPERATIONS.md#4-凭据)。
@@ -42,7 +42,7 @@ Connector 主动出站连接 Gateway，Gateway 不连接设备。通道上的帧
 
 - Connector 断线后按指数退避重连，间隔从 250 毫秒起，上限 30 秒，带随机抖动。重连使用稳定的设备 ID 和新的 epoch。
 - 重连不会迁入或重放任何旧请求。断线时旧 epoch 上未完成的调用由 Gateway 记为 `outcome_unknown`。
-- 旧 epoch 的响应、过期的 provider 绑定或策略修订的响应一律拒绝。
+- 旧 epoch 的响应、过期的 provider 绑定或契约来源的响应一律拒绝。
 - Connector 的断开诊断是独立一行 `connector_disconnect code=<4位关闭码> close_reason=<固定原因词>`；本机原因没有对端关闭码时只输出 `connector_disconnect close_reason=<原因>`。
   - `transport_closed`：对端（Gateway）主动关闭。
   - `transport_abnormal`：未收到关闭帧，例如 TCP 被掐或连接被强制终止；此时通常同时给出 `code=1006`。
@@ -63,7 +63,7 @@ Connector 主动出站连接 Gateway，Gateway 不连接设备。通道上的帧
 - Gateway 在派发记录持久化之后才发送 `request`。请求发送前失败的调用为 `not_dispatched`，发送后结果未知的为 `outcome_unknown`。
 - 每个调用只有一次 attempt。重复的 `client_request_key` 只返回原调用，不会再次发送，也不会延长期限。
 - Connector 收到请求后、执行前，记录 `call_id:attempt_id` 和请求摘要，并在本机持久化。同一完整 attempt 在任何 epoch 或正常重启后都不会再次写入原生。记录保留至原执行 deadline（最多 10 分钟）；到期后请求始终被期限检查拒绝。回收与持久时钟高水位原子提交，拒绝回拨。Gateway 的 30 天调用 key 去重窗口不变。详见 [Wire 协议](protocol/WIRE-PROTOCOL.md#connector-本机去重)。
-- Connector 检查方向、完整绑定、当前双端权限、期限和并发额度，通过后才执行。`accepted` 只表示已接受，不表示原生完成。
+- Connector 检查方向、完整绑定、当前来源、终端执行开关、期限和并发额度，通过后才执行。`accepted` 只表示已接受，不表示原生完成。
 - 原生请求中的认证信息由 Connector 在本机注入，Gateway 不接触。
 
 ## 取消
@@ -78,9 +78,9 @@ Connector 主动出站连接 Gateway，Gateway 不连接设备。通道上的帧
 ## 响应与结果读取
 
 - Gateway 在提交响应事务之后才将调用标为 `responded`。提交失败不会报告成功。
-- 响应原文只通过结果读取返回。每次读取都重新检查调用方归属、双端权限、内容期限和原请求，不使用缓存的授权。
-- 调用完成后，Gateway 最多保留 128 个调用的读取上下文。满额时拒绝新的派发，不淘汰仍有效的上下文。
-- 设备撤销、连接关闭、内容到期或被丢弃后，结果不能再读取。
+- 响应提交时验证原生来源、binding 和结构；已提交原文和句柄从 Store 按固定 TTL 读取，逐次核对当前身份、token 设备范围与原主体归属。
+- 128 是 Gateway 全局在途请求限额，不是已完成结果的读取上下文保留数。完成后释放执行上下文，持久内容与句柄仍受 Store 的 TTL 和唯一预算约束。
+- 连接断开或 provider fence 不会自行删除已提交结果；读取无需活 Wire，也不恢复旧 permit。内容到期、discard 或当前设备范围/主体不允许时拒绝。
 
 ## 单个 provider 失效
 
@@ -90,7 +90,7 @@ Gateway 与 Connector 协商 `provider_fence` 后，单个 provider 的来源失
 - 该 provider 上未确定完成的调用记为 `outcome_unknown`。
 - 同一设备上健康的 provider、连接和 epoch 保持不变。
 
-撤回在本 epoch 内不可逆。底层恢复后需要重新连接才能建立新的来源，旧调用、结果句柄和 unknown 调用不会迁移。协议细节见 [Wire 协议](protocol/WIRE-PROTOCOL.md#可选逐-provider-来源撤回)。
+撤回在本 epoch 内不可逆。底层恢复后需要重新连接才能建立新的来源，旧执行上下文和 unknown 调用不会迁移或重放；已提交结果仍按上述 Store 读取规则处理。协议细节见 [Wire 协议](protocol/WIRE-PROTOCOL.md#可选逐-provider-来源撤回)。
 
 ## 终端执行开关观察
 

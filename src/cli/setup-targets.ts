@@ -2,16 +2,14 @@
 import { CliError, herdrCoreSession, luvusMode, type ConnectorConfig, type NativeProviderKind } from './config.js'
 import type { V2Target } from '../wire/types.js'
 
-// 配对双方共用的计划事实：单码直连配对没有逐次人工批准，主体与谱系都是固定常量。
+// 配对双方共用的计划事实：单码直连配对没有逐次人工批准，主体是固定常量。
 export type SetupPlanFacts = Readonly<{
   attempt_id: string
   actor: string
-  lineage?: string
   providers?: readonly NativeProviderKind[]
 }>
-// 单码直连配对主体及安装谱系标签；不用于调用授权。
+// 单码直连配对主体标签；不用于调用授权。
 export const SIMPLE_SETUP_ACTOR = 'operator_simple_pairing'
-export const SIMPLE_SETUP_LINEAGE = 'simple'
 
 // Luvus 会话名随运行方式确定：附着用户真实的 default 会话，或 managed 隔离实例的 rovloom；
 // Herdr 固定 default；herdr-core 的会话名来自 Connector 本地配置（默认 default）。

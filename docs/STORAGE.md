@@ -106,7 +106,7 @@ SQLite 写失败、磁盘满、审计或元数据配额耗尽、时钟异常时�
 - 失败的响应事务不会发布 `responded`，不会补发原动作。
 - 磁盘满时无法写入的状态由内存保持。已提交的派发记录保留，重启后相应调用为 `outcome_unknown`。
 
-降级状态记录在数据库和 `gateway.db.degraded` 标记文件中，重启后仍然保持。目前没有 CLI 命令解除降级。排除磁盘或权限问题后，按下节从备份恢复。
+降级状态记录在数据库和 `gateway.db.degraded` 标记文件中，重启后仍然保持。排除磁盘或权限问题并停止 Gateway 后，先运行 `rovloom storage check --role gateway`，再显式运行 `rovloom storage resume --role gateway`；resume 重新核对完整性、时钟、预算与管理确认，不绕过故障。
 
 ## 备份与恢复
 
@@ -115,7 +115,7 @@ Store 的备份接口导出一份脱敏快照，包含设备记录、provider �
 - 请求与响应原文、结果句柄；
 - 设备凭据摘要和配对码账本（含未使用码的明文）。
 
-快照写入独立的备份目录，不能放在数据目录内。目前没有 CLI 命令导出快照。直接复制整个数据目录得到的是完整状态，包含有效的凭据摘要，恢复后回到备份时点，设备不需要重新配对。
+停止 Gateway 后可运行 `rovloom storage backup --role gateway --output /absolute/path/to/<state>.backups/snapshot.db` 导出快照。快照只写入实际状态目录同级的 `<state>.backups`，受原 Store 预算与私有权限约束；目录不能放在数据目录内。直接复制整个数据目录得到的是完整状态，包含有效的凭据摘要，恢复后回到备份时点，设备不需要重新配对。
 
 从快照恢复时，设备全部回到待配对状态，provider 全部禁用并升版，未完成的调用记为 `outcome_unknown`，内容不可用。
 
@@ -124,7 +124,7 @@ Store 的备份接口导出一份脱敏快照，包含设备记录、provider �
 1. 停止 Gateway，确认没有进程仍在写原数据库，并保留原数据目录。
 2. 把快照复制到新的数据目录，保持私有权限，作为 `gateway.db`。
 3. 正常启动 Gateway。没有单独的恢复模式。
-4. 逐个设备生成新配对码并重新执行 join 命令（见 [运维指南](OPERATIONS.md#4-凭据)），provider 随自动批准的安装清单重新发布。当前 caller 和本机策略由快照之外的配置提供。
+4. 逐个设备生成新配对码并重新执行 join 命令（见 [运维指南](OPERATIONS.md#4-凭据)），provider 随自动批准的安装清单重新发布。当前 caller 身份与设备范围由快照之外的 token 注册表提供；Connector 终端开关由本机配置提供。
 
 旧的调用、授权和已消费的配对码在恢复后没有任何效力，不会重新派发。
 

@@ -264,7 +264,7 @@ npm 安装的二进制默认 MCP 与设备通道为 `0.0.0.0`、管理页为 `12
 这是配置片段，不要用它覆盖包含 `schema_version`、`role` 和 `data` 的完整文件。
 重启 Gateway 后，Connector 使用 `ws://Gateway机器IP:9443`，浏览器打开
 `http://Gateway机器IP:9445/`，MCP 客户端使用 `http://Gateway机器IP:9444/mcp`。
-只需远程 Connector 时，仅修改 `devices` 分组；其余两个监听可以继续保持回环。
+只需远程 Connector 时，保持 `devices` 可达；不需要远程客户端的 MCP 与管理监听可显式改为回环。
 
 LAN 选项是明文 HTTP/WS，只应在可信网络使用，并通过防火墙限制访问；公网在前面加
 HTTPS/WSS 反向代理。Docker 部署还需核对容器配置与 Compose 端口映射，默认 MCP 和管理页
@@ -279,7 +279,7 @@ HTTPS/WSS 反向代理。Docker 部署还需核对容器配置与 Compose 端口
 | URL | `http://127.0.0.1:9444/mcp`（默认） |
 | Authorization 头 | `Bearer <第 3 节中保存的令牌>` |
 
-纯 CLI 配对使用 Gateway 打印的 Bearer；管理页配对使用上面 `token create` 签发的令牌。
+首次配对使用 Connector 执行 `--join` 时打印的 Bearer；之后另建的令牌使用上面 `token create` 签发的令牌。
 配对码、管理员密码都不是 Bearer。Bearer 默认 30 天过期，用 `rovloom token renew` 或
 `rovloom token rotate` 续期。远程客户端使用局域网地址、代理或隧道访问 MCP 监听。
 Rovloom 不是 stdio MCP 服务。
@@ -287,8 +287,8 @@ Rovloom 不是 stdio MCP 服务。
 然后让客户端列出这台机器的工作区和 Agent，并向某个 Agent 发一条短消息。
 断线后结果不确定的调用会标为未知，不会自动重发。工具细节见 [MCP 参考](protocol/MCP-HTTP.md)。
 
-管理页地址是 `http://127.0.0.1:9445/`，用户名默认 `admin`，密码为 CLI 配对或
-`rovloom admin create` 时打印的密码。页面显示每台设备的连接状态，可新建配对申请、
+管理页地址是 `http://127.0.0.1:9445/`，用户名默认 `admin`，密码为
+`rovloom admin create` 时打印的密码（配对不会创建管理员）。页面显示每台设备的连接状态，可生成配对码、
 重命名、断开或撤销设备，以及停用 provider。具体操作见[管理页说明](GATEWAY-WEBUI.md)。
 
 ## 5. 日常操作
@@ -296,7 +296,7 @@ Rovloom 不是 stdio MCP 服务。
 | 任务 | 做法 |
 |---|---|
 | 再次启动 | Gateway 机器运行 `rovloom gateway --non-interactive`，Connector 机器运行 `rovloom connector --non-interactive`；已保存的配对状态会复用。Docker Gateway 使用 `docker compose up -d`。 |
-| 加入更多设备 | Gateway 保持运行，在管理页生成新配对码（或 `rovloom gateway --issue-code`），新设备执行显示的加入命令。面板创建的完整 Gateway token（及其克隆）跟随已配对目标，`device_scope` 继续收窄范围。旧普通 token 及其克隆保留原目标与动作边界；新增方法不需要重新克隆或补方法清单。 |
+| 加入更多设备 | Gateway 保持运行，在管理页生成新配对码（或 `rovloom gateway --issue-code`），新设备执行显示的加入命令。面板创建的完整 Gateway token（及其克隆）跟随已配对目标，`device_scope` 继续收窄范围。旧普通 token 及其克隆按自己的 grants 迁出设备范围，显式 device_scope 优先；新增方法不需要重新克隆或补方法清单。 |
 | 凭据丢失或泄漏 | 在管理页删除该设备并生成新配对码，在该机器上重新执行加入命令即可；本地配对状态自动退役，设备以新身份重新配对。进行中的调用结果变为未知。 |
 | 换到另一台 Gateway | 先停该 Connector，机器上直接执行新 Gateway 的加入命令（旧状态自动退役）；或先 `rovloom connector --unpair` 得到干净起点。 |
 | 开机自启 | `rovloom service install --role gateway`（或 `connector`），见[开机服务](SERVICE.md)。 |
@@ -311,7 +311,7 @@ Rovloom 不是 stdio MCP 服务。
 
 | 现象 | 处理 |
 |---|---|
-| `configuration_required` / `pairing_required` | 完成终端里的提示和批准，或从管理页完成配对（见[配对](CONFIGURATION-zh.md#配对)）；仅保存 Gateway 地址不会配对设备。 |
+| `configuration_required` / `pairing_required` | 在管理页生成配对码，再在 Connector 执行显示的 join 命令（见[配对](CONFIGURATION-zh.md#配对)）；仅保存 Gateway 地址不会配对设备。 |
 | 执行加入命令后立刻 `configuration_required` | 所选运行时不在 Connector 的查找路径里。按第 2 节装好 Herdr 或 Luvus，确认 `herdr --version` / `luvus --version` 有输出，再用新的配对码重新执行加入命令。 |
 | 无法连接 / 地址被占用 | 检查端口、Gateway 监听地址和网络可达性。 |
 | HTTP 401 | 检查 `/mcp` 地址、Bearer 及其有效期。 |

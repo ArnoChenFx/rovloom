@@ -12,7 +12,6 @@ import { createLuvusWireAdapter } from '../../src/connector/luvus/wire.js'
 import { commitNativeResponse } from '../../src/wire/persistence.js'
 import { nativeBackend } from './native-backend.js'
 import { management, responseFrame } from './helpers.js'
-import {} from '../../src/wire/index.js'
 import type {} from '../../src/wire/types.js'
 
 // 创建临时目录中的独立 SQLite、可控时钟及真实后端，额外连接只用于检查落盘结果。

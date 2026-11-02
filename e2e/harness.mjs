@@ -2,6 +2,8 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { createConnection } from 'node:net'
+import { once } from 'node:events'
 import { existsSync, copyFileSync, mkdirSync, readFileSync, readdirSync, readlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { setTimeout as pause } from 'node:timers/promises'
@@ -255,6 +257,25 @@ export async function createStack({ binary, herdrBinary, methods = ['ping'], con
       child.unref()
       await until('user_herdr_endpoint', async () => existsSync(f.endpoint), { tries: 100, interval: 100 })
       return child.pid
+    },
+    /** Connector 已被杀后，直接从本轮私有 native socket 读取状态，独立证明不确定请求是否执行。 */
+    async nativeWorkspaces() {
+      const socket = createConnection({ path: f.endpoint })
+      socket.setTimeout(5000, () => socket.destroy(new Error('native snapshot timed out')))
+      try {
+        await once(socket, 'connect')
+        socket.write(JSON.stringify({ id: 'e2e-native-snapshot', method: 'session.snapshot', params: {} }) + '\n')
+        let raw = ''
+        for await (const chunk of socket) {
+          raw += chunk.toString('utf8')
+          assert(Buffer.byteLength(raw) <= 1_048_576, 'native snapshot too large')
+        }
+        const reply = JSON.parse(raw)
+        assert.equal(reply.id, 'e2e-native-snapshot')
+        return reply.result.snapshot.workspaces.length
+      } finally {
+        socket.destroy()
+      }
     },
     /** 本例Connector的直接native子进程。 */
     natives() {

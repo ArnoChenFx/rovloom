@@ -887,10 +887,10 @@ test(
     )
 )
 test(
-  'default thirty-day tombstone cleanup and scope deletion still reject the original key',
-  /* 验证默认去重墓碑和历史范围被清理后，原客户端请求键仍不能重新分配调用。 */ () =>
+  'default metadata TTL allows the original key to create a new call',
+  /* 验证默认元数据 TTL 到期后，原客户端请求键可以分配新的调用 ID。 */ () =>
     disk(
-      /* 先跨默认去重期限再跨历史范围期限执行清理，分别检查旧键继续被拒绝。 */ (_root, path) => {
+      /* 跨默认元数据 TTL 执行清理，检查复用旧键得到新的调用 ID。 */ (_root, path) => {
         let now = 100
         const s = new Store(path, /* 返回墓碑清理测试的时间，供用例依次跨越去重与历史作用域期限。 */ () => now, {
           management

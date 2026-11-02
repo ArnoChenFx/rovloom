@@ -14,7 +14,7 @@ Connector 默认允许远程向终端写入输入，也允许远程指定要启�
 
 - 省略或 `true` 表示开启。只有字面量 `false` 关闭。字符串、数字、`null` 和对象会被拒绝，既不开启也不关闭。
 - 修改后重启 Connector。以系统服务运行时使用 `rovloom service restart --role connector`。
-- 没有命令行参数，也没有 Gateway 侧开关。修改它不影响已有的 caller 与 local 授权、配对身份和已安装的 Agent。
+- 没有命令行参数，也没有 Gateway 侧开关。修改它不影响token 设备范围、配对身份和已安装的 Agent。
 - 升级不改变已有的显式设置：旧版本生成的 `connector.json` 已显式写出该值，沿用其中的选择；只有当初省略了该项的用户文件，升级后按默认变为开启。想保持关闭请显式写 `false`。
 
 CLI 运行时以这份用户配置为准，覆盖 `managed/providers.json` 中安装快照里的同名值。
@@ -55,9 +55,9 @@ Gateway 会收到 Connector 报告的开关状态，在开关关闭或未知时�
 | Luvus `task.done`、`task.retry` | 拒绝，它们可能执行已保存的 gate 或重启原运行 |
 | Herdr `pane.send_text`、`pane.send_keys`、`pane.send_input`、`pane.link.activate` | 拒绝。链接可以调用本地处理器 |
 | Agent 启动、workspace/tab/pane 创建、会话恢复 | 带非空 `command`、`args`、`env`、`resume_command`、`resume_argv` 时拒绝 |
-| 严格 Agent 文本对话、读取、不带自定义启动参数的 `agent.start` | 不受开关影响，仍受 runtime 自身的检查和 caller/local 授权约束 |
+| 严格 Agent 文本对话、读取、不带自定义启动参数的 `agent.start` | 不受开关影响，仍受 runtime 自身检查、token 设备范围与真实来源校验约束 |
 
-具体的方法与参数判定见 [源码](../src/connector/terminal-execution.ts)。开启开关不会补齐缺失的授权或分类。例如，已有的 local 策略可能不含 `pane.run`，开启开关不会修改它。
+具体的方法与参数判定见 [源码](../src/connector/terminal-execution.ts)。开启开关不绕过 token 设备范围、静态方法表或原生参数/来源校验。旧 caller/local 方法策略只兼容读取，不参与当前产品授权。
 
 严格文本对话保留 runtime 的目标检查和 prompt 就绪检查，请求参数不会被改写。Connector 不把这些检查或终端画面当作对当前前台身份的独立核验。开关也不隔离 Agent 自己的内部工具。
 

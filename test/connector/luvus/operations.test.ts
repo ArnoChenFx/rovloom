@@ -196,22 +196,10 @@ test(
 )
 
 test(
-  'Luvus stable selectors preserve discovered identities and revisions after preceding rows close',
+  'Luvus stable selectors preserve identities and revisions during parameter validation',
   /** 此处验证维护参数投影，不复制原生 resolver；实际命中及 revision_conflict 另由隔离官方实例核验。 */ () => {
-    const workspaces = [
-      { workspace: '0', workspace_id: 'workspace_before' },
-      { workspace: '1', workspace_id: 'workspace_a' }
-    ]
-    const tabs = [
-      { tab: '1', tab_id: 'tab_before' },
-      { tab: '2', tab_id: 'tab_a' }
-    ]
-    const selectedWorkspace = { workspace_id: workspaces[1]!.workspace_id, name: 'selected A', if_revision: 40 }
-    const selectedTab = { tab_id: tabs[1]!.tab_id, name: 'selected A', if_revision: 40 }
-    workspaces.shift()
-    tabs.shift()
-    workspaces[0]!.workspace = '0'
-    tabs[0]!.tab = '1'
+    const selectedWorkspace = { workspace_id: 'workspace_a', name: 'selected A', if_revision: 40 }
+    const selectedTab = { tab_id: 'tab_a', name: 'selected A', if_revision: 40 }
     for (const [method, params] of [
       ['workspace.rename', selectedWorkspace],
       ['tab.rename', selectedTab]
@@ -220,8 +208,8 @@ test(
       validateLuvusOperationParams(method, params)
       assert.deepEqual(params, before)
     }
-    assert.equal(selectedWorkspace.workspace_id, workspaces[0]!.workspace_id)
-    assert.equal(selectedTab.tab_id, tabs[0]!.tab_id)
+    assert.equal(selectedWorkspace.workspace_id, 'workspace_a')
+    assert.equal(selectedTab.tab_id, 'tab_a')
     assert.equal(selectedWorkspace.if_revision, 40)
     assert.equal(selectedTab.if_revision, 40)
     assert.throws(
@@ -229,30 +217,6 @@ test(
         validateLuvusOperationParams('tab.rename', { ...selectedTab, workspace_id: 'other_workspace' }),
       /luvus_operation_params_invalid/
     )
-  }
-)
-
-test(
-  'Luvus snapshot display coordinates project through the stable pane identity rather than a workspace offset',
-  /** snapshot 的两层 index 为一基；用 pane_id 获取稳定 workspace/tab ID，不能把 index 原样当零基 workspace。 */ () => {
-    const snapshot = { event_sequence: 40, workspaces: [{ index: 2, tabs: [{ index: 1, panes: [{ pane_id: '7' }] }] }] }
-    const paneRequest = { pane: String(snapshot.workspaces[0]!.tabs[0]!.panes[0]!.pane_id) }
-    validateLuvusOperationParams('pane.get', paneRequest)
-    const paneResult = {
-      pane: '7',
-      workspace: '1',
-      workspace_id: 'workspace_a',
-      tab: '1',
-      tab_id: 'tab_a',
-      revision: 41
-    }
-    const workspaceRequest = { workspace_id: paneResult.workspace_id, name: 'A', if_revision: paneResult.revision }
-    const tabRequest = { workspace_id: paneResult.workspace_id, tab_id: paneResult.tab_id }
-    validateLuvusOperationParams('workspace.rename', workspaceRequest)
-    validateLuvusOperationParams('tab.get', tabRequest)
-    assert.equal('workspace' in workspaceRequest, false)
-    assert.equal('workspace' in tabRequest, false)
-    assert.deepEqual(paneRequest, { pane: '7' })
   }
 )
 

@@ -239,10 +239,7 @@ export async function prepareSetupHerdr(
   })
   publishSchema(schemaPath, raw)
   const claims = new DispatchClaims({ ...claimsRef, mode: 'create', now: Date.now })
-  try {
-  } finally {
-    claims.close()
-  }
+  claims.close()
   const result: PreparedSetupHerdr = {
     schema_version: 1,
     attempt_id: attempt,

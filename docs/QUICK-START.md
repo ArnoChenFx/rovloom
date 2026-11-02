@@ -300,7 +300,7 @@ edit existing configuration directly:
 This is a fragment; do not replace the complete file containing `schema_version`, `role` and `data`.
 After restarting the Gateway, the Connector uses `ws://GATEWAY_IP:9443`, the browser opens
 `http://GATEWAY_IP:9445/`, and the MCP client uses `http://GATEWAY_IP:9444/mcp`.
-If only the Connector is remote, update only `devices` and keep the other listeners on loopback.
+If only the Connector is remote, keep `devices` reachable and explicitly bind MCP and management to loopback when remote clients do not need them.
 
 LAN access uses plain HTTP/WS. Use it on trusted networks with firewall restrictions, and put an
 HTTPS/WSS reverse proxy in front of public access. For Docker, also check the container configuration
@@ -316,8 +316,8 @@ Add a **Streamable HTTP** server in your AI client:
 | URL | `http://127.0.0.1:9444/mcp` (default) |
 | Authorization header | `Bearer <the token saved in section 3>` |
 
-For CLI pairing, use the Bearer printed by the Gateway; for web pairing, use the token issued with
-`token create` above. Neither the pairing code nor the administrator password is the Bearer.
+For the first pairing, use the Bearer printed on the Connector by the `--join` command; for tokens created
+later, use the token issued with `token create` above. Neither the pairing code nor the administrator password is the Bearer.
 The Bearer expires after 30 days; renew it with `rovloom token renew` or `rovloom token rotate`.
 Remote clients reach the MCP listener through its LAN address, your proxy or a tunnel.
 Rovloom is not a stdio MCP server.
@@ -327,8 +327,8 @@ A call whose outcome is uncertain after a disconnect is reported as unknown and 
 automatically. Tool details are in the [MCP reference](protocol/MCP-HTTP.md).
 
 The management page is at `http://127.0.0.1:9445/`. The default username is `admin`; use the password
-printed during CLI pairing or `rovloom admin create`. It shows each device's connection and lets you
-create pairing applications, rename, disconnect or revoke devices and disable providers.
+printed by `rovloom admin create` (pairing does not create an administrator). It shows each device's
+connection and lets you generate pairing codes, rename, disconnect or revoke devices and disable providers.
 See the [management page guide](GATEWAY-WEBUI.md).
 
 ## 5. Everyday tasks
@@ -336,7 +336,7 @@ See the [management page guide](GATEWAY-WEBUI.md).
 | Task | How |
 |---|---|
 | Start again | Run `rovloom gateway --non-interactive` on the Gateway machine and `rovloom connector --non-interactive` on the Connector machine; saved pairing state is reused. For Docker Gateway, use `docker compose up -d`. |
-| Add another device | Keep the Gateway running, generate a new pairing code on the management page (or `rovloom gateway --issue-code`), and run the displayed join command on the new device. Full Gateway tokens created in the dashboard, and their clones, follow current paired targets within device_scope. Legacy ordinary tokens and their clones retain their approved targets and actions; newly exposed methods need no token recreation or method-list update. |
+| Add another device | Keep the Gateway running, generate a new pairing code on the management page (or `rovloom gateway --issue-code`), and run the displayed join command on the new device. Full Gateway tokens created in the dashboard, and their clones, follow current paired targets within device_scope. Legacy ordinary tokens and their clones migrate their own grant machine IDs into device_scope; explicit scopes take precedence; newly exposed methods need no token recreation or method-list update. |
 | Credential lost or leaked | Delete the device on the management page (or simply) generate a new pairing code and run the join command on that machine; the local pairing state retires and the device re-pairs as a new identity. In-flight calls become unknown. |
 | Moving to another Gateway | Stop that Connector and run the new Gateway's join command (previous state retires automatically); or run `rovloom connector --unpair` first for a clean slate. |
 | Run at boot | `rovloom service install --role gateway` (or `connector`) — see [Boot services](SERVICE.md). |
@@ -351,7 +351,7 @@ Each role keeps one configuration file, created on first run and never reset:
 
 | Symptom | What to do |
 |---|---|
-| `configuration_required` / `pairing_required` | Finish the terminal prompts and approvals, or pair from the management page ([Pairing](CONFIGURATION.md#pairing)); a saved Gateway address alone does not pair the device. |
+| `configuration_required` / `pairing_required` | Generate a pairing code on the management page and run the displayed join command on the Connector ([Pairing](CONFIGURATION.md#pairing)); a saved Gateway address alone does not pair the device. |
 | `configuration_required` right after a join | The selected runtime is not on the Connector's search path. Install Herdr or Luvus (§2), confirm `herdr --version` / `luvus --version` works, then run the join command again with a fresh code. |
 | Cannot connect / address in use | Check ports, the Gateway listener address and network reachability. |
 | HTTP 401 | Check the `/mcp` URL, the Bearer and its expiry. |

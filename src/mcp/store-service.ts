@@ -1071,7 +1071,7 @@ export class StoreGatewayService implements GatewayService {
           health.mode as ManagementStatus['mode']
         ) as ManagementReply[K]
       }
-      if (!['devices_list', 'devices_get', 'providers_list', 'providers_get', 'permissions_get'].includes(name)) {
+      if (!['devices_list', 'providers_list', 'providers_get', 'permissions_get'].includes(name)) {
         throw new FacadeServiceError('backend_unavailable')
       }
       const required =

@@ -51,9 +51,10 @@ bun --no-env-file scripts/e2e/connector-disconnect.mjs
 
 - `src/connector/luvus/`：Luvus 的全部实现——方法表（`methods.ts`）、参数规则（`operations.ts`、`operations-validation.ts`、`parameter-help.ts`）、契约编译与校验（`contract/`）、原生/Wire 适配（`adapter.ts`、`catalog.ts`）与宿主接线（`host/`、`operations-provider.ts`）。
 - `src/connector/herdr/`：Herdr 的全部实现（adapter、schema 编译、方法表、安装与来源）。
-- `src/connector/{claims,schema-store,terminal-execution}.ts`：两个 provider 实际共用的发送账本、原始 schema 落盘约定与终端开关。
+- `src/connector/herdr-core/`：herdr-core 的 framed JSON-RPC、OpenRPC 契约、方法审核、安装与来源。
+- `src/connector/{claims,schema-store,terminal-execution}.ts`：各 provider 共用的发送账本、原始 schema 落盘约定与终端开关。
 - `src/json/`：provider 中性的有界 JSON 工具。`src/wire/{native,backend}.ts` 是 Luvus 契约内核与 Wire 的接缝和中性原生后端接口；`wire`、`transport`、`storage`、`runtime`、`mcp`、`webui`、`admin`、`service` 按职责划分；根目录的 Store、Router 与协议文件是公共入口。
-- `scripts/{luvus,herdr}`：固定版本原生输入的采集、审计和验证工具。`scripts/bun`：构建与 smoke。`scripts/release`：发行。`scripts/webui`：管理页浏览器检查。`scripts/maintenance`：维护脚本。
+- `scripts/{luvus,herdr,herdr-core}`：固定版本原生输入的采集、审计和验证工具。`scripts/bun`：构建与 smoke。`scripts/release`：发行。`scripts/webui`：管理页浏览器检查。`scripts/maintenance`：维护脚本。
 - `test/`：所有 Bun 回归，由 `bun run test` 执行。`test/fixtures/{luvus,herdr}` 按版本保存协议原文、来源与许可证，`test/fixtures/native-contract` 保存当前映射和矩阵（fixture 名沿用历史命名，被测实现已聚合到 `src/connector/luvus/`）。
 - 端到端验收见 [e2e/README](../e2e/README.md)，不属于单元测试门禁。
 
@@ -152,3 +153,8 @@ Herdr Worker 样本/编译/打包、Gateway schema 编译、Windows 原生解析
 macOS 系统服务失败时额外查询一次固定 label 的 `launchctl print`，只输出退出码、stderr 和公开状态字段，过滤环境与完整声明；不会再次执行 stop。Gateway smoke 失败记录自有 child 生命周期、输出字节/摘要和白名单产品错误行，未知输出不公开。#217 仍需实际 Intel macOS 失败样本才能定位；本地 Linux 通过不能证明该偶发已修复。
 
 聚合存储量测命令：`bun --no-env-file scripts/storage/aggregate-benchmark.ts /tmp/aggregate.json`。方法和限制见[报告](performance/249-aggregate-storage.md)。
+
+Herdr matrix 的 `--write --source-tree` 核对输入树的 schema 摘要与安装夹具一致，并记录实际读到的源码文件摘要；
+不要求这些摘要等于已提交矩阵里的旧值。矩阵里的提交号仍取自 `provenance.json`，生成不会反查输入树的实际提交。
+Luvus 旧主采集未含 wrong-pane 通道；语义审计另要求并校验 `stale-pane.json` 的独立原生交换，
+两份采集不共享终端身份。缺失、截断或把拒绝改为成功都会被拒绝。

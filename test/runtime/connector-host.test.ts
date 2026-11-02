@@ -1,9 +1,6 @@
 // 验证中性 Connector 角色的共享关闭、真实 welcome 重入和 provider 资源回收，不冒充任何原生协议。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import {} from 'node:fs'
-import {} from 'node:path'
-import {} from 'node:url'
 import { GatewayError } from '../../src/contracts.js'
 import { ConnectorHostStartupError, createProviderConnectorRuntime } from '../../src/runtime/connector-host.js'
 import type { ConnectorHostOptions } from '../../src/runtime/connector-host.js'
