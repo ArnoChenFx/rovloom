@@ -64,7 +64,7 @@ Luvus / Herdr / herdr-core 的原生协议与 fixture 保持原样，UHP 仅属�
 - `{machine_id, provider_id, profile: "session", session}`
 - `{machine_id, provider_id, profile: "host"}`
 
-`ProviderBinding` 为 `{machine_id, provider_id, kind: "luvus" | "herdr", config_ref, binding_revision, enabled}`。
+`ProviderBinding` 为 `{machine_id, provider_id, kind: "luvus" | "herdr" | "herdr-core", config_ref, binding_revision, enabled}`。
 
 - `Target` 不含 `kind` 或 `expected_binding_revision`。`session` 必须显式给出且非空，不继承 shell、current 或 default。
 - `provider_id` 只在所属 machine 内解析，稳定且不可复用。`binding_revision` 是正的安全整数，单调且不可复用。配置或启用状态变化必须分配新的 revision。revision 的分配与不可复用由可信 registry 的事务保证，codec 不能从单个快照证明。
@@ -75,22 +75,22 @@ Luvus / Herdr / herdr-core 的原生协议与 fixture 保持原样，UHP 仅属�
 
 ## ContractSource 与 contract_ref
 
-`ContractSource` 描述一份安装契约的来源：
+`ContractSource` 描述一份安装或运行实例契约的来源：
 
 | 字段 | 取值 |
 |---|---|
-| `provider_kind` | `luvus` 或 `herdr` |
-| `protocol_family` | `uhp` 或 `herdr-json` |
+| `provider_kind` | `luvus`、`herdr` 或 `herdr-core` |
+| `protocol_family` | 分别为 `uhp`、`herdr-json` 或 `herdr-core-jsonrpc` |
 | `binary_version`、`binary_sha256`、`schema_sha256` | 安装程序与 schema 的版本和摘要 |
-| `schema_origin` | 固定 `installed_cli` |
-| `schema_command` | `luvus uhp schema` 或 `herdr api schema --json` |
+| `schema_origin` | Luvus / Herdr 使用 `installed_cli`；herdr-core 使用 `live_instance` |
+| `schema_command` | 分别为 `luvus uhp schema`、`herdr api schema --json` 或运行中 herdr-core 的 `rpc.discover` |
 | `server_version`、`native_protocol_version`、`runtime_generation` | 未观察到时为 null，不合成 |
 | `adapter_revision`、`classification_revision` | Rovloom 适配与方法分类的版本。`classification_revision` 可为 null |
 | `support_basis` | `live_catalog` 或 `schema_and_version` |
 
 `contract_ref = SHA256(boundedJson(ContractSource))`，编码为 64 位小写 hex。它是内容摘要，不是签名、认证、执行许可或 native request id。任何来源值变化都会改变 `contract_ref`。
 
-- 必填来源缺失、未知的 `schema_origin` 或命令、`kind` / 协议族 / 命令不一致，一律拒绝。网页上的 schema 不能代替 `installed_cli`。
+- 必填来源缺失、未知的 `schema_origin` 或命令、`kind` / 协议族 / 命令不一致，一律拒绝。herdr-core 还必须使用 `live_instance`。网页上的 schema 不能代替已核验的 CLI 或运行实例提供的原始契约。
 - Wire 只按 ref 查可信的 `ContractRecord {source, support_status: "candidate" | "validated"}`，并重新计算摘要核对。消息自带的 `ContractSource` 不能自证来源。`candidate` 状态永远不派发。
 - 可执行的 Luvus 契约还要求 `validated` 状态、`live_catalog` 和非空的 `classification_revision`。方法与子动作的多轴门禁由原生模块判定。
 - 原生缓存与 handle 必须另外绑定完整的 provider / profile / session / attempt，不能只按 schema hash 或 ref 在 provider 之间共享执行身份。
