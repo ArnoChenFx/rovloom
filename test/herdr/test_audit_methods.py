@@ -10,7 +10,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts/herdr'))
 
 from contract import Rejected, reviewed_production_allowlist, WORKFLOW_RESPONSE_TYPES
-from audit_methods import FIXTURES, MATRIX, audit, build, methods, read_json
+from audit_methods import FIXTURES, MATRIX, audit, methods, read_json
 
 
 class MethodInventory(unittest.TestCase):
@@ -241,20 +241,6 @@ class MethodInventory(unittest.TestCase):
             path.write_text('// 合成变更；从不执行\n')
             with self.assertRaisesRegex(Rejected, 'source file hash'):
                 self.checked(tree=Path(directory))
-
-    def test_generation_rejects_modified_source_even_when_schema_matches(self):
-        """生成入口也必须验证已有源码 pin，不能给改过的树写入固定提交归属。"""
-        with tempfile.TemporaryDirectory(prefix='herdr-method-generation-') as directory:
-            tree = Path(directory)
-            schema_path = tree / 'docs/next/api/herdr-api.schema.json'
-            schema_path.parent.mkdir(parents=True)
-            schema_path.write_bytes((FIXTURES / 'schema.json').read_bytes())
-            for relative in self.matrix['sources_sha256']:
-                path = tree / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text('// modified source with unchanged schema\n')
-            with self.assertRaisesRegex(Rejected, 'source file hash mismatch'):
-                build(tree, self.schema, self.provenance)
 
 
 if __name__ == '__main__':

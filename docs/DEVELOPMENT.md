@@ -154,7 +154,7 @@ macOS 系统服务失败时额外查询一次固定 label 的 `launchctl print`�
 
 聚合存储量测命令：`bun --no-env-file scripts/storage/aggregate-benchmark.ts /tmp/aggregate.json`。方法和限制见[报告](performance/249-aggregate-storage.md)。
 
-Herdr matrix 的 `--write --source-tree` 只接受已有固定矩阵记录的源码文件摘要集（另核对安装 schema 摘要），
-不以匹配 schema 为由给任意源码树写入固定提交归属。更新 pin 需要独立审阅来源与摘要。
+Herdr matrix 的 `--write --source-tree` 核对输入树的 schema 摘要与安装夹具一致，并记录实际读到的源码文件摘要；
+不要求这些摘要等于已提交矩阵里的旧值。矩阵里的提交号仍取自 `provenance.json`，生成不会反查输入树的实际提交。
 Luvus 旧主采集未含 wrong-pane 通道；语义审计另要求并校验 `stale-pane.json` 的独立原生交换，
 两份采集不共享终端身份。缺失、截断或把拒绝改为成功都会被拒绝。
