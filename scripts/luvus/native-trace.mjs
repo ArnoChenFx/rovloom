@@ -1,5 +1,6 @@
 // 从原生采集记录重建进程、端点、终端与清理证据，审计 fixture 的语义一致性。
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 
 // 从原始 request/response 与进程记录重建最小门禁，不把 assertions.json 的自报当证据。
 export function verifyNativeTrace(transcript, environment, artifacts) {
@@ -191,7 +192,30 @@ export function verifyNativeTrace(transcript, environment, artifacts) {
   }
   errorCode('control-stale-generation', 'stale_server')
   errorCode('control-wrong-terminal', 'stale_terminal')
-  if (received('control-wrong-pane').length) {
+  // 旧主采集未含 wrong-pane；必须核对独立原生补充采集，不能因主记录缺失而跳过拒绝证据。
+  const stalePane = artifacts.stalePane
+  assert(stalePane, 'stale-route evidence required')
+  assert.equal(stalePane.source.capture_completed, true)
+  assert.equal(stalePane.source.archive_sha256, '71c38aa6ce308cb71fe02746a8380034e2869b75d82c8c288edefd3b4935cc41')
+  assert.equal(stalePane.binary_sha256, environment.binary_sha256)
+  assert.equal(stalePane.schema_sha256, '00e3bb8862b9f3602164bdbe3f11cd7b466e7f7098aa2942dd3878d0b1abdbe6')
+  assert.equal(stalePane.records.length, 2)
+  const exchange = stalePane.records.map((row, index) => {
+    assert.equal(row.kind, index === 0 ? 'send' : 'receive')
+    assert.equal(row.channel, 'control-wrong-pane')
+    assert(row.wire.endsWith('\n'), 'stale-route frame must end with LF')
+    assert.equal(createHash('sha256').update(row.wire).digest('hex'), row.wire_sha256)
+    return JSON.parse(row.wire)
+  })
+  const [wrongPaneRequest, wrongPaneResponse] = exchange
+  assert.equal(wrongPaneRequest.method, 'terminal.backend.control')
+  assert.equal(wrongPaneRequest.id, 'control-wrong-pane')
+  assert.equal(wrongPaneResponse.id, wrongPaneRequest.id)
+  assert.equal(wrongPaneRequest.params.server_generation, stalePane.terminal_identity.server_generation)
+  assert.equal(wrongPaneRequest.params.terminal_id, stalePane.terminal_identity.terminal_id)
+  assert.notEqual(wrongPaneRequest.params.pane_id, stalePane.terminal_identity.pane_id)
+  assert.equal(wrongPaneResponse.error?.code, 'stale_route')
+  if (transcript.some((row) => row.channel === 'control-wrong-pane')) {
     errorCode('control-wrong-pane', 'stale_route')
   }
   errorCode('control-lease-conflict', 'control_conflict')

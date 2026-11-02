@@ -162,7 +162,8 @@ test(
       host: readJson('host-capabilities.json'),
       session: readJson('session-capabilities.json'),
       identity: readJson('terminal-identity.json'),
-      inventory: readJson('terminal-inventory.json')
+      inventory: readJson('terminal-inventory.json'),
+      stalePane: JSON.parse(readFileSync(new URL('../fixtures/luvus/0.14.3/stale-pane.json', import.meta.url)))
     }
     for (const mutate of [
       /* 将应成功的主机信息进程改为失败退出。 */ (trace) => {
@@ -187,6 +188,28 @@ test(
       assert.throws(
         /* 被篡改的原始证据必须被独立语义审计拒绝。 */ () => verifyNativeTrace(trace, environment, artifacts)
       )
+    }
+    for (const mutate of [
+      /* 移除整份补充证据。 */ (value) => {
+        delete value.stalePane
+      },
+      /* 删除必须存在的拒绝响应。 */ (value) => {
+        value.stalePane.records.pop()
+      },
+      /* 截断响应帧，即使同步修改摘要也不能冒充完整交换。 */ (value) => {
+        const row = value.stalePane.records[1]
+        row.wire = row.wire.slice(0, -1)
+        row.wire_sha256 = sha256(row.wire)
+      },
+      /* 把拒绝替换成成功响应并同步摘要，仍须被语义校验拒绝。 */ (value) => {
+        const row = value.stalePane.records[1]
+        row.wire = JSON.stringify({ id: 'control-wrong-pane', result: {} }) + '\n'
+        row.wire_sha256 = sha256(row.wire)
+      }
+    ]) {
+      const changed = structuredClone(artifacts)
+      mutate(changed)
+      assert.throws(() => verifyNativeTrace(original, environment, changed))
     }
     const mismatch = structuredClone(artifacts)
     mismatch.session.result.methods.push('p0.unobserved')

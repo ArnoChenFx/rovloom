@@ -234,6 +234,11 @@ def build(tree, schema, provenance):
     tree = Path(tree)
     require(digest((tree / 'docs/next/api/herdr-api.schema.json').read_bytes()) == provenance['schema_sha256'],
             'fixed source schema differs from installed fixture')
+    # 固定矩阵中的摘要是已审阅源码 pin；生成不能把任意输入树重新标成固定提交。
+    pinned = read_json(MATRIX)
+    require(pinned['source_commit'] == provenance['source_commit'] == COMMIT, 'source commit mismatch')
+    for path, expected in pinned['sources_sha256'].items():
+        require(digest((tree / path).read_bytes()) == expected, 'source file hash mismatch')
     entries, grouped = methods(schema), categories()
     require(set(grouped) == {name for name, _, _ in entries}, 'method classification coverage differs from schema')
     anchors, sources, rows = {}, {}, []
@@ -330,6 +335,7 @@ def build(tree, schema, provenance):
             'unavailable_bridge_guarantees': UNAVAILABLE,
             'next_slice': SLICE_OVERRIDES.get(name, SLICE_FOR_GROUP[group]),
         })
+    require(sources == pinned['sources_sha256'], 'source traversal differs from reviewed digest set')
     return {
         'format': 1, 'runtime': 'herdr', 'version': provenance['version'],
         'protocol': provenance['protocol'], 'source_repository': 'herdrdev/herdr',

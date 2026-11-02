@@ -151,7 +151,8 @@ export function inspectFixtures(root = fixtureRoot) {
     host: readJson('host-capabilities.json', root),
     session: readJson('session-capabilities.json', root),
     identity: readJson('terminal-identity.json', root),
-    inventory: readJson('terminal-inventory.json', root)
+    inventory: readJson('terminal-inventory.json', root),
+    stalePane: JSON.parse(readFileSync(new URL('../../test/fixtures/luvus/0.14.3/stale-pane.json', import.meta.url)))
   })
   return totals
 }

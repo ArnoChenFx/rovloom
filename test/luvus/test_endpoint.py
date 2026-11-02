@@ -14,10 +14,36 @@ import unittest
 # 从当前仓库显式载入被测维护工具，隔离不同测试文件的导入状态。
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts/luvus'))
 
-from collect import Capture
+from collect import Capture, Wire
 
 # 验证器显式传入工作区父目录；不依赖仅此云环境才有的 /workspace。
 TEST_ROOT = Path(os.environ.get("LUVUS_TEST_ROOT", Path(__file__).resolve().parents[2].parent))
+
+
+class StreamBoundary(unittest.TestCase):
+    """用真实 socketpair 验证最后一帧截断不会伪装成正常 EOF。"""
+
+    def test_eof_requires_a_frame_boundary(self):
+        for raw, truncated in [(b'', False), (b'{"id":1}', True), (b'{"id":1}\n{', True)]:
+            with self.subTest(raw=raw):
+                reader, writer = socket.socketpair()
+                wire = object.__new__(Wire)
+                wire.socket, wire.buffer, wire.label = reader, b'', 'unit'
+                wire.capture = type('CaptureRecords', (), {'records': []})()
+                try:
+                    writer.sendall(raw)
+                    writer.shutdown(socket.SHUT_WR)
+                    if b'\n' in raw:
+                        self.assertEqual(wire.receive(), {'id': 1})
+                    if truncated:
+                        with self.assertRaisesRegex(ValueError, 'truncated frame'):
+                            wire.receive()
+                        self.assertFalse(any(row['kind'] == 'eof' for row in wire.capture.records))
+                    else:
+                        self.assertIsNone(wire.receive())
+                finally:
+                    reader.close()
+                    writer.close()
 
 
 class EndpointBoundary(unittest.TestCase):

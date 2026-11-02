@@ -384,7 +384,7 @@ class Wire:
         self.capture.records.append({"kind": "send", "channel": self.label, "wire": wire})
         self.socket.sendall(wire.encode())
 
-    # 在超时和缓冲区限制内读取一帧 JSON 并记录原文，遇到 EOF 返回空值。
+    # 在超时和缓冲区限制内读取一帧 JSON 并记录原文；仅帧边界上的 EOF 返回空值。
     def receive(self, timeout=5):
         deadline = time.monotonic() + timeout
         while b"\n" not in self.buffer:
@@ -393,6 +393,8 @@ class Wire:
                 raise TimeoutError(self.label)
             data = self.socket.recv(65536)
             if not data:
+                if self.buffer:
+                    raise ValueError("truncated frame at EOF")
                 self.capture.records.append({"kind": "eof", "channel": self.label})
                 return None
             self.buffer += data
