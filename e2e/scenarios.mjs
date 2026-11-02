@@ -274,7 +274,7 @@ export const scenarios = [
       await pause(4000)
       const next = await stack.connect()
       const machine = await tool(next, 'machines_get', { machine_id: stack.target.machine_id })
-      assert(reconnect.alive, 'revoked connector must stay alive and retry')
+      assert(reconnect.alive, 'revoked connector must stay alive')
       assert.equal(machine.isError, false, JSON.stringify(machine.raw))
       assert.equal(machine.data?.status, 'revoked')
       assert.equal(machine.data?.link, 'offline')
@@ -284,7 +284,7 @@ export const scenarios = [
       return {
         machine: machine.isError ? machine.raw : machine.data?.status,
         call: call.submit_error ?? call.state,
-        connector: reconnect.alive ? 'retrying' : `exited:${reconnect.exit.code}`
+        connector: 'alive'
       }
     }
   },

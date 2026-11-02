@@ -39,11 +39,12 @@ function fixtureStack({ alive = true, status = 'revoked', link = 'offline', mach
 }
 
 test(
-  'device-revoke requires a live retrying Connector and explicit revoked/offline machine evidence',
+  'device-revoke requires a live Connector and explicit revoked/offline machine evidence',
   { timeout: 25_000 },
   async () => {
     const scenario = scenarios.find((row) => row.name === 'device-revoke')
-    await scenario.run(fixtureStack())
+    const evidence = await scenario.run(fixtureStack())
+    assert.equal(evidence.connector, 'alive')
     for (const fault of [{ alive: false }, { status: 'active' }, { link: 'connected' }, { machineError: true }]) {
       await assert.rejects(scenario.run(fixtureStack(fault)), { name: 'AssertionError' })
     }
