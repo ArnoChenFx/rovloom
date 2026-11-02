@@ -16,7 +16,7 @@ port is opened on the machines that run them.
 
 - **Multi-device access.** Every device runs one Connector that dials out to a shared Gateway.
 - **Explicit targets.** Each call names a device, runtime and session; nothing is chosen implicitly.
-- **Native runtimes.** Herdr and Luvus keep their own contracts and capabilities. herdr-core is an opt-in provider (Linux, core 0.1.14) that exposes the core's own agent management surface: reads (with history), input, interrupt/kill/rm/keep/label, `terminal.run` (program or template), `templates.list` and a `terminal.events` long poll for status changes. `native.herdr_core.mode` is `attach` (default, uses a core you started) or `managed` (the Connector starts a private core with `herdr-core serve`, never via `hc`). Everything that types into a terminal, starts a program, runs a command, or touches files/documents/the core lifecycle (`machine.exec`, `file.*`, `doc.set`, `server.restart/stop`) requires `allow_terminal_execution`; only `machine.*` (core's own machine table) and the raw streams (`terminal.attach`, `events.subscribe`) stay closed, and `runtime_describe` lists them with the reason. See [ADR 0009](docs/adr/0009-herdr-core-provider.md) for the capability catalog and the per-method limits.
+- **Native runtimes.** Herdr and Luvus keep their own contracts and capabilities. herdr-core is an opt-in provider (Linux; no core version limit, CI tests the latest release) that exposes the core's own agent management surface: reads (with history), input, interrupt/kill/rm/keep/label, `terminal.run` (program or template), `templates.list` and a `terminal.events` long poll for status changes. `native.herdr_core.mode` is `attach` (default, uses a core you started) or `managed` (the Connector starts a private core with `herdr-core serve`, never via `hc`). Everything that types into a terminal, starts a program, runs a command, or touches files/documents/the core lifecycle (`machine.exec`, `file.*`, `doc.set`, `server.restart/stop`) requires `allow_terminal_execution`; only `machine.*` (core's own machine table) and the raw streams (`terminal.attach`, `events.subscribe`) stay closed, and `runtime_describe` lists them with the reason. See [ADR 0009](docs/adr/0009-herdr-core-provider.md) for the capability catalog and the per-method limits.
 - **Two authorization controls.** Tokens select visible devices; each Connector controls direct
   terminal execution. Every exposed method on a visible device is available to its token.
 - **Honest results.** A call whose outcome is uncertain after a disconnect is reported as unknown
@@ -78,7 +78,9 @@ managed native processes; see [Distribution](docs/DISTRIBUTION.md).
 A Connector needs **Herdr**, **Luvus**, or an already running **herdr-core** on its machine; see
 [Quick Start §2](docs/QUICK-START.md#2-prepare-the-connector-machine) for per-platform install commands.
 
-Pairing a Connector needs a real local terminal.
+Pairing is one command: generate a pairing code on the Gateway, then run the displayed
+`rovloom connector --join …` on the Connector machine. There are no prompts or approvals (see
+[Quick Start §3](docs/QUICK-START.md#3-start-and-pair)).
 
 ## Documentation
 
