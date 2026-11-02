@@ -26,7 +26,6 @@ type Settings = {
   viaPorts?: boolean
   stage?: Stage
   ready?: boolean
-  revision?: string
   max_response_bytes?: number
   missingPort?: 'admit' | 'retainEvidence'
   binding?: Partial<ProviderBinding>
@@ -63,7 +62,6 @@ async function fixture(settings: Settings = {}) {
     sessionCloses: 0,
     releases: 0,
     ready: settings.ready ?? true,
-    revision: settings.revision ?? 'local1',
     observer: true,
     caller: true,
     nativeCalls: 0,
@@ -468,26 +466,24 @@ test(
   }
 )
 
-for (const condition of ['not_ready'] as const) {
-  test(
-    'neutral Gateway refuses dispatch while provider ' + condition + ' is current',
-    /** 设备已认证也不能替代独立原生健康或双端配置修订。 */ async () => {
-      const f = await fixture(condition === 'not_ready' ? { ready: false } : { revision: 'wrong_revision' })
-      try {
-        await until(/** 先证明真正建立了被认证epoch及provider会话。 */ () => f.state.sessionCalls === 1)
-        const admitted = await f.gateway.runAuthenticated(
-          { principal_id: 'synthetic' },
-          /** 只登记可对账元数据，拒绝在ready失败时创建派发锚点。 */ () => f.gateway.admit(f.input())
-        )
-        assert.equal(admitted.call.state, 'created')
-        assert.equal(admitted.call.attempt_id, null)
-        assert.equal(f.state.nativeCalls, 0)
-      } finally {
-        await f.close()
-      }
+test(
+  'neutral Gateway refuses dispatch while provider is not ready',
+  /** 设备已认证也不能替代独立原生健康检查。 */ async () => {
+    const f = await fixture({ ready: false })
+    try {
+      await until(/** 先证明真正建立了被认证epoch及provider会话。 */ () => f.state.sessionCalls === 1)
+      const admitted = await f.gateway.runAuthenticated(
+        { principal_id: 'synthetic' },
+        /** 只登记可对账元数据，拒绝在ready失败时创建派发锚点。 */ () => f.gateway.admit(f.input())
+      )
+      assert.equal(admitted.call.state, 'created')
+      assert.equal(admitted.call.attempt_id, null)
+      assert.equal(f.state.nativeCalls, 0)
+    } finally {
+      await f.close()
     }
-  )
-}
+  }
+)
 
 for (const stage of ['session', 'adapter', 'readiness', 'provider'] as const) {
   test(

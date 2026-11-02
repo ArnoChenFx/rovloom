@@ -2,8 +2,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import {} from 'node:path'
-import {} from 'node:url'
 import { composeConnectorSessions, composeGatewaySessions } from '../../src/runtime/provider-sessions.js'
 import type { ProviderSessionGroup } from '../../src/runtime/provider-sessions.js'
 import type { Adapter, Connection, ConnectorWireSession } from '../../src/transport/index.js'

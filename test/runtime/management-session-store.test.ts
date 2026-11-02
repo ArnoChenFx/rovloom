@@ -50,7 +50,7 @@ test(
         read: () => broken,
         write: () => {}
       })
-      assert.deepEqual(store.load(), broken === undefined ? [] : [])
+      assert.deepEqual(store.load(), [])
     }
   }
 )

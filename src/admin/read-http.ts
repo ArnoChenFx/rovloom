@@ -180,11 +180,11 @@ function prepare(options: ManagementHttpOptions) {
   }
 
   /** 回收实际任务之后才释放额度；忽略 AbortSignal 的后端不能被取消请求无限堆积。 */
-  async function execute(request: Request, controller: AbortController, path: string): Promise<Response> {
-    const read = parseManagementReadPath(path)
-    if (!read) {
-      return failure('not_found', 404)
-    }
+  async function execute(
+    request: Request,
+    controller: AbortController,
+    read: NonNullable<ReturnType<typeof parseManagementReadPath>>
+  ): Promise<Response> {
     const identity = await options.authenticate(request, controller.signal)
     if (controller.signal.aborted) {
       throw new ReadError('unavailable')
@@ -249,8 +249,12 @@ function prepare(options: ManagementHttpOptions) {
         })
       }
     }
+    let read: ReturnType<typeof parseManagementReadPath> = null
     try {
-      if (!initializePage && !parseManagementReadPath(path)) {
+      if (!initializePage) {
+        read = parseManagementReadPath(path)
+      }
+      if (!initializePage && !read) {
         return failure('not_found', 404)
       }
     } catch {
@@ -308,7 +312,7 @@ function prepare(options: ManagementHttpOptions) {
         controller.signal.addEventListener('abort', cancelled, { once: true })
         const work = initializePage
           ? initialize(initializePage, request, file!, controller.signal)
-          : execute(request, controller, path)
+          : execute(request, controller, read!)
         void work.then(
           /** 真实任务结束才释放额度；已取消时不写回旧响应。 */
           (response) => {

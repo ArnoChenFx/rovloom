@@ -82,8 +82,7 @@ test(
       )
       delete p.device_scope
       assert(s.call('alice', c.call_id).response)
-      const manager = { ...p, permissions: { discard_response: true } }
-      router.discardResponse(manager, c.call_id)
+      router.discardResponse(p, c.call_id)
       assert.equal(s.call('alice', c.call_id).response, null)
       assert.equal(s.call('alice', c.call_id).state, 'responded')
       assert.equal(s.createCall('alice', d.target, { method: 'pane.read' }, o).call_id, c.call_id)
@@ -99,7 +98,7 @@ test(
         /* 对已完成调用再次派发，要求状态栅栏阻止重放。 */ () => s.dispatch('alice', c.call_id, 'old'),
         /dispatch_rejected/
       )
-      router.discardResponse(manager, c.call_id)
+      router.discardResponse(p, c.call_id)
     } finally {
       s.close()
     }
