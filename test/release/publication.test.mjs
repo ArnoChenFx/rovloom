@@ -642,6 +642,18 @@ test('Release 说明按版本生成：没有该版本条目就不带升级提示
   assert(!startup.includes('always pass `timeout`'))
   assert(!startup.includes('65536 bytes'))
   assert(!startup.includes('herdr-core is a third runtime'))
+  // 0.10.5 讲 terminal.wait 默认 60 秒；不沿用 0.10.4 与 0.10.3 的要点。
+  const waitDefault = releaseBody({ tag: 'v0.10.5', version: '0.10.5', commit: 'f'.repeat(40) })
+  assert.match(waitDefault, /`terminal\.wait` without `timeout` now waits up to 60 seconds/u)
+  assert.match(waitDefault, /`default: 60` next to `maximum: 60`/u)
+  assert.match(waitDefault, /upgrade the Gateway to get it/u)
+  assert.match(waitDefault, /A `terminal\.wait` through an older Gateway still needs an explicit `timeout`/u)
+  assert(!waitDefault.includes('always pass `timeout`'))
+  assert(!waitDefault.includes('no longer hides the cause'))
+  assert(!waitDefault.includes('working_directory_reset'))
+  assert(!waitDefault.includes('now says the limit'))
+  assert(!waitDefault.includes('65536 bytes'))
+  assert(!waitDefault.includes('herdr-core is a third runtime'))
   // 未登记的版本不继承任何旧提示，只保留固定的公共段落与契约标记。
   const future = releaseBody({ tag: 'v0.9.9', version: '0.9.9', commit: 'b'.repeat(40) })
   assert(!future.includes('Upgrade note'))

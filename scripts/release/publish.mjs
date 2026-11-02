@@ -133,6 +133,14 @@ const RELEASE_NOTES = Object.freeze({
     ],
     upgrade:
       "Nothing to migrate: pairings, tokens, ledgers and the wire protocol are unchanged. Known limitation: the standalone single-file binary still stops with Bun's own `The current working directory was deleted` message in that situation, because the runtime exits before Rovloom starts; `cd` to an existing directory first. The npm install is fixed."
+  },
+  '0.10.5': {
+    highlights: [
+      'A herdr-core `terminal.wait` without `timeout` now waits up to 60 seconds, the same as its limit. Before, Rovloom only waited 5 seconds locally: the call ended as `outcome_unknown` and the device reconnected once. The Gateway now fills the missing `timeout` with an explicit 60 before the call is registered, so the stored request, the Wire frame, the call deadline and what core receives are the same value, and `runtime_describe` shows `default: 60` next to `maximum: 60`.',
+      "Nothing else changes: a `timeout` you give is sent as is, an invalid one (`0`, a negative number, `null`, a string, more than 60) is still refused with the same code, and every other method keeps its rules (`terminal.send` and `terminal.run` still take `timeout` only with `wait=true`; `terminal.interrupt` still observes for core's 10 seconds; `machine.exec` still requires it)."
+    ],
+    upgrade:
+      'Nothing to migrate: pairings, tokens, ledgers and the wire protocol are unchanged. The default is applied by the Gateway, so upgrade the Gateway to get it; a Connector of any version works with it, because it receives an ordinary request with an explicit `timeout`. A `terminal.wait` through an older Gateway still needs an explicit `timeout`.'
   }
 })
 
