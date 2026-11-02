@@ -279,7 +279,7 @@ HTTPS/WSS 反向代理。Docker 部署还需核对容器配置与 Compose 端口
 | URL | `http://127.0.0.1:9444/mcp`（默认） |
 | Authorization 头 | `Bearer <第 3 节中保存的令牌>` |
 
-纯 CLI 配对使用 Gateway 打印的 Bearer；管理页配对使用上面 `token create` 签发的令牌。
+首次配对使用 Connector 执行 `--join` 时打印的 Bearer；之后另建的令牌使用上面 `token create` 签发的令牌。
 配对码、管理员密码都不是 Bearer。Bearer 默认 30 天过期，用 `rovloom token renew` 或
 `rovloom token rotate` 续期。远程客户端使用局域网地址、代理或隧道访问 MCP 监听。
 Rovloom 不是 stdio MCP 服务。
@@ -287,8 +287,8 @@ Rovloom 不是 stdio MCP 服务。
 然后让客户端列出这台机器的工作区和 Agent，并向某个 Agent 发一条短消息。
 断线后结果不确定的调用会标为未知，不会自动重发。工具细节见 [MCP 参考](protocol/MCP-HTTP.md)。
 
-管理页地址是 `http://127.0.0.1:9445/`，用户名默认 `admin`，密码为 CLI 配对或
-`rovloom admin create` 时打印的密码。页面显示每台设备的连接状态，可新建配对申请、
+管理页地址是 `http://127.0.0.1:9445/`，用户名默认 `admin`，密码为
+`rovloom admin create` 时打印的密码（配对不会创建管理员）。页面显示每台设备的连接状态，可生成配对码、
 重命名、断开或撤销设备，以及停用 provider。具体操作见[管理页说明](GATEWAY-WEBUI.md)。
 
 ## 5. 日常操作

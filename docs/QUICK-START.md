@@ -316,8 +316,8 @@ Add a **Streamable HTTP** server in your AI client:
 | URL | `http://127.0.0.1:9444/mcp` (default) |
 | Authorization header | `Bearer <the token saved in section 3>` |
 
-For CLI pairing, use the Bearer printed by the Gateway; for web pairing, use the token issued with
-`token create` above. Neither the pairing code nor the administrator password is the Bearer.
+For the first pairing, use the Bearer printed on the Connector by the `--join` command; for tokens created
+later, use the token issued with `token create` above. Neither the pairing code nor the administrator password is the Bearer.
 The Bearer expires after 30 days; renew it with `rovloom token renew` or `rovloom token rotate`.
 Remote clients reach the MCP listener through its LAN address, your proxy or a tunnel.
 Rovloom is not a stdio MCP server.
@@ -327,8 +327,8 @@ A call whose outcome is uncertain after a disconnect is reported as unknown and 
 automatically. Tool details are in the [MCP reference](protocol/MCP-HTTP.md).
 
 The management page is at `http://127.0.0.1:9445/`. The default username is `admin`; use the password
-printed during CLI pairing or `rovloom admin create`. It shows each device's connection and lets you
-create pairing applications, rename, disconnect or revoke devices and disable providers.
+printed by `rovloom admin create` (pairing does not create an administrator). It shows each device's
+connection and lets you generate pairing codes, rename, disconnect or revoke devices and disable providers.
 See the [management page guide](GATEWAY-WEBUI.md).
 
 ## 5. Everyday tasks
