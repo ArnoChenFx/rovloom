@@ -118,7 +118,12 @@ export const HERDR_CORE_LIMITS: Readonly<Record<string, Readonly<Record<string, 
   }),
   'terminal.interrupt': Object.freeze({ timeout: { max: HERDR_CORE_WAIT_MAX_SECONDS, min: 0, unit: 'seconds' } }),
   'terminal.wait': Object.freeze({
-    timeout: { max: HERDR_CORE_WAIT_MAX_SECONDS, default: HERDR_CORE_WAIT_MAX_SECONDS, exclusiveMin: 0, unit: 'seconds' }
+    timeout: {
+      max: HERDR_CORE_WAIT_MAX_SECONDS,
+      default: HERDR_CORE_WAIT_MAX_SECONDS,
+      exclusiveMin: 0,
+      unit: 'seconds'
+    }
   }),
   'terminal.read': Object.freeze({ lines: { max: HERDR_CORE_READ_MAX_LINES, unit: 'lines' } }),
   'terminal.put': Object.freeze({ data: { max: HERDR_CORE_PUT_MAX_BASE64, unit: 'bytes' } }),

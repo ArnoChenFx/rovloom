@@ -400,7 +400,10 @@ export function herdrCoreRequestTimeout(method: string, params: Readonly<Record<
   if (method === 'terminal.wait') {
     // 省略 timeout 时 Gateway 已在登记前补成 60（也是上限）；这里的兜底取同一个常量，
     // 绝不留下一条会回到 5 秒本地期限的路径。
-    return Math.min(Math.ceil(seconds(params.timeout, HERDR_CORE_WAIT_MAX_SECONDS) * 1000) + 5000, HERDR_CORE_REQUEST_MAX_MS)
+    return Math.min(
+      Math.ceil(seconds(params.timeout, HERDR_CORE_WAIT_MAX_SECONDS) * 1000) + 5000,
+      HERDR_CORE_REQUEST_MAX_MS
+    )
   }
   if (method === 'terminal.send') {
     // `wait=true` 要等这一轮结束，期限由调用方显式给出（≤60 秒）；否则只等粘贴安静窗口。

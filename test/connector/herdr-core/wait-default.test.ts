@@ -52,7 +52,14 @@ async function fixture(t: TestContext) {
   mkdirSync(dirname(reference), { mode: 0o700 })
   publishSchema(reference, OPENRPC)
   const resources = await createHerdrCoreGatewayResources({
-    config: { version: 1, target, binding_revision: 1, config_ref: 'config-a', expected_source: source, schema_ref: reference },
+    config: {
+      version: 1,
+      target,
+      binding_revision: 1,
+      config_ref: 'config-a',
+      expected_source: source,
+      schema_ref: reference
+    },
     now: () => 1000,
     terminalExecution: () => true
   })
@@ -70,7 +77,10 @@ function normalize(port: { normalizeRequest?: (request: NativeRequest) => Native
 test('terminal.wait 省略 timeout 时补成 60；显式值一字不动', async (t) => {
   const { port } = await fixture(t)
   const omitted = normalize(port, { method: 'terminal.wait', params: { terminal: 't1' } })
-  assert.deepEqual(omitted, { method: 'terminal.wait', params: { terminal: 't1', timeout: HERDR_CORE_WAIT_MAX_SECONDS } })
+  assert.deepEqual(omitted, {
+    method: 'terminal.wait',
+    params: { terminal: 't1', timeout: HERDR_CORE_WAIT_MAX_SECONDS }
+  })
   // params 整体省略时也补：先补空对象，再补 timeout。
   assert.deepEqual(normalize(port, { method: 'terminal.wait' }), {
     method: 'terminal.wait',
