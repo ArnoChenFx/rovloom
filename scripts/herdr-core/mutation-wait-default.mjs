@@ -13,6 +13,7 @@ const WAIT = 'test/connector/herdr-core/wait-default.test.ts'
 const OMIT_TEST = [WAIT, '-t', 'terminal.wait 省略 timeout 时补成 60']
 const PERIOD_TEST = [WAIT, '-t', '补值后的本地期限是本地上限']
 const ONLY_WAIT_TEST = [WAIT, '-t', '补值只针对 terminal.wait']
+const SHAPE_TEST = [WAIT, '-t', 'params 不是对象时原样交给预检']
 
 const mutations = [
   {
@@ -70,6 +71,24 @@ const mutations = [
     to: 'seconds(params.timeout, 0) * 1000',
     test: PERIOD_TEST,
     expect: '(fail) 补值后的本地期限是本地上限'
+  },
+  {
+    // null 会进入 Object.hasOwn 并抛 TypeError，登记就会崩而不是给出固定拒绝码。
+    name: '去掉 params 非 null 守卫',
+    file: 'src/connector/herdr-core/provider.ts',
+    from: '            params !== null &&\n',
+    to: '',
+    test: SHAPE_TEST,
+    expect: '(fail) terminal.wait 的 params 不是对象时原样交给预检'
+  },
+  {
+    // 数组会被展开并悄悄改写成 { timeout: 60 }，原本应被预检拒绝的非法请求变成合法形状。
+    name: '去掉数组守卫',
+    file: 'src/connector/herdr-core/provider.ts',
+    from: '            !Array.isArray(params) &&\n',
+    to: '',
+    test: SHAPE_TEST,
+    expect: '(fail) terminal.wait 的 params 不是对象时原样交给预检'
   }
 ]
 
@@ -115,4 +134,4 @@ if (failed) {
   console.error(`变异检查失败：${failed} 项`)
   process.exit(1)
 }
-console.log('变异检查通过：七条变异都让测试变红，恢复后都变绿')
+console.log('变异检查通过：九条变异都让测试变红，恢复后都变绿')

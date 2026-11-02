@@ -102,6 +102,16 @@ test('terminal.wait 省略 timeout 时补成 60；显式值一字不动', async 
   }
 })
 
+test('terminal.wait 的 params 不是对象时原样交给预检：不抛错，也不被改写成合法对象', async (t) => {
+  const { port } = await fixture(t)
+  // null 若进入 Object.hasOwn 会抛 TypeError；数组若被展开会被悄悄改写成 { timeout: 60 }。
+  for (const params of [null, [], ['t1'], 'terminal', 5, true]) {
+    const request = { method: 'terminal.wait', params } as unknown as NativeRequest
+    assert.doesNotThrow(() => normalize(port, request))
+    assert.deepEqual(normalize(port, request), request, JSON.stringify(params))
+  }
+})
+
 test('补值只针对 terminal.wait：其它方法的省略语义不变', async (t) => {
   const { port } = await fixture(t)
   const cases: NativeRequest[] = [

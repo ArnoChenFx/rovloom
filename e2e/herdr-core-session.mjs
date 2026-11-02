@@ -568,8 +568,9 @@ try {
   assert.equal(waitView.state, 'responded', JSON.stringify(waitView))
   const waitResult = await readAll(waitView)
   assert.equal(waitResult.ended, true, JSON.stringify(waitResult))
-  // 忙了 8 秒：若默认值仍是 5 秒，这里一定是 outcome_unknown。
-  assert.ok(waitElapsed >= 7_000, `terminal.wait 省略 timeout 应等满这一轮：${waitElapsed} ms`)
+  // 忙了 8 秒：若默认值仍是 5 秒，上面的 state 一定是 outcome_unknown。下限只是再确认确实等过了旧的 5 秒；
+  // 终端是在 waitStarted 之前启动的（提交与读取要花时间），所以不要把下限贴着 8 秒，免得慢机器上误报。
+  assert.ok(waitElapsed >= 6_000, `terminal.wait 省略 timeout 应等满这一轮：${waitElapsed} ms`)
   assert.ok(
     probes.every((value) => value === 'responded'),
     JSON.stringify(probes)
