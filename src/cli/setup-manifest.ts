@@ -48,8 +48,8 @@ function label(value: string | null): string {
 // 兼容既有单Luvus封套；新清单只接纳一个Herdr或固定顺序的Luvus+Herdr，没有任意provider注册入口。
 export async function reviewSetupManifest(
   input: unknown,
-  // 只消费计划的身份事实（attempt/批准主体/谱系/已批准选择）；单码直连配对以固定常量构造同一事实集。
-  plan: Pick<SetupPlanFacts, 'attempt_id' | 'actor' | 'lineage' | 'providers'>,
+  // 只消费计划的身份事实（attempt/批准主体/已批准选择）；单码直连配对以固定常量构造同一事实集。
+  plan: Pick<SetupPlanFacts, 'attempt_id' | 'actor' | 'providers'>,
   machine: string,
   directory: string,
   signal: AbortSignal
@@ -237,7 +237,7 @@ export async function reviewSetupManifest(
       })
     }
   }
-  return { kinds, reviewed, authorization, fingerprint: hash(boundedJson(input, 1_048_576)) }
+  return { reviewed, authorization }
 }
 
 // 获准后才落盘Gateway自己的原始schema；已有不同字节不能被重入或设备输入覆盖。

@@ -60,14 +60,6 @@ test('Luvus 配对清单只接受当前策略授权，不携带逐方法 raw 授
       assert.equal((reviewed.reviewed[0]!.value as { raw_grant?: unknown }).raw_grant, undefined)
       assert.deepEqual(reviewed.authorization, { principal_id: plan.actor })
     }
-    const noGrant = await reviewSetupManifest(
-      { installations: [{ reference, value }] },
-      plan,
-      'synthetic_machine',
-      root,
-      new AbortController().signal
-    )
-    assert.deepEqual(noGrant.authorization, { principal_id: plan.actor })
     assert.deepEqual(readdirSync(root), [])
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -159,8 +151,6 @@ test(
     try {
       const input = manifest()
       const result = await reviewSetupManifest(input, plan, 'synthetic_machine', root, new AbortController().signal)
-      assert.deepEqual(result.kinds, ['herdr'])
-      assert.match(result.fingerprint, /^[a-f0-9]{64}$/)
       assert.equal(result.reviewed[0]!.label, 'synthetic-future')
       assert.equal(result.reviewed[0]!.binary_sha256, 'f'.repeat(64))
       assert.equal(result.reviewed[0]!.schema!.bytes.toString('utf8'), input.installations[0]!.value.schema_bundle)

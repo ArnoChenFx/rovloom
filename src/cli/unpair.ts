@@ -214,7 +214,6 @@ export async function handleConnectorUnpair(path: string, io: CliIo): Promise<nu
     show: (text) => {
       io.stderr.write(text)
     },
-    confirm: async () => true,
     assertOwner: () => {}
   }
   const retired = retirePairingState(config, console)

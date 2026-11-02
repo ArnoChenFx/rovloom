@@ -13,7 +13,7 @@ import { PairingCodes } from './pairing-codes.js'
 import { publishSetupSchemas, reviewSetupManifest } from './setup-manifest.js'
 import type { ReviewedSetupInstallation } from './setup-manifest.js'
 import { mergeSetupProviders, publish, publishSetupCaller } from './setup-publish.js'
-import { SIMPLE_SETUP_ACTOR, SIMPLE_SETUP_LINEAGE } from './setup-targets.js'
+import { SIMPLE_SETUP_ACTOR } from './setup-targets.js'
 import { readSetupJson } from './setup-files.js'
 import { runtimeReference } from './runtime-files.js'
 import { readRuntimeConfig } from './runtime-config.js'
@@ -248,7 +248,7 @@ export class SimplePairingHttp {
       const signal = AbortSignal.any([request.signal, this.#stop.signal])
       const reviewed = await reviewSetupManifest(
         input.installation,
-        { attempt_id: [...attempts][0]!, actor: SIMPLE_SETUP_ACTOR, lineage: SIMPLE_SETUP_LINEAGE },
+        { attempt_id: [...attempts][0]!, actor: SIMPLE_SETUP_ACTOR },
         machine,
         this.config.state_dir,
         signal
@@ -424,7 +424,7 @@ export class SimplePairingHttp {
     const signal = AbortSignal.any([request.signal, this.#stop.signal])
     const reviewed = await reviewSetupManifest(
       installation,
-      { attempt_id: attempt, actor: SIMPLE_SETUP_ACTOR, lineage: SIMPLE_SETUP_LINEAGE },
+      { attempt_id: attempt, actor: SIMPLE_SETUP_ACTOR },
       machine,
       this.config.state_dir,
       signal
