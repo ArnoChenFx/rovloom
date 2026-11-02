@@ -8,7 +8,7 @@ Rovloom 让 AI Agent 通过一个 MCP 入口，访问多台设备上的本地 **
 
 - 一个 **Gateway**：MCP 入口、设备注册与认证、调用方授权、路由、调用账本、结果存储、管理 UI。
 - 每台设备一个 **Connector**：主动出站连到 Gateway，承载若干 **provider**（一个 Luvus、Herdr 或 herdr-core 实例对应一个 provider）。
-- runtime 留在各自机器上，由操作者安装和升级。Connector 可附着受核验的已有实例，也可在 managed 模式启动并复用自己的隔离实例；Herdr/Luvus 的实例生命周期不等同于 Connector 进程，退出 Connector 不宣称原生工作已停止。Rovloom 不复制原生 UI；已开放的命令执行能力使用目标账号权限并受终端执行开关约束。
+- runtime 留在各自机器上，由操作者安装和升级。Connector 可附着受核验的已有实例，也可在 managed 模式启动并复用自己的隔离实例；各 provider（Herdr、Luvus、herdr-core）的实例生命周期不等同于 Connector 进程，退出 Connector 不宣称原生工作已停止。Rovloom 不复制原生 UI；已开放的命令执行能力使用目标账号权限并受终端执行开关约束。
 
 目标用户：一个管理员，几台自己的机器，一个主 Agent。不支持多租户、多活集群和公网 SaaS。
 
