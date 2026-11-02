@@ -484,8 +484,8 @@ def main():
         open(out, 'w').write(json.dumps(info)); os.chmod(out, 0o600)
         print('READY', json.dumps({'mcp_url': info['url'], 'targets': info['targets'], 'config': out}), flush=True)
         inflight_file = os.path.join(work, 'mixed-inflight.json')
-        # 三来源组合才跑 mixed 的开关对照：只有 luvus+herdr-core 时没有 herdr 目标。
-        if multi and args.herdr and args.herdr_core and not args.upgrade_from:
+        # 只有真正的三来源 mixed 才跑开关对照（脚本固定要 luvus/herdr/herdr-core 三个目标）。
+        if len(providers) == 3 and args.herdr and args.herdr_core and args.luvus and not args.upgrade_from:
             # (a) 关闭终端执行时三个来源的输入/启动类都必须被拒，读取不受影响。
             off_env = {**os.environ, 'MCP_CONFIG': out}
             done = subprocess.run(['bun', '--no-env-file',
@@ -493,7 +493,9 @@ def main():
                                   env=off_env, cwd=os.path.dirname(__file__), capture_output=True, text=True, timeout=120)
             print('MIXED_CONTROL_OFF', (done.stdout + done.stderr).strip()[-800:], flush=True)
             assert done.returncode == 0, 'mixed control-off check failed'
-            # (b) 省略 allow_terminal_execution 即开启；只改本机开关并重启 Connector。
+        # (b) 多来源场景都要把开关翻成「省略」= 开启：先显式关掉只是为验证拒绝路径。
+        if multi and not args.upgrade_from:
+            # 省略 allow_terminal_execution 即开启；只改本机开关并重启 Connector。
             connector.stop()
             switched = json.load(open(path))
             switched.pop('allow_terminal_execution', None)
@@ -503,7 +505,7 @@ def main():
             print('MIXED_CONTROL_ON', 'allow_terminal_execution=omitted', flush=True)
             # (c) 在途调用 + SIGKILL Connector：默认不跑。SIGKILL 后 herdr-core 的 claims 锁
             # 没有恢复路径（见 questions-3），单独用 --mixed-crash 打开，避免把已知 src 缺陷混进主场景。
-            if args.mixed_crash:
+            if args.mixed_crash and args.luvus and args.herdr and args.herdr_core:
                 prepare_env = {**os.environ, 'MCP_CONFIG': out, 'MIXED_INFLIGHT_FILE': inflight_file}
                 done = subprocess.run(['bun', '--no-env-file',
                                        os.path.join(os.path.dirname(__file__), 'mixed-prepare.mjs')],

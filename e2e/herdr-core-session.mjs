@@ -526,6 +526,69 @@ try {
   })
   assert.equal(cleanedRun.state, 'responded', JSON.stringify(cleanedRun))
 
+  // ---- terminal.wait 省略 timeout：默认 60 秒；忙 8 秒后正常结束，期间设备不断线 ----
+  const busyRun = await invoke(entry('terminal.run').contract_ref, {
+    method: 'terminal.run',
+    params: { line: 'sleep 8; echo wait-default-done', name: 'wait-default' }
+  })
+  assert.equal(busyRun.state, 'responded', JSON.stringify(busyRun))
+  const busyResult = await readAll(busyRun)
+  const waitStarted = Date.now()
+  // 不传 timeout：旧行为会在 5 秒本地期限到点后变成 outcome_unknown 并断线。
+  const waitSubmitted = await tool('runtime_call', {
+    target,
+    expected_binding_revision: 1,
+    contract_ref: entry('terminal.wait').contract_ref,
+    native_request: { method: 'terminal.wait', params: { terminal: busyResult.address } },
+    deadline: Date.now() + 30_000,
+    wait_ms: 500
+  })
+  assert.equal(waitSubmitted.isError, false, JSON.stringify(waitSubmitted.raw))
+  let waitView = waitSubmitted.data
+  const probes = []
+  for (
+    let index = 0;
+    index < 120 && !['responded', 'not_dispatched', 'outcome_unknown'].includes(waitView.state);
+    index++
+  ) {
+    await pause(100)
+    // 同时在别的调用上确认设备没断线：断线会 unavailable 或让这次 wait 变成 outcome_unknown。
+    const probe = await tool('runtime_call', {
+      target,
+      expected_binding_revision: 1,
+      contract_ref: entry('server.status').contract_ref,
+      native_request: { method: 'server.status' },
+      deadline: Date.now() + 30_000,
+      wait_ms: 1000
+    })
+    probes.push(probe.isError ? probe.raw?.gateway_error?.code : probe.data?.state)
+    waitView = await ok('runtime_call_get', { call_id: waitSubmitted.data.call_id, wait_ms: 100 })
+  }
+  const waitElapsed = Date.now() - waitStarted
+  assert.equal(waitView.state, 'responded', JSON.stringify(waitView))
+  const waitResult = await readAll(waitView)
+  assert.equal(waitResult.ended, true, JSON.stringify(waitResult))
+  // 忙了 8 秒：若默认值仍是 5 秒，上面的 state 一定是 outcome_unknown。下限只是再确认确实等过了旧的 5 秒；
+  // 终端是在 waitStarted 之前启动的（提交与读取要花时间），所以不要把下限贴着 8 秒，免得慢机器上误报。
+  assert.ok(waitElapsed >= 6_000, `terminal.wait 省略 timeout 应等满这一轮：${waitElapsed} ms`)
+  assert.ok(
+    probes.every((value) => value === 'responded'),
+    JSON.stringify(probes)
+  )
+  // describe 把默认值与上限都写清（同一个常量）。
+  const waitSchema = await ok('runtime_describe', {
+    target,
+    expected_binding_revision: 1,
+    method: 'terminal.wait'
+  })
+  assert.equal(waitSchema.params_schema.properties.timeout.default, 60)
+  assert.equal(waitSchema.params_schema.properties.timeout.maximum, 60)
+  const cleanedWait = await invoke(entry('terminal.rm').contract_ref, {
+    method: 'terminal.rm',
+    params: { terminal: busyResult.address, core_id: coreId, created_ms: busyResult.created_ms }
+  })
+  assert.equal(cleanedWait.state, 'responded', JSON.stringify(cleanedWait))
+
   // ---- terminal.put：往沙箱终端旁放一个文件并读回 ----
   const put = await invoke(entry('terminal.put').contract_ref, {
     method: 'terminal.put',

@@ -268,7 +268,7 @@ export const HERDR_CORE_GUIDE: readonly string[] = Object.freeze([
   'Write calls are never replayed. After a disconnect the result may be `outcome_unknown`; check `terminal.list` (by `name` or labels) before retrying.',
   'Control methods accept a bare address (`t7`) or a terminal name, and `core_id`/`created_ms` are optional. Give them to reject a reused address or a replaced core; omitting them means "the terminal under that name/address now" and loses that protection. `machine/t7` is always rejected.',
   'Tiers (`observe`/`control`/`host`) are catalog labels, not separate switches: one local switch, `allow_terminal_execution`, gates `terminal.send`/`keys`/`run`/`kill`, `machine.exec`, `file.write` and the rest. Turning it off closes all of them; it is not a way around a tier.',
-  'Waiting calls (`terminal.wait`, `terminal.events`, `terminal.send`/`terminal.run` with `wait=true`, `terminal.interrupt`) usually return the synchronous view `connector_accepted`/`possibly_dispatched` without a result handle. Keep waiting with `runtime_call_get {call_id, wait_ms}` until the state is `responded`, then read the handle with `runtime_result_read`. `runtime_call` only waits as long as its own `wait_ms` (default 0): pass `wait_ms: 500` for quick writes such as `send`/`keys`/`kill`/`rm`, so a definitive refusal (`reason`) or the result arrives in that first reply instead of `dispatching`.',
+  'Waiting calls (`terminal.wait`, `terminal.events`, `terminal.send`/`terminal.run` with `wait=true`, `terminal.interrupt`) usually return the synchronous view `connector_accepted`/`possibly_dispatched` without a result handle. Keep waiting with `runtime_call_get {call_id, wait_ms}` until the state is `responded`, then read the handle with `runtime_result_read`. `runtime_call` only waits as long as its own `wait_ms` (default 0): pass `wait_ms: 500` for quick writes such as `send`/`keys`/`kill`/`rm`, so a definitive refusal (`reason`) or the result arrives in that first reply instead of `dispatching`. `terminal.wait` without `timeout` uses the rovloom default of 60 s, sent explicitly.',
   "`terminal.send`/`terminal.keys` report `status`/`turn` **as of the send**, and `turn` counts completed turns. Use `wait=true` (`wait.turn` is the turn after it ended) or `terminal.get`/`terminal.events` afterwards. `terminal.get` status comes from the program's own report and can lag the screen by hundreds of milliseconds; do not treat one read as final.",
   '`terminal.run` with `rm:true` deletes the terminal as soon as it exits: `wait:true` then returns empty `output` and `wait.exit_code:null`. Drop `rm` when you need the output and run `terminal.rm` after reading. `hidden_finished` counts finished terminals that were not removed; `terminal.rm` clears them.'
 ])
@@ -398,7 +398,12 @@ export function herdrCoreRequestTimeout(method: string, params: Readonly<Record<
   const seconds = (value: unknown, fallback: number) =>
     typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
   if (method === 'terminal.wait') {
-    return Math.min(Math.ceil(seconds(params.timeout, 0) * 1000) + 5000, HERDR_CORE_REQUEST_MAX_MS)
+    // 省略 timeout 时 Gateway 已在登记前补成 60（也是上限）；这里的兜底取同一个常量，
+    // 绝不留下一条会回到 5 秒本地期限的路径。
+    return Math.min(
+      Math.ceil(seconds(params.timeout, HERDR_CORE_WAIT_MAX_SECONDS) * 1000) + 5000,
+      HERDR_CORE_REQUEST_MAX_MS
+    )
   }
   if (method === 'terminal.send') {
     // `wait=true` 要等这一轮结束，期限由调用方显式给出（≤60 秒）；否则只等粘贴安静窗口。
