@@ -1,6 +1,6 @@
 # 原生契约校验与宿主接口
 
-本文说明 Luvus 与 Herdr 安装契约的编译、原生请求与响应的校验，以及宿主必须提供的可信来源。
+本文主要说明 Luvus 契约内核及 Herdr 安装 schema 的编译与校验。herdr-core 使用独立的 `rpc.discover` 契约、framed JSON-RPC 与来源核对，见 [ADR 0009](../adr/0009-herdr-core-provider.md)。
 
 - `src/connector/luvus/contract/index.ts`：异步契约编译，同步的原生校验与授权内核。准确签名见 `src/connector/luvus/contract/types.ts`。
 - `src/connector/luvus/wire.ts`：`createLuvusWireAdapter(backend, limits?)` 把内核接入 [Wire v2](WIRE-PROTOCOL.md)；Luvus 后端接口在 `src/connector/luvus/backend.ts`，公共 attempt 账本事实在 `src/wire/backend.ts`。
@@ -68,19 +68,19 @@ Rovloom 使用宿主实际安装的程序导出的 schema 原字节，按协议�
 
 Gateway 可把 `checkRequestShape` 接入首次登记事务的同步预检。非法参数使登记回滚，后续 Wire 与实际 I/O 门禁仍完整复验。
 
-### 方法表与 raw 授权
+### 方法表与 raw 参数覆盖模式
 
 `checkDispatch` 的门禁：
 
 - 方法必须在静态方法表（`src/connector/luvus/methods.ts`）中，并且目标 profile 为 session、传输为单请求 RPC。表外方法（包括流、token、Host 与 server 管理方法）返回 `method_not_listed`。
 - 安装契约广告的 `access / scope / idempotent` 提示必须与表项逐字段一致，否则返回 `method_contract_mismatch`。
-- 调用方与本机策略都必须授权该方法。
+- 宿主先核对 token 设备范围、绑定与本机终端执行开关；内核验证当前认证来源与派发主体。
 - `strict` 模式拒绝参数覆盖不完整（`parameter_schema_incomplete`）和不可用（`schema_unavailable`）的方法。
-- `raw_contract` 模式只在 Owner 显式选择、可信的精确范围 grant 有效、其它门禁均满足时，放宽参数覆盖要求。已有的 schema 约束仍然生效，表外方法也不能借 raw 通过。
+- `raw_contract` 是宿主选择的参数覆盖模式，只放宽参数 schema 完整性要求。已有 schema 约束、静态方法表、原生 access-only 白名单与来源校验仍生效；它不使用旧配对 `raw_grant`，也不能开放表外方法。
 
 raw 的 `validation=unavailable` 只适用于 bundle 已可信、可编译，但在线方法未收录于该 bundle 的情形。整个 bundle 编译失败时仍是 `schema_unavailable`，不能借 raw 作为无 schema 的执行入口。
 
-原生 `method_contracts` 只用于核对静态方法表，不单独授权。raw grant 绑定调用主体、完整目标、精确方法、契约与 revision、有效期。方法表是上限，具体 provider 仍用自己的白名单进一步收窄。
+原生 `method_contracts` 只用于核对静态方法表，不单独授权。内存 permit 绑定本次主体、完整原生 binding、方法与参数模式；Wire 另绑定完整 attempt、连接、契约与期限。方法表是上限，具体 provider 仍用自己的白名单进一步收窄。
 
 固定的 Luvus 0.14.3 输入有 29 份 schema 文档、223 个方法。部分方法只有通用 params 对象，不能宣称完整参数校验。session、Host 与 access_machines 三类接口分开，`machine.*` 不用作 Gateway 设备注册。数据与审计入口见 [开发指引](../DEVELOPMENT.md#固定输入与维护用途)。
 
@@ -95,12 +95,11 @@ raw 的 `validation=unavailable` 只适用于 bundle 已可信、可编译，但
 | `provider` / `localProvider` | 双端独立的受保护配置，完整 binding 精确一致 |
 | `contract` | 不可变的 ContractSource、真实编译 handle、能力 revision。重算 `contract_ref` 并核对 binary / schema |
 | `nativeSource` | 独立的 endpoint 与身份实证，`authenticated` / `source_verified` 成立且完整 NativeBinding 匹配 |
-| `policies` / `authority` | 当前双方精确的 Target grant、Owner 与 raw grant。方法表是静态常量，不由宿主提供 |
 | `now` / `contentStatus` / `responseAnchor` | 受信时钟、固定的内容状态与持久的原派发锚点，不从回复补建 |
 
 - direction 来自宿主角色。Wire 的 `V2Target` 投影为原生 Target。`kind / provider / revision / contract_source_ref` 单独保存在 NativeBinding，revision 不做字符串与数字转换。
 - 组合后的 `contract_ref` 不能强转为 schema hash。
-- 完整 provider tuple 求双方权限交集后才投影给原生 Policy，不从独立数组拼出笛卡尔授权。
+- `NativeWireBackend` 不含旧 `policies`/`authority` 端口。设备范围在 Gateway 准入和持久结果读取处核对；本机 Owner、原生来源与终端开关由 Connector 独立核验。
 - `contract` resolver 只能返回已接纳的 handle。opaque handle、permit 和来源 token 都不能序列化后跨进程或重启恢复。
 
 ## 请求、控制与交付
@@ -108,11 +107,11 @@ raw 的 `validation=unavailable` 只适用于 bundle 已可信、可编译，但
 - 每帧重新读取原 attempt、双端 binding、契约和原生来源，并核对原请求。调用方提交的 id / auth 被拒绝，native ID 从登记绑定注入，auth 只由 Connector 在本机注入。校验失败只返回 code 与 reason，不记录载荷。backend 异常返回 `native_adapter_unavailable`。
 - adapter 按完整 AttemptBinding 私有保存最初的 permit，重复编解码不替换。
 - `checkResult(binding, nativeFrame?)` 检查实际响应。省略 frame 时只核对当前读取权限。解码与顺序校验成功不授予内容读取权限。
-- `checkResultBoundary` 另验当前读取者、双方 read grant 和内容状态。`planEvidence` 只返回待持久化的意图，只有当前读取者仍是派发主体且双端读权限有效，才能包含载荷。内容过期、被丢弃、不可用或撤权时，不输出原文，不生成句柄，不延长期限。事务提交成功前不发布持久的 `responded`。
+- `checkResultBoundary` 另验读取主体与原 permit 主体相同且内容可用。`planEvidence` 只返回待持久化的意图，只有当前读取者仍是派发主体且内容/当前设备范围有效，才能包含载荷。内容过期、被丢弃、不可用或撤权时，不输出原文，不生成句柄，不延长期限。事务提交成功前不发布持久的 `responded`。
 - 创建结果句柄前使用 `checkResultRetention(binding, nativeFrame)`。它核对活的原请求、精确响应和当前读取授权，再用原 permit 复验派发主体与当前来源。没有原上下文时拒绝，不从账本或响应 JSON 创建 permit。
 - 宿主先用 `observeMessage` 过滤重复，重复消息不得再执行。内存中的 handle 与 source token 不序列化，关闭、到期、撤权时必须释放。缺失 handle 时拒绝，不从回复重建 permit，不通过重新派发恢复结果。
-- 默认至多 128 个 attempt，合计 16 MiB 保留 JSON 快照。快照逐项计入 UTF-8、转义、键和标点，超限先拒绝。共享同一 `CompiledContract` 的 attempt 可共享 handle，但完整可信 binding 仍须一致。该计量不是 JS heap 隔离。
+- adapter 默认至多 128 个在途 attempt，合计 16 MiB 保留 JSON 快照。快照逐项计入 UTF-8、转义、键和标点，超限先拒绝。共享同一 `CompiledContract` 的 attempt 可共享 handle，但完整可信 binding 仍须一致。该计量不是 JS heap 隔离。
 - 响应必须放入单个 1 MiB Wire 帧，超限不分片，Connector 写出时因预算错误失败，调用保持 `outcome_unknown`。读取细节见 [通道](../TRANSPORT.md)。
-- 内容到期或被丢弃后，adapter 把 RPC 切换为仅响应上下文，只允许在原去重期限内提交仅元数据的证据，不恢复内容读取、原请求或派发权限。Store 提交后的回收通知与 adapter 的内存期限维护共同回收原文。断连、撤销、provider fence、关闭或去重到期都会释放句柄。
+- 内容到期或被丢弃后，adapter 把 RPC 切换为仅响应上下文，只允许在原去重期限内提交仅元数据的证据，不恢复内容读取、原请求或派发权限。Store 提交后生产运行时释放执行上下文；已提交原文和句柄仍通过 Store 按固定 TTL、当前设备范围和原主体归属读取，不要求活 Wire，也不从 JSON 恢复 permit。回收通知与 adapter 的内存期限维护共同回收执行期原文。断连、撤销、provider fence、关闭或去重到期都会释放句柄。
 - 原生 error 与 data 原样保留，网关错误不写回原生 error。
 - 不提供流（open / event / control 帧），流类方法不在方法表中，不进入 RPC 派发。

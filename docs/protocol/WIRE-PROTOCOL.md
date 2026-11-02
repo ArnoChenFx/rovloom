@@ -2,7 +2,7 @@
 
 Wire 当前版本为 major **2** / minor **3**。每条 WebSocket 消息是一个 UTF-8 JSON 信封。编解码在 `src/wire/`，Luvus 原生校验经 `src/connector/luvus/wire.ts` 接入（Luvus 后端接口在 `src/connector/luvus/backend.ts`，公共 attempt 账本事实在 `src/wire/backend.ts`），见 [原生契约](NATIVE-CONTRACT.md)。认证、存储和传输由宿主提供可信实现，见 [通道](../TRANSPORT.md)。总览见 [协议总览](../PROTOCOL.md)。
 
-Luvus / Herdr 的原生协议、UHP 标识和 fixture 保持原样，Wire 不改写它们。
+Luvus / Herdr / herdr-core 的原生协议与 fixture 保持原样，UHP 仅属于 Luvus，Wire 不改写它们。
 
 ## 版本与能力
 
@@ -247,7 +247,7 @@ Connector 不依赖 Gateway 额外交付的 TTL 或上下文。受保护配置�
 
 ## Provider scope 权限
 
-Herdr、Luvus 与混合模式采用相同权限模型：Gateway 核对 token 的设备范围，Connector 核对直接终端执行开关。没有 ProviderPolicy、caller/local grants、methods/actions 或策略修订比对。
+Herdr、Luvus、herdr-core 与混合模式采用相同权限模型：Gateway 核对 token 的设备范围，Connector 核对直接终端执行开关。没有 ProviderPolicy、caller/local grants、methods/actions 或策略修订比对。
 
 响应按完整原尝试关联并在入库时核验来源与结构。保存原文只服从内容状态、固定期限和唯一 Store 预算；已撤销 token 不能读取，旧执行无需重发。provider 禁用、撤销和 binding 漂移属于实例生命周期校验。
 

@@ -119,7 +119,7 @@ rovloom config check [--role gateway|connector] [--config ABS]
 rovloom config check-runtime [--role gateway|connector] [--config ABS]
 rovloom gateway [--issue-code] [--config ABS] [--non-interactive]
 rovloom connector --join <ws://host:port#pairing-code> [--config ABS]
-rovloom connector [--repair] [--config ABS] [--non-interactive]
+rovloom connector [--config ABS] [--non-interactive]
 rovloom token --help
 rovloom admin --help
 rovloom service --help

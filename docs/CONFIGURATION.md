@@ -30,8 +30,8 @@ Gateway, normally `~/.config/rovloom/gateway.json`:
   "schema_version": 1,
   "role": "gateway",
   "data": {"directory": "/home/your-user/.local/share/rovloom/gateway"},
-  "mcp": {"hostname": "127.0.0.1", "port": 9444},
-  "devices": {"hostname": "127.0.0.1", "port": 9443},
+  "mcp": {"hostname": "0.0.0.0", "port": 9444},
+  "devices": {"hostname": "0.0.0.0", "port": 9443},
   "management": {"enabled": true, "port": 9445}
 }
 ```
@@ -50,8 +50,8 @@ Connector, normally `~/.config/rovloom/connector.json`:
 
 Replace `/home/your-user` with your actual home when saving an example. The
 generated file already contains the real home. The Gateway starts with these
-defaults and no identities. A blank Connector address is valid: a local terminal
-prompts for it, and non-TTY startup returns `configuration_required` (2).
+defaults and no identities. A blank Connector address is valid configuration; run the displayed `--join` command to pair.
+Starting without pairing state returns `configuration_required` (2), without reading stdin.
 Setting an address does not pair the device or install a native provider.
 
 ## Every user parameter
@@ -63,10 +63,10 @@ Setting an address does not pair the device or install a native provider.
 | `data` | Object, required | Contains only `directory`. |
 | `data.directory` | Normalized absolute path string, ≤4096 characters, required | `<home>/.local/share/rovloom/<role>`; separate private data for each role. |
 | Gateway `mcp` | Object, required | Contains `hostname`, `port`; Streamable HTTP `/mcp`. |
-| `mcp.hostname` | String, required | Accepts `127.0.0.1`, `::1`, `0.0.0.0`, `::`. It selects the listening interface, not allowed proxy domains. MCP accepts HTTP/HTTPS proxy addresses and preserved or rewritten Host headers on `/mcp`; every request still requires its Bearer. |
+| `mcp.hostname` | String, required | Generated default: `0.0.0.0`. Accepts `127.0.0.1`, `::1`, `0.0.0.0`, `::`. It selects the listening interface, not allowed proxy domains. MCP accepts HTTP/HTTPS proxy addresses and preserved or rewritten Host headers on `/mcp`; every request still requires its Bearer. |
 | `mcp.port` | Integer 1–65535, required | `9444`. |
 | Gateway `devices` | Object, required | Contains `hostname`, `port`; WS `/connector`. |
-| `devices.hostname` | String, required | `127.0.0.1`; also `::1`, `0.0.0.0`, `::`. A wildcard bind accepts remote devices. |
+| `devices.hostname` | String, required | `0.0.0.0` in generated configurations; also `127.0.0.1`, `::1`, `::`. A wildcard bind accepts remote devices. |
 | `devices.port` | Integer 1–65535, required | `9443`. |
 | Gateway `management` | Object, required | Contains `enabled`, `hostname` and `port`; local HTTP management page. |
 | `management.enabled` | Boolean, required | `true`; `false` disables this listener. Enabling it grants no administrator identity. |
@@ -129,22 +129,14 @@ edit its records or delete them to retry an uncertain setup. Herdr uses
 `data.directory` plus `/n` must fit within 52 UTF-8 bytes; choose a shorter
 directory before pairing if necessary.
 
-A Gateway with no caller state is in the **pairing required** state. MCP returns
-401 and the management page shows only an empty shell until an administrator
-exists. The first pairing creates one local caller for the reviewed Target.
-Its Bearer is shown only on the verified local terminal and kept privately by
-Rovloom. Copy it into the MCP client's secret storage. It expires after 30 days
-by default and is managed with `rovloom token`. Device credentials, MCP Bearers
-and administrator passwords are separate; an MCP Bearer cannot sign in to the
-management page. When first pairing completes through the Gateway terminal, it
-creates the administrator `admin` and prints its password once next to the MCP
-Bearer. Manage administrators afterwards with `rovloom admin`.
-
-You can also create the first administrator **before any pairing**
-(`rovloom admin create` initializes the empty caller registry), sign in to the
-management page, and complete first pairing entirely from the page; see
-[Pairing](#pairing). Declining the terminal pairing prompt keeps the Gateway
-running unpaired and prints this web-first path.
+Without caller state, MCP returns 401 while Gateway keeps running and waits for pairing.
+Create an administrator with `rovloom admin create`, then generate a pairing code on the
+management page, or start Gateway with `--issue-code` to print one code. Run the displayed
+`--join` command on the Connector. The first MCP address and Bearer are printed on the
+Connector and kept in its protected local state. The default token lifetime is 30 days;
+manage tokens with `rovloom token`. Pairing does not create an administrator. Device
+credentials, MCP Bearers and administrator passwords are separate. This flow has no
+applications, approvals or terminal prompts; see [Pairing](#pairing).
 
 ### Managing the management-page administrator
 
@@ -191,7 +183,7 @@ updated too. A corrupt registry denies all authentication until it is repaired.
 
 ### Device visibility scope
 
-MCP authorization has two controls for both Herdr and Luvus: the token's device scope, and the Connector's `allow_terminal_execution` switch for direct terminal input/execution and custom commands. There are no per-method, per-provider or read/dispatch/cancel grants.
+MCP authorization has two controls for Luvus, Herdr and herdr-core: the token's device scope, and the Connector's `allow_terminal_execution` switch for direct terminal input/execution and custom commands. There are no per-method, per-provider or read/dispatch/cancel grants.
 
 New registries use `schema_version: 2`. A caller entry contains its identity, credentials, expiry and optional device scope:
 
@@ -396,8 +388,8 @@ Agent's own tools. A `ready` state alone is not evidence that a model replied.
 Direct terminal operation uses the native methods: Luvus `pane.run` takes an
 explicit `pane` and `command`; read the output with `pane.read`. Its `ok`
 acknowledges PTY input, not command completion or an exit code. The Gateway
-catalog hides direct input while the local switch is off or unknown. Policies
-created before the switch was enabled may still exclude `pane.run`. See
+catalog hides direct input while the local switch is off or unknown. Old method
+policies do not restrict the current product; token device scopes still apply. See
 [terminal execution](TERMINAL-EXECUTION.md).
 
 ## CLI reference
@@ -439,8 +431,8 @@ is no `start`, `stop` or `restart` command at the top level. Ports are JSON
 fields, not flags.
 
 `--issue-code` and `--join` need no local terminal and
-cannot be combined with `--non-interactive`. `--non-interactive` disables the
-local setup prompts; the Windows service passes it automatically.
+can be combined with `--non-interactive`, which must be the final option. The role
+commands do not read pairing prompts; the Windows service passes `--non-interactive` automatically.
 
 ### Service commands
 

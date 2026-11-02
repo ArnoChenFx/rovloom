@@ -5,10 +5,10 @@
 ## 访问
 
 - 默认地址是 `http://127.0.0.1:9445/`。端口和开关由 Gateway 配置的 `management.port` 与 `management.enabled` 控制，见 [配置参考](CONFIGURATION-zh.md)。
-- 默认监听地址为 `127.0.0.1`，请求的 Host 必须是 `127.0.0.1:<port>`。从其他机器访问时，使用 SSH 端口转发，并让本地端口与 `management.port` 相同。
-- 把 `management.hostname` 设为 `"0.0.0.0"` 后，管理页即接受局域网 Host 的明文 HTTP 访问（见 [配置参考](CONFIGURATION-zh.md#全部用户参数)）。Cookie 仍为 `HttpOnly`/`SameSite=Strict`，跨站请求仍被拒绝，但没有传输加密：请勿在不可信网络中开放此选项，必要时用 TLS 反向代理收口。保持 `127.0.0.1` 时只接受回环寻址，局域网访问返回 403，行为与原来完全一致。
+- 默认监听地址为 `127.0.0.1`，直接访问使用回环地址；从其他机器可用 SSH 端口转发，也可使用保留或改写 Host 的 HTTP/HTTPS 反向代理，无需公网 URL 配置。
+- 把 `management.hostname` 设为 `"0.0.0.0"` 后，管理页即接受局域网 Host 的明文 HTTP 访问（见 [配置参考](CONFIGURATION-zh.md#全部用户参数)）。Cookie 仍为 `HttpOnly`/`SameSite=Strict`，跨站请求仍被拒绝，但没有传输加密：请勿在不可信网络中开放此选项，必要时用 TLS 反向代理收口。保持 `127.0.0.1` 时只接受回环寻址，直接局域网寻址返回 403；经本机反向代理的同源请求仍受登录、会话与 CSRF 校验。
 - 管理页使用 HTTP Basic 登录。用户名是管理员 ID，默认 `admin`。
-- 首次配对经 Gateway 终端完成时，会自动创建管理员 `admin` 并只显示一次密码。也可以在任何配对之前运行 `rovloom admin create` 手动创建，然后从管理页完成首台设备的在线配对（见下文「在线配对」与 [配置参考](CONFIGURATION-zh.md#管理页管理员)）。之后用 `rovloom admin create|list|revoke` 管理，创建与修改都不需要重启。
+- 用 `rovloom admin create` 创建管理员并保存显示的密码；配对不会自动创建管理员。在任何配对之前就可以登录管理页并生成配对码（见下文「在线配对」与 [配置参考](CONFIGURATION-zh.md#管理页管理员)）。用 `rovloom admin create|list|revoke` 管理，创建与修改都不需要重启。
 - Gateway 只保存密码的 SHA-256 摘要。创建、重新签发和撤销都不需要重启。管理员被撤销或密码被替换后，对应浏览器会话在下一次请求时失效。
 - **登录状态会保持。** 首次用 Basic 登录后，浏览器收到 `Path=/`、`HttpOnly`、`SameSite=Strict` 的会话 cookie。此后刷新页面、Gateway 因配对重载、以及 Gateway 进程重启都不再要求重输密码：cookie 与租期的绑定以 SHA-256 摘要形式保存在 `<state.dir>/managed/management-sessions.json`，重启后重新加载并逐次复验原管理员记录。撤销管理员、重新签发密码或租期到期仍会立即让旧 cookie 失效。该文件不含 cookie 或 CSRF 原值；读写统一使用 256 KiB 预算（多个管理员各持多条绑定会超过默认 16 KiB），文件损坏或超限时按「没有可恢复会话」处理，不阻塞启动，且损坏文件会在下一次成功登录后被覆盖，不会永久阻止后续持久化。
 - 同一租期可并存多条绑定：重启后新打开的页面会追加一条新 cookie，而其他浏览器和此前已打开的标签页持有的旧 cookie 与 CSRF 继续有效（每个租期最多 8 条，超出后淘汰最旧的一条）。撤销管理员或租期到期时，该租期的全部绑定一起失效。
@@ -87,7 +87,7 @@
 
 首次配对全程可在页面完成：`rovloom admin create` 创建管理员并登录页面后，在「配对设备」生成一机一码，把显示的加入命令复制到 Connector 机器执行即可（终端用 `rovloom gateway --issue-code` 也能打印一条）。没有申请、批准或核对码。页面不提供 provider 启用入口。
 
-改名、断开、撤销、禁用 provider 和配对批准沿用两步确认；创建 Token 直接提交，删除 Token、设备或配对记录只需一次删除确认。原有两步确认流程：
+改名、断开、撤销和禁用 provider 沿用两步确认；创建 Token 直接提交，删除 Token、设备或配对记录只需一次删除确认。原有两步确认流程：
 
 1. 页面先获取后台摘要，展示目标、精确的连接 epoch 或 revision、原因和影响，由管理员确认。
 2. 确认后才提交。确认记录由后台保存，绑定当前管理会话、操作摘要、目标和 revision，只能使用一次，2 分钟后过期。过期、操作摘要变化或 revision 变化都需要重新确认。

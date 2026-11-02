@@ -6,10 +6,12 @@
 
 | 角色 | 默认监听 | 说明 |
 |---|---|---|
-| Gateway · MCP | `127.0.0.1:9444`（`/mcp`） | 远程客户端经 HTTPS 反向代理 / 隧道，无需公网地址配置 |
-| Gateway · 设备通道 | `127.0.0.1:9443`（WS `/connector`） | 要接受别的机器的 Connector 就改 `devices.hostname`（`0.0.0.0` / `::`），公网用 WSS 代理 |
-| Gateway · 管理页 | `127.0.0.1:9445` | 固定回环，HTTP Basic 登录（见 §4） |
+| Gateway · MCP | `0.0.0.0:9444`（`/mcp`） | 默认接受局域网连接，仍需 Bearer；公网经 HTTPS 代理 / 隧道 |
+| Gateway · 设备通道 | `0.0.0.0:9443`（WS `/connector`） | 默认接受远程 Connector，仍需设备凭据；公网用 WSS 代理 |
+| Gateway · 管理页 | `127.0.0.1:9445` | 普通默认回环，可配置通配或使用代理，HTTP Basic 登录（见 §4） |
 | Connector | 无监听 | 只主动出站连 Gateway；Luvus / Herdr 留在本机 |
+
+容器首次生成的三个监听均为 `0.0.0.0`，宿主暴露范围还由 Compose 端口映射决定。已有配置不会被新默认值改写。
 
 每个角色只有一份用户配置：`~/.config/rovloom/gateway.json` / `connector.json`（Windows 同样用用户 home）。参数全集见[配置参考](CONFIGURATION.md)。程序自己的数据在 `data.directory`（默认 `~/.local/share/rovloom/<role>`），**整个目录一起保留**，不要手改里面的文件。
 
@@ -74,7 +76,7 @@ Gateway 与 Connector 一同升级。升级前停止两端进程，离线备份�
 |---|---|---|
 | 查看 / 创建 / 续期 / 轮换 / 吊销 MCP 令牌 | `rovloom token list\|create\|renew\|rotate\|revoke` | 原值只在 create / rotate 时在 stdout 显示一次；热生效，无需重启 |
 | 收窄 / 放开令牌的设备可见范围 | `rovloom token scope --principal ID --devices m_x,m_y` / `--all-devices true`，或管理页令牌卡片 | 空列表禁用全部设备（`--no-devices true`），清除须显式 `--all-devices true`；热生效；不推进策略修订（已派发的调用不会停） |
-| 管理页管理员 | `rovloom admin create\|list\|revoke` | 首次配对完成时已自动创建 `admin`；丢了口令就再 create；热生效 |
+| 管理页管理员 | `rovloom admin create\|list\|revoke` | 先 create 并保存密码；配对不自动创建管理员，丢了口令就再 create；热生效 |
 | 加入更多设备 | 管理页生成配对码；新机器：`rovloom connector --join <命令>` | 无需终端问答，不停机 |
 | 设备凭据丢失 / 泄漏 | 生成新配对码，该机器重新执行 join 命令 | 本机作为新设备重新配对，本地旧状态自动退役到 `state/retired/` |
 | 换 Gateway / 干净重置 | Connector：`rovloom connector --unpair`，再用新加入命令 `--join` | 直接执行另一台 Gateway 的加入命令也会自动退役旧状态；managed 实例数据保留在 retired 目录 |
@@ -112,7 +114,7 @@ rovloom storage resume --role gateway --json
 | MCP 401 | Bearer 是否过期（默认 30 天，`rovloom token renew`）；代理是否保留 Authorization、MCP 会话头和 `/mcp` 路径 |
 | 调用停在 `dispatching` 很久 | 设备可能刚断网（Gateway 20 秒内发现后立即 `not_dispatched`）；已写出的调用是 `outcome_unknown`，**不会自动重发**，先核对再决定 |
 | `invalid_device_credential` | 凭据被撤销或重配：生成新码重新 join |
-| `configuration_required` | 需要真实本地终端完成配对 / 批准；不要删数据后重登记，结果不确定时保留原状态 |
+| `configuration_required` | 生成新配对码并在 Connector 执行显示的 join 命令；结果不确定时保留原状态，不用删除数据来重试 |
 | 启动先输出 `working_directory_reset` | 终端所在的当前目录已被删除；Rovloom 自动切到了你的家目录继续运行（此前会在读取终端输入时直接崩溃）。命令里的**相对路径**因此按家目录解析，需要时先 `cd` 到存在的目录再运行；不影响配置与数据位置 |
 | Connector 启动就退出，只有 `runtime_failed` | 看它**前一行**：`native_unavailable <码>` 是启动时的固定失败码（`herdr_core_binary_unavailable`、`herdr_core_installation_changed`、`claim_ledger_invalid` 这类；操作系统错误以 `system_` 加小写 errno 名给出，如 `system_eaddrinuse`），按码排查并带着它求助；`luvus_crash_residue_cleared …`、`claims_lock_recovered` 只是接管上次崩溃留下的锁，**不是**失败原因。没有 `native_unavailable` 行时才是未归类的失败 |
 | Luvus / Herdr 不可用 | Connector 会按退避自动重新附着或重建；Linux 上附着要求对端是**你已安装的同一个**程序 |

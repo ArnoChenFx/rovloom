@@ -29,8 +29,8 @@ Gateway，通常为 `~/.config/rovloom/gateway.json`：
   "schema_version": 1,
   "role": "gateway",
   "data": {"directory": "/home/your-user/.local/share/rovloom/gateway"},
-  "mcp": {"hostname": "127.0.0.1", "port": 9444},
-  "devices": {"hostname": "127.0.0.1", "port": 9443},
+  "mcp": {"hostname": "0.0.0.0", "port": 9444},
+  "devices": {"hostname": "0.0.0.0", "port": 9443},
   "management": {"enabled": true, "port": 9445}
 }
 ```
@@ -48,8 +48,8 @@ Connector，通常为 `~/.config/rovloom/connector.json`：
 ```
 
 保存示例时将 `/home/your-user` 替换为真实 home；程序生成的文件已经写入真实 home。
-默认 Gateway 在没有身份时即可启动。Connector 的空地址是合法配置：本地终端会
-询问地址，非 TTY 启动返回 `configuration_required`（2）。填写地址不等于已配对或已安装原生 provider。
+默认 Gateway 在没有身份时即可启动。Connector 的空地址是合法配置：执行显示的 `--join` 命令完成配对。
+没有配对状态时启动返回 `configuration_required`（2），不读取 stdin。填写地址不等于已配对或已安装原生 provider。
 
 ## 全部用户参数
 
@@ -60,10 +60,10 @@ Connector，通常为 `~/.config/rovloom/connector.json`：
 | `data` | object，必填 | 仅含 `directory`。 |
 | `data.directory` | 规范绝对路径 string，≤4096 字符，必填 | `<home>/.local/share/rovloom/<role>`；各角色独立私有数据。 |
 | Gateway `mcp` | object，必填 | 含 `hostname`、`port`；Streamable HTTP `/mcp`。 |
-| `mcp.hostname` | string，必填 | 接受 `127.0.0.1`、`::1`、`0.0.0.0`、`::`。仅决定监听网卡，不限定代理域名。MCP 接受 HTTP/HTTPS 代理地址、保留或改写 Host 的 `/mcp` 请求，每次仍需 Bearer。 |
+| `mcp.hostname` | string，必填 | 普通生成默认 `0.0.0.0`，接受 `127.0.0.1`、`::1`、`0.0.0.0`、`::`。仅决定监听网卡，不限定代理域名。MCP 接受 HTTP/HTTPS 代理地址、保留或改写 Host 的 `/mcp` 请求，每次仍需 Bearer。 |
 | `mcp.port` | integer 1–65535，必填 | `9444`。 |
 | Gateway `devices` | object，必填 | 含 `hostname`、`port`；WS `/connector`。 |
-| `devices.hostname` | string，必填 | `127.0.0.1`，也接受 `::1`、`0.0.0.0`、`::`；通配绑定接受远程设备。 |
+| `devices.hostname` | string，必填 | `0.0.0.0`（普通生成默认值），也接受 `127.0.0.1`、`::1`、`::`；通配绑定接受远程设备。 |
 | `devices.port` | integer 1–65535，必填 | `9443`。 |
 | Gateway `management` | object，必填 | 含 `enabled`、`hostname` 与 `port`；本地 HTTP 管理页。 |
 | `management.enabled` | boolean，必填 | `true`；`false` 关闭该监听。启用不授予管理员身份。 |
@@ -115,16 +115,12 @@ provider JSON 或凭据文件。
 首次 Luvus 设置要求 `data.directory` 路径加 `/n` 不超过 52 个 UTF-8 字节，
 如有需要，请在配对前选择更短的目录。
 
-没有 caller 状态的 Gateway 处于**待配对**状态：MCP 返回 401，管理页在创建管理员之前
-只显示空壳。首次配对为已审核的 Target 创建一个本机 caller，Bearer 仅显示在
-已核验的本地终端，并由 Rovloom 私密保留；请复制到 MCP 客户端的秘密存储。
-默认有效期 30 天，用 `rovloom token` 管理。设备凭据、MCP Bearer 与管理员密码互不替代，
-MCP Bearer 不能登录管理页。经 Gateway 终端完成首次配对时，终端会创建管理员 `admin`，
-并在 MCP Bearer 旁边只显示一次它的密码；之后用 `rovloom admin` 管理。
-
-也可以在**任何配对之前**创建第一位管理员（`rovloom admin create` 会初始化空的调用方
-注册表），登录管理页后全程在页面完成首台设备的配对；见下文「配对」。在终端拒绝配对
-提示时，Gateway 会保持未配对运行并提示这条网页引导路径。
+没有 caller 状态时 MCP 返回 401；Gateway 继续运行，等待配对。先用 `rovloom admin create`
+创建管理员，再登录管理页生成配对码，或用 `rovloom gateway --issue-code` 启动并签发一张码。
+Connector 执行显示的 `--join` 命令完成首次配对；首次 MCP 地址与 Bearer 显示在 Connector
+输出中，并保存在受保护的本地状态。默认有效期 30 天，用 `rovloom token` 管理。
+设备凭据、MCP Bearer 与管理员密码互不替代，MCP Bearer 不能登录管理页；配对不创建管理员。
+此流程无需申请、批准或本地终端问答，见下文「配对」。
 
 ### 管理页管理员
 
@@ -352,7 +348,7 @@ Agent/模型访问配置位于 runtime 的私有 HOME/XDG。managed 模式下其
 显式 `--config` 优先，无效时不会回退。所选文件必须匹配角色。缺失文件会在所选位置生成，已有文件不会被覆盖。
 Ctrl-C 停止前台角色，顶层没有 `start`、`stop` 或 `restart`。端口是 JSON 字段，不是命令行选项。
 
-`--issue-code` 与 `--join` 不需要本地终端，可与 `--non-interactive` 合用。
+`--issue-code` 与 `--join` 不需要本地终端，可与 `--non-interactive` 合用；该选项必须放在命令末尾。
 `--non-interactive` 关闭本地交互引导，Windows 服务会自动传入。
 
 ### Service 命令

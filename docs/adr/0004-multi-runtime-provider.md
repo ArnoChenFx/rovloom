@@ -16,7 +16,7 @@
 
 核心管理身份、策略、路由、预算和账本。adapter 管理本地来源、原生协议、能力与保证。MCP 工具是通用的 `runtime_*`，Wire 载荷是 `native_request` / `native_response`，各协议的原生字段和错误原样保留，Herdr 不被模拟成 UHP。
 
-权限由调用方与 Connector 本机策略对同一个完整目标求交，设备权限只设上限，新 provider 不自动继承。禁用 provider 与撤销整台设备是两个操作，故障与健康也分层。这样同名方法或终端 ID 不会混用，单个实例故障也不会误撤其它授权。代价是每个 provider 都要独立确认方法分类、传输和结果边界，不能继承 Luvus 的方法表。
+历史决策采用调用方与 Connector 本机策略对完整目标求交。当前实现已改为 token `device_scope` 与 Connector 终端执行开关：没有逐方法/provider/action grant；旧策略只兼容读取，迁移范围见 [配置参考](../CONFIGURATION-zh.md)。新增 provider 可被当前设备范围内的 token 使用。禁用 provider 与撤销整台设备是两个操作，故障与健康也分层。这样同名方法或终端 ID 不会混用，单个实例故障也不会误撤其它授权。代价是每个 provider 都要独立确认方法分类、传输和结果边界，不能继承 Luvus 的方法表。
 
 event recovery、terminal fence、cancel 和 prompt completion 的保证强度逐方法说明。原生没有的 incarnation、序号、原子性或完成归属，不能由桥接字段制造。
 

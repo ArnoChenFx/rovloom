@@ -7,18 +7,24 @@
 - Connector 在设备本机访问 Luvus。Gateway 所在机器不需要安装 Luvus。
 - Connector 对真实实例测得版本、schema 和能力，在每个认证连接上通过 `provider_snapshot` 交付给 Gateway。Gateway 校验后才把该连接上的 Luvus provider 标为 ready。
 - 实例、契约或能力变化时，Connector 关闭连接。断线、撤权、重绑或关闭后，Gateway 不再使用旧的来源，需要新连接重新交付。
-- 原有的调用、结果句柄和未确认的响应不会迁移到新连接，也不会自动重发。
+- 原有执行上下文和未确认调用不会迁移到新连接或自动重发；已提交的结果和句柄继续按 Store 的 TTL 与读取权限规则处理。
 - 通用的 `raw-contract` 参数契约由已审核的方法子集限制，不等于完整的参数 schema。
 
 ### MCP token 与设备范围
 
-MCP 不再按方法名分配 token 权限：在已批准的目标与 `dispatch/read/cancel` 动作范围内，所有 provider 已暴露的方法一视同仁。旧方法列表只在运行时展开，不修改原目标和动作；例如仅 `read` 的策略不会获得 `dispatch`。`device_scope` 继续收窄设备范围；吊销、过期、设备撤销和 provider 启用状态继续生效。完整 Gateway token 缺少权威 `gateway_policy` 时失败关闭，不能借用本机策略；旧普通 token 保留自己的目标和动作边界。
+MCP token 通过可选的 `device_scope` 限制设备可见范围，没有逐方法、provider 或
+`dispatch/read/cancel` 动作 grant。旧普通 caller 只从自己的 grants 迁出 machine ID，已有
+显式范围优先；旧 Gateway scope 和配对主体保留全设备范围。`local_policy` 不参与扩权，
+下次注册表写入保存 v2 并移除旧策略、方法、动作和 revision。两端升级与回滚要求见
+[运维指南](OPERATIONS.md#升级与回滚)。
 
-新配对使用全方法标志，不保存当时的 35/36 项方法快照，也不再生成持久化 `raw_grant`。旧配置中的方法列表与 raw grant 仅兼容读取，不再限制 MCP 方法；无需按新增方法迁移授权。注册表解析以及 token 创建、续期、修改范围等写操作保留原策略，不把运行时的展开结果写盘。
+Connector 的 `allow_terminal_execution` 是终端输入与启动的最终本机门禁。目录和调用
+准入使用同一实际暴露面；绑定、契约、原生身份、参数与固定 deadline 仍逐次校验。
+旧 `raw_grant` 只兼容读取，不参与授权。原生内核中的 `raw_contract` 只描述参数覆盖模式，
+不跳过已存在的 schema 约束、静态方法表、原生 access 白名单或真实来源验证。
 
-远端 raw 授权由可信 Gateway 在通过身份、目标和动作检查后逐次提供，取代旧配对清单这道显式 gate。它不证明 Gateway 拥有远端 OS 进程的 Owner 身份；authority 先复核实际认证 epoch、来源、契约、已实现方法与参数，再生成只绑定本次实际 caller、方法、来源、连接和固定 deadline 的原生许可。目录和调用准入使用同一 provider 暴露面，静态分类表或原生广告不能额外开放接口。
-
-升级并重启 Gateway 与 Connector 后，原 token 和配对继续使用，不需要手改多份文件。provider 目录只暴露当前后端实际实现的契约；设备运行开关与原生参数校验仍决定方法/参数是否可用。新配对的全方法标志无法由 0.6.9 及更早版本解释，回滚前须恢复升级前两端完整状态，见[运维指南](OPERATIONS.md#升级与回滚)。
+已提交结果从 Store 按 TTL 读取，仍核对当前 token 设备范围与原主体归属，无需活连接。
+断连不会恢复旧 permit 或自动重发原调用。
 
 Gateway 在编码阶段拒绝请求时，尚未写入设备通道；调用账本记录
 `not_dispatched` 和 Gateway 的 `dispatch_refused` 审计（含固定错误码），释放该次调用的
