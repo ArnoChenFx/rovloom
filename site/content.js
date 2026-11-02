@@ -31,7 +31,8 @@ export const copy = {
     'manage.title': '从第一台，到下一台。',
     'manage.body': '机器增加，接入方式依然清晰。在 Gateway 管理页完成在线配对，查看设备与 Provider 的实际状态。',
     'manage.oneTitle': '在线配对，不停 Gateway',
-    'manage.oneBody': '管理页创建申请，新设备在本地终端认领。核对两端的核对码后，再批准接入。',
+    'manage.oneBody':
+      '在管理页为每台设备生成一张配对码，新设备执行显示的 join 命令即可接入。没有问答、批准或核对码，Gateway 不用停。',
     'manage.twoTitle': '从配对走到原生激活',
     'manage.twoBody': '凭据交付后，Connector 继续完成原生激活。管理页跟踪进度，直到设备可被调用。',
     'manage.threeTitle': '每台设备，心中有数',
@@ -85,7 +86,7 @@ export const copy = {
     'how.title2': '不迁移你的工作现场',
     'how.body': '一个管理员，几台自己的机器，一个主 Agent。把连接交给 Rovloom，把原生能力留给原生工具。',
     'how.oneTitle': '连接',
-    'how.oneBody': '每台设备运行一个 Connector，主动通过 WSS 连接 Gateway。首次连接在终端完成配对批准。',
+    'how.oneBody': '每台设备运行一个 Connector，主动通过 WSS 连接 Gateway。首次连接用 Gateway 签发的配对码完成配对。',
     'how.twoTitle': '发现',
     'how.twoBody': '从同一个 MCP 入口发现可见设备与 Provider，读取实际安装版本的接口能力。',
     'how.threeTitle': '调用',
@@ -102,7 +103,7 @@ export const copy = {
     'start.platforms': 'Gateway：Linux / macOS / Windows',
     'start.connector': 'Connector：Linux x64 / Windows x64 / macOS x64、ARM64',
     'start.step1': '下载对应平台程序',
-    'start.step2': '在终端完成配对',
+    'start.step2': '用配对码接入设备',
     'start.step3': '连接 MCP 客户端',
     'terminal.cli': '启动角色',
     'terminal.docker': 'Docker',
@@ -111,8 +112,10 @@ export const copy = {
     'terminal.copied': '已复制',
     'terminal.copyFail': '请选中命令手动复制',
     'terminal.label': '选择接入方式',
-    'terminal.note.cli': '在两个终端运行；按提示批准配对。Luvus / Herdr 和 Agent 需预先安装。',
-    'terminal.note.docker': '用于原生 Linux Docker Engine。首次配对需前台终端；完整步骤见 Docker 文档。',
+    'terminal.note.cli':
+      '分别在 Gateway 和设备上运行；用 Gateway 生成的配对码执行 join 命令，无需批准。Luvus / Herdr 和 Agent 需预先安装。',
+    'terminal.note.docker':
+      '用于原生 Linux Docker Engine。后台启动 Gateway 后，在管理页生成配对码；完整步骤见 Docker 文档。',
     'terminal.note.mcp': '将 URL 与配对后获得的 Bearer 填入客户端的 MCP 设置。配对码不是 MCP Bearer。',
     'terminal.guide': '查看完整配置说明',
     'faq.label': 'GOOD QUESTIONS',
@@ -174,7 +177,7 @@ export const copy = {
       'Add machines with a clear path from pairing to activation. Pair online and inspect device and Provider state in the Gateway management UI.',
     'manage.oneTitle': 'Pair without stopping Gateway',
     'manage.oneBody':
-      'Create a request in the management UI. Claim it in the new machine’s terminal, compare both verification codes, then approve.',
+      'Generate a pairing code per device in the management UI, then run the displayed join command on the new machine. No prompts, approvals or verification codes, and Gateway keeps running.',
     'manage.twoTitle': 'Continue into native activation',
     'manage.twoBody':
       'After credential delivery, Connector continues native activation. The management UI tracks progress until the device can receive calls.',
@@ -242,7 +245,7 @@ export const copy = {
       'One administrator, a few of your own machines, one primary Agent. Rovloom handles the connections. Native tools keep their capabilities.',
     'how.oneTitle': 'Connect',
     'how.oneBody':
-      'One Connector per machine makes an outbound WSS connection to Gateway. Approve first pairing in a local terminal.',
+      'One Connector per machine makes an outbound WSS connection to Gateway. First pairing uses a pairing code issued by Gateway.',
     'how.twoTitle': 'Discover',
     'how.twoBody':
       'Discover visible machines and Providers through one MCP entry point, using the capabilities of the actual installed runtime.',
@@ -262,7 +265,7 @@ export const copy = {
     'start.platforms': 'Gateway: Linux / macOS / Windows',
     'start.connector': 'Connector: Linux x64 / Windows x64 / macOS x64, ARM64',
     'start.step1': 'Download your binary',
-    'start.step2': 'Pair in a terminal',
+    'start.step2': 'Pair with a pairing code',
     'start.step3': 'Connect your MCP client',
     'terminal.cli': 'Run the roles',
     'terminal.docker': 'Docker',
@@ -272,9 +275,9 @@ export const copy = {
     'terminal.copyFail': 'Select and copy the commands manually',
     'terminal.label': 'Choose a connection method',
     'terminal.note.cli':
-      'Run in two terminals and approve pairing. Install Luvus / Herdr and your Agent separately first.',
+      'Run on the Gateway machine and on each device; pair with the join command from a Gateway-issued pairing code, no approval needed. Install Luvus / Herdr and your Agent separately first.',
     'terminal.note.docker':
-      'For native Linux Docker Engine. First pairing needs a foreground terminal; see the Docker guide.',
+      'For native Linux Docker Engine. Start Gateway in the background, then generate a pairing code in the management UI; see the Docker guide.',
     'terminal.note.mcp':
       'Add the URL and Bearer obtained after pairing to your client settings. The pairing code is not the MCP Bearer.',
     'terminal.guide': 'Read the configuration guide',
@@ -307,12 +310,12 @@ export const copy = {
 
 export const commands = {
   cli: {
-    zh: '# 终端 1 · Gateway 所在设备\nrovloom gateway\n\n# 终端 2 · 运行 Luvus / Herdr 的设备\nrovloom connector',
-    en: '# Terminal 1 · Gateway machine\nrovloom gateway\n\n# Terminal 2 · Luvus / Herdr machine\nrovloom connector'
+    zh: '# Gateway 所在设备：打印配对码和 join 命令\nrovloom gateway --issue-code\n\n# 运行 Luvus / Herdr 的设备：粘贴上面打印的 join 命令\nrovloom connector --join ws://GATEWAY_IP:9443#PAIRING_CODE',
+    en: '# Gateway machine: print a pairing code and the join command\nrovloom gateway --issue-code\n\n# Luvus / Herdr machine: paste the printed join command\nrovloom connector --join ws://GATEWAY_IP:9443#PAIRING_CODE'
   },
   docker: {
-    zh: 'curl -fsSL -o docker-compose.yaml \\\n  https://raw.githubusercontent.com/ArnoChenFx/rovloom/main/docker-compose.yaml\ndocker compose pull\n\n# 在真实终端中完成首次配对\ndocker compose run --rm gateway\n\n# 配对完成并停止前台实例后\ndocker compose up -d',
-    en: 'curl -fsSL -o docker-compose.yaml \\\n  https://raw.githubusercontent.com/ArnoChenFx/rovloom/main/docker-compose.yaml\ndocker compose pull\n\n# Complete first pairing in a real terminal\ndocker compose run --rm gateway\n\n# After pairing and stopping the foreground instance\ndocker compose up -d'
+    zh: 'curl -fsSL -o docker-compose.yaml \\\n  https://raw.githubusercontent.com/ArnoChenFx/rovloom/main/docker-compose.yaml\ndocker compose pull\n\n# 后台启动 Gateway\ndocker compose up -d\n\n# 创建管理员并保存密码\n# 再登录 http://127.0.0.1:9445/ 在管理页生成配对码\ndocker compose run --rm gateway admin create',
+    en: 'curl -fsSL -o docker-compose.yaml \\\n  https://raw.githubusercontent.com/ArnoChenFx/rovloom/main/docker-compose.yaml\ndocker compose pull\n\n# Start the Gateway in the background\ndocker compose up -d\n\n# Create an administrator and save the password,\n# then sign in at http://127.0.0.1:9445/ to generate a pairing code\ndocker compose run --rm gateway admin create'
   },
   mcp: {
     zh: '{\n  "url": "http://127.0.0.1:9444/mcp",\n  "headers": {\n    "Authorization": "Bearer YOUR_MCP_BEARER"\n  }\n}',
