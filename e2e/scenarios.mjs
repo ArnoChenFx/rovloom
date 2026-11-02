@@ -274,7 +274,12 @@ export const scenarios = [
       await pause(4000)
       const next = await stack.connect()
       const machine = await tool(next, 'machines_get', { machine_id: stack.target.machine_id })
+      assert(reconnect.alive, 'revoked connector must stay alive and retry')
+      assert.equal(machine.isError, false, JSON.stringify(machine.raw))
+      assert.equal(machine.data?.status, 'revoked')
+      assert.equal(machine.data?.link, 'offline')
       const call = await stack.invoke(next, { method: 'ping', params: {} })
+      assert.equal(call.submit_error?.gateway_error?.code, 'unavailable', JSON.stringify(call))
       assert.equal(call.state === 'responded', false, 'a revoked device must never serve calls')
       return {
         machine: machine.isError ? machine.raw : machine.data?.status,
@@ -298,19 +303,25 @@ export const scenarios = [
         { wait_ms: 200 },
         { settle: false }
       )
-      assert.notEqual(pending.state, 'responded')
+      assert(['dispatching', 'connector_accepted'].includes(pending.state), JSON.stringify(pending))
       await pause(500)
       await stack.connector.kill() // 请求可能已到达native：Gateway只能看到断线
       const settled = await until(
         'unknown',
         async () => {
           const view = await tool(client, 'runtime_call_get', { call_id: pending.call_id, wait_ms: 200 })
-          return view.data?.state === 'outcome_unknown' || view.data?.state === 'not_dispatched' ? view.data : undefined
+          assert.equal(view.isError, false, JSON.stringify(view.raw))
+          assert.notEqual(view.data?.state, 'not_dispatched', 'scenario must reach uncertain dispatch')
+          return view.data?.state === 'outcome_unknown' ? view.data : undefined
         },
         { tries: 50, interval: 200 }
       )
       process.kill(native.pid, 'SIGCONT') // native随后真的执行了这次请求
-      await pause(500)
+      await until('native executed the uncertain request once', async () => {
+        const count = await stack.nativeWorkspaces()
+        assert(count <= before + 1, 'native must not execute the request twice')
+        return count === before + 1
+      })
       process.kill(native.pid, 'SIGKILL')
       await pause(300)
       stack.startConnector()
@@ -321,6 +332,7 @@ export const scenarios = [
       assert.equal(count, before, 'the new native must never receive the possibly-executed request')
       return {
         state_after_disconnect: settled.state,
+        workspaces_after_native_resume: before + 1,
         state_after_restart: after.data.state,
         workspaces_before: before,
         workspaces_after_restart: count,

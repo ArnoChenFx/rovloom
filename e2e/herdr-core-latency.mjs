@@ -1,7 +1,8 @@
 /**
  * D4：量一次经 Connector 的调用在提交与收敛上各花多久，先量再决定。
  * 用法：MCP_CONFIG=... bun e2e/herdr-core-latency.mjs（METHODS=server.status,terminal.read）
- * 只做只读调用；每项 10 次，输出每次的提交毫秒数与收敛毫秒数。
+ * 默认只读调用；显式 METHODS=terminal.send 会向首个终端发送 echo latency，需使用隔离会话。
+ * 每项默认 10 次，输出每次的提交毫秒数与收敛毫秒数。
  */
 import assert from 'node:assert/strict'
 import { connect } from './herdr-core-client.mjs'

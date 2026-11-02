@@ -29,6 +29,7 @@ for (const scenario of selected) {
     const problems = await stack.close()
     if (problems.length) {
       entry.cleanup = problems
+      entry.result = 'failed'
     }
   }
   entry.seconds = Math.round((Date.now() - started) / 100) / 10

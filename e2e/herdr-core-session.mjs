@@ -574,9 +574,10 @@ try {
     'blocked',
     'blocked interrupt'
   )
-  if (existsSync(blockedLog)) {
+  await until('blocked program log is ready', async () => {
+    assert(existsSync(blockedLog), 'blocked program log missing')
     assert.equal(readFileSync(blockedLog, 'utf8').trim(), 'ready', 'blocked program received input')
-  }
+  })
   const interrupted = await invoke(entry('terminal.interrupt').contract_ref, {
     method: 'terminal.interrupt',
     params: agentFence

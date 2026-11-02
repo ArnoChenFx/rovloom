@@ -69,12 +69,13 @@ try {
     const started = Date.now()
     for (;;) {
       const view = await ping(8000)
-      if (view.error || view.state === 'not_dispatched') {
+      if (view.error?.gateway_error?.code === 'unavailable' || view.state === 'not_dispatched') {
         const elapsed = Date.now() - started
         assert(elapsed < 90_000, `partition detected too late: ${elapsed}ms`)
         console.log(JSON.stringify({ ok: true, detected_after_ms: elapsed }))
         break
       }
+      assert.equal(view.error, undefined, `unexpected MCP failure: ${JSON.stringify(view.error)}`)
       assert(Date.now() - started < 120_000, `device never became unavailable: ${JSON.stringify(view)}`)
       await pause(2000)
     }

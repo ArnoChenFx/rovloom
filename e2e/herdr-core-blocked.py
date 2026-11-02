@@ -12,11 +12,11 @@ LOG = sys.argv[1]
 fd = sys.stdin.fileno()
 termios.tcgetattr(fd)
 tty.setraw(fd)
-sys.stdout.write('\x1b]7501;state=blocked:kind=permission:app=rovloom-e2e\x1b\\')
-sys.stdout.write('Allow this action? [y/N] ')
-sys.stdout.flush()
 with open(LOG, 'ab', buffering=0) as log:
     log.write(b'ready\n')
+    sys.stdout.write('\x1b]7501;state=blocked:kind=permission:app=rovloom-e2e\x1b\\')
+    sys.stdout.write('Allow this action? [y/N] ')
+    sys.stdout.flush()
     while True:
         try:
             data = os.read(fd, 4096)
