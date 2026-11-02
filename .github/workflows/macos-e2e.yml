@@ -44,7 +44,7 @@ jobs:
       - name: macOS platform primitives (peer credentials, process facts)
         run: bun --no-env-file test ./test/platform/macos.test.ts
       - name: Attach to a running Herdr / Luvus (peer proof, process image identity, crash recovery)
-        run: bun --no-env-file test ./test/connector/herdr/attach.test.ts ./test/runtime/native-attach-macos.test.ts ./test/runtime/native-crash-recovery.test.ts
+        run: bun --no-env-file test ./test/connector/herdr/attach.test.ts ./test/connector/luvus/native-attach-macos.test.ts ./test/connector/luvus/crash-recovery.test.ts
   quickstart:
     needs: changes
     if: needs.changes.outputs.run == 'true'
